@@ -1,4 +1,4 @@
-const ALLOWED = new Set(['http:', 'https:', 'mailto:', 'tel:']);
+const ALLOWED = ['http:', 'https:', 'mailto:', 'tel:'];
 const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
 const HOST_PORT = /^[^:/?#]+:\d+(?:[/?#]|$)/;
 
@@ -6,9 +6,8 @@ const HOST_PORT = /^[^:/?#]+:\d+(?:[/?#]|$)/;
 export function safeUrl(input: string | null | undefined): string | null {
   const value = input?.trim();
   if (!value) return null;
-  if (HAS_SCHEME.test(value) && !HOST_PORT.test(value)) {
-    const scheme = value.slice(0, value.indexOf(':') + 1).toLowerCase();
-    return ALLOWED.has(scheme) ? value : null;
-  }
+  const lower = value.toLowerCase();
+  if (ALLOWED.some((s) => lower.startsWith(s))) return value;
+  if (HAS_SCHEME.test(value) && !HOST_PORT.test(value)) return null;
   return `https://${value}`;
 }
