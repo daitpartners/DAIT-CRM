@@ -5,6 +5,8 @@ import rateLimit from '@fastify/rate-limit';
 import { healthRoutes } from './routes/health.js';
 import { authRoutes } from './routes/auth.js';
 import { meRoutes } from './routes/me.js';
+import { userRoutes } from './routes/users.js';
+import { ValidationError } from './validate.js';
 import { registerAuth } from './plugins/auth.js';
 import { createMsalClient, type MicrosoftClient } from './auth/microsoft.js';
 
@@ -37,9 +39,14 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(cookie, { secret: sessionSecret(env) });
   await app.register(rateLimit, { global: false });
   registerAuth(app, { secureCookies });
+  app.setErrorHandler((error, _request, reply) => {
+    if (error instanceof ValidationError) return reply.code(400).send({ error: 'validation', issues: error.issues });
+    return reply.send(error);
+  });
 
   await app.register(healthRoutes, { prefix: '/api' });
   await app.register(authRoutes, { prefix: '/api', microsoft, localLogin, testLogin, secureCookies });
   await app.register(meRoutes, { prefix: '/api' });
+  await app.register(userRoutes, { prefix: '/api' });
   return app;
 }
