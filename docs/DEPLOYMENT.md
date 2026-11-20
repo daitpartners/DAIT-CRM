@@ -16,7 +16,9 @@ Each folder holds `releases/<sha>/`, `current` (symlink to the running release) 
 ## How a release flows
 
 1. Push to `main`: `.github/workflows/deploy-test.yml` runs `npm ci`, typecheck, tests, build, then `npm ci --omit=dev` and packs one tarball: `package.json`, `package-lock.json`, `node_modules` (production only), `packages/shared`, `apps/api`, `apps/worker`, `apps/web/dist`, `prisma/`, `deploy/`. It uploads it to `~/incoming/<sha>.tgz` and runs `release.sh install test` (taken from the tarball itself, so the very first deploy works before `~/test/current` exists).
-2. `deploy/release.sh install` unpacks to `~/test/releases/<sha>`, writes `RELEASE`, runs `prisma generate` and `prisma migrate deploy` (with `~/test/shared/.env` loaded), switches `current`, runs `pm2 startOrReload ... --only crm-test,crm-test-worker --update-env`, and polls `http://127.0.0.1:3091/api/health` for `"ok":true` and the new `"release":"<sha>"` (30 tries, 1 s apart). If it never answers, `current` is switched back to the previous release, PM2 reloads it, and the job fails. The newest 5 releases are kept.
+2. `deploy/release.sh install` unpacks to `~/test/releases/<sha>`, writes `RELEASE`, runs `prisma generate`, `prisma migrate deploy` and the compiled seed `dist/cli/seed.js` (lookup values only, idempotent; sample users only when `SEED_SAMPLE_USERS=1`, i.e. test), all through `node --env-file=~/test/shared/.env` (the env file is never sourced by the shell). If migrate or seed fails, nothing is switched and PM2 is not touched, switches `current`, runs `pm2 startOrReload ... --only crm-test,crm-test-worker --update-env`, and polls `http://127.0.0.1:3091/api/health` for `"ok":true` and the new `"release":"<sha>"` (30 tries, 1 s apart). If it never answers, `current` is switched back to the previous release, PM2 reloads it, and the job fails. The newest 5 releases are kept. Re-installing the sha that is already running is refused (exit 2) so the live release is never deleted.
+
+   First deploy only: there is no previous release, so if the health check fails `current` stays on the broken release (the script says so). Inspect with `source ~/.nvm/nvm.sh && pm2 logs crm-test --lines 100`, fix the cause (usually a missing or wrong `.env` value), and push again.
 3. When test looks right: GitHub, Actions, "Deploy to live", Run workflow, type `deploy-live` in `confirm` (optionally the `sha` you expect). It runs `release.sh promote` on the server, which copies exactly what test runs into `~/live/releases/` and activates it the same way (same health check, same rollback). Nothing is rebuilt, so live runs the bytes you tested.
 
 Design choices: production `node_modules` ship in the tarball so the server never runs `npm ci`. Prisma's client is generated on the server by `release.sh` (the `prisma` CLI is a production dependency of `apps/api` for that reason) because the query engine must match the server's OS (RHEL-family), not the GitHub runner's Ubuntu. Migrations run before the switch; write them backward-compatible so a rollback of the code still works against the migrated database.
@@ -48,6 +50,26 @@ Not set by hand (PM2 sets them in `deploy/ecosystem.config.cjs`): `NODE_ENV=prod
 
 Commands marked `!` run in your terminal. Replace the angle-bracket parts; generate secrets on the server so they never travel through chat.
 
+**Remote commands and Node:** a non-interactive `ssh host 'command'` does not load nvm, so `node` and `pm2` are not found. Prefix such commands with `source ~/.nvm/nvm.sh &&` (the examples below do). In an interactive `ssh daitcrm@...` session nvm is already loaded.
+
+0. Prerequisites on the server (already done on 88.222.213.73; needed again for a rebuild). As root (or a sudoer):
+
+   ```
+   ! ssh root@88.222.213.73
+   sudo -u postgres psql -c "CREATE ROLE crm_live LOGIN PASSWORD '<live-db-password>';"
+   sudo -u postgres psql -c "CREATE DATABASE dait_crm OWNER crm_live;"
+   sudo -u postgres psql -c "CREATE ROLE crm_test LOGIN PASSWORD '<test-db-password>';"
+   sudo -u postgres psql -c "CREATE DATABASE dait_crm_test OWNER crm_test;"
+   ```
+
+   Then as `daitcrm`:
+
+   ```
+   mkdir -p ~/incoming ~/backups ~/test/{releases,shared/storage} ~/live/{releases,shared/storage}
+   ```
+
+   Also needed: Node 24 via nvm, PM2 with the `pm2-daitcrm` systemd service (`pm2 startup`, `pm2 save`), and the deploy public key in `~/.ssh/authorized_keys` with `restrict`. The database logins `crm_live` and `crm_test` are example names; use whatever you created in `DATABASE_URL` and as `PGUSER` for backups. Lookup values (statuses, countries and so on) are seeded by the release script on every deploy; there is no separate seed step.
+
 1. DNS and sites: follow `deploy/openlitespeed.md` steps 1 and 2 (Cloudflare A records, CyberPanel sites, SSL). Do step 3 (proxy config) once the first release is deployed, or now; a 503 until then is normal.
 2. Env files. Log in as `daitcrm` and create the two files (the folders already exist):
 
@@ -73,11 +95,11 @@ Commands marked `!` run in your terminal. Replace the angle-bracket parts; gener
    Edit the `<...>` values with `nano ~/test/shared/.env`. The four `MS_*` keys stay out until step 9.
 3. GitHub secrets (repo, Settings, Secrets and variables, Actions): `DEPLOY_HOST` (88.222.213.73), `DEPLOY_USER` (`daitcrm`), `DEPLOY_SSH_KEY` (the private half of the key whose public half is in `~/.ssh/authorized_keys` with `restrict`), `DEPLOY_KNOWN_HOSTS` (output of `! ssh-keyscan -t ed25519 88.222.213.73`).
 4. Push to `main` and watch the "Deploy to test" run. It must end with "test is now running <sha>".
-5. Check on the server: `pm2 status` shows `crm-test` and `crm-test-worker` online; `curl -s http://127.0.0.1:3091/api/health` shows `{"ok":true,"release":"<sha>"}`.
+5. Check on the server (`! ssh daitcrm@88.222.213.73 'source ~/.nvm/nvm.sh && pm2 status && curl -s http://127.0.0.1:3091/api/health'`): `pm2 status` shows `crm-test` and `crm-test-worker` online; the health call shows `{"ok":true,"release":"<sha>"}`.
 6. Create the first administrator on the server (see the next section), then sign in at https://crm-test.daitpartners.com with that email and password.
 7. In the CRM, add the other users.
 8. Entra: hand `docs/setup/entra-app.md` to the Microsoft 365 Global Administrator. They return the tenant ID, client ID, client secret value and confirm the two redirect URIs; paste them on the server, never into chat.
-9. Add `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET` and `MS_REDIRECT_URI` (`https://crm-test.daitpartners.com/api/auth/microsoft/callback`) to `~/test/shared/.env`, then `pm2 reload crm-test crm-test-worker --update-env`. Sign in with Microsoft, then connect the system mailbox in the CRM's mailbox settings.
+9. Add `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET` and `MS_REDIRECT_URI` (`https://crm-test.daitpartners.com/api/auth/microsoft/callback`) to `~/test/shared/.env`, then `source ~/.nvm/nvm.sh && pm2 reload crm-test crm-test-worker --update-env`. Sign in with Microsoft, then connect the system mailbox in the CRM's mailbox settings.
 10. Repeat steps 2 and 9 for live (`~/live/shared/.env`, `dait_crm`, `https://crm.daitpartners.com`), run the "Deploy to live" workflow, create the live administrator, and set up the cron backup below.
 
 ## Creating a local administrator
@@ -85,18 +107,20 @@ Commands marked `!` run in your terminal. Replace the angle-bracket parts; gener
 On the server (the script is compiled; it needs no tsx). `-t` lets it ask for the password (at least 12 characters), which is not echoed into the shell history:
 
 ```
-! ssh -t daitcrm@88.222.213.73 'cd ~/test/current/apps/api && node --env-file=$HOME/test/shared/.env dist/cli/create-local-admin.js --email you@daitpartners.com --name "Your Name"'
+! ssh -t daitcrm@88.222.213.73 'source ~/.nvm/nvm.sh && cd ~/test/current/apps/api && node --env-file=$HOME/test/shared/.env dist/cli/create-local-admin.js --email you@daitpartners.com --name "Your Name"'
 ```
 
 Use `~/live/...` for live. Running it again for the same email resets that user's password. Local login only works while `LOCAL_ADMIN_LOGIN=1` in that environment's `.env`.
 
 ## Day to day
 
+- On the server over non-interactive SSH, start every command with `source ~/.nvm/nvm.sh &&` so `node` and `pm2` are found.
 - Logs: `pm2 logs crm-test`, `pm2 logs crm-test-worker` (same with `live`); `pm2 status`. PM2 starts at boot through the `pm2-daitcrm` systemd service.
 - Current release: `curl -s http://127.0.0.1:3091/api/health` (3090 for live), or `cat ~/test/current/RELEASE`.
 - Rollback by hand (the script already does this when a new release fails its health check):
 
   ```
+  source ~/.nvm/nvm.sh
   ls ~/live/releases
   ln -sfn ~/live/releases/<previous-sha> ~/live/current
   pm2 startOrReload ~/live/current/deploy/ecosystem.config.cjs --only crm-live,crm-live-worker --update-env
@@ -119,6 +143,7 @@ Test it once by hand: `bash ~/live/current/deploy/backup.sh`, then check `ls -l 
 Restore (replaces the database's contents; stop the apps first, and prefer restoring into `dait_crm_test` to rehearse):
 
 ```
+source ~/.nvm/nvm.sh
 pm2 stop crm-live crm-live-worker
 pg_restore -Fc --clean --if-exists --no-owner -h localhost -U <db-user> -d dait_crm ~/backups/dait_crm-<stamp>.dump
 pm2 start crm-live crm-live-worker

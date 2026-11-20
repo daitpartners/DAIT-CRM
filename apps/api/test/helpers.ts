@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../src/db';
-import { seedLookups as seedLookupsWith } from '../../../prisma/seed-data/lookups';
+import { seedLookups as seedLookupsWith } from '../src/seed/lookups';
 
 export async function resetDb(): Promise<void> {
   const tables = Prisma.dmmf.datamodel.models.map((m) => `"${m.dbName ?? m.name}"`).join(', ');

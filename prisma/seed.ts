@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { seedLookups, seedSampleUsers } from './seed-data/lookups';
+import { seedLookups, seedSampleUsers } from '../apps/api/src/seed/lookups.js';
 
 const prisma = new PrismaClient();
 
