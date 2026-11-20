@@ -9,18 +9,25 @@
     "start": "node dist/server.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "db:migrate": "echo \"db:migrate: not implemented yet\"",
-    "db:seed": "echo \"db:seed: not implemented yet\""
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "prisma db seed",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@fastify/cookie": "11.1.5",
     "@fastify/static": "8.3.0",
+    "@prisma/client": "6.19.3",
     "fastify": "5.12.8"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
+    "prisma": "6.19.3",
     "tsx": "4.23.15",
     "typescript": "5.9.3",
     "vitest": "3.2.7"
+  },
+  "prisma": {
+    "schema": "../../prisma/schema.prisma",
+    "seed": "tsx ../../prisma/seed.ts"
   }
 }

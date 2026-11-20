@@ -1,0 +1,144 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMINISTRATOR
+  MANAGER
+  SALES_REPRESENTATIVE
+  DATA_RESEARCH_USER
+
+  @@map("role")
+}
+
+model User {
+  id           Int       @id @default(autoincrement())
+  email        String    @unique
+  name         String
+  role         Role
+  language     String    @default("en")
+  timezone     String    @default("Europe/London")
+  dateFormat   String    @default("DD MMM YYYY") @map("date_format")
+  isActive     Boolean   @default(true) @map("is_active")
+  microsoftOid String?   @unique @map("microsoft_oid")
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  sessions      Session[]
+  emailAccounts EmailAccount[]
+  notifications Notification[]
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+model Session {
+  id         String   @id
+  userId     Int      @map("user_id")
+  expiresAt  DateTime @map("expires_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  lastSeenAt DateTime @default(now()) @map("last_seen_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model LookupValue {
+  id        Int     @id @default(autoincrement())
+  group     String
+  value     String
+  label     String
+  labelEs   String? @map("label_es")
+  labelFr   String? @map("label_fr")
+  sortOrder Int     @map("sort_order")
+  isActive  Boolean @default(true) @map("is_active")
+
+  @@unique([group, value])
+  @@map("lookup_values")
+}
+
+model AllocationRule {
+  id             Int     @id @default(autoincrement())
+  name           String
+  matchCountries Json    @map("match_countries")
+  assignTo       Json    @map("assign_to")
+  roundRobinPos  Int     @default(0) @map("round_robin_pos")
+  priority       Int
+  isActive       Boolean @default(true) @map("is_active")
+
+  @@map("allocation_rules")
+}
+
+model EmailAccount {
+  id              Int       @id @default(autoincrement())
+  userId          Int?      @map("user_id")
+  address         String    @unique
+  provider        String
+  kind            String
+  refreshTokenEnc String    @map("refresh_token_enc")
+  tokenExpiresAt  DateTime? @map("token_expires_at")
+  status          String
+  lastError       String?   @map("last_error")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("email_accounts")
+}
+
+model Job {
+  id          Int       @id @default(autoincrement())
+  type        String
+  payload     Json
+  runAt       DateTime  @map("run_at")
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(8) @map("max_attempts")
+  status      String
+  lastError   String?   @map("last_error")
+  lockedAt    DateTime? @map("locked_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, runAt])
+  @@map("jobs")
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  text      String
+  detail    String?
+  link      String?
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  action     String
+  userId     Int?     @map("user_id")
+  before     Json?
+  after      Json?
+  at         DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
