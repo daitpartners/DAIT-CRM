@@ -30,7 +30,7 @@ Set in `~/<env>/shared/.env` (mode 600, `KEY=value`, one per line; quote values 
 | Name | Meaning | How to get it |
 |---|---|---|
 | `DATABASE_URL` | PostgreSQL connection string | `postgresql://<user>:<password>@localhost:5432/dait_crm` (live) or `dait_crm_test` (test); percent-encode special characters in the password |
-| `PUBLIC_URL` | Public origin, e.g. `https://crm.daitpartners.com`; `https://` turns on Secure cookies | Hostname of the site |
+| `PUBLIC_URL` | Public origin, e.g. `https://crm.daitpartners.com`. Required, and must start with `https://`, when `NODE_ENV=production` (the app refuses to start otherwise); it turns on Secure cookies, and every POST/PUT/PATCH/DELETE from a browser must come from this exact origin | Hostname of the site |
 | `SESSION_SECRET` | Signs auth cookies. Required when `NODE_ENV=production` | `openssl rand -hex 32` |
 | `TOKEN_ENCRYPTION_KEY` | Encrypts stored mailbox refresh tokens (AES-256-GCM). Changing it disconnects every mailbox | `openssl rand -base64 32` |
 | `MS_TENANT_ID` | Microsoft Entra directory (tenant) ID | From the Entra app, see below |
@@ -45,7 +45,7 @@ Not set by hand (PM2 sets them in `deploy/ecosystem.config.cjs`): `NODE_ENV=prod
 
 **`MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET` and `MS_REDIRECT_URI` are all-or-none.** Leave all four empty (Microsoft sign-in off) or fill all four; the app fails fast at start if only some are set, and PM2 then shows the app crashing.
 
-**Why `NODE_ENV=production` matters:** it makes `SESSION_SECRET` mandatory (the app refuses to start without it) and disables the passwordless `TEST_LOGIN`, so a production host cannot be signed into by accident. Never set `TEST_LOGIN` on the server.
+**Why `NODE_ENV=production` matters:** it makes `SESSION_SECRET` and an `https://` `PUBLIC_URL` mandatory (the app refuses to start without them) and disables the passwordless `TEST_LOGIN`, so a production host cannot be signed into by accident. Never set `TEST_LOGIN` on the server.
 
 ## First deployment checklist
 

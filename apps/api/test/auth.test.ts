@@ -124,6 +124,28 @@ describe('microsoft sign-in', () => {
   });
 });
 
+describe('production settings', () => {
+  test('production with an https PUBLIC_URL sets a Secure session cookie', async () => {
+    await makeUser({ email: 'manager@daitpartners.com', role: 'MANAGER' });
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('PUBLIC_URL', 'https://x');
+    const a = await app({ microsoft: fakeMicrosoft({ oid: 'oid-p', email: 'manager@daitpartners.com', name: 'M' }) });
+    const res = await microsoftSignIn(a);
+    expect(res.headers.location).toBe('/');
+    const setCookie = [res.headers['set-cookie']].flat().find((c) => String(c).startsWith('crm_session='));
+    expect(setCookie).toMatch(/;\s*Secure/);
+    expect(res.cookies.find((c) => c.name === 'crm_session')!.secure).toBe(true);
+  });
+
+  test('production refuses to start with an http PUBLIC_URL or none', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('PUBLIC_URL', 'http://x');
+    await expect(buildApp()).rejects.toThrow(/PUBLIC_URL must be set to the https:\/\/ origin/);
+    vi.stubEnv('PUBLIC_URL', '');
+    await expect(buildApp()).rejects.toThrow(/PUBLIC_URL/);
+  });
+});
+
 describe('sessions', () => {
   test('deactivated user loses session', async () => {
     const user = await makeUser();
@@ -214,6 +236,7 @@ describe('test login', () => {
   test('test-login refused in production even with flag', async () => {
     const user = await makeUser();
     vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('PUBLIC_URL', 'https://crm.example.test');
     const a = await app();
     const res = await a.inject({ method: 'POST', url: '/api/auth/test-login', payload: { email: user.email } });
     expect(res.statusCode).toBe(404);

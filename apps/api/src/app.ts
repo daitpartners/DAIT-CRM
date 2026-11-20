@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import { healthRoutes } from './routes/health.js';
@@ -36,9 +36,53 @@ function sessionSecret(env: NodeJS.ProcessEnv): string {
   return randomBytes(32).toString('base64url');
 }
 
+/** Paths that accept cross-site writes (public forms, plan 1D). Everything else under /api must be same-origin. */
+const PUBLIC_PATH_PREFIXES = ['/api/public/'];
+
+export function isPublicPath(path: string): boolean {
+  return PUBLIC_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
+
+const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+function originOf(url: string): string | null {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Same-site CSRF guard for state-changing requests. A browser always sends `Origin` on cross-origin
+ * writes; when it is absent, `Sec-Fetch-Site` (sent by every current browser) must not say cross-site.
+ * Non-browser clients send neither and are let through (they cannot ride a user's cookies).
+ */
+function isSameOrigin(request: FastifyRequest, expectedOrigin: string | null): boolean {
+  const origin = request.headers.origin;
+  if (origin !== undefined) {
+    if (expectedOrigin) return origin === expectedOrigin;
+    // PUBLIC_URL unset (development only; production requires it): the origin must match the Host header.
+    const given = originOf(origin);
+    return given !== null && new URL(given).host === request.headers.host;
+  }
+  const site = request.headers['sec-fetch-site'];
+  return site === undefined || site === 'same-origin' || site === 'none';
+}
+
+function publicUrl(env: NodeJS.ProcessEnv): string {
+  const url = env.PUBLIC_URL ?? '';
+  if (env.NODE_ENV === 'production' && !url.startsWith('https://')) {
+    throw new Error('PUBLIC_URL must be set to the https:// origin of the site when NODE_ENV=production');
+  }
+  return url;
+}
+
 export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInstance> {
   const env = process.env;
-  const secureCookies = (env.PUBLIC_URL ?? '').startsWith('https');
+  const publicOrigin = publicUrl(env);
+  const secureCookies = publicOrigin.startsWith('https://');
+  const expectedOrigin = publicOrigin ? originOf(publicOrigin) : null;
   const localLogin = env.LOCAL_ADMIN_LOGIN === '1';
   const testLogin = env.TEST_LOGIN === '1' && env.NODE_ENV !== 'production';
   const microsoft = opts.microsoft ?? (env.MS_CLIENT_ID ? createMsalClient(env) : null);
@@ -50,6 +94,14 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
     logger: opts.logger
       ? { serializers: { req: (req) => ({ method: req.method, url: req.url.split('?')[0], remoteAddress: req.ip }) } }
       : false,
+  });
+  // Only JSON bodies are accepted: a text/plain POST (a "simple" cross-site request) gets 415.
+  app.removeContentTypeParser('text/plain');
+  app.addHook('onRequest', async (request, reply) => {
+    if (!UNSAFE_METHODS.has(request.method)) return;
+    const path = request.url.split('?')[0]!;
+    if (!path.startsWith('/api/') || isPublicPath(path)) return;
+    if (!isSameOrigin(request, expectedOrigin)) return reply.code(403).send({ error: 'bad_origin' });
   });
   await app.register(cookie, { secret: sessionSecret(env) });
   await app.register(rateLimit, { global: false });
