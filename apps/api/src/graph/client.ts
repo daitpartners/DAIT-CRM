@@ -18,6 +18,7 @@ export interface GraphClient {
 
 export const GRAPH_SEND_SCOPES = ['https://graph.microsoft.com/Mail.Send', 'offline_access'];
 const SEND_MAIL_URL = 'https://graph.microsoft.com/v1.0/me/sendMail';
+export const SEND_TIMEOUT_MS = 20_000;
 
 /** A Graph call failed; `status` is the HTTP status (401 for token problems). */
 export class GraphError extends Error {
@@ -64,19 +65,28 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
         });
       }
 
-      const res = await fetch(SEND_MAIL_URL, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${result.accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: {
-            subject: msg.subject,
-            body: { contentType: 'HTML', content: msg.html },
-            toRecipients: recipients(msg.to),
-            ccRecipients: recipients(msg.cc),
-          },
-          saveToSentItems: true,
-        }),
-      });
+      let res: Response;
+      try {
+        res = await fetch(SEND_MAIL_URL, {
+          method: 'POST',
+          signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+          headers: { Authorization: `Bearer ${result.accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: {
+              subject: msg.subject,
+              body: { contentType: 'HTML', content: msg.html },
+              toRecipients: recipients(msg.to),
+              ccRecipients: recipients(msg.cc),
+            },
+            saveToSentItems: true,
+          }),
+        });
+      } catch (err) {
+        // A hung request is treated like a 5xx: retried later, the mailbox stays connected.
+        const name = (err as { name?: unknown } | null)?.name;
+        if (name === 'TimeoutError' || name === 'AbortError') throw new GraphError('graph_send_failed timeout', 504);
+        throw err;
+      }
       if (!res.ok) {
         let code = '';
         try {

@@ -6,6 +6,14 @@ type Db = Prisma.TransactionClient | PrismaClient;
 
 const MAX_ERROR_LENGTH = 1000;
 
+/** A `running` job locked longer than this was interrupted (crash, reload, host sleep) and may be retried. */
+export const STALE_AFTER_MS = 15 * 60_000;
+
+/** Prisma filter for interrupted jobs. */
+export function staleRunningWhere(): Prisma.JobWhereInput {
+  return { status: 'running', lockedAt: { lt: new Date(Date.now() - STALE_AFTER_MS) } };
+}
+
 export async function enqueue(
   db: Db,
   type: JobType,

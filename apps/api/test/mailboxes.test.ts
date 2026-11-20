@@ -156,7 +156,7 @@ describe('mailbox routes', () => {
     const rep = await makeUser({ role: 'SALES_REPRESENTATIVE' });
     const res = await a.inject({ method: 'GET', url: '/api/mailboxes/system', headers: { cookie: await signIn(a, manager) } });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ account: null, pendingJobs: 0, failedJobs: 0 });
+    expect(res.json()).toEqual({ account: null, pendingJobs: 0, failedJobs: 0, staleJobs: 0 });
     const denied = await a.inject({ method: 'GET', url: '/api/mailboxes/system', headers: { cookie: await signIn(a, rep) } });
     expect(denied.statusCode).toBe(403);
   });
@@ -259,11 +259,47 @@ describe('job routes', () => {
     expect((await a.inject({ method: 'POST', url: '/api/jobs/abc/retry', headers: { cookie } })).statusCode).toBe(404);
   });
 
-  test('retry refuses a running job', async () => {
+  const STALE = () => new Date(Date.now() - 16 * 60_000);
+
+  test('retry refuses a freshly running job, a done job and a queued job', async () => {
+    const running = await enqueue(prisma, 'send_email', p);
+    await prisma.job.update({ where: { id: running.id }, data: { status: 'running', lockedAt: new Date(Date.now() - 60_000) } });
+    const done = await enqueue(prisma, 'send_email', p);
+    await prisma.job.update({ where: { id: done.id }, data: { status: 'done' } });
+    const queued = await enqueue(prisma, 'send_email', p);
+    const a = await app();
+    const cookie = await signIn(a, await admin());
+    for (const j of [running, done, queued]) {
+      const res = await a.inject({ method: 'POST', url: `/api/jobs/${j.id}/retry`, headers: { cookie } });
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toEqual({ error: 'job_not_retryable' });
+    }
+    expect((await prisma.job.findUniqueOrThrow({ where: { id: running.id } })).status).toBe('running');
+    expect((await prisma.job.findUniqueOrThrow({ where: { id: done.id } })).status).toBe('done');
+  });
+
+  test('retry requeues a stale running job', async () => {
     const job = await enqueue(prisma, 'send_email', p);
-    await prisma.job.update({ where: { id: job.id }, data: { status: 'running' } });
+    await prisma.job.update({ where: { id: job.id }, data: { status: 'running', attempts: 3, lockedAt: STALE() } });
     const a = await app();
     const res = await a.inject({ method: 'POST', url: `/api/jobs/${job.id}/retry`, headers: { cookie: await signIn(a, await admin()) } });
-    expect(res.statusCode).toBe(409);
+    expect(res.statusCode).toBe(200);
+    const after = await prisma.job.findUniqueOrThrow({ where: { id: job.id } });
+    expect(after).toMatchObject({ status: 'queued', attempts: 0, lockedAt: null });
+  });
+
+  test('stale running jobs are listed and counted', async () => {
+    const stale = await enqueue(prisma, 'send_email', p);
+    await prisma.job.update({ where: { id: stale.id }, data: { status: 'running', lockedAt: STALE() } });
+    const fresh = await enqueue(prisma, 'send_email', p);
+    await prisma.job.update({ where: { id: fresh.id }, data: { status: 'running', lockedAt: new Date() } });
+    const a = await app();
+    const cookie = await signIn(a, await makeUser({ role: 'MANAGER' }));
+    const list = await a.inject({ method: 'GET', url: '/api/jobs?status=stale&type=send_email', headers: { cookie } });
+    expect(list.statusCode).toBe(200);
+    expect(list.json().items.map((j: { id: number }) => j.id)).toEqual([stale.id]);
+    expect(list.json().items[0].status).toBe('running');
+    const box = await a.inject({ method: 'GET', url: '/api/mailboxes/system', headers: { cookie } });
+    expect(box.json()).toMatchObject({ pendingJobs: 2, failedJobs: 0, staleJobs: 1 });
   });
 });

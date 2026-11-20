@@ -3,13 +3,15 @@ import { prisma } from '../db.js';
 import { audit } from '../audit.js';
 import { requireRight } from '../plugins/auth.js';
 import { accountSummary } from '../graph/accounts.js';
+import { staleRunningWhere } from '../jobs/queue.js';
 
 export const mailboxRoutes: FastifyPluginAsync = async (app) => {
   app.get('/mailboxes/system', { preHandler: [requireRight('view_admin_settings')] }, async () => {
-    const [account, pendingJobs, failedJobs] = await Promise.all([
+    const [account, pendingJobs, failedJobs, staleJobs] = await Promise.all([
       prisma.emailAccount.findFirst({ where: { kind: 'system' }, orderBy: { id: 'desc' } }),
       prisma.job.count({ where: { type: 'send_email', status: { in: ['queued', 'running'] } } }),
       prisma.job.count({ where: { type: 'send_email', status: 'failed' } }),
+      prisma.job.count({ where: { type: 'send_email', ...staleRunningWhere() } }),
     ]);
     return {
       account: account
@@ -17,6 +19,7 @@ export const mailboxRoutes: FastifyPluginAsync = async (app) => {
         : null,
       pendingJobs,
       failedJobs,
+      staleJobs,
     };
   });
 

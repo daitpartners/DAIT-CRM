@@ -88,7 +88,7 @@ function MailboxCard({ canManage }: { canManage: boolean }) {
   }
 
   const account = data?.account ?? null;
-  const head = [t('To'), t('Subject'), t('Attempts'), t('Last error')];
+  const head = [t('To'), t('Subject'), t('Status'), t('Attempts'), t('Last error')];
   return (
     <>
       <section className="card flush" aria-labelledby="mailbox-title">
@@ -144,6 +144,12 @@ function MailboxCard({ canManage }: { canManage: boolean }) {
               <dd>{data?.pendingJobs ?? 0}</dd>
               <dt>{t('Failed')}</dt>
               <dd>{data?.failedJobs ?? 0}</dd>
+              {data?.staleJobs ? (
+                <>
+                  <dt>{t('Interrupted')}</dt>
+                  <dd>{data.staleJobs}</dd>
+                </>
+              ) : null}
             </dl>
           )}
         </div>
@@ -151,7 +157,7 @@ function MailboxCard({ canManage }: { canManage: boolean }) {
 
       <section className="card flush" aria-labelledby="failed-title" style={{ marginTop: 16 }}>
         <div className="head">
-          <h2 id="failed-title">{t('Failed emails')}</h2>
+          <h2 id="failed-title">{t('Failed and interrupted emails')}</h2>
         </div>
         {failed.error ? (
           <div className="empty" role="alert">{errorText(t, failed.error instanceof ApiError ? failed.error.code : 'unknown')}</div>
@@ -159,12 +165,19 @@ function MailboxCard({ canManage }: { canManage: boolean }) {
           <Table
             head={canManage ? [...head, <span className="sr">{t('Actions')}</span>] : head}
             isEmpty={failed.isPending || !failed.data?.length}
-            empty={failed.isPending ? t('Loading…') : t('No failed emails')}
+            empty={failed.isPending ? t('Loading…') : t('No failed or interrupted emails')}
           >
             {failed.data?.map((j) => (
               <tr key={j.id}>
                 <td className="wrap">{(j.payloadSummary.to ?? []).join(', ')}</td>
                 <td className="wrap">{j.payloadSummary.subject ?? ''}</td>
+                <td>
+                  {j.interrupted ? (
+                    <span className="badge b-warn" title={t('Sending was interrupted; it may or may not have gone out')}>{t('Interrupted')}</span>
+                  ) : (
+                    <span className="badge b-bad">{t('Failed')}</span>
+                  )}
+                </td>
                 <td>{t('{n} of {max}', { n: j.attempts, max: j.maxAttempts })}</td>
                 <td className="wrap">{j.lastError ?? ''}</td>
                 {canManage ? (

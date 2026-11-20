@@ -112,6 +112,20 @@ describe('graph client', () => {
     expect(isAuthFailure(err)).toBe(true);
   });
 
+  test('a timed-out request is retryable and the fetch carries a timeout signal', async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const err = await createGraphClient(env).sendMail(await account(), msg).catch((e: unknown) => e);
+    const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(err).toBeInstanceOf(GraphError);
+    expect((err as GraphError).status).toBe(504);
+    expect((err as GraphError).message).toBe('graph_send_failed timeout');
+    expect(isAuthFailure(err)).toBe(false);
+  });
+
   test('missing Microsoft settings fail the send clearly', async () => {
     const err = (await createGraphClient({}).sendMail(await account(), msg).catch((e: unknown) => e)) as Error;
     expect(err.message).toBe('microsoft_not_configured');

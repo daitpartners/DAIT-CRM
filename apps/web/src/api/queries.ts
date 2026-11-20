@@ -51,6 +51,8 @@ export type SystemMailbox = {
   account: { address: string; status: string; lastError: string | null; updatedAt: string } | null;
   pendingJobs: number;
   failedJobs: number;
+  /** Running for over 15 minutes: interrupted mid-send, can be retried. */
+  staleJobs: number;
 };
 
 export type JobSummary = {
@@ -64,6 +66,9 @@ export type JobSummary = {
   createdAt: string;
   payloadSummary: { to?: string[]; subject?: string };
 };
+
+/** A job an administrator can retry: failed, or interrupted (stale running). */
+export type RetryableJob = JobSummary & { interrupted: boolean };
 
 export type AuthOptions = { localLogin: boolean; testLogin: boolean };
 
@@ -122,6 +127,15 @@ export function useSystemMailbox() {
 export function useFailedEmailJobs() {
   return useQuery({
     queryKey: keys.failedEmailJobs,
-    queryFn: async () => (await api<{ items: JobSummary[] }>('/api/jobs?status=failed&type=send_email')).items,
+    queryFn: async (): Promise<RetryableJob[]> => {
+      const [stale, failed] = await Promise.all([
+        api<{ items: JobSummary[] }>('/api/jobs?status=stale&type=send_email'),
+        api<{ items: JobSummary[] }>('/api/jobs?status=failed&type=send_email'),
+      ]);
+      return [
+        ...stale.items.map((j) => ({ ...j, interrupted: true })),
+        ...failed.items.map((j) => ({ ...j, interrupted: false })),
+      ];
+    },
   });
 }
