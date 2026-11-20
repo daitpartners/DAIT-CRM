@@ -8,6 +8,8 @@ on:
       sha:
         description: 'Release to check against the test site (empty = whatever test runs now)'
         required: false
+permissions:
+  contents: read
 concurrency:
   group: deploy-live
   cancel-in-progress: false

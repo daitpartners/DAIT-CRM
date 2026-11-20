@@ -1,43 +1,41 @@
 name: Deploy to test
+# Runs only after the CI workflow (name: CI) finished green for a push to main, and deploys exactly
+# the commit CI tested. Tests are not re-run here; CI already ran them against that sha.
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
+permissions:
+  contents: read
 concurrency:
   group: deploy-test
   cancel-in-progress: false
 jobs:
   deploy:
+    # Only a successful push run from this repository (not a pull request whose branch is named main).
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: dait_crm_unit
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/dait_crm_unit
+      SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
       - uses: actions/setup-node@v4.4.0
         with:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
       - run: npm run build
       # Production dependencies only; the server runs this bundle as is (no npm ci there).
       - run: npm ci --omit=dev
       - name: Pack the release
         run: |
-          tar czf "$GITHUB_SHA.tgz" package.json package-lock.json node_modules \
+          tar czf "$SHA.tgz" package.json package-lock.json node_modules \
             packages/shared/package.json packages/shared/dist \
             apps/api/package.json apps/api/dist \
             apps/worker/package.json apps/worker/dist \
@@ -55,7 +53,8 @@ jobs:
         env:
           TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
         run: |
+          if ! printf '%s' "$SHA" | grep -Eq '^[0-9a-f]{40}$'; then echo "unexpected sha: $SHA" >&2; exit 1; fi
           SSH_OPTS="-i $HOME/.ssh/deploy_key -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes"
-          scp $SSH_OPTS "$GITHUB_SHA.tgz" "$TARGET:incoming/$GITHUB_SHA.tgz"
+          scp $SSH_OPTS "$SHA.tgz" "$TARGET:incoming/$SHA.tgz"
           # ~/test/current does not exist on the first deploy, so run the script from the tarball itself.
-          ssh $SSH_OPTS "$TARGET" "tar xzf ~/incoming/$GITHUB_SHA.tgz -O deploy/release.sh > ~/incoming/release-$GITHUB_SHA.sh && bash ~/incoming/release-$GITHUB_SHA.sh install test ~/incoming/$GITHUB_SHA.tgz $GITHUB_SHA && rm -f ~/incoming/release-$GITHUB_SHA.sh"
+          ssh $SSH_OPTS "$TARGET" "tar xzf ~/incoming/$SHA.tgz -O deploy/release.sh > ~/incoming/release-$SHA.sh && bash ~/incoming/release-$SHA.sh install test ~/incoming/$SHA.tgz $SHA && rm -f ~/incoming/release-$SHA.sh"
