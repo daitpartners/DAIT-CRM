@@ -47,6 +47,24 @@ export type AllocationRule = {
   roundRobinPos: number;
 };
 
+export type SystemMailbox = {
+  account: { address: string; status: string; lastError: string | null; updatedAt: string } | null;
+  pendingJobs: number;
+  failedJobs: number;
+};
+
+export type JobSummary = {
+  id: number;
+  type: string;
+  status: 'queued' | 'running' | 'done' | 'failed';
+  attempts: number;
+  maxAttempts: number;
+  lastError: string | null;
+  runAt: string;
+  createdAt: string;
+  payloadSummary: { to?: string[]; subject?: string };
+};
+
 export type AuthOptions = { localLogin: boolean; testLogin: boolean };
 
 export const keys = {
@@ -56,6 +74,8 @@ export const keys = {
   lookups: ['lookups'] as const,
   lookupGroup: (group: string) => ['lookups', group, 'all'] as const,
   allocation: ['allocation-rules'] as const,
+  systemMailbox: ['mailboxes', 'system'] as const,
+  failedEmailJobs: ['jobs', 'send_email', 'failed'] as const,
 };
 
 export function useMe() {
@@ -92,5 +112,16 @@ export function useAllocationRules() {
   return useQuery({
     queryKey: keys.allocation,
     queryFn: async () => (await api<{ items: AllocationRule[] }>('/api/allocation-rules')).items,
+  });
+}
+
+export function useSystemMailbox() {
+  return useQuery({ queryKey: keys.systemMailbox, queryFn: () => api<SystemMailbox>('/api/mailboxes/system') });
+}
+
+export function useFailedEmailJobs() {
+  return useQuery({
+    queryKey: keys.failedEmailJobs,
+    queryFn: async () => (await api<{ items: JobSummary[] }>('/api/jobs?status=failed&type=send_email')).items,
   });
 }

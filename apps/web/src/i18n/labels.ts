@@ -61,6 +61,8 @@ export function errorText(t: TFn, code: string): string {
       return t('You do not have access');
     case 'not_found':
       return t('Not found');
+    case 'job_running':
+      return t('That email is being sent right now');
     case 'validation':
       return t('Please check the highlighted fields');
     default:

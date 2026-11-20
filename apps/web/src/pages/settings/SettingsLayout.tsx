@@ -16,7 +16,7 @@ export function SettingsLayout() {
     { to: '/settings/users', label: t('Users'), right: me.can('manage_users') },
     { to: '/settings/lookups', label: t('Dropdown values'), right: me.can('manage_lookups') },
     { to: '/settings/allocation', label: t('Allocation rules'), right: me.can('view_admin_settings') },
-    // Task 8 adds { to: '/settings/mailbox', label: t('System mailbox') } here.
+    { to: '/settings/mailbox', label: t('System mailbox'), right: me.can('view_admin_settings') },
   ].filter((l) => l.right);
   const adminHome = adminLinks[0]?.to ?? '/settings/allocation';
 

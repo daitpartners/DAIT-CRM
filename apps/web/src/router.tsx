@@ -8,6 +8,7 @@ import { AllocationRules } from './pages/settings/AllocationRules';
 import { Lookups } from './pages/settings/Lookups';
 import { MySettings } from './pages/settings/MySettings';
 import { SettingsLayout } from './pages/settings/SettingsLayout';
+import { SystemMailbox } from './pages/settings/SystemMailbox';
 import { Users } from './pages/settings/Users';
 
 export const router = createBrowserRouter([
@@ -30,7 +31,7 @@ export const router = createBrowserRouter([
           { path: 'users', element: <Users /> },
           { path: 'lookups', element: <Lookups /> },
           { path: 'allocation', element: <AllocationRules /> },
-          // Task 8: { path: 'mailbox', element: <SystemMailbox /> }
+          { path: 'mailbox', element: <SystemMailbox /> },
         ],
       },
       { path: '*', element: <NotFound /> },
