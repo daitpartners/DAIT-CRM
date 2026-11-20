@@ -7,9 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "echo \"no tests yet\"",
+    "test": "playwright test",
     "typecheck": "tsc --noEmit",
-    "test:unit": "vitest run"
+    "test:unit": "vitest run",
+    "pretest": "vite build"
   },
   "dependencies": {
     "@dait-crm/shared": "0.0.0",
@@ -22,6 +23,7 @@
     "zod": "3.25.76"
   },
   "devDependencies": {
+    "@playwright/test": "1.65.0",
     "@testing-library/dom": "10.4.2",
     "@testing-library/jest-dom": "6.10.0",
     "@testing-library/react": "16.3.3",

@@ -18,7 +18,8 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
     "postinstall": "prisma generate",
-    "create-local-admin": "tsx src/cli/create-local-admin.ts"
+    "create-local-admin": "tsx src/cli/create-local-admin.ts",
+    "e2e:seed": "tsx test/e2e-seed.ts"
   },
   "dependencies": {
     "@azure/msal-node": "3.8.10",
