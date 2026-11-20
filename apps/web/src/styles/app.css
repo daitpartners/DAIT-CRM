@@ -78,7 +78,7 @@ select.in:disabled,select.chip:disabled{opacity:.6;cursor:default}
 .tab .n{color:var(--faint);font-weight:500}.tab .n.bad{color:var(--bad-fg);font-weight:600}
 .search{display:flex;align-items:center;gap:8px;height:36px;padding:0 12px;border:1px solid var(--field);border-radius:8px;background:var(--surface);width:280px;max-width:100%}
 .search input{border:0;outline:0;background:transparent;flex-grow:1;font-size:13px;min-width:0}
-.tbl{overflow-x:auto}
+.tbl{overflow-x:auto;position:relative}
 table{border-collapse:collapse;width:100%;font-size:13px}
 th{text-align:left;font-weight:600;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;background:#F9F7FD}
 td{padding:11px 12px;border-bottom:1px solid var(--line-2);vertical-align:middle;white-space:nowrap}

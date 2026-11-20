@@ -15,10 +15,11 @@
     "pretest": "npm run build -w packages/shared",
     "test": "npm test --workspaces --if-present && npm run test:unit -w apps/web",
     "pretypecheck": "npm run build -w packages/shared",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present && npm run i18n:check",
     "db:migrate": "npm run db:migrate -w apps/api",
     "db:seed": "npm run db:seed -w apps/api",
-    "predb:seed": "npm run build -w packages/shared"
+    "predb:seed": "npm run build -w packages/shared",
+    "i18n:check": "tsx scripts/i18n-check.ts"
   },
   "overrides": {
     "vite": "7.3.7"

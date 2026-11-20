@@ -1,4 +1,4 @@
-/* Translated display labels for fixed enums. Each phrase is a literal t('...') so scripts/i18n-check.ts sees it. */
+/* Translated display labels for fixed enums. Each phrase is a literal t() call so scripts/i18n-check.ts sees it. */
 import type { LookupGroup, Role } from '@dait-crm/shared';
 import type { Lang } from '../api/queries';
 import type { TFn } from './useT';

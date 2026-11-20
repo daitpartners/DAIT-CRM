@@ -15,6 +15,8 @@ export function useDialogFocus(ref: RefObject<HTMLElement | null>, onEscape: () 
     function onKey(e: KeyboardEvent) {
       if (!root) return;
       if (e.key === 'Escape') {
+        // An open combobox inside the dialog handles (and prevents) its own Escape first.
+        if (e.defaultPrevented) return;
         e.preventDefault();
         escape.current();
         return;
