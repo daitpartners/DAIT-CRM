@@ -22,3 +22,15 @@ test('seedLookups is idempotent', async () => {
   await seedLookups();
   expect(await prisma.lookupValue.count()).toBe(before);
 });
+
+test('seedLookups preserves admin edits to existing rows', async () => {
+  const before = await prisma.lookupValue.count();
+  await prisma.lookupValue.update({
+    where: { group_value: { group: 'lead_status', value: 'New' } },
+    data: { label: 'Fresh', isActive: false, sortOrder: 99 },
+  });
+  await seedLookups();
+  const row = await prisma.lookupValue.findUniqueOrThrow({ where: { group_value: { group: 'lead_status', value: 'New' } } });
+  expect(row).toMatchObject({ label: 'Fresh', isActive: false, sortOrder: 99 });
+  expect(await prisma.lookupValue.count()).toBe(before);
+});

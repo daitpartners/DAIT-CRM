@@ -6,6 +6,8 @@ import { healthRoutes } from './routes/health.js';
 import { authRoutes } from './routes/auth.js';
 import { meRoutes } from './routes/me.js';
 import { userRoutes } from './routes/users.js';
+import { lookupRoutes } from './routes/lookups.js';
+import { allocationRoutes } from './routes/allocation.js';
 import { ValidationError } from './validate.js';
 import { registerAuth } from './plugins/auth.js';
 import { createMsalClient, type MicrosoftClient } from './auth/microsoft.js';
@@ -48,5 +50,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(authRoutes, { prefix: '/api', microsoft, localLogin, testLogin, secureCookies });
   await app.register(meRoutes, { prefix: '/api' });
   await app.register(userRoutes, { prefix: '/api' });
+  await app.register(lookupRoutes, { prefix: '/api' });
+  await app.register(allocationRoutes, { prefix: '/api' });
   return app;
 }

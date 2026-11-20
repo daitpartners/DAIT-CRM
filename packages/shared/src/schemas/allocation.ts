@@ -7,3 +7,6 @@ export const AllocationRuleCreate = z.object({
   priority: z.number().int().min(0),
 });
 export type AllocationRuleCreate = z.infer<typeof AllocationRuleCreate>;
+
+export const AllocationRuleUpdate = AllocationRuleCreate.partial().extend({ isActive: z.boolean().optional() });
+export type AllocationRuleUpdate = z.infer<typeof AllocationRuleUpdate>;

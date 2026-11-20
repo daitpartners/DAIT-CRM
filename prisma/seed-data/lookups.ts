@@ -99,18 +99,15 @@ export const LOOKUP_GROUPS: Group[] = [
   },
 ];
 
+/** Creates missing (group, value) rows only; existing rows keep admin edits. */
 export async function seedLookups(prisma: PrismaClient): Promise<void> {
-  for (const { group, values, translations } of LOOKUP_GROUPS) {
-    for (const [sortOrder, value] of values.entries()) {
+  const data = LOOKUP_GROUPS.flatMap(({ group, values, translations }) =>
+    values.map((value, sortOrder) => {
       const tr = translations?.[value];
-      const data = { label: value, labelEs: tr?.es ?? null, labelFr: tr?.fr ?? null, sortOrder };
-      await prisma.lookupValue.upsert({
-        where: { group_value: { group, value } },
-        update: data,
-        create: { group, value, ...data },
-      });
-    }
-  }
+      return { group, value, label: value, labelEs: tr?.es ?? null, labelFr: tr?.fr ?? null, sortOrder };
+    }),
+  );
+  await prisma.lookupValue.createMany({ data, skipDuplicates: true });
 }
 
 // The four users from prototype/js/data.js; seeded only when SEED_SAMPLE_USERS=1.
