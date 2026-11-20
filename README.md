@@ -21,6 +21,8 @@ Full-stack CRM for DAIT Partners, built as an npm-workspaces monorepo (Node >= 2
 Development: `npm run dev -w apps/api` (port 3090) and `npm run dev -w apps/web` (Vite proxies `/api` to the API).
 To serve the built web app from the API: `WEB_DIST=apps/web/dist node apps/api/dist/server.js`.
 
+Deployment (test and live servers, GitHub Actions, backups): see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 ## Prototype (reference)
 
 A working single-page prototype of the enhanced CRM. No build step, no server: open `prototype/index.html` in a browser

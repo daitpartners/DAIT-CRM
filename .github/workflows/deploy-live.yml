@@ -1,0 +1,40 @@
+name: Deploy to live
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type deploy-live to confirm'
+        required: true
+      sha:
+        description: 'Release to check against the test site (empty = whatever test runs now)'
+        required: false
+concurrency:
+  group: deploy-live
+  cancel-in-progress: false
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check confirmation
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$CONFIRM" != "deploy-live" ]; then echo "confirm must be exactly: deploy-live" >&2; exit 1; fi
+      - name: Set up SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Promote the test release to live
+        env:
+          TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+          SHA: ${{ inputs.sha }}
+        run: |
+          SSH_OPTS="-i $HOME/.ssh/deploy_key -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes"
+          if [ -n "$SHA" ] && ! printf '%s' "$SHA" | grep -Eq '^[0-9a-f]{7,40}$'; then echo "sha must be hex" >&2; exit 1; fi
+          # promote ships exactly what test runs; refuse if that is not the release asked for.
+          ssh $SSH_OPTS "$TARGET" "running=\$(cat ~/test/current/RELEASE); echo \"Test runs \$running\"; if [ -n '$SHA' ] && [ \"\$running\" != '$SHA' ]; then case \"\$running\" in '$SHA'*) ;; *) echo 'Test is not running the requested sha' >&2; exit 1 ;; esac; fi; bash ~/test/current/deploy/release.sh promote"

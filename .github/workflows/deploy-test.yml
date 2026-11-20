@@ -1,0 +1,61 @@
+name: Deploy to test
+on:
+  push:
+    branches: [main]
+concurrency:
+  group: deploy-test
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: dait_crm_unit
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/dait_crm_unit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      # Production dependencies only; the server runs this bundle as is (no npm ci there).
+      - run: npm ci --omit=dev
+      - name: Pack the release
+        run: |
+          tar czf "$GITHUB_SHA.tgz" package.json package-lock.json node_modules \
+            packages/shared/package.json packages/shared/dist \
+            apps/api/package.json apps/api/dist \
+            apps/worker/package.json apps/worker/dist \
+            apps/web/dist prisma deploy
+      - name: Set up SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Upload and install on test
+        env:
+          TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+        run: |
+          SSH_OPTS="-i $HOME/.ssh/deploy_key -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes"
+          scp $SSH_OPTS "$GITHUB_SHA.tgz" "$TARGET:incoming/$GITHUB_SHA.tgz"
+          # ~/test/current does not exist on the first deploy, so run the script from the tarball itself.
+          ssh $SSH_OPTS "$TARGET" "tar xzf ~/incoming/$GITHUB_SHA.tgz -O deploy/release.sh > ~/incoming/release-$GITHUB_SHA.sh && bash ~/incoming/release-$GITHUB_SHA.sh install test ~/incoming/$GITHUB_SHA.tgz $GITHUB_SHA && rm -f ~/incoming/release-$GITHUB_SHA.sh"

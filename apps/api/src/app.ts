@@ -44,6 +44,8 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   const microsoft = opts.microsoft ?? (env.MS_CLIENT_ID ? createMsalClient(env) : null);
 
   const app = Fastify({
+    // OpenLiteSpeed proxies from loopback: trust only its X-Forwarded-For so rate limits see the real client IP.
+    trustProxy: ['127.0.0.1', '::1'],
     // Query strings are dropped from request logs so OAuth codes never reach them.
     logger: opts.logger
       ? { serializers: { req: (req) => ({ method: req.method, url: req.url.split('?')[0], remoteAddress: req.ip }) } }
