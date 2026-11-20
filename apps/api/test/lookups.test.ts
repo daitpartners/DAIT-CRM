@@ -60,6 +60,16 @@ describe('lookups', () => {
     expect((await req('PATCH', '/api/lookups/999999', c, { label: 'x' })).statusCode).toBe(404);
   });
 
+  it('patch cannot change value or group (400, row unchanged)', async () => {
+    const c = await admin();
+    const row = await prisma.lookupValue.findUniqueOrThrow({ where: { group_value: { group: 'currency', value: 'GBP' } } });
+    for (const payload of [{ value: 'EUR' }, { value: 'X' }, { group: 'priority' }]) {
+      expect((await req('PATCH', `/api/lookups/${row.id}`, c, payload)).statusCode).toBe(400);
+    }
+    const after = await prisma.lookupValue.findUniqueOrThrow({ where: { id: row.id } });
+    expect(after).toMatchObject({ value: 'GBP', group: 'currency' });
+  });
+
   it('reorder renumbers, unlisted keep relative order after listed', async () => {
     const c = await admin();
     const rows = (await req('GET', '/api/lookups?group=currency', c)).json().items as { id: number; value: string }[];

@@ -20,7 +20,7 @@ export type LookupValueCreate = z.infer<typeof LookupValueCreate>;
 export const LookupValueUpdate = LookupValueCreate.omit({ group: true }).partial();
 export type LookupValueUpdate = z.infer<typeof LookupValueUpdate>;
 
-export const LookupValuePatch = LookupValueUpdate.extend({ isActive: z.boolean().optional() });
+export const LookupValuePatch = LookupValueUpdate.omit({ value: true }).extend({ isActive: z.boolean().optional() }).strict();
 export type LookupValuePatch = z.infer<typeof LookupValuePatch>;
 
 export const LookupOrder = z.object({ ids: z.array(z.number().int()) });
