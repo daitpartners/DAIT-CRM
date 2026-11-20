@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contact us — DAIT Partners</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../css/app.css">
+</head>
+<body>
+<div class="public">
+<header>
+  <a href="contact.html" aria-label="DAIT Partners home"><img src="../assets/logo-full.png" alt="DAIT Partners" style="height:46px;width:auto"></a>
+  <div class="grow"></div>
+  <nav aria-label="Site"><a href="contact.html">Services</a><a href="contact.html">Industries</a><a href="contact.html">Insights</a><a href="contact.html">About</a><a href="contact.html" style="color:#6811CF;font-weight:600">Contact</a></nav>
+</header>
+<div class="wrap">
+  <div class="intro">
+    <div class="eyebrow">Contact us</div>
+    <h1>Tell us what you're working on.</h1>
+    <p>Share a few details and a member of our advisory team will reply within one business day. We only ask for what we need to get started; we'll do the rest of the research ourselves.</p>
+    <ul style="margin:8px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:12px;font-size:14.5px;color:#4A3F66">
+      <li>✓ Reply within one business day</li>
+      <li>✓ No sales pressure, no obligation</li>
+      <li>✓ Your details stay private and are never shared</li>
+    </ul>
+    <div class="note info" style="margin-top:12px;font-size:13.5px;color:#4A3F66">Prefer email? Write to <a href="mailto:hello@daitpartners.com">hello@daitpartners.com</a> or call <strong>+44 20 7946 0810</strong>, Mon–Fri 9:00–18:00 GMT.</div>
+    <div class="note ai" style="font-size:12.5px">Prototype note: submitting this form writes to the same mock database as the CRM (<a href="../index.html#/enquiries">open the CRM</a>) so you can watch the enquiry become a company, contact and lead.</div>
+  </div>
+  <form id="contactForm" novalidate>
+    <div class="grid2">
+      <div class="span2"><label class="lbl" for="fullName">Full name <span class="req">*</span></label><input id="fullName" name="fullName" class="in" type="text" autocomplete="name" placeholder="Priya Raman" required><div class="err-msg" data-err="fullName"></div></div>
+      <div><label class="lbl" for="email">Business email <span class="req">*</span></label><input id="email" name="email" class="in" type="email" autocomplete="email" placeholder="you@company.com" required><div class="err-msg" data-err="email"></div></div>
+      <div><label class="lbl" for="phone">Phone number <span style="color:#6A5E86;font-weight:400">(optional)</span></label><input id="phone" name="phone" class="in" type="tel" autocomplete="tel" placeholder="+91 …"></div>
+      <div><label class="lbl" for="companyName">Company name <span class="req">*</span></label><input id="companyName" name="companyName" class="in" type="text" autocomplete="organization" placeholder="Northwind Logistics" required><div class="err-msg" data-err="companyName"></div></div>
+      <div><label class="lbl" for="website">Company website <span style="color:#6A5E86;font-weight:400">(optional)</span></label><input id="website" name="website" class="in" type="url" autocomplete="url" placeholder="https://"></div>
+      <div class="span2"><label class="lbl" for="message">Requirement / message <span class="req">*</span></label><textarea id="message" name="message" class="in" rows="5" required placeholder="What are you trying to achieve? A sentence or two is enough."></textarea><div class="err-msg" data-err="message"></div></div>
+    </div>
+    <!-- honeypot: hidden from people, filled by bots -->
+    <div style="position:absolute;left:-9999px" aria-hidden="true"><label>Leave this empty <input name="honeypot" type="text" tabindex="-1" autocomplete="off"></label></div>
+    <label style="display:flex;gap:10px;align-items:flex-start;font-size:13px;color:#4A3F66;line-height:1.5;cursor:pointer"><input name="consent" type="checkbox" style="margin-top:3px;width:16px;height:16px;accent-color:#6811CF" required>I agree that DAIT Partners may contact me about this enquiry and store my details as described in the <a href="contact.html">privacy policy</a>.</label>
+    <div class="err-msg" data-err="consent"></div>
+    <button type="submit" class="submit">Send enquiry</button>
+    <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#6A5E86">🛡 Protected against spam. Honeypot field, rate limiting and a server-side token run silently; nothing extra for you to do.</div>
+  </form>
+</div>
+<footer><span>© 2026 DAIT Partners</span><a href="contact.html">Privacy</a><a href="contact.html">Terms</a></footer>
+</div>
+<script src="../js/data.js"></script>
+<script src="../js/store.js"></script>
+<script>
+(function () {
+  const f = document.getElementById('contactForm');
+  const RATE_KEY = 'dait-contact-last';
+  f.addEventListener('submit', function (e) {
+    e.preventDefault();
+    f.querySelectorAll('.err-msg').forEach((x) => { x.textContent = ''; });
+    f.querySelectorAll('.in').forEach((x) => x.classList.remove('err'));
+    const data = {}; f.querySelectorAll('[name]').forEach((i) => { data[i.name] = i.type === 'checkbox' ? i.checked : i.value; });
+    if (!data.consent) { f.querySelector('[data-err=consent]').textContent = 'Please confirm you agree to be contacted.'; return; }
+    // rate limit: one submission per 20 seconds per browser (server would do this per IP + token)
+    try { const last = Number(localStorage.getItem(RATE_KEY) || 0); if (Date.now() - last < 20000) { f.querySelector('[data-err=message]').textContent = 'Please wait a moment before sending another enquiry.'; return; } } catch (err) {}
+    const r = Store.submitEnquiry(data);
+    if (!r.ok) { Object.keys(r.errors).forEach((k) => { const el = f.querySelector('[data-err=' + k + ']'); if (el) el.textContent = r.errors[k]; const inp = f.querySelector('[name=' + k + ']'); if (inp) inp.classList.add('err'); }); return; }
+    try { localStorage.setItem(RATE_KEY, String(Date.now())); } catch (err) {}
+    // visitor gets confirmation immediately; enrichment happens in the background
+    f.innerHTML = '<div class="done"><div style="font-size:40px">✓</div><h2 style="font-size:20px;font-weight:800;color:#1F0249">Thank you, ' + (r.enquiry.fullName.split(' ')[0]) + '.</h2><p style="margin:0;color:#4A3F66;line-height:1.6">We have received your enquiry and will reply within one business day. A confirmation has been sent to <strong>' + r.enquiry.email.replace(/</g, '&lt;') + '</strong>.</p><p style="margin:0;font-size:12.5px;color:#6A5E86">Reference ' + r.enquiry.id + '</p><a class="btn" style="align-self:center" href="../index.html#/enquiries/' + r.enquiry.id + '">Prototype: see what the CRM did with it</a></div>';
+  });
+})();
+</script>
+</body>
+</html>
