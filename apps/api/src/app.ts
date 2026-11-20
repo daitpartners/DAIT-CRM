@@ -8,13 +8,24 @@ import { meRoutes } from './routes/me.js';
 import { userRoutes } from './routes/users.js';
 import { lookupRoutes } from './routes/lookups.js';
 import { allocationRoutes } from './routes/allocation.js';
+import { mailboxRoutes } from './routes/mailboxes.js';
+import { jobRoutes } from './routes/jobs.js';
 import { ValidationError } from './validate.js';
 import { registerAuth } from './plugins/auth.js';
 import { createMsalClient, type MicrosoftClient } from './auth/microsoft.js';
+import { createGraphClient, type GraphClient } from './graph/client.js';
 
 export interface BuildAppOptions {
   logger?: boolean;
   microsoft?: MicrosoftClient;
+  /** Microsoft Graph client used by routes that talk to mailboxes; defaults to the real one. */
+  graph?: GraphClient;
+}
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    graph: GraphClient;
+  }
 }
 
 function sessionSecret(env: NodeJS.ProcessEnv): string {
@@ -40,6 +51,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   });
   await app.register(cookie, { secret: sessionSecret(env) });
   await app.register(rateLimit, { global: false });
+  app.decorate('graph', opts.graph ?? createGraphClient(env));
   registerAuth(app, { secureCookies });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ValidationError) return reply.code(400).send({ error: 'validation', issues: error.issues });
@@ -52,5 +64,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(userRoutes, { prefix: '/api' });
   await app.register(lookupRoutes, { prefix: '/api' });
   await app.register(allocationRoutes, { prefix: '/api' });
+  await app.register(mailboxRoutes, { prefix: '/api' });
+  await app.register(jobRoutes, { prefix: '/api' });
   return app;
 }

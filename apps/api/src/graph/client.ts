@@ -1,0 +1,93 @@
+import { ConfidentialClientApplication } from '@azure/msal-node';
+import type { EmailAccount, PrismaClient } from '@prisma/client';
+import { prisma } from '../db.js';
+import { decrypt, encrypt } from '../crypto/tokens.js';
+import { readRefreshToken, type MsEnv } from '../auth/microsoft.js';
+
+export interface MailMessage {
+  to: string[];
+  cc?: string[];
+  subject: string;
+  html: string;
+  text: string;
+}
+
+export interface GraphClient {
+  sendMail(account: EmailAccount, msg: MailMessage): Promise<void>;
+}
+
+export const GRAPH_SEND_SCOPES = ['https://graph.microsoft.com/Mail.Send', 'offline_access'];
+const SEND_MAIL_URL = 'https://graph.microsoft.com/v1.0/me/sendMail';
+
+/** A Graph call failed; `status` is the HTTP status (401 for token problems). */
+export class GraphError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'GraphError';
+  }
+}
+
+/** True when the mailbox needs reconnecting (expired/revoked consent), not for throttling or outages. */
+export function isAuthFailure(err: unknown): boolean {
+  if (err instanceof GraphError) return err.status === 401;
+  const e = err as { errorCode?: unknown; message?: unknown } | null;
+  if (!e || typeof e !== 'object') return false;
+  if (e.errorCode === 'invalid_grant' || e.errorCode === 'interaction_required') return true;
+  return typeof e.message === 'string' && /\binvalid_grant\b/.test(e.message);
+}
+
+const recipients = (list: string[] = []) => list.map((address) => ({ emailAddress: { address } }));
+
+export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = prisma): GraphClient {
+  return {
+    async sendMail(account, msg) {
+      const { MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET } = env;
+      if (!MS_TENANT_ID || !MS_CLIENT_ID || !MS_CLIENT_SECRET) throw new Error('microsoft_not_configured');
+
+      // A fresh client per send keeps tokens out of any shared in-memory cache.
+      const msal = new ConfidentialClientApplication({
+        auth: {
+          clientId: MS_CLIENT_ID,
+          clientSecret: MS_CLIENT_SECRET,
+          authority: `https://login.microsoftonline.com/${MS_TENANT_ID}`,
+        },
+      });
+      const refreshToken = decrypt(account.refreshTokenEnc);
+      const result = await msal.acquireTokenByRefreshToken({ refreshToken, scopes: GRAPH_SEND_SCOPES });
+      if (!result?.accessToken) throw new GraphError('graph_token_failed', 401);
+
+      const rotated = readRefreshToken(msal.getTokenCache().serialize());
+      if (rotated && rotated !== refreshToken) {
+        await db.emailAccount.update({
+          where: { id: account.id },
+          data: { refreshTokenEnc: encrypt(rotated), tokenExpiresAt: result.expiresOn ?? null },
+        });
+      }
+
+      const res = await fetch(SEND_MAIL_URL, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${result.accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: {
+            subject: msg.subject,
+            body: { contentType: 'HTML', content: msg.html },
+            toRecipients: recipients(msg.to),
+            ccRecipients: recipients(msg.cc),
+          },
+          saveToSentItems: true,
+        }),
+      });
+      if (!res.ok) {
+        let code = '';
+        try {
+          const body = (await res.json()) as { error?: { code?: unknown } };
+          if (typeof body.error?.code === 'string') code = ` code=${body.error.code.slice(0, 100)}`;
+        } catch {
+          // Body is not JSON; the status is enough.
+        }
+        const retryAfter = res.status === 429 ? ` retry-after=${res.headers.get('Retry-After') ?? 'unknown'}` : '';
+        throw new GraphError(`graph_send_failed status=${res.status}${retryAfter}${code}`, res.status);
+      }
+    },
+  };
+}

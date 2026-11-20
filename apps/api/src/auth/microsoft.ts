@@ -10,12 +10,18 @@ export interface MicrosoftIdentity {
 
 export interface MicrosoftClient {
   getAuthUrl(args: { state: string; codeVerifier: string; codeChallenge: string }): Promise<string>;
-  redeemCode(args: { code: string; codeVerifier: string }): Promise<MicrosoftIdentity>;
+  /** Consent URL for connecting a mailbox (requests the mail and calendar scopes). */
+  getConnectUrl(args: { state: string; codeVerifier: string; codeChallenge: string; mode: 'user' | 'system' }): Promise<string>;
+  redeemCode(args: { code: string; codeVerifier: string; scopes?: string[] }): Promise<MicrosoftIdentity>;
 }
 
 export const MS_SCOPES = ['openid', 'profile', 'email', 'offline_access', 'User.Read'];
 
-type MsEnv = Partial<Record<'MS_TENANT_ID' | 'MS_CLIENT_ID' | 'MS_CLIENT_SECRET' | 'MS_REDIRECT_URI', string>>;
+export const CONNECT_SCOPES = [
+  'openid', 'profile', 'email', 'offline_access', 'User.Read', 'Mail.ReadWrite', 'Mail.Send', 'Calendars.ReadWrite',
+];
+
+export type MsEnv = Partial<Record<'MS_TENANT_ID' | 'MS_CLIENT_ID' | 'MS_CLIENT_SECRET' | 'MS_REDIRECT_URI', string>>;
 
 export function createMsalClient(env: MsEnv): MicrosoftClient {
   const { MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET, MS_REDIRECT_URI } = env;
@@ -42,10 +48,20 @@ export function createMsalClient(env: MsEnv): MicrosoftClient {
         prompt: 'select_account',
       });
     },
-    async redeemCode({ code, codeVerifier }) {
+    getConnectUrl({ state, codeChallenge }) {
+      return shared.getAuthCodeUrl({
+        scopes: CONNECT_SCOPES,
+        redirectUri: MS_REDIRECT_URI,
+        state,
+        codeChallenge,
+        codeChallengeMethod: 'S256',
+        prompt: 'select_account',
+      });
+    },
+    async redeemCode({ code, codeVerifier, scopes = MS_SCOPES }) {
       // A fresh client per redemption keeps one user's tokens out of another's cache.
       const msal = new ConfidentialClientApplication(config);
-      const result = await msal.acquireTokenByCode({ code, codeVerifier, scopes: MS_SCOPES, redirectUri: MS_REDIRECT_URI });
+      const result = await msal.acquireTokenByCode({ code, codeVerifier, scopes, redirectUri: MS_REDIRECT_URI });
       const claims = (result.idTokenClaims ?? {}) as Record<string, unknown>;
       const oid = String(claims.oid ?? result.account?.localAccountId ?? '');
       const email = String(claims.preferred_username ?? claims.email ?? result.account?.username ?? '');
@@ -61,7 +77,8 @@ export function createMsalClient(env: MsEnv): MicrosoftClient {
   };
 }
 
-function readRefreshToken(serializedCache: string): string | undefined {
+/** Pulls the refresh token out of a serialized MSAL cache (MSAL does not expose it directly). */
+export function readRefreshToken(serializedCache: string): string | undefined {
   try {
     const cache = JSON.parse(serializedCache) as { RefreshToken?: Record<string, { secret?: string }> };
     return Object.values(cache.RefreshToken ?? {})[0]?.secret;

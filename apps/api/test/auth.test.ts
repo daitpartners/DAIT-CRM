@@ -15,6 +15,9 @@ function fakeMicrosoft(identity: Identity): MicrosoftClient {
     async getAuthUrl({ state, codeChallenge }) {
       return `https://login.example.test/authorize?state=${encodeURIComponent(state)}&code_challenge=${codeChallenge}`;
     },
+    async getConnectUrl({ state }) {
+      return `https://login.example.test/authorize?connect=1&state=${encodeURIComponent(state)}`;
+    },
     async redeemCode({ code, codeVerifier }) {
       if (code !== 'good-code' || !codeVerifier) throw new Error('bad code');
       return identity;

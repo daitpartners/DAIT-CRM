@@ -1,10 +1,12 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import type { FastifyPluginAsync, FastifyReply } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { prisma } from '../db.js';
-import type { MicrosoftClient } from '../auth/microsoft.js';
+import { can } from '@dait-crm/shared';
+import { CONNECT_SCOPES, type MicrosoftClient } from '../auth/microsoft.js';
+import { connectSystemMailbox } from '../graph/accounts.js';
 import { verifyLocalAdmin } from '../auth/local.js';
 import { SESSION_COOKIE, createSession, deleteSession } from '../auth/session.js';
-import { sessionCookieOptions } from '../plugins/auth.js';
+import { requireRight, sessionCookieOptions } from '../plugins/auth.js';
 
 export interface AuthRoutesOptions {
   microsoft: MicrosoftClient | null;
@@ -16,6 +18,15 @@ export interface AuthRoutesOptions {
 const MS_STATE_COOKIE = 'ms_state';
 const MS_STATE_MAX_AGE_S = 10 * 60;
 const NOT_REGISTERED = '/sign-in?error=not-registered';
+const MAILBOX_CONNECTED = '/settings/mailbox?connected=1';
+const MAILBOX_FAILED = '/settings/mailbox?error=connect-failed';
+
+interface SavedState {
+  state?: unknown;
+  verifier?: unknown;
+  mode?: unknown;
+  userId?: unknown;
+}
 
 const emailBody = {
   type: 'object',
@@ -39,15 +50,47 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
     reply.setCookie(SESSION_COOKIE, session.id, sessionCookieOptions(secureCookies, session.expiresAt));
   }
 
+  /** Callback leg of `GET /auth/microsoft/connect?mode=system`. Never logs or returns the token. */
+  async function finishSystemConnect(
+    request: FastifyRequest<{ Querystring: { code?: string; error?: string } }>,
+    reply: FastifyReply,
+    verifier: string,
+    savedUserId: unknown,
+  ) {
+    const { code } = request.query;
+    const actor = request.user;
+    // The admin who started the connect must finish it, in the same session, and still hold the right.
+    if (!microsoft || !actor || actor.id !== savedUserId || !can(actor.role, 'manage_users')) {
+      return reply.redirect(MAILBOX_FAILED);
+    }
+    if (request.query.error || !code) return reply.redirect(MAILBOX_FAILED);
+    try {
+      const identity = await microsoft.redeemCode({ code, codeVerifier: verifier, scopes: CONNECT_SCOPES });
+      if (!identity.refreshToken || !identity.email) throw new Error('missing_refresh_token');
+      await connectSystemMailbox({
+        address: identity.email,
+        refreshToken: identity.refreshToken,
+        tokenExpiresAt: identity.expiresOn,
+        actorId: actor.id,
+      });
+    } catch (err) {
+      request.log.warn({ errName: (err as Error)?.name }, 'system mailbox connect failed');
+      return reply.redirect(MAILBOX_FAILED);
+    }
+    return reply.redirect(MAILBOX_CONNECTED);
+  }
+
   app.get('/auth/options', async () => ({ localLogin: opts.localLogin, testLogin: opts.testLogin }));
 
-  app.get('/auth/microsoft', async (_request, reply) => {
-    if (!microsoft) return reply.code(503).send({ error: 'microsoft_not_configured' });
+  function pkce() {
     const state = randomBytes(16).toString('base64url');
     const verifier = randomBytes(32).toString('base64url');
     const challenge = createHash('sha256').update(verifier).digest('base64url');
-    const url = await microsoft.getAuthUrl({ state, codeVerifier: verifier, codeChallenge: challenge });
-    reply.setCookie(MS_STATE_COOKIE, JSON.stringify({ state, verifier, mode: 'signin' }), {
+    return { state, verifier, challenge };
+  }
+
+  function setStateCookie(reply: FastifyReply, value: SavedState): void {
+    reply.setCookie(MS_STATE_COOKIE, JSON.stringify(value), {
       path: '/api/auth',
       httpOnly: true,
       sameSite: 'lax',
@@ -55,8 +98,28 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
       maxAge: MS_STATE_MAX_AGE_S,
       signed: true,
     });
+  }
+
+  app.get('/auth/microsoft', async (_request, reply) => {
+    if (!microsoft) return reply.code(503).send({ error: 'microsoft_not_configured' });
+    const { state, verifier, challenge } = pkce();
+    const url = await microsoft.getAuthUrl({ state, codeVerifier: verifier, codeChallenge: challenge });
+    setStateCookie(reply, { state, verifier, mode: 'signin' });
     return reply.redirect(url);
   });
+
+  app.get<{ Querystring: { mode?: string } }>(
+    '/auth/microsoft/connect',
+    { preHandler: [requireRight('manage_users')] },
+    async (request, reply) => {
+      if (request.query.mode !== 'system') return reply.code(400).send({ error: 'unsupported_mode' });
+      if (!microsoft) return reply.code(503).send({ error: 'microsoft_not_configured' });
+      const { state, verifier, challenge } = pkce();
+      const url = await microsoft.getConnectUrl({ state, codeVerifier: verifier, codeChallenge: challenge, mode: 'system' });
+      setStateCookie(reply, { state, verifier, mode: 'system', userId: request.user!.id });
+      return reply.redirect(url);
+    },
+  );
 
   app.get<{ Querystring: { code?: string; state?: string; error?: string } }>(
     '/auth/microsoft/callback',
@@ -65,19 +128,21 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
       const raw = request.cookies[MS_STATE_COOKIE];
       reply.clearCookie(MS_STATE_COOKIE, { path: '/api/auth' });
       const unsigned = raw ? request.unsignCookie(raw) : null;
-      let saved: { state?: unknown; verifier?: unknown } = {};
+      let saved: SavedState = {};
       try {
         if (unsigned?.valid && unsigned.value) saved = JSON.parse(unsigned.value);
       } catch {
         saved = {};
       }
       const { code, state } = request.query;
+      const system = saved.mode === 'system';
       if (
         typeof saved.state !== 'string' || typeof saved.verifier !== 'string' ||
         !state || !safeEqual(saved.state, state)
       ) {
-        return reply.redirect('/sign-in?error=state');
+        return reply.redirect(system ? MAILBOX_FAILED : '/sign-in?error=state');
       }
+      if (system) return finishSystemConnect(request, reply, saved.verifier, saved.userId);
       if (request.query.error || !code) return reply.redirect('/sign-in?error=microsoft');
 
       let identity;

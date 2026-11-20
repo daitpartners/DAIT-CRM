@@ -12,6 +12,8 @@ export default defineConfig({
       LOCAL_ADMIN_LOGIN: '',
       MS_CLIENT_ID: '',
       PUBLIC_URL: 'http://localhost:5173',
+      // Fixed test-only key (32 bytes of 0x07); never used outside tests.
+      TOKEN_ENCRYPTION_KEY: 'BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=',
     },
   },
 });
