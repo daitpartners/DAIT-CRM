@@ -70,7 +70,7 @@ describe('System mailbox page', () => {
   it('lists failed emails and retries one', async () => {
     const fetchMock = stubFetch(() => Response.json({ ...failedJob, status: 'queued', attempts: 0 }));
     renderPage({
-      mailbox: { account: { address: 'crm@daitpartners.com', status: 'error', lastError: 'graph_send_failed status=401', updatedAt: '2026-11-20T10:00:00.000Z' }, pendingJobs: 0, failedJobs: 1, staleJobs: 0 },
+      mailbox: { account: { address: 'crm@daitpartners.com', sendAs: null, status: 'error', lastError: 'graph_send_failed status=401', updatedAt: '2026-11-20T10:00:00.000Z' }, pendingJobs: 0, failedJobs: 1, staleJobs: 0 },
       failed: [failedJob],
     });
     expect(screen.getByText('crm@daitpartners.com')).toBeInTheDocument();
@@ -83,7 +83,7 @@ describe('System mailbox page', () => {
 
   it('disconnect asks for confirmation first', async () => {
     const fetchMock = stubFetch(() => new Response(null, { status: 204 }));
-    renderPage({ mailbox: { account: { address: 'crm@daitpartners.com', status: 'connected', lastError: null, updatedAt: '2026-11-20T10:00:00.000Z' }, pendingJobs: 0, failedJobs: 0, staleJobs: 0 } });
+    renderPage({ mailbox: { account: { address: 'crm@daitpartners.com', sendAs: null, status: 'connected', lastError: null, updatedAt: '2026-11-20T10:00:00.000Z' }, pendingJobs: 0, failedJobs: 0, staleJobs: 0 } });
     await userEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
     expect(fetchMock).not.toHaveBeenCalled();
     const dialog = screen.getByRole('dialog', { name: 'Disconnect mailbox?' });
@@ -94,7 +94,7 @@ describe('System mailbox page', () => {
   it('shows interrupted jobs with a Retry button and the interrupted count', async () => {
     const fetchMock = stubFetch(() => Response.json({ ...failedJob, id: 9, status: 'queued', attempts: 0 }));
     renderPage({
-      mailbox: { account: { address: 'crm@daitpartners.com', status: 'connected', lastError: null, updatedAt: '2026-11-20T10:00:00.000Z' }, pendingJobs: 1, failedJobs: 0, staleJobs: 1 },
+      mailbox: { account: { address: 'crm@daitpartners.com', sendAs: null, status: 'connected', lastError: null, updatedAt: '2026-11-20T10:00:00.000Z' }, pendingJobs: 1, failedJobs: 0, staleJobs: 1 },
       failed: [{ ...failedJob, id: 9, status: 'running', attempts: 0, lastError: null, interrupted: true }],
     });
     expect(screen.getAllByText('Interrupted')).toHaveLength(2);
@@ -102,15 +102,43 @@ describe('System mailbox page', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/jobs/9/retry', expect.objectContaining({ method: 'POST' }));
   });
 
+  it('passes the optional Send as address to the connect link and shows it once connected', async () => {
+    renderPage({
+      mailbox: { account: { address: 'admin@daitpartners.com', sendAs: 'hello@daitpartners.com', status: 'connected', lastError: null, updatedAt: '2026-11-20T10:00:00.000Z' }, pendingJobs: 0, failedJobs: 0, staleJobs: 0 },
+    });
+    expect(screen.getByText('Sends as')).toBeInTheDocument();
+    expect(screen.getByText('hello@daitpartners.com')).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: 'Reconnect' });
+    expect(link).toHaveAttribute('href', '/api/auth/microsoft/connect?mode=system');
+    await userEvent.type(screen.getByLabelText('Send as (shared mailbox address)'), 'hello@daitpartners.com');
+    expect(link).toHaveAttribute('href', '/api/auth/microsoft/connect?mode=system&sendAs=hello%40daitpartners.com');
+  });
+
+  it('sends a test email and refreshes the counts', async () => {
+    const fetchMock = stubFetch(() => Response.json({ jobId: 42 }, { status: 201 }));
+    renderPage({ mailbox: { account: { address: 'crm@daitpartners.com', sendAs: null, status: 'connected', lastError: null, updatedAt: '2026-11-20T10:00:00.000Z' }, pendingJobs: 0, failedJobs: 0, staleJobs: 0 } });
+    await userEvent.click(screen.getByRole('button', { name: 'Send test email' }));
+    expect(fetchMock).toHaveBeenCalledWith('/api/mailboxes/system/test-email', expect.objectContaining({ method: 'POST' }));
+    expect(await screen.findByText('Test email queued to admin@daitpartners.com')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/mailboxes/system', expect.anything());
+  });
+
+  it('disables the test email button until a mailbox is connected', () => {
+    renderPage({ mailbox: { account: null, pendingJobs: 0, failedJobs: 0, staleJobs: 0 } });
+    expect(screen.getByRole('button', { name: 'Send test email' })).toBeDisabled();
+    expect(screen.getByText('Connect a mailbox first')).toBeInTheDocument();
+  });
+
   it('hides connect, disconnect and retry from a Manager', () => {
     renderPage({
       me: { ...admin, role: 'Manager', rights: ['view_admin_settings'] },
-      mailbox: { account: { address: 'crm@daitpartners.com', status: 'connected', lastError: null, updatedAt: '2026-11-20T10:00:00.000Z' }, pendingJobs: 0, failedJobs: 1, staleJobs: 0 },
+      mailbox: { account: { address: 'crm@daitpartners.com', sendAs: null, status: 'connected', lastError: null, updatedAt: '2026-11-20T10:00:00.000Z' }, pendingJobs: 0, failedJobs: 1, staleJobs: 0 },
       failed: [failedJob],
     });
     expect(screen.queryByRole('link', { name: /Connect|Reconnect/ })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Disconnect' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Send test email' })).toBeNull();
     expect(screen.getByText('Your quote')).toBeInTheDocument();
   });
 });

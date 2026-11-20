@@ -16,8 +16,16 @@ export interface GraphClient {
   sendMail(account: EmailAccount, msg: MailMessage): Promise<void>;
 }
 
-export const GRAPH_SEND_SCOPES = ['https://graph.microsoft.com/Mail.Send', 'offline_access'];
-const SEND_MAIL_URL = 'https://graph.microsoft.com/v1.0/me/sendMail';
+export const GRAPH_SEND_SCOPES = [
+  'https://graph.microsoft.com/Mail.Send',
+  'https://graph.microsoft.com/Mail.Send.Shared',
+  'offline_access',
+];
+
+/** Graph sendMail endpoint for the mailbox the account sends as (its own address unless `sendAs` names a shared one). */
+export function sendMailUrl(account: Pick<EmailAccount, 'address' | 'sendAs'>): string {
+  return `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(account.sendAs ?? account.address)}/sendMail`;
+}
 export const SEND_TIMEOUT_MS = 20_000;
 
 /** A Graph call failed; `status` is the HTTP status (401 for token problems). */
@@ -67,7 +75,7 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
 
       let res: Response;
       try {
-        res = await fetch(SEND_MAIL_URL, {
+        res = await fetch(sendMailUrl(account), {
           method: 'POST',
           signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
           headers: { Authorization: `Bearer ${result.accessToken}`, 'Content-Type': 'application/json' },

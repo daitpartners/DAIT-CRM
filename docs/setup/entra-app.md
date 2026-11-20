@@ -22,12 +22,24 @@ and calendar through Microsoft Graph. No passwords are ever stored in the CRM.
    Click Add, then copy the **Value** column immediately (it is shown only once) → `MS_CLIENT_SECRET`.
    Put a reminder in your calendar for the expiry date; a new secret must be issued before then.
 7. **API permissions → + Add a permission → Microsoft Graph → Delegated permissions** and tick:
-   `User.Read`, `offline_access`, `Mail.ReadWrite`, `Mail.Send`, `Calendars.ReadWrite`.
+   `User.Read`, `offline_access`, `Mail.ReadWrite`, `Mail.Send`, `Mail.Send.Shared`, `Calendars.ReadWrite`.
    Click **Add permissions**, then **Grant admin consent for DAIT Partners** → Yes.
-   All five rows must show a green tick under Status.
+   All six rows must show a green tick under Status.
 8. Decide which mailbox the CRM sends system email from (visitor confirmations, assignment and transfer notices),
-   for example `hello@daitpartners.com`. A user who has access to that mailbox will connect it from the CRM's
-   Settings → Email & calendar connections after release 1 goes up. Tell the builder the address.
+   for example `hello@daitpartners.com`, and tell the builder the address. An administrator of the CRM connects it
+   in the CRM under **Settings → Administration → System mailbox** by clicking **Connect mailbox** and signing in
+   with Microsoft. Which account signs in depends on what kind of mailbox `hello@` is (Microsoft 365 admin center →
+   Teams & groups → Shared mailboxes lists the shared ones):
+   - **(a) `hello@` is a licensed user mailbox** (it has its own password): leave **Send as** empty, click
+     **Connect mailbox** and sign in to Microsoft **as `hello@daitpartners.com`**. The CRM sends as that account.
+   - **(b) `hello@` is a shared mailbox** (no password of its own): first, in the Microsoft 365 admin center,
+     open the shared mailbox → **Manage mailbox permissions** → **Send as** and add the person who will connect it.
+     Then that person types `hello@daitpartners.com` in **Send as (shared mailbox address)**, clicks
+     **Connect mailbox** and signs in with **their own** account. The CRM sends as `hello@` through their
+     Send-As right (this is what `Mail.Send.Shared` is for). If that person leaves or loses the right, connect
+     again with someone who has it.
+
+   Afterwards the page shows "Sends as: hello@daitpartners.com". Click **Send test email** to check it works.
 
 ## Hand to the builder
 

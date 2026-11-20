@@ -18,7 +18,8 @@ export interface MicrosoftClient {
 export const MS_SCOPES = ['openid', 'profile', 'email', 'offline_access', 'User.Read'];
 
 export const CONNECT_SCOPES = [
-  'openid', 'profile', 'email', 'offline_access', 'User.Read', 'Mail.ReadWrite', 'Mail.Send', 'Calendars.ReadWrite',
+  'openid', 'profile', 'email', 'offline_access', 'User.Read', 'Mail.ReadWrite', 'Mail.Send', 'Mail.Send.Shared',
+  'Calendars.ReadWrite',
 ];
 
 export type MsEnv = Partial<Record<'MS_TENANT_ID' | 'MS_CLIENT_ID' | 'MS_CLIENT_SECRET' | 'MS_REDIRECT_URI', string>>;

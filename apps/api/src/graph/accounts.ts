@@ -5,18 +5,22 @@ import { encrypt } from '../crypto/tokens.js';
 
 /** Audit-safe view of a mailbox: never includes the token. */
 export function accountSummary(a: EmailAccount) {
-  return { id: a.id, address: a.address, provider: a.provider, kind: a.kind, userId: a.userId, status: a.status };
+  return { id: a.id, address: a.address, sendAs: a.sendAs, provider: a.provider, kind: a.kind, userId: a.userId, status: a.status };
 }
 
 /** Stores the system mailbox, replacing any previous one (there is only ever one `kind='system'` row). */
 export async function connectSystemMailbox(args: {
   address: string;
+  /** Shared mailbox to send as; defaults to `address`. */
+  sendAs?: string;
   refreshToken: string;
   tokenExpiresAt?: Date;
   actorId: number;
 }): Promise<EmailAccount> {
   const address = args.address.trim().toLowerCase();
+  const sendAs = args.sendAs?.trim().toLowerCase() || address;
   const data = {
+    sendAs,
     provider: 'microsoft',
     kind: 'system',
     userId: args.actorId,

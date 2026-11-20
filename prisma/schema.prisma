@@ -83,6 +83,8 @@ model EmailAccount {
   id              Int       @id @default(autoincrement())
   userId          Int?      @map("user_id")
   address         String    @unique
+  /// Mailbox the CRM sends as (a shared mailbox the connecting user has Send-As on); null = `address`.
+  sendAs          String?   @map("send_as")
   provider        String
   kind            String
   refreshTokenEnc String    @map("refresh_token_enc")

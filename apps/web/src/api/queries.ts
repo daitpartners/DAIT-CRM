@@ -48,7 +48,7 @@ export type AllocationRule = {
 };
 
 export type SystemMailbox = {
-  account: { address: string; status: string; lastError: string | null; updatedAt: string } | null;
+  account: { address: string; sendAs: string | null; status: string; lastError: string | null; updatedAt: string } | null;
   pendingJobs: number;
   failedJobs: number;
   /** Running for over 15 minutes: interrupted mid-send, can be retried. */

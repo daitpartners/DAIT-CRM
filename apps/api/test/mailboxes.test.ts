@@ -43,8 +43,8 @@ async function app(microsoft?: MicrosoftClient) {
   return a;
 }
 
-async function connectSystem(a: FastifyInstance, cookie: string) {
-  const start = await a.inject({ method: 'GET', url: '/api/auth/microsoft/connect?mode=system', headers: { cookie } });
+async function connectSystem(a: FastifyInstance, cookie: string, query = '') {
+  const start = await a.inject({ method: 'GET', url: `/api/auth/microsoft/connect?mode=system${query}`, headers: { cookie } });
   expect(start.statusCode).toBe(302);
   const state = new URL(start.headers.location as string).searchParams.get('state')!;
   const msState = start.cookies.find((c) => c.name === 'ms_state')!;
@@ -84,7 +84,7 @@ describe('system mailbox connect', () => {
     expect(accounts).toHaveLength(1);
     const acc = accounts[0]!;
     expect(acc).toMatchObject({
-      address: 'crm@daitpartners.com', provider: 'microsoft', kind: 'system', userId: user.id, status: 'connected', lastError: null,
+      address: 'crm@daitpartners.com', sendAs: 'crm@daitpartners.com', provider: 'microsoft', kind: 'system', userId: user.id, status: 'connected', lastError: null,
     });
     expect(acc.refreshTokenEnc).not.toBe(RAW_TOKEN);
     expect(acc.refreshTokenEnc).not.toContain(RAW_TOKEN);
@@ -95,6 +95,29 @@ describe('system mailbox connect', () => {
     expect(logs).toHaveLength(1);
     expect(JSON.stringify(logs[0])).not.toContain(RAW_TOKEN);
     expect(JSON.stringify(logs[0])).not.toContain(acc.refreshTokenEnc);
+  });
+
+  test('connect with sendAs stores the shared mailbox address, lowercased', async () => {
+    const a = await app(fakeMicrosoft({ email: 'admin@daitpartners.com' }).client);
+    const cookie = await signIn(a, await admin());
+    const res = await connectSystem(a, cookie, '&sendAs=' + encodeURIComponent(' Hello@DaitPartners.com '));
+    expect(res.headers.location).toBe('/settings/mailbox?connected=1');
+    const acc = await prisma.emailAccount.findFirstOrThrow({ where: { kind: 'system' } });
+    expect(acc).toMatchObject({ address: 'admin@daitpartners.com', sendAs: 'hello@daitpartners.com' });
+
+    const box = await a.inject({ method: 'GET', url: '/api/mailboxes/system', headers: { cookie } });
+    expect(box.json().account).toMatchObject({ address: 'admin@daitpartners.com', sendAs: 'hello@daitpartners.com' });
+  });
+
+  test('connect rejects an invalid sendAs; an empty one means the connecting address', async () => {
+    const a = await app(fakeMicrosoft().client);
+    const cookie = await signIn(a, await admin());
+    const bad = await a.inject({ method: 'GET', url: '/api/auth/microsoft/connect?mode=system&sendAs=not-an-email', headers: { cookie } });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json()).toEqual({ error: 'invalid_send_as' });
+    await connectSystem(a, cookie, '&sendAs=');
+    const acc = await prisma.emailAccount.findFirstOrThrow({ where: { kind: 'system' } });
+    expect(acc.sendAs).toBe('crm@daitpartners.com');
   });
 
   test('reconnecting replaces the existing system mailbox', async () => {
@@ -182,7 +205,7 @@ describe('mailbox routes', () => {
       pendingJobs: 2,
       failedJobs: 1,
     });
-    expect(Object.keys(body.account).sort()).toEqual(['address', 'lastError', 'status', 'updatedAt']);
+    expect(Object.keys(body.account).sort()).toEqual(['address', 'lastError', 'sendAs', 'status', 'updatedAt']);
     expect(res.body).not.toContain('refresh');
   });
 
@@ -201,6 +224,42 @@ describe('mailbox routes', () => {
     const log = await prisma.auditLog.findFirstOrThrow({ where: { entityType: 'email_account', entityId: String(acc.id) } });
     expect(log.action).toBe('delete');
     expect(JSON.stringify(log)).not.toContain(acc.refreshTokenEnc);
+  });
+});
+
+describe('test email', () => {
+  test('queues one send_email job to the acting admin, audited', async () => {
+    const acc = await prisma.emailAccount.create({
+      data: { address: 'admin@daitpartners.com', sendAs: 'hello@daitpartners.com', provider: 'microsoft', kind: 'system', refreshTokenEnc: encrypt(RAW_TOKEN), status: 'connected' },
+    });
+    const a = await app();
+    const user = await admin();
+    const res = await a.inject({ method: 'POST', url: '/api/mailboxes/system/test-email', headers: { cookie: await signIn(a, user) } });
+    expect(res.statusCode).toBe(201);
+    const jobs = await prisma.job.findMany();
+    expect(jobs).toHaveLength(1);
+    const job = jobs[0]!;
+    expect(res.json()).toEqual({ jobId: job.id });
+    expect(job).toMatchObject({ type: 'send_email', status: 'queued' });
+    expect(job.payload).toMatchObject({ to: ['admin@daitpartners.com'], subject: 'DAIT CRM test email' });
+    expect((job.payload as { text: string }).text).toContain('hello@daitpartners.com');
+
+    const log = await prisma.auditLog.findFirstOrThrow({ where: { entityType: 'email_account', action: 'test_email' } });
+    expect(log).toMatchObject({ entityId: String(acc.id), userId: user.id });
+
+    const box = await a.inject({ method: 'GET', url: '/api/mailboxes/system', headers: { cookie: await signIn(a, user) } });
+    expect(box.json().pendingJobs).toBe(1);
+  });
+
+  test('Manager is forbidden; no mailbox is a 409', async () => {
+    const a = await app();
+    const manager = await makeUser({ role: 'MANAGER' });
+    const denied = await a.inject({ method: 'POST', url: '/api/mailboxes/system/test-email', headers: { cookie: await signIn(a, manager) } });
+    expect(denied.statusCode).toBe(403);
+    const none = await a.inject({ method: 'POST', url: '/api/mailboxes/system/test-email', headers: { cookie: await signIn(a, await admin()) } });
+    expect(none.statusCode).toBe(409);
+    expect(none.json()).toEqual({ error: 'no_system_mailbox' });
+    expect(await prisma.job.count()).toBe(0);
   });
 });
 

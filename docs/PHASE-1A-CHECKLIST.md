@@ -16,8 +16,8 @@ Things to click through on the test site before 1A is accepted. Tick each one an
 
 ## System mailbox
 
-- [ ] Go to Settings, Administration, **System mailbox**. Click connect and sign in with the shared sending mailbox (hello@daitpartners.com). The page shows it as connected.
-- [ ] Trigger a system email (for example, add a user with an address you can read). A pending email is listed, and it arrives in the recipient's inbox from the system mailbox.
+- [ ] Go to Settings, Administration, **System mailbox** and connect the sending mailbox (hello@daitpartners.com) as described in `docs/setup/entra-app.md` step 8: if hello@ is a licensed mailbox, leave **Send as** empty and sign in as hello@; if it is a shared mailbox, type hello@daitpartners.com in **Send as** and sign in with your own account (you need Send-As rights on it). The page shows it as connected and, for a shared mailbox, "Sends as: hello@daitpartners.com".
+- [ ] Click **Send test email**. Check that (a) a message confirms it was queued and **Waiting to send** goes up by one; (b) within a minute the worker sends it, so **Waiting to send** goes back down (refresh the page) and nothing appears under failed emails; (c) an email titled "DAIT CRM test email" arrives in your own (the signed-in administrator's) inbox; (d) the same email appears in the Sent items of the system mailbox (hello@) in Outlook.
 
 ## Phone view
 

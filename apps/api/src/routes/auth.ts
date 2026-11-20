@@ -26,6 +26,18 @@ interface SavedState {
   verifier?: unknown;
   mode?: unknown;
   userId?: unknown;
+  sendAs?: unknown;
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Normalises the optional `sendAs` query value; `undefined` = not given, `null` = invalid. */
+function parseSendAs(raw: unknown): string | undefined | null {
+  if (raw === undefined || raw === '') return undefined;
+  if (typeof raw !== 'string') return null;
+  const value = raw.trim().toLowerCase();
+  if (!value) return undefined;
+  return value.length <= 320 && EMAIL_RE.test(value) ? value : null;
 }
 
 const emailBody = {
@@ -55,20 +67,23 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
     request: FastifyRequest<{ Querystring: { code?: string; error?: string } }>,
     reply: FastifyReply,
     verifier: string,
-    savedUserId: unknown,
+    saved: SavedState,
   ) {
+    const savedUserId = saved.userId;
+    const sendAs = parseSendAs(saved.sendAs);
     const { code } = request.query;
     const actor = request.user;
     // The admin who started the connect must finish it, in the same session, and still hold the right.
     if (!microsoft || !actor || actor.id !== savedUserId || !can(actor.role, 'manage_users')) {
       return reply.redirect(MAILBOX_FAILED);
     }
-    if (request.query.error || !code) return reply.redirect(MAILBOX_FAILED);
+    if (request.query.error || !code || sendAs === null) return reply.redirect(MAILBOX_FAILED);
     try {
       const identity = await microsoft.redeemCode({ code, codeVerifier: verifier, scopes: CONNECT_SCOPES });
       if (!identity.refreshToken || !identity.email) throw new Error('missing_refresh_token');
       await connectSystemMailbox({
         address: identity.email,
+        ...(sendAs ? { sendAs } : {}),
         refreshToken: identity.refreshToken,
         tokenExpiresAt: identity.expiresOn,
         actorId: actor.id,
@@ -108,15 +123,17 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
     return reply.redirect(url);
   });
 
-  app.get<{ Querystring: { mode?: string } }>(
+  app.get<{ Querystring: { mode?: string; sendAs?: string } }>(
     '/auth/microsoft/connect',
     { preHandler: [requireRight('manage_users')] },
     async (request, reply) => {
       if (request.query.mode !== 'system') return reply.code(400).send({ error: 'unsupported_mode' });
+      const sendAs = parseSendAs(request.query.sendAs);
+      if (sendAs === null) return reply.code(400).send({ error: 'invalid_send_as' });
       if (!microsoft) return reply.code(503).send({ error: 'microsoft_not_configured' });
       const { state, verifier, challenge } = pkce();
       const url = await microsoft.getConnectUrl({ state, codeVerifier: verifier, codeChallenge: challenge, mode: 'system' });
-      setStateCookie(reply, { state, verifier, mode: 'system', userId: request.user!.id });
+      setStateCookie(reply, { state, verifier, mode: 'system', userId: request.user!.id, ...(sendAs ? { sendAs } : {}) });
       return reply.redirect(url);
     },
   );
@@ -142,7 +159,7 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
       ) {
         return reply.redirect(system ? MAILBOX_FAILED : '/sign-in?error=state');
       }
-      if (system) return finishSystemConnect(request, reply, saved.verifier, saved.userId);
+      if (system) return finishSystemConnect(request, reply, saved.verifier, saved);
       if (request.query.error || !code) return reply.redirect('/sign-in?error=microsoft');
 
       let identity;

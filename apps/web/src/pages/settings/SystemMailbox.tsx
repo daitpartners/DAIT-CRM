@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatDate } from '@dait-crm/shared';
@@ -13,6 +13,13 @@ import { errorText } from '../../i18n/labels';
 import { useT, type TFn } from '../../i18n/useT';
 
 const CONNECT_URL = '/api/auth/microsoft/connect?mode=system';
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Connect link; `sendAs` (a shared mailbox the signing-in user has Send-As rights on) is optional. */
+export function connectUrl(sendAs: string): string {
+  const value = sendAs.trim();
+  return value ? `${CONNECT_URL}&sendAs=${encodeURIComponent(value)}` : CONNECT_URL;
+}
 
 export function SystemMailbox() {
   const me = useCurrentUser();
@@ -51,6 +58,8 @@ function MailboxCard({ canManage }: { canManage: boolean }) {
   const { data, isPending, error } = useSystemMailbox();
   const failed = useFailedEmailJobs();
   useConnectResultToast();
+  const [sendAs, setSendAs] = useState('');
+  const sendAsValid = !sendAs.trim() || EMAIL_RE.test(sendAs.trim());
 
   const fmt = (d: string) => formatDate(d, { locale: me.language, timezone: me.timezone, dateFormat: me.dateFormat });
   const refresh = () => Promise.all([
@@ -73,6 +82,15 @@ function MailboxCard({ canManage }: { canManage: boolean }) {
     onSuccess: async () => {
       await refresh();
       toast(t('Email queued to send again'));
+    },
+    onError,
+  });
+
+  const testEmail = useMutation({
+    mutationFn: () => api<{ jobId: number }>('/api/mailboxes/system/test-email', { method: 'POST' }),
+    onSuccess: async () => {
+      await refresh();
+      toast(t('Test email queued to {email}', { email: me.email }));
     },
     onError,
   });
@@ -102,9 +120,46 @@ function MailboxCard({ canManage }: { canManage: boolean }) {
           <div className="grow" />
           {canManage ? (
             <>
-              <a className={account ? 'btn sm' : 'btn primary sm'} href={CONNECT_URL}>
+              <label htmlFor="mailbox-send-as" style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+                {t('Send as (shared mailbox address)')}
+              </label>
+              <input
+                id="mailbox-send-as"
+                type="email"
+                className={sendAsValid ? 'in' : 'in err'}
+                style={{ width: 230, height: 32 }}
+                placeholder="hello@daitpartners.com"
+                value={sendAs}
+                onChange={(e) => setSendAs(e.target.value)}
+                aria-invalid={!sendAsValid}
+              />
+              <a
+                className={account ? 'btn sm' : 'btn primary sm'}
+                href={connectUrl(sendAs)}
+                aria-disabled={!sendAsValid}
+                onClick={(e) => {
+                  if (sendAsValid) return;
+                  e.preventDefault();
+                  toast(t('Enter a valid email address for Send as, or leave it empty'), 'warn');
+                }}
+              >
                 {account ? t('Reconnect') : t('Connect mailbox')}
               </a>
+              <button
+                type="button"
+                className="btn sm"
+                onClick={() => testEmail.mutate()}
+                disabled={!account || testEmail.isPending}
+                title={account ? undefined : t('Connect a mailbox first')}
+                aria-describedby={account ? undefined : 'mailbox-test-hint'}
+              >
+                {t('Send test email')}
+              </button>
+              {account ? null : (
+                <span id="mailbox-test-hint" style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  {t('Connect a mailbox first')}
+                </span>
+              )}
               {account ? (
                 <button type="button" className="btn sm danger" onClick={() => confirmDisconnect(account.address)} disabled={disconnect.isPending}>
                   {t('Disconnect')}
@@ -128,6 +183,12 @@ function MailboxCard({ canManage }: { canManage: boolean }) {
               )}
               {account ? (
                 <>
+                  {account.sendAs ? (
+                    <>
+                      <dt>{t('Sends as')}</dt>
+                      <dd>{account.sendAs}</dd>
+                    </>
+                  ) : null}
                   <dt>{t('Status')}</dt>
                   <dd>{statusBadge(t, account.status)}</dd>
                   {account.lastError ? (

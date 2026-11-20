@@ -60,7 +60,7 @@ describe('graph client', () => {
     expect(msalState.scopes[0]).toEqual(GRAPH_SEND_SCOPES);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe('https://graph.microsoft.com/v1.0/me/sendMail');
+    expect(url).toBe('https://graph.microsoft.com/v1.0/users/crm%40daitpartners.com/sendMail');
     expect(init.method).toBe('POST');
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer access-token-xyz');
     expect(JSON.parse(init.body as string)).toEqual({
@@ -77,6 +77,17 @@ describe('graph client', () => {
     expect(stored.refreshTokenEnc).not.toContain('rotated-refresh-token');
     expect(decrypt(stored.refreshTokenEnc)).toBe('rotated-refresh-token');
     expect(stored.tokenExpiresAt).toBeInstanceOf(Date);
+  });
+
+  test('sends through the shared mailbox named in sendAs', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 202 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const acc = await prisma.emailAccount.update({ where: { id: (await account()).id }, data: { sendAs: 'hello@daitpartners.com' } });
+    await createGraphClient(env).sendMail(acc, msg);
+    const [url] = fetchMock.mock.calls[0] as unknown as [string];
+    expect(url).toContain('/users/hello%40daitpartners.com/sendMail');
+    expect(url).toBe('https://graph.microsoft.com/v1.0/users/hello%40daitpartners.com/sendMail');
+    expect(msalState.scopes[0]).toContain('https://graph.microsoft.com/Mail.Send.Shared');
   });
 
   test('leaves the stored token alone when MSAL does not rotate it', async () => {

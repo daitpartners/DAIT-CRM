@@ -63,6 +63,10 @@ export function errorText(t: TFn, code: string): string {
       return t('Not found');
     case 'job_not_retryable':
       return t('That email is not waiting for a retry');
+    case 'no_system_mailbox':
+      return t('Connect a mailbox first');
+    case 'invalid_send_as':
+      return t('Enter a valid email address for Send as, or leave it empty');
     case 'validation':
       return t('Please check the highlighted fields');
     default:
