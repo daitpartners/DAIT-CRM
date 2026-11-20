@@ -1,0 +1,15 @@
+import { useCallback, useContext } from 'react';
+import { t as translate } from '@dait-crm/shared';
+import { I18nContext } from './index';
+
+export type TFn = (phrase: string, vars?: Record<string, string | number>) => string;
+
+/** Returns `t(phrase, vars?)`; the English phrase is the key. */
+export function useT(): TFn {
+  const { dict } = useContext(I18nContext);
+  return useCallback<TFn>((phrase, vars) => translate(dict, phrase, vars), [dict]);
+}
+
+export function useLang() {
+  return useContext(I18nContext).lang;
+}

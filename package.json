@@ -13,7 +13,7 @@
     "prebuild": "npm run build -w packages/shared",
     "build": "npm run build --workspaces --if-present",
     "pretest": "npm run build -w packages/shared",
-    "test": "npm test --workspaces --if-present",
+    "test": "npm test --workspaces --if-present && npm run test:unit -w apps/web",
     "pretypecheck": "npm run build -w packages/shared",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "db:migrate": "npm run db:migrate -w apps/api",
@@ -22,5 +22,8 @@
   },
   "overrides": {
     "vite": "7.3.7"
+  },
+  "devDependencies": {
+    "tsx": "4.23.15"
   }
 }
