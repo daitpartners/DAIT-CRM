@@ -1,6 +1,6 @@
-import { test, expect, beforeAll, afterAll } from 'vitest';
+import { test, expect, beforeAll, afterAll, vi } from 'vitest';
 import { prisma } from '../src/db';
-import { resetDb, seedLookups } from './helpers';
+import { databaseName, resetDb, seedLookups } from './helpers';
 
 beforeAll(async () => {
   await resetDb();
@@ -33,4 +33,14 @@ test('seedLookups preserves admin edits to existing rows', async () => {
   const row = await prisma.lookupValue.findUniqueOrThrow({ where: { group_value: { group: 'lead_status', value: 'New' } } });
   expect(row).toMatchObject({ label: 'Fresh', isActive: false, sortOrder: 99 });
   expect(await prisma.lookupValue.count()).toBe(before);
+});
+
+test('resetDb refuses to truncate a database that is not *_unit or *_e2e', async () => {
+  expect(databaseName('postgresql://u:p@localhost:5432/dait_crm_unit?schema=public')).toBe('dait_crm_unit');
+  vi.stubEnv('DATABASE_URL', 'postgresql://u:p@localhost:5432/dait_crm');
+  try {
+    await expect(resetDb()).rejects.toThrow(/refuses to truncate database "dait_crm"/);
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });

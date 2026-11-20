@@ -6,6 +6,7 @@ export DATABASE_URL="${E2E_DATABASE_URL:-postgresql://mac@localhost:5432/dait_cr
 export PORT=3097
 export PUBLIC_URL=http://localhost:3097
 export NODE_ENV=test
+# test-only values, not secrets
 export TEST_LOGIN=1
 export SESSION_SECRET=e2e-session-secret-0123456789-abcdefghijklmnopqrstuv
 export TOKEN_ENCRYPTION_KEY=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=

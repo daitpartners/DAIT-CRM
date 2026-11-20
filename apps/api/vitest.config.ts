@@ -5,6 +5,7 @@ export default defineConfig({
     environment: 'node',
     fileParallelism: false,
     globalSetup: ['./test/global-setup.ts'],
+    // test-only values, not secrets
     env: {
       DATABASE_URL: process.env.DATABASE_URL ?? 'postgresql://mac@localhost:5432/dait_crm_unit',
       SESSION_SECRET: 'test-session-secret-0123456789-abcdefghij',
