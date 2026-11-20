@@ -1,5 +1,6 @@
 import { parseArgs } from 'node:util';
 import { createInterface } from 'node:readline/promises';
+import { Writable } from 'node:stream';
 import { prisma } from '../db.js';
 import { hashPassword } from '../auth/local.js';
 
@@ -8,11 +9,15 @@ const MIN_PASSWORD = 12;
 async function readPassword(): Promise<string> {
   const fromEnv = process.env.LOCAL_ADMIN_PASSWORD;
   if (fromEnv) return fromEnv;
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  // Readline echoes what is typed to its output; give it one that swallows everything so the password is not shown.
+  process.stdout.write('Password (not shown): ');
+  const muted = new Writable({ write: (_chunk, _encoding, done) => done() });
+  const rl = createInterface({ input: process.stdin, output: muted, terminal: Boolean(process.stdin.isTTY) });
   try {
-    return await rl.question('Password: ');
+    return await rl.question('');
   } finally {
     rl.close();
+    process.stdout.write('\n');
   }
 }
 

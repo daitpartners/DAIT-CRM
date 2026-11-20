@@ -1,9 +1,9 @@
-import { beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { EmailAccount } from '@prisma/client';
 import { prisma } from '../src/db';
 import { encrypt } from '../src/crypto/tokens';
 import type { GraphClient, MailMessage } from '../src/graph/client';
-import { GraphError } from '../src/graph/client';
+import { GraphError, createGraphClient } from '../src/graph/client';
 import { enqueue } from '../src/jobs/queue';
 import { runOnce } from '../src/jobs/runner';
 import { sendEmailHandler } from '../src/jobs/handlers/sendEmail';
@@ -34,7 +34,22 @@ beforeEach(async () => {
   await resetDb();
 });
 
+afterEach(() => vi.unstubAllEnvs());
+
 describe('send_email handler', () => {
+  test('a token stored under an old TOKEN_ENCRYPTION_KEY marks the mailbox token_unreadable', async () => {
+    const account = await systemAccount();
+    const job = await enqueue(prisma, 'send_email', payload);
+    // A different 32-byte key (0x08 repeated) than the one the token was encrypted with.
+    vi.stubEnv('TOKEN_ENCRYPTION_KEY', Buffer.alloc(32, 8).toString('base64'));
+    const graph = createGraphClient({ MS_TENANT_ID: 't', MS_CLIENT_ID: 'c', MS_CLIENT_SECRET: 's' });
+    expect(await run(graph)).toBe(true);
+    const acc = await prisma.emailAccount.findUniqueOrThrow({ where: { id: account.id } });
+    expect(acc).toMatchObject({ status: 'error', lastError: 'token_unreadable' });
+    const after = await prisma.job.findUniqueOrThrow({ where: { id: job.id } });
+    expect(after).toMatchObject({ status: 'queued', attempts: 1, lastError: 'token_unreadable' });
+  });
+
   test('sends through the connected system mailbox', async () => {
     const account = await systemAccount();
     const job = await enqueue(prisma, 'send_email', { ...payload, relatedTo: { entityType: 'lead', entityId: '1' } });

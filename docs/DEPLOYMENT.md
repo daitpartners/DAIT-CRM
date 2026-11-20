@@ -16,7 +16,7 @@ Each folder holds `releases/<sha>/`, `current` (symlink to the running release) 
 ## How a release flows
 
 1. Push to `main`: the **CI** workflow (`.github/workflows/ci.yml`) runs first: `npm ci`, typecheck and every test (unit, end-to-end, deploy script). Only when CI is green does `.github/workflows/deploy-test.yml` ("Deploy to test", triggered by `workflow_run` on CI) start; a red CI run deploys nothing. Deploy to test checks out exactly the commit CI tested, runs `npm ci`, the build, then `npm ci --omit=dev` (it does not re-run the tests) and packs one tarball: `package.json`, `package-lock.json`, `node_modules` (production only), `packages/shared`, `apps/api`, `apps/worker`, `apps/web/dist`, `prisma/`, `deploy/`. It uploads it to `~/incoming/<sha>.tgz` and runs `release.sh install test` (taken from the tarball itself, so the very first deploy works before `~/test/current` exists). GitHub only fires `workflow_run` for workflow files that are on the default branch, so the first deploy happens once `deploy-test.yml` is on `main`.
-2. `deploy/release.sh install` unpacks to `~/test/releases/<sha>`, writes `RELEASE`, runs `prisma generate`, `prisma migrate deploy` and the compiled seed `dist/cli/seed.js` (lookup values only, idempotent; sample users only when `SEED_SAMPLE_USERS=1`, i.e. test), all through `node --env-file=~/test/shared/.env` (the env file is never sourced by the shell). If migrate or seed fails, nothing is switched and PM2 is not touched, switches `current`, runs `pm2 startOrReload ... --only crm-test,crm-test-worker --update-env`, and polls `http://127.0.0.1:3091/api/health` for `"ok":true` and the new `"release":"<sha>"` (30 tries, 1 s apart). If it never answers, `current` is switched back to the previous release, PM2 reloads it, and the job fails. The newest 5 releases are kept. Re-installing the sha that is already running is refused (exit 2) so the live release is never deleted.
+2. `deploy/release.sh install` unpacks to `~/test/releases/<sha>`, writes `RELEASE`, runs `prisma generate`, `prisma migrate deploy` and the compiled seed `dist/cli/seed.js` (lookup values only, idempotent; sample users only when `SEED_SAMPLE_USERS=1`, i.e. test), all through `node --env-file=~/test/shared/.env` (the env file is never sourced by the shell). If migrate or seed fails, the script stops there: `current` is not switched and PM2 is not touched. Otherwise it switches `current` to the new release, runs `pm2 startOrReload ... --only crm-test,crm-test-worker --update-env`, and polls `http://127.0.0.1:3091/api/health` for `"ok":true` and the new `"release":"<sha>"` (30 tries, 1 s apart). If it never answers, `current` is switched back to the previous release, PM2 reloads it, and the job fails. The newest 5 releases are kept. Re-installing the sha that is already running is refused (exit 2) so the live release is never deleted.
 
    First deploy only: there is no previous release, so if the health check fails `current` stays on the broken release (the script says so). Inspect with `source ~/.nvm/nvm.sh && pm2 logs crm-test --lines 100`, fix the cause (usually a missing or wrong `.env` value), and push again.
 3. When test looks right: GitHub, Actions, "Deploy to live", Run workflow, type `deploy-live` in `confirm` (optionally the `sha` you expect). It runs `release.sh promote` on the server, which copies exactly what test runs into `~/live/releases/` and activates it the same way (same health check, same rollback). Nothing is rebuilt, so live runs the bytes you tested.
@@ -32,12 +32,12 @@ Set in `~/<env>/shared/.env` (mode 600, `KEY=value`, one per line; quote values 
 | `DATABASE_URL` | PostgreSQL connection string | `postgresql://<user>:<password>@localhost:5432/dait_crm` (live) or `dait_crm_test` (test); percent-encode special characters in the password |
 | `PUBLIC_URL` | Public origin, e.g. `https://crm.daitpartners.com`. Required, and must start with `https://`, when `NODE_ENV=production` (the app refuses to start otherwise); it turns on Secure cookies, and every POST/PUT/PATCH/DELETE from a browser must come from this exact origin | Hostname of the site |
 | `SESSION_SECRET` | Signs auth cookies. Required when `NODE_ENV=production` | `openssl rand -hex 32` |
-| `TOKEN_ENCRYPTION_KEY` | Encrypts stored mailbox refresh tokens (AES-256-GCM). Changing it disconnects every mailbox | `openssl rand -base64 32` |
+| `TOKEN_ENCRYPTION_KEY` | Encrypts stored mailbox refresh tokens (AES-256-GCM). If it changes, every stored token becomes unreadable: the system mailbox shows "Needs reconnecting" with last error `token_unreadable`; disconnect and reconnect the mailbox | `openssl rand -base64 32` |
 | `MS_TENANT_ID` | Microsoft Entra directory (tenant) ID | From the Entra app, see below |
 | `MS_CLIENT_ID` | Entra application (client) ID | From the Entra app |
 | `MS_CLIENT_SECRET` | Entra client secret value | From the Entra app |
 | `MS_REDIRECT_URI` | `<PUBLIC_URL>/api/auth/microsoft/callback` | Must match the Entra redirect URI exactly |
-| `LOCAL_ADMIN_LOGIN` | `1` enables the break-glass local-admin password login | Test: `1` until Microsoft sign-in works; live: leave unset unless needed |
+| `LOCAL_ADMIN_LOGIN` | `1` enables the break-glass local-admin password login | Test: `1` until Microsoft sign-in works; live: leave unset. Set it only for a break-glass sign-in (Microsoft sign-in broken), then remove it and reload |
 | `HOST` | Interface the API listens on; default `127.0.0.1` (loopback only, reached through OpenLiteSpeed) | Leave unset: PM2 already sets `127.0.0.1`. Never `0.0.0.0` on the server |
 | `SEED_SAMPLE_USERS` | `1` makes the seed create sample users | Test only; never on live |
 
@@ -78,7 +78,7 @@ Commands marked `!` run in your terminal. Replace the angle-bracket parts; gener
    ! ssh daitcrm@88.222.213.73
    ```
 
-   then, on the server (shows the pattern for test; repeat for live with `~/live`, `dait_crm`, port-less values, and without `SEED_SAMPLE_USERS`):
+   then, on the server (shows the pattern for test; repeat for live with `~/live/shared/.env`, the `dait_crm` database, `PUBLIC_URL=https://crm.daitpartners.com`, without `LOCAL_ADMIN_LOGIN` (see below) and without `SEED_SAMPLE_USERS`):
 
    ```
    umask 077
@@ -97,21 +97,25 @@ Commands marked `!` run in your terminal. Replace the angle-bracket parts; gener
 3. GitHub secrets (repo, Settings, Secrets and variables, Actions): `DEPLOY_HOST` (88.222.213.73), `DEPLOY_USER` (`daitcrm`), `DEPLOY_SSH_KEY` (the private half of the key whose public half is in `~/.ssh/authorized_keys` with `restrict`), `DEPLOY_KNOWN_HOSTS` (output of `! ssh-keyscan -t ed25519 88.222.213.73`).
 4. Push to `main` and watch the Actions tab: "CI" runs first, and "Deploy to test" starts only after CI succeeds. The deploy run must end with "test is now running <sha>". If CI fails, nothing is deployed; fix it and push again.
 5. Check on the server (`! ssh daitcrm@88.222.213.73 'source ~/.nvm/nvm.sh && pm2 status && curl -s http://127.0.0.1:3091/api/health'`): `pm2 status` shows `crm-test` and `crm-test-worker` online; the health call shows `{"ok":true,"release":"<sha>"}`.
-6. Create the first administrator on the server (see the next section), then sign in at https://crm-test.daitpartners.com with that email and password.
+6. Create the first administrator on the server (see the next section), then sign in at https://crm-test.daitpartners.com with that email and password (this works on test because its `.env` has `LOCAL_ADMIN_LOGIN=1`).
 7. In the CRM, add the other users.
 8. Entra: hand `docs/setup/entra-app.md` to the Microsoft 365 Global Administrator. They return the tenant ID, client ID, client secret value and confirm the two redirect URIs; paste them on the server, never into chat.
 9. Add `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET` and `MS_REDIRECT_URI` (`https://crm-test.daitpartners.com/api/auth/microsoft/callback`) to `~/test/shared/.env`, then `source ~/.nvm/nvm.sh && pm2 reload crm-test crm-test-worker --update-env`. Sign in with Microsoft, then connect the system mailbox in the CRM's mailbox settings.
-10. Repeat steps 2 and 9 for live (`~/live/shared/.env`, `dait_crm`, `https://crm.daitpartners.com`), run the "Deploy to live" workflow, create the live administrator, and set up the cron backup below.
+10. Repeat steps 2 and 9 for live (`~/live/shared/.env`, `dait_crm`, `https://crm.daitpartners.com`, no `LOCAL_ADMIN_LOGIN`), run the "Deploy to live" workflow, create the live administrator with the administrator's Microsoft 365 email (next section) and have them sign in with Microsoft, then set up the cron backup below.
 
 ## Creating a local administrator
 
-On the server (the script is compiled; it needs no tsx). `-t` lets it ask for the password (at least 12 characters), which is not echoed into the shell history:
+`create-local-admin` creates (or updates) a user with the **Administrator** role for the email you give it, and sets a local password on it. Use the person's DAIT Partners Microsoft 365 email: once Microsoft sign-in is configured they sign in with **Sign in with Microsoft** like everyone else (the CRM matches them by email), so the password is only a break-glass fallback.
+
+On the server (the script is compiled; it needs no tsx). `-t` gives it a terminal so it can ask for the password (at least 12 characters). What you type is not shown on screen and does not go into the shell history:
 
 ```
 ! ssh -t daitcrm@88.222.213.73 'source ~/.nvm/nvm.sh && cd ~/test/current/apps/api && node --env-file=$HOME/test/shared/.env dist/cli/create-local-admin.js --email you@daitpartners.com --name "Your Name"'
 ```
 
-Use `~/live/...` for live. Running it again for the same email resets that user's password. Local login only works while `LOCAL_ADMIN_LOGIN=1` in that environment's `.env`.
+Alternatively set the password in the `LOCAL_ADMIN_PASSWORD` environment variable for that one command (for example from a password manager's CLI) instead of typing it; do not write it into a file or the command line itself.
+
+Use `~/live/...` for live. Running it again for the same email resets that user's password. The password only works while `LOCAL_ADMIN_LOGIN=1` is in that environment's `.env`: keep it on test until Microsoft sign-in works, and leave it unset on live unless you need a break-glass sign-in (then add it, `pm2 reload crm-live --update-env`, sign in, remove it and reload again).
 
 ## Day to day
 

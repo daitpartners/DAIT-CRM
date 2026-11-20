@@ -53,6 +53,14 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
       const { MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET } = env;
       if (!MS_TENANT_ID || !MS_CLIENT_ID || !MS_CLIENT_SECRET) throw new Error('microsoft_not_configured');
 
+      let refreshToken: string;
+      try {
+        refreshToken = decrypt(account.refreshTokenEnc);
+      } catch {
+        // TOKEN_ENCRYPTION_KEY changed (or the row was damaged): only reconnecting the mailbox fixes it.
+        throw new GraphError('token_unreadable', 401);
+      }
+
       // A fresh client per send keeps tokens out of any shared in-memory cache.
       const msal = new ConfidentialClientApplication({
         auth: {
@@ -61,7 +69,6 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
           authority: `https://login.microsoftonline.com/${MS_TENANT_ID}`,
         },
       });
-      const refreshToken = decrypt(account.refreshTokenEnc);
       const result = await msal.acquireTokenByRefreshToken({ refreshToken, scopes: GRAPH_SEND_SCOPES });
       if (!result?.accessToken) throw new GraphError('graph_token_failed', 401);
 
