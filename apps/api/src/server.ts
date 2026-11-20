@@ -15,8 +15,10 @@ if (webDist) {
 }
 
 const port = Number(process.env.PORT ?? 3090);
+// Loopback by default: OpenLiteSpeed proxies to it, so the app is never reachable directly from outside.
+const host = process.env.HOST || '127.0.0.1';
 try {
-  await app.listen({ port, host: '0.0.0.0' });
+  await app.listen({ port, host });
 } catch (err) {
   app.log.error(err);
   process.exit(1);

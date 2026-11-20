@@ -17,7 +17,7 @@ function app(env, kind, port) {
     node_args: `--env-file=${root}/${env}/shared/.env`,
     env: {
       NODE_ENV: 'production',
-      ...(worker ? {} : { PORT: String(port) }),
+      ...(worker ? {} : { PORT: String(port), HOST: '127.0.0.1' }),
       WEB_DIST: `${cwd}/apps/web/dist`,
       RELEASE: release(cwd),
     },

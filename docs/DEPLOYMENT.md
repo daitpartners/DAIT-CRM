@@ -38,9 +38,10 @@ Set in `~/<env>/shared/.env` (mode 600, `KEY=value`, one per line; quote values 
 | `MS_CLIENT_SECRET` | Entra client secret value | From the Entra app |
 | `MS_REDIRECT_URI` | `<PUBLIC_URL>/api/auth/microsoft/callback` | Must match the Entra redirect URI exactly |
 | `LOCAL_ADMIN_LOGIN` | `1` enables the break-glass local-admin password login | Test: `1` until Microsoft sign-in works; live: leave unset unless needed |
+| `HOST` | Interface the API listens on; default `127.0.0.1` (loopback only, reached through OpenLiteSpeed) | Leave unset: PM2 already sets `127.0.0.1`. Never `0.0.0.0` on the server |
 | `SEED_SAMPLE_USERS` | `1` makes the seed create sample users | Test only; never on live |
 
-Not set by hand (PM2 sets them in `deploy/ecosystem.config.cjs`): `NODE_ENV=production`, `PORT` (3090 live, 3091 test), `WEB_DIST` (the release's `apps/web/dist`), `RELEASE` (the release's sha, from its `RELEASE` file).
+Not set by hand (PM2 sets them in `deploy/ecosystem.config.cjs`): `NODE_ENV=production`, `PORT` (3090 live, 3091 test), `HOST` (`127.0.0.1`: the API listens on loopback only, OpenLiteSpeed is the only way in; the default is also `127.0.0.1` when unset), `WEB_DIST` (the release's `apps/web/dist`), `RELEASE` (the release's sha, from its `RELEASE` file).
 
 **`MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET` and `MS_REDIRECT_URI` are all-or-none.** Leave all four empty (Microsoft sign-in off) or fill all four; the app fails fast at start if only some are set, and PM2 then shows the app crashing.
 
