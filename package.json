@@ -1,0 +1,25 @@
+{
+  "name": "dait-crm",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "prebuild": "npm run build -w packages/shared",
+    "build": "npm run build --workspaces --if-present",
+    "pretest": "npm run build -w packages/shared",
+    "test": "npm test --workspaces --if-present",
+    "pretypecheck": "npm run build -w packages/shared",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:migrate": "npm run db:migrate -w apps/api",
+    "db:seed": "npm run db:seed -w apps/api"
+  },
+  "overrides": {
+    "vite": "7.3.7"
+  }
+}

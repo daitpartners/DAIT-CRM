@@ -1,6 +1,29 @@
-# DAIT Partners CRM — HTML/CSS/JS prototype
+# DAIT Partners CRM
 
-A working single-page prototype of the enhanced CRM. No build step, no server: open `index.html` in a browser
+Full-stack CRM for DAIT Partners, built as an npm-workspaces monorepo (Node >= 24):
+
+| Path | Purpose |
+|---|---|
+| `packages/shared` | Shared TypeScript (roles, `safeUrl`), compiled to `dist/` and imported as `@dait-crm/shared` |
+| `apps/api` | Fastify 5 API (routes under `/api`); Prisma + PostgreSQL arrive in a later task |
+| `apps/worker` | Background worker (idle placeholder for now) |
+| `apps/web` | React + Vite front end |
+| `prototype/` | The original HTML/JS prototype, kept for reference (see below) |
+
+## Run
+
+    cp .env.example .env
+    npm install
+    npm test            # builds packages/shared first, then runs all tests
+    npm run typecheck
+    npm run build
+
+Development: `npm run dev -w apps/api` (port 3090) and `npm run dev -w apps/web` (Vite proxies `/api` to the API).
+To serve the built web app from the API: `WEB_DIST=apps/web/dist node apps/api/dist/server.js`.
+
+## Prototype (reference)
+
+A working single-page prototype of the enhanced CRM. No build step, no server: open `prototype/index.html` in a browser
 (or serve the folder with any static server). All data lives in `localStorage`; use **Settings → Reset sample data**
 to start over.
 
@@ -9,12 +32,12 @@ to start over.
 `dait-crm.html` and `contact-form.html` are generated: they inline the CSS, scripts and logos so they open without a server.
 After changing anything in `index.html`, `css/`, `js/`, `assets/` or `public/`, run:
 
-    python3 build.py
+    python3 prototype/build.py
 
 Never edit the two generated files by hand. The Montserrat font still loads from Google Fonts, so offline the pages fall back to
 a system font; everything else works offline.
 
-## What is here
+## What is here (paths relative to `prototype/`)
 
 | Path | Purpose |
 |---|---|
