@@ -1,6 +1,6 @@
 # DAIT Partners CRM — fresh build design
 
-Date: 21 Nov 2026. Status: draft for Deepak's approval. Owner: Deepak Singh (DAIT Partners).
+Date: 21 Nov 2026. Status: revised after builder check; awaiting Deepak's approval. Owner: Deepak Singh (DAIT Partners).
 
 Companion material in this repository: `docs/DAIT-CRM-Specification-v2.md` (modules, rules), `docs/data-model.md`
 (tables and columns), `docs/development-plan.md` (release order, pending decisions), `docs/ux-test-report.md`, the
@@ -57,8 +57,9 @@ work leads to Won and send email from the record, instead of the browser-only pr
   `deploy/server-setup.md` for what was done and how.
 - **Root actions on the production server are performed by Deepak** (commands supplied by the builder, run with `!`).
   The builder never pastes secrets into chat or into the repository.
-- **Entra app registration** (Microsoft 365 sign-in and Graph mail/calendar) has been pending for weeks. Release 1 must
-  not depend on it.
+- **Entra app registration** (Microsoft 365 sign-in and Graph mail/calendar): Deepak does it this week following
+  `docs/setup/entra-app.md`. Release 1 depends on it for sign-in and outbound mail; building can start before it exists
+  (the break-glass local admin and the mail queue cover the gap on the test site).
 - **Brand:** the prototype's palette, Montserrat and components in `css/app.css` are approved and must be carried over.
 - **Design canvas and prototype are the UI reference.** Dropdowns with 8+ options are searchable comboboxes.
 - **New npm dependencies** are pinned to versions published at least two weeks before they are added.
@@ -74,10 +75,21 @@ work leads to Won and send email from the record, instead of the browser-only pr
 
 ## 5. Decisions already made
 
-**Sign-in (builder's call, offered to Deepak, not contested):** release 1 uses email + password with server-side sessions
-(httpOnly cookie), password reset by emailed link, administrator-created users. "Sign in with Microsoft" is added in
-release 2 alongside the mailbox connection, once the Entra app exists. A user's Microsoft identity is linked by email
-address, so nobody gets a second account.
+**Sign-in (decided by Deepak, 21 Nov 2026):** "Sign in with Microsoft" (Microsoft 365 / Outlook accounts) from
+release 1, using the Entra app registration in `docs/setup/entra-app.md`, which Deepak does this week. OAuth 2.0
+authorization-code flow with PKCE, server-side sessions in an httpOnly cookie. Only users an administrator has added under
+Settings → Users may sign in; the Microsoft identity is matched by email address. No passwords are stored. Builder's call:
+one break-glass local administrator account, created by a CLI command on the server and usable only when
+`LOCAL_ADMIN_LOGIN=1` is set in the env file, so the first administrator can be added before Microsoft sign-in is
+configured and the system can be entered if the Entra app breaks.
+
+**Outbound email in release 1 (decided by Deepak, 21 Nov 2026):** through Microsoft Graph, not SMTP. A system mailbox
+Deepak names (e.g. hello@daitpartners.com) is connected from Settings by a user with access to it; the CRM sends visitor
+confirmations, assignment and transfer notices, and reminders from it via `/users/{mailbox}/sendMail` with the stored
+refresh token (encrypted, `TOKEN_ENCRYPTION_KEY`). The worker owns a `send_email` job type with retries. Until the mailbox
+is connected, those emails are queued and shown as pending on the Administration page; nothing is lost. Per-user
+mailbox sync, the Email module and the Mailer stay in release 2, but the `email_accounts` table and the Graph token
+code are built in release 1 because sign-in and the system mailbox need them.
 
 **Stack (builder's call under approach B):**
 - API: Node 24, Fastify 5, Prisma 6 on PostgreSQL 15+ (whatever the server runs; check at setup), Zod for input
@@ -110,6 +122,20 @@ transfers, reports. Sales Representative: own leads (assigned to them) and their
 calendar, quotations. Data Research User: prospects, companies, research records; no quotations or email. A task can be
 assigned only to someone who can see its lead (owner or admin/manager). Row visibility is enforced in the API, not the UI.
 *Deepak may change who sees what (pending decision 4 below); the mechanism does not change.*
+Builder's calls after the reviewer's check: a Sales Representative also sees **unassigned** leads and can claim one
+(writes a `lead_assignments` row); a prospect a Data Research User creates is owned by that user until it is assigned;
+Data Research Users see all prospects and companies but no leads of type Lead unless assigned to them.
+
+**Enquiry matching (builder's call, tightening the spec and `store.js`):** a company is linked automatically only on an
+exact **business-email domain** match (free-mail domains ignored). Typed website domain, exact legal name and
+normalised name + country matches go to the Needs-review queue with the candidates shown; no lead is created until a
+user decides. Contacts link automatically on exact email only; phone and name + company matches go to review. When
+nothing matches at all, company and contact are created and the lead is created immediately.
+
+**Public form hosting (builder's call):** the CRM serves the six-field page at `https://crm.daitpartners.com/contact`
+(public, no login, no CRM chrome) and daitpartners.com links to it. The endpoint `POST /api/public/enquiries` accepts only
+same-origin requests from that page in release 1; `source_page` is recorded from the page's referrer. Embedding the form in
+the website's own HTML (cross-origin POST, CORS allow-list) is a later change to daitpartners.com, not part of release 1.
 
 **Hosting and release:**
 - Two environments on the same server: **test** `crm-test.daitpartners.com` → port 3091, database `dait_crm_test`;
@@ -152,8 +178,11 @@ Release 1 can be built, but cannot go live until they are answered:
 4. Roles: who sees all leads and who sees only their own (this design assumes the split in section 5).
 5. Real dropdown values (sources, statuses, industries, segments). The prototype's lists seed the test site meanwhile.
 
+Also needed for release 1 go-live: the three Entra values and the system mailbox address (`docs/setup/entra-app.md`),
+the OneDrive folder for backups.
+
 Also before later releases: Mailer users and daily limit, lawful-basis wording, working hours (release 2); tax rate and
-currencies (release 3); AI budget and allowed sources (release 4). And one hosting item: the OneDrive folder for backups.
+currencies (release 3); AI budget and allowed sources (release 4).
 
 ## 7. Left to the builder
 
