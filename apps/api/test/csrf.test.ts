@@ -56,6 +56,29 @@ describe('same-site CSRF guard', () => {
     expect((await post()).statusCode).toBe(204);
   });
 
+  test('a percent-encoded path cannot skip the check', async () => {
+    const a = await app();
+    const cookie = await signIn(a, await makeUser());
+    const res = await a.inject({ method: 'POST', url: '/%61pi/auth/logout', headers: { cookie, origin: 'https://evil.example' } });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ error: 'bad_origin' });
+    expect((await a.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).statusCode).toBe(200);
+  });
+
+  test('matched /api writes with a foreign Origin are refused; same-origin writes pass; unmatched writes are checked', async () => {
+    const a = await app();
+    const admin = await makeUser({ role: 'ADMINISTRATOR' });
+    const cookie = await signIn(a, admin);
+    const foreign = await a.inject({ method: 'POST', url: '/api/mailboxes/system/disconnect', headers: { cookie, origin: 'https://evil.example' } });
+    expect(foreign.statusCode).toBe(403);
+    const same = await a.inject({ method: 'POST', url: '/api/mailboxes/system/disconnect', headers: { cookie, origin: 'http://localhost:5173' } });
+    expect(same.statusCode).toBe(204);
+    const unmatched = await a.inject({ method: 'POST', url: '/api/nope', headers: { origin: 'https://evil.example' } });
+    expect(unmatched.statusCode).toBe(403);
+    const unmatchedSame = await a.inject({ method: 'POST', url: '/api/nope', headers: { origin: 'http://localhost:5173' } });
+    expect(unmatchedSame.statusCode).toBe(404);
+  });
+
   test('Origin: null is refused', async () => {
     const a = await app();
     const res = await a.inject({ method: 'POST', url: '/api/auth/logout', headers: { origin: 'null' } });
@@ -91,6 +114,8 @@ describe('same-site CSRF guard', () => {
     a.post('/api/public/ping', async () => ({ ok: true }));
     const res = await a.inject({ method: 'POST', url: '/api/public/ping', headers: { origin: 'https://www.daitpartners.com' } });
     expect(res.statusCode).toBe(200);
+    const encoded = await a.inject({ method: 'POST', url: '/%61pi/public/ping', headers: { origin: 'https://www.daitpartners.com' } });
+    expect(encoded.statusCode).toBe(200);
     expect(isPublicPath('/api/public/enquiry')).toBe(true);
     expect(isPublicPath('/api/publicity')).toBe(false);
     expect(isPublicPath('/api/users')).toBe(false);

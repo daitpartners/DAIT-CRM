@@ -36,7 +36,7 @@ function sessionSecret(env: NodeJS.ProcessEnv): string {
   return randomBytes(32).toString('base64url');
 }
 
-/** Paths that accept cross-site writes (public forms, plan 1D). Everything else under /api must be same-origin. */
+/** Route patterns that accept cross-site writes (public forms, plan 1D). Every other write must be same-origin. */
 const PUBLIC_PATH_PREFIXES = ['/api/public/'];
 
 export function isPublicPath(path: string): boolean {
@@ -99,8 +99,10 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   app.removeContentTypeParser('text/plain');
   app.addHook('onRequest', async (request, reply) => {
     if (!UNSAFE_METHODS.has(request.method)) return;
-    const path = request.url.split('?')[0]!;
-    if (!path.startsWith('/api/') || isPublicPath(path)) return;
+    // Decide from the matched route pattern, never the raw URL: the router decodes `%61pi` to `api`,
+    // so a raw-path test could be bypassed. Unmatched (404) requests have no route url and are checked too.
+    const route = request.routeOptions?.url;
+    if (route && isPublicPath(route)) return;
     if (!isSameOrigin(request, expectedOrigin)) return reply.code(403).send({ error: 'bad_origin' });
   });
   await app.register(cookie, { secret: sessionSecret(env) });
