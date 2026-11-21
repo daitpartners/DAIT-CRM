@@ -101,7 +101,8 @@ function NewLeadForm() {
       website: '',
       businessEmail: '',
       phone: '',
-      country: '',
+      // The prototype's lead form starts on India, where most leads come from.
+      country: 'India',
       city: '',
       leadSource: defaultSource,
       sourceUrl: '',
@@ -141,7 +142,6 @@ function NewLeadForm() {
       if (v && !getValues(k).trim()) setValue(k, v);
     };
     fill('companyName', c.name);
-    fill('country', c.country);
     fill('website', c.website);
     fill('city', c.city);
   }, [preset.data]);
@@ -149,6 +149,13 @@ function NewLeadForm() {
   // The linked company's record, for the duplicate panel's "Linked to …" line (however it was chosen).
   const linkedCompany = useCompany(linkCompanyId ?? Number.NaN).data;
   const linkedLabel = linkedCompany && linkedCompany.id === linkCompanyId ? candidateLabel(linkedCompany) : undefined;
+  // Country starts on the India default: each newly linked company replaces it with its own country, once per link.
+  const countryFor = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (!linkedCompany || linkedCompany.id !== linkCompanyId || countryFor.current === linkCompanyId) return;
+    countryFor.current = linkCompanyId;
+    if (linkedCompany.country) setValue('country', linkedCompany.country);
+  }, [linkedCompany, linkCompanyId]);
 
   const hasKey = Boolean(companyName.trim() || website.trim() || businessEmail.trim());
   const dup = useDuplicateCheck({ name: companyName, website, businessEmail, country }, hasKey, 'leads');
@@ -277,7 +284,7 @@ function NewLeadForm() {
               </FormField>
               {f.input('website', t('Company website'), { type: 'url', placeholder: 'https://' })}
               {f.input('businessEmail', t('Business email'), { type: 'email' })}
-              {f.input('phone', t('Phone number'), { type: 'tel' })}
+              {f.input('phone', t('Phone number'), { type: 'tel', placeholder: '+91 …' })}
               {f.country()}
               {f.input('city', t('City'))}
             </div>

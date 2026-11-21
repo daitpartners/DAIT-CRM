@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import { useNotificationCount } from '../api/notifications';
+import { useNavCounts } from '../api/notifications';
 import type { Me } from '../api/queries';
 import { useT } from '../i18n/useT';
 import { initials, roleText } from '../i18n/labels';
@@ -17,7 +17,9 @@ export function Sidebar({ me, open, onNavigate }: SidebarProps) {
   const t = useT();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const unread = useNotificationCount().data?.unread ?? 0;
+  const counts = useNavCounts().data;
+  const badge = (n: number | undefined, text: string, hot = false) =>
+    n ? <span className={hot ? 'cnt hot' : 'cnt'}>{text}</span> : null;
 
   async function signOut() {
     try {
@@ -47,23 +49,12 @@ export function Sidebar({ me, open, onNavigate }: SidebarProps) {
       </div>
       {item('/', t('Dashboard'), 'dash', true)}
       <div className="navsec">{t('Modules')}</div>
-      {item('/leads', t('Leads'), 'leads')}
+      {item('/leads', t('Leads'), 'leads', false, badge(counts?.leads, String(counts?.leads)))}
       {item('/companies', t('Companies'), 'companies')}
       {item('/contacts', t('Contacts'), 'contacts')}
       <div className="navsec">{t('Work')}</div>
-      {item('/tasks', t('Tasks'), 'tasks')}
-      {item(
-        '/notifications',
-        t('Notifications'),
-        'bell',
-        false,
-        unread > 0 ? (
-          <span className="cnt hot">
-            {unread}
-            <span className="sr">{t('unread')}</span>
-          </span>
-        ) : null,
-      )}
+      {item('/tasks', t('Tasks'), 'tasks', false, badge(counts?.overdueTasks, t('{n} overdue', { n: counts?.overdueTasks ?? 0 })))}
+      {item('/notifications', t('Notifications'), 'bell', false, badge(counts?.unread, t('{n} new', { n: counts?.unread ?? 0 }), true))}
       {item('/reports', t('Reports'), 'reports')}
       <div className="grow" />
       {item('/settings', t('Settings'), 'settings')}

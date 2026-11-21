@@ -28,6 +28,13 @@ test('companies list: prototype tiles, tabs with counts and columns', async ({ p
   const tabs = await page.getByRole('tab').evaluateAll((els) => els.map((el) => (el.textContent ?? '').replace(/\s*\d+$/, '').trim()));
   expect(tabs).toEqual(TABS);
 
+  // Filters read like the prototype's ("Industry: Any"), and the pager is the Leads list's full pager.
+  await expect(page.getByRole('combobox', { name: 'Industry', exact: true })).toHaveValue('Industry: Any');
+  await expect(page.getByRole('combobox', { name: 'Country', exact: true })).toHaveValue('Country: Any');
+  await expect(page.getByLabel('Status', { exact: true }).locator('option').first()).toHaveText('Status: Any');
+  await expect(page.getByLabel('Rows per page')).toHaveValue('50');
+  await expect(page.getByRole('button', { name: /First/ })).toBeVisible();
+
   const heads = await page.locator('thead th').evaluateAll((els) =>
     els.map((el) => (el.textContent ?? '').replace(/[↑↓\s]+/g, ' ').trim()).filter((x) => x !== ''),
   );

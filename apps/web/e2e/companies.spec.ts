@@ -78,6 +78,6 @@ test('a page number past the end shows the last page', async ({ page }) => {
   await signInAs(page, MAYA);
   await page.goto('/companies?page=99');
   await expect(page.getByRole('row').filter({ hasText: 'Northwind Logistics' })).toBeVisible();
-  await expect(page.getByText(/Showing 1–\d+ of \d+/)).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Pagination' })).toContainText(/^1–\d+ of \d+/);
   await expect(page).not.toHaveURL(/page=99/);
 });

@@ -44,6 +44,11 @@ test('dashboard: greeting, prototype tiles, tasks, agenda placeholder, notificat
   await expect(pipe.getByRole('listitem').first()).toContainText('New');
   await expect(pipe).toContainText(/Won: \d+ · Lost: \d+/);
 
+  // Sidebar badges as in the prototype: the open-leads count, "n overdue" on Tasks, "n new" on Notifications.
+  const nav = page.getByRole('navigation', { name: 'Main navigation' });
+  await expect(nav.getByRole('link', { name: /^Leads/ }).locator('.cnt')).toHaveText(/^\d+$/);
+  await expect(nav.getByRole('link', { name: /^Tasks/ }).locator('.cnt')).toHaveText(/^\d+ overdue$/);
+
   await captureParity(page, 'dashboard');
 
   // Ticking a task from the dashboard completes it.

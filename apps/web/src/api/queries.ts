@@ -112,12 +112,13 @@ export const keys = {
   /** Prefix of every task query: a lead write can create, move or close tasks. */
   tasksAll: ['tasks'] as const,
   tasks: (query: TaskListQuery) => ['tasks', 'list', query] as const,
+  /** Sidebar badges: under the tasks prefix so task and lead writes refresh them (notification reads refresh it too). */
+  navCounts: ['tasks', 'nav-counts'] as const,
   /** The dashboard: under the tasks prefix so task and lead writes refresh it. */
   dashboard: ['tasks', 'dashboard'] as const,
-  /** Prefix of every notification query (list and unread count). */
+  /** Prefix of every notification query. */
   notificationsAll: ['notifications'] as const,
   notifications: (page: number) => ['notifications', 'list', page] as const,
-  notificationCount: ['notifications', 'count'] as const,
 };
 
 export function useMe() {

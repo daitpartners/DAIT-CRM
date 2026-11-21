@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { COMPANY_SORTS, COMPANY_TABS, CompanyStatus, VERIFICATION_STATUSES, lookupLabel, safeUrl, type CompanyTab } from '@dait-crm/shared';
 import { ApiError, api } from '../../api/client';
@@ -21,7 +21,9 @@ import { companyStatusBadge, companyStatusText, errorText, initials, verificatio
 import { useLang, useT } from '../../i18n/useT';
 import { CompanyModal } from './CompanyModal';
 
-const PAGE_SIZE = 25;
+/** Rows per page offered by the pager, as on the Leads list (prototype SIZES); 50 by default. */
+const PAGE_SIZES = [25, 50, 100] as const;
+const DEFAULT_PAGE_SIZE = 50;
 /** Combobox value meaning "no filter" (the combobox cannot hold an empty value). */
 const ANY = '*';
 
@@ -39,6 +41,9 @@ export function CompaniesList() {
     defaultSort: 'name',
     extra: ['tab', 'status', 'country', 'industry', 'employeeRange', 'verification'],
   });
+  const [searchParams] = useSearchParams();
+  const sizeParam = Number(searchParams.get('size'));
+  const pageSize = (PAGE_SIZES as readonly number[]).includes(sizeParam) ? sizeParam : DEFAULT_PAGE_SIZE;
   const status = CompanyStatus.safeParse(params.status);
   const tab: CompanyTab = (COMPANY_TABS as readonly string[]).includes(params.tab ?? '') ? (params.tab as CompanyTab) : 'all';
   const verification = (VERIFICATION_STATUSES as readonly string[]).includes(params.verification ?? '')
@@ -46,7 +51,7 @@ export function CompaniesList() {
     : undefined;
   const query: CompanyListQuery & Pick<typeof params, 'page' | 'sort' | 'dir'> = {
     page: params.page,
-    pageSize: PAGE_SIZE,
+    pageSize,
     sort: params.sort,
     dir: params.dir,
     q: params.q,
@@ -85,8 +90,8 @@ export function CompaniesList() {
     if (current && !opts.some((o) => o.value === current)) opts.push({ value: current, label: current });
     return [{ value: ANY, label: any }, ...opts];
   };
-  const countryOptions = useMemo(() => filterOptions('country', t('Any country'), query.country), [lookups, lang, query.country, t]);
-  const industryOptions = useMemo(() => filterOptions('industry', t('Any industry'), query.industry), [lookups, lang, query.industry, t]);
+  const countryOptions = useMemo(() => filterOptions('country', t('Country: Any'), query.country), [lookups, lang, query.country, t]);
+  const industryOptions = useMemo(() => filterOptions('industry', t('Industry: Any'), query.industry), [lookups, lang, query.industry, t]);
 
   const bulk = useMutation({
     mutationFn: (v: { ids: number[]; status: CompanyStatus }) => api<{ updated: number }>('/api/companies/bulk-status', { method: 'POST', body: v }),
@@ -244,7 +249,7 @@ export function CompaniesList() {
                 {t('Status')}
               </label>
               <select id="flt-status" className="chip" value={query.status ?? ''} onChange={(e) => update({ status: e.target.value })}>
-                <option value="">{t('Any status')}</option>
+                <option value="">{t('Status: Any')}</option>
                 {CompanyStatus.options.map((s) => (
                   <option key={s} value={s}>
                     {companyStatusText(t, s)}
@@ -326,7 +331,14 @@ export function CompaniesList() {
             )}
             {data && data.total > 0 ? (
               <div className="foot">
-                <Pager page={data.page} pageSize={data.pageSize} total={data.total} onPage={(page) => update({ page: page > 1 ? page : undefined })} />
+                <Pager
+                  page={data.page}
+                  pageSize={data.pageSize}
+                  total={data.total}
+                  onPage={(page) => update({ page: page > 1 ? page : undefined })}
+                  sizes={PAGE_SIZES}
+                  onPageSize={(size) => update({ size: size === DEFAULT_PAGE_SIZE ? undefined : size })}
+                />
               </div>
             ) : null}
           </Tabs>

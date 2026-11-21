@@ -136,16 +136,17 @@ These differ from the prototype on purpose:
 Release `fe22dcc` (live) was checked screen by screen against `prototype/index.html` at 1400×1000: Dashboard, Leads,
 New lead, Lead page, Companies, Company profile, Tasks, Notifications and Settings. The parity e2e specs pass (10/10).
 Section order, headings, tiles, tabs and cards match on every screen. Gaps found that are **not** in the deliberate
-differences above, to fix in a short follow-up before release 1D:
+differences above. All four were fixed on 21 Nov 2026, before release 1D (covered by the parity e2e specs):
 
-- [ ] **Sidebar counts.** The prototype shows the open-leads count on Leads, "n overdue" on Tasks and "n new" on
+- [x] **Sidebar counts.** The prototype shows the open-leads count on Leads, "n overdue" on Tasks and "n new" on
       Notifications. The CRM shows only the Notifications number, without "new".
-- [ ] **Companies filters** read "Any industry", "Any country", "Any status"; the prototype reads "Industry: Any",
+- [x] **Companies filters** read "Any industry", "Any country", "Any status"; the prototype reads "Industry: Any",
       "Country: Any", "Status: Any", like the Leads filters.
-- [ ] **Companies pager** is Previous / Page n of n / Next; the prototype (and the CRM's Leads list) uses
-      Rows · First · Prev · Page · Next · Last.
-- [ ] **New lead:** Country starts empty ("Type to search…") where the prototype starts on India, and the phone field has
-      no "+91 …" hint.
+- [x] **Companies pager** is Previous / Page n of n / Next; the prototype (and the CRM's Leads list) uses
+      Rows · First · Prev · Page · Next · Last. (The prototype's 11 sample companies need no pager; the CRM now uses
+      the Leads list's pager, 50 rows by default.)
+- [x] **New lead:** Country starts empty ("Type to search…") where the prototype starts on India, and the phone field has
+      no "+91 …" hint. Now starts on India; linking an existing company replaces it with that company's country.
 
 Additions in the CRM that the prototype does not have, kept because earlier releases need them (owner to confirm):
 

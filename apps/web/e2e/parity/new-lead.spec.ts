@@ -29,6 +29,9 @@ test('new lead page: prototype cards in order, defaults, and a company preset fr
   await expect(form.getByLabel('Assigned to').locator('option').first()).toHaveText('Leave unassigned · allocation rules decide');
   await expect(form.getByLabel('Assigned to').locator('option:checked')).toHaveText('Maya Pillai (me)');
   await expect(form.getByLabel('Lead priority')).toHaveValue('Medium');
+  // Country starts on India and the phone hint reads "+91 …", as in the prototype.
+  await expect(form.getByRole('combobox', { name: 'Country' })).toHaveValue('India');
+  await expect(form.getByLabel('Phone number')).toHaveAttribute('placeholder', '+91 …');
   await expect(form.getByLabel('Lead status')).toBeDisabled();
   await expect(form.getByLabel('Next follow-up date')).not.toHaveValue('');
   await expect(form.getByRole('combobox', { name: 'Company (existing record)' })).toHaveAttribute('placeholder', 'Create new company on save');
@@ -61,4 +64,11 @@ test('new lead page: prototype cards in order, defaults, and a company preset fr
   await expect(preview).toContainText('Verification');
   await expect(page.locator('main')).not.toContainText(/undefined|NaN/);
   await captureParity(page, 'new-lead-company');
+
+  // A linked company outside India replaces the India default with its own country.
+  const orbit = ((await (await page.request.get('/api/companies?q=Orbit')).json()) as { items: { id: number; number: string }[] }).items
+    .find((c) => c.number === 'CO-0310')!;
+  await page.goto(`/leads/new?company=${orbit.id}`);
+  await expect(form.getByRole('combobox', { name: 'Company (existing record)' })).toHaveValue(/^CO-0310 · Orbit Fintech/);
+  await expect(form.getByRole('combobox', { name: 'Country' })).toHaveValue('Germany');
 });

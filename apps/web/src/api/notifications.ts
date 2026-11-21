@@ -26,11 +26,11 @@ export function useNotifications(page: number, unreadOnly = false) {
   });
 }
 
-/** Unread count for the sidebar badge, polled every 60 seconds. */
-export function useNotificationCount() {
+/** Sidebar badges (visible leads, my overdue tasks, unread notifications), polled every 60 seconds. */
+export function useNavCounts() {
   return useQuery({
-    queryKey: keys.notificationCount,
-    queryFn: () => api<{ unread: number }>('/api/notifications/count'),
+    queryKey: keys.navCounts,
+    queryFn: () => api<{ leads: number; overdueTasks: number; unread: number }>('/api/nav-counts'),
     refetchInterval: 60_000,
   });
 }
@@ -40,6 +40,7 @@ function invalidateAfterRead(qc: ReturnType<typeof useQueryClient>) {
   return Promise.all([
     qc.invalidateQueries({ queryKey: keys.notificationsAll }),
     qc.invalidateQueries({ queryKey: keys.dashboard }),
+    qc.invalidateQueries({ queryKey: keys.navCounts }),
   ]);
 }
 
