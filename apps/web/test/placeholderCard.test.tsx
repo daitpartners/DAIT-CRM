@@ -14,6 +14,9 @@ describe('PlaceholderCard', () => {
     const { container } = render(<PlaceholderCard title="Email" release="2" />);
     const card = container.firstElementChild as HTMLElement;
     expect(card).toHaveAttribute('aria-disabled', 'true');
+    expect(card).toHaveClass('card', 'ph-card');
+    expect(card).not.toHaveClass('placeholder');
+    expect(screen.getByRole('region', { name: 'Email' })).toBe(card);
     const controls = container.querySelectorAll('button, a[href], input, select, textarea, [tabindex], [role=button], [role=link]');
     const enabled = Array.from(controls).filter((el) => !(el as HTMLButtonElement).disabled);
     expect(enabled).toHaveLength(0);

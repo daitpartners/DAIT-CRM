@@ -418,8 +418,9 @@ a.tile{display:block;text-decoration:none}a.tile:hover{border-color:var(--purple
 /* Tiles collapse (prototype breakpoints; .tiles.t3 keeps the app rule above) */
 @media (max-width:900px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:640px){.tiles{grid-template-columns:1fr}}
-/* Later-release placeholder panel (PlaceholderCard) */
-.card.placeholder{background:#FBFAFE;border-style:dashed;color:var(--muted);gap:6px}
-.card.placeholder h2{color:var(--muted)}
-.card.placeholder p{margin:0;font-size:12.5px}
-.card.placeholder .ph-note{font-weight:600;color:var(--faint)}
+/* Later-release placeholder panel (PlaceholderCard; the full-page .placeholder above is for NotFound/AccessDenied).
+   Muted card in the prototype's .note.info colours with a dashed border; normal card padding, left-aligned. */
+.card.ph-card{background:#F9F7FD;border:1px dashed var(--field);color:var(--muted);gap:6px}
+.card.ph-card h2{color:var(--muted)}
+.card.ph-card p{margin:0;font-size:12.5px;line-height:1.5}
+.card.ph-card .ph-note{font-weight:600;color:var(--faint)}

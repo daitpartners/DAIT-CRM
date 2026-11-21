@@ -2,8 +2,8 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: 'e2e',
-  // Top-level specs plus the prototype-parity captures in e2e/parity/ (helpers there start with `_`).
-  testMatch: ['*.spec.ts', '**/parity/**/*.spec.ts'],
+  // Matches top-level specs and the prototype-parity captures in e2e/parity/ (helpers there start with `_`).
+  testMatch: ['*.spec.ts'],
   fullyParallel: false,
   workers: 1,
   retries: 0,

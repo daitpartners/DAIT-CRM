@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { useT } from '../i18n/useT';
 
 type PlaceholderCardProps = {
@@ -15,9 +16,10 @@ type PlaceholderCardProps = {
  */
 export function PlaceholderCard({ title, release, hint }: PlaceholderCardProps) {
   const t = useT();
+  const headingId = useId();
   return (
-    <section className="card placeholder" aria-disabled="true">
-      <h2>{title}</h2>
+    <section className="card ph-card" aria-disabled="true" aria-labelledby={headingId}>
+      <h2 id={headingId}>{title}</h2>
       <p className="ph-note">{t('Available in release {release}', { release })}</p>
       {hint ? <p className="ph-hint">{hint}</p> : null}
     </section>
