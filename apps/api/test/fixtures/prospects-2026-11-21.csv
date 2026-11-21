@@ -1,0 +1,5 @@
+prospect_id,company_name,owner,verified_on,pipeline_stage,status,priority,action,lead_score,source_url,notes
+S-0001,Cotton Patch of Kentucky,Carlos,2026-11-16,2. Researched,Active,High,Call this week,100,https://www.cottonpatchofky.com/,"Footer social icons go to Wix's own accounts, not theirs."
+S-0174,Maple Leaf Fitness,Deepak,2026-11-17,3. Contacted,New,Urgent,Email,80,https://mapleleaf.example.ca/,
+S-0200,Ghost Company,Deepak,2026-11-17,2. Researched,New,Low,Email,50,,Not in the CRM
+S-0154,Muffy's Flowers & Gifts,,2026-11-18,2. Researched,New,Medium,Email,60,,No owner

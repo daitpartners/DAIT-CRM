@@ -119,3 +119,63 @@ export const SwitchContact = z.object({
   updatedAt,
 });
 export type SwitchContact = z.infer<typeof SwitchContact>;
+
+/* ------------------------------------------------------------------ CSV import */
+
+/** Lead fields a CSV column can map to. */
+export const CSV_FIELDS = [
+  'companyName', 'website', 'businessEmail', 'phone', 'country', 'city', 'contactFirstName', 'contactLastName',
+  'contactEmail', 'leadSource', 'priority', 'notes', 'sourceUrl',
+] as const;
+export type CsvField = (typeof CSV_FIELDS)[number];
+
+/** Largest CSV text accepted by the import endpoints (characters). */
+export const CSV_MAX_LENGTH = 5_000_000;
+
+const csvHeader = z.string().trim().min(1).max(200);
+const optionalHeader = csvHeader.nullish().transform((v) => v ?? null);
+
+/** CSV header name per lead field (null = not imported). `companyName` and `country` are required. */
+export const CsvMapping = z.object({
+  columns: z.object({
+    companyName: csvHeader,
+    website: optionalHeader,
+    businessEmail: optionalHeader,
+    phone: optionalHeader,
+    country: csvHeader,
+    city: optionalHeader,
+    contactFirstName: optionalHeader,
+    contactLastName: optionalHeader,
+    contactEmail: optionalHeader,
+    leadSource: optionalHeader,
+    priority: optionalHeader,
+    notes: optionalHeader,
+    sourceUrl: optionalHeader,
+  }),
+});
+export type CsvMapping = z.infer<typeof CsvMapping>;
+/** A suggested mapping: any field, required ones included, may be unmatched (null). */
+export type CsvSuggestedMapping = { columns: Record<CsvField, string | null> };
+
+const csvText = z.string().min(1).max(CSV_MAX_LENGTH);
+
+/** `POST /imports/leads/preview`. */
+export const CsvPreview = z.object({ csv: csvText });
+export type CsvPreview = z.infer<typeof CsvPreview>;
+
+/** `POST /imports/leads`. */
+export const CsvImport = z.object({
+  csv: csvText,
+  mapping: CsvMapping,
+  /** Used for rows without a mapped (or with an empty) lead source column. */
+  leadSource: z.string().trim().min(1).max(60).default('CSV Import'),
+  assignedToId: z.number().int().positive().nullish(),
+});
+export type CsvImport = z.infer<typeof CsvImport>;
+
+/** `POST /leads/:id/resolve-company`: link an existing company, or create one from the lead. */
+export const ResolveCompany = z.object({
+  companyId: z.union([z.number().int().positive(), z.literal('create')]),
+  updatedAt,
+});
+export type ResolveCompany = z.infer<typeof ResolveCompany>;

@@ -2,13 +2,13 @@ import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { Prisma, type Lead } from '@prisma/client';
 import {
   CLOSED_STATUSES, DuplicateCheck, LeadBulk, LeadCreate, LeadListQuery, LeadStatusChange, LeadTransfer, LeadUnassign,
-  LeadUpdate, LogCall, SwitchContact, UpdatedAtOnly, can, checkDomain, isClosedStatus, pageArgs, type CompanyCandidate,
+  LeadUpdate, LogCall, ResolveCompany, SwitchContact, UpdatedAtOnly, can, checkDomain, isClosedStatus, pageArgs, type CompanyCandidate,
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { audit } from '../audit.js';
 import { NotFoundError, ValidationError, parseBody, parseQuery } from '../validate.js';
 import { requireRight, requireUser, type AuthUser } from '../plugins/auth.js';
-import { visibleCompanyIds } from '../companies/visibility.js';
+import { assertCompanyVisible, visibleCompanyIds } from '../companies/visibility.js';
 import { findCompanyMatches } from '../companies/match.js';
 import { StaleError, isNotFound, isUniqueViolation } from '../prismaErrors.js';
 import { assertLeadVisible, leadWhere } from '../leads/visibility.js';
@@ -16,7 +16,10 @@ import {
   activityInclude, activityRow, assignmentInclude, assignmentRow, leadDetail, leadDetailInclude, leadSummary,
   leadSummaryInclude, taskInclude, taskRow,
 } from '../leads/serialize.js';
-import { RuleError, applyStatusChange, createLeadWithCompany, recordAssignment, syncFollowUpTask } from '../leads/service.js';
+import {
+  RuleError, applyStatusChange, auditCreatedLead, companyDataFromLead, createLeadWithCompany, recordAssignment,
+  syncFollowUpTask,
+} from '../leads/service.js';
 import { dateOnly, todayIn } from '../leads/dates.js';
 
 type Tx = Prisma.TransactionClient;
@@ -28,7 +31,7 @@ const DAY_MS = 86_400_000;
 /* ------------------------------------------------------------------ errors */
 
 /** RuleError codes answered with 409; `forbidden` is a 403; every other rule refusal is a 400. */
-const CONFLICT_CODES = new Set(['stale', 'company_inactive', 'already_assigned']);
+const CONFLICT_CODES = new Set(['stale', 'company_inactive', 'already_assigned', 'company_already_linked']);
 
 /** Maps a business-rule / concurrency error to its HTTP reply; anything else is rethrown. */
 export async function guard<T>(reply: FastifyReply, fn: () => Promise<T>): Promise<T | FastifyReply> {
@@ -50,7 +53,7 @@ export async function guard<T>(reply: FastifyReply, fn: () => Promise<T>): Promi
  * Who `user` may assign a lead to: Administrator / Manager anyone active, Sales Representative
  * self or nobody, Data Research User self only. `null` = unassigned.
  */
-async function assertAssignable(tx: Tx, user: AuthUser, toUserId: number | null): Promise<void> {
+export async function assertAssignable(tx: Tx, user: AuthUser, toUserId: number | null): Promise<void> {
   const everyone = can(user.role, 'view_all_leads');
   if (toUserId === null) {
     if (everyone || user.role === 'Sales Representative') return;
@@ -66,7 +69,7 @@ async function assertAssignable(tx: Tx, user: AuthUser, toUserId: number | null)
  * under that same `updatedAt`: the row is locked for the rest of the transaction and a concurrent
  * write since the client read it is a 409 `stale`. Refuses an archived lead unless `allowArchived`.
  */
-async function lockFresh(
+export async function lockFresh(
   tx: Tx, user: AuthUser, id: number, updatedAt: string, opts: { allowArchived?: boolean } = {},
 ): Promise<{ before: Lead; lead: Lead }> {
   const before = await assertLeadVisible(tx, user, id, { includeArchived: true });
@@ -83,7 +86,7 @@ async function detailOf(db: Tx | typeof prisma, id: number, user: AuthUser) {
 }
 
 /** 409 body for a domain unique violation: names the company holding the domain. */
-async function domainTaken(domain: string | null) {
+export async function domainTaken(domain: string | null) {
   if (!domain) return null;
   const holder = await prisma.company.findFirst({ where: { domain }, select: { id: true } });
   return holder ? { error: 'domain_taken', companyId: holder.id } : null;
@@ -199,17 +202,9 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
       return await guard(reply, async () => {
         const id = await prisma.$transaction(async (tx) => {
           if (body.assignedToId != null) await assertAssignable(tx, user, body.assignedToId);
-          const { lead, createdCompanyId, createdContactId } = await createLeadWithCompany(tx, body, user);
-          if (createdCompanyId !== null) {
-            const company = await tx.company.findUniqueOrThrow({ where: { id: createdCompanyId } });
-            await audit(tx, { entityType: 'company', entityId: company.id, action: 'create', userId: user.id, after: company });
-          }
-          if (createdContactId !== null) {
-            const contact = await tx.contact.findUniqueOrThrow({ where: { id: createdContactId } });
-            await audit(tx, { entityType: 'contact', entityId: contact.id, action: 'create', userId: user.id, after: contact });
-          }
-          await audit(tx, { entityType: 'lead', entityId: lead.id, action: 'create', userId: user.id, after: lead });
-          return lead.id;
+          const created = await createLeadWithCompany(tx, body, user);
+          await auditCreatedLead(tx, user.id, created);
+          return created.lead.id;
         });
         return reply.code(201).send(await detailOf(prisma, id, user));
       });
@@ -380,6 +375,57 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
       return detailOf(prisma, id, user);
     });
   });
+
+  /**
+   * Resolves the company of a lead imported with an unresolved duplicate (company null): links
+   * a visible company (and its primary contact) or creates one from the lead's details.
+   */
+  app.post<{ Params: { id: string } }>(
+    '/leads/:id/resolve-company', { preHandler: [requireRight('manage_leads')] }, async (request, reply) => {
+      const body = parseBody(ResolveCompany, request.body);
+      const user = request.user!;
+      const id = leadId(request.params.id);
+      let domain: string | null = null;
+      try {
+        return await guard(reply, async () => {
+          await prisma.$transaction(async (tx) => {
+            const { before } = await lockFresh(tx, user, id, body.updatedAt);
+            if (before.companyId !== null) throw new RuleError('company_already_linked');
+            let company;
+            if (body.companyId === 'create') {
+              const data = companyDataFromLead(before, user.id);
+              domain = data.domain ?? null;
+              company = await tx.company.create({ data });
+              await audit(tx, { entityType: 'company', entityId: company.id, action: 'create', userId: user.id, after: company });
+            } else {
+              company = await assertCompanyVisible(tx, user, body.companyId);
+            }
+            const contactId = (await tx.contact.findFirst({
+              where: { companyId: company.id, isPrimary: true }, select: { id: true },
+            }))?.id ?? null;
+            await tx.lead.update({ where: { id }, data: { companyId: company.id, contactId } });
+            await tx.leadActivity.create({
+              data: {
+                leadId: id, activityType: 'note', byUserId: user.id,
+                title: body.companyId === 'create' ? `Company ${company.number} created` : `Linked to company ${company.number}`,
+              },
+            });
+            await audit(tx, {
+              entityType: 'lead', entityId: id, action: 'update', userId: user.id,
+              before: { companyId: null, contactId: before.contactId }, after: { companyId: company.id, contactId },
+            });
+          });
+          return detailOf(prisma, id, user);
+        });
+      } catch (e) {
+        if (isUniqueViolation(e, 'domain')) {
+          const taken = await domainTaken(domain);
+          if (taken) return reply.code(409).send(taken);
+        }
+        throw e;
+      }
+    },
+  );
 
   for (const action of ['archive', 'unarchive'] as const) {
     app.post<{ Params: { id: string } }>(`/leads/:id/${action}`, { preHandler: [requireRight('manage_leads')] }, async (request, reply) => {

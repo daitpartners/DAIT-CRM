@@ -4,6 +4,7 @@ import { pickAllocation } from '../allocation/pick.js';
 import { findCompanyMatches } from '../companies/match.js';
 import { assertCompanyVisible } from '../companies/visibility.js';
 import type { AuthUser } from '../plugins/auth.js';
+import { audit } from '../audit.js';
 import { ValidationError } from '../validate.js';
 import { dateOnly, todayIn } from './dates.js';
 import { notifyUser } from './notify.js';
@@ -112,11 +113,12 @@ export async function applyStatusChange(
  * a notification to the receiver unless they assigned it to themselves. `by.isNew` marks the
  * assignment made while creating the lead: the receiver also gets a "Review new lead" task due
  * today in their timezone. `by.userId: null` = system (allocation rule `by.ruleId`).
+ * `by.quiet` (bulk migrations) writes no "Review new lead" task and no notification.
  * No-op when the assignee is unchanged. Refuses an unknown or inactive receiver (`unknown_user`).
  */
 export async function recordAssignment(
   tx: Tx, lead: Lead, toUserId: number | null,
-  by: { userId: number | null; ruleId?: number | null; note?: string; isNew?: boolean },
+  by: { userId: number | null; ruleId?: number | null; note?: string; isNew?: boolean; quiet?: boolean },
 ): Promise<Lead> {
   const receiver = toUserId === null
     ? null
@@ -140,7 +142,7 @@ export async function recordAssignment(
   if (receiver) {
     await tx.task.updateMany({ where: { leadId: lead.id, isDone: false }, data: { assignedToId: receiver.id } });
     await syncFollowUpTask(tx, updated);
-    if (by.isNew) {
+    if (by.isNew && !by.quiet) {
       await tx.task.create({
         data: {
           leadId: lead.id, title: `Review new lead · ${lead.companyName}`, dueDate: dateOnly(todayIn(receiver.timezone)),
@@ -148,7 +150,7 @@ export async function recordAssignment(
         },
       });
     }
-    if (receiver.id !== by.userId) {
+    if (receiver.id !== by.userId && !by.quiet) {
       if (isTransfer && fromUserId !== null) {
         const from = await tx.user.findUniqueOrThrow({ where: { id: fromUserId }, select: { name: true } });
         await notifyUser(tx, receiver.id, `Lead transferred to you · ${lead.companyName} from ${from.name}`, note, `/leads/${lead.id}`);
@@ -162,18 +164,52 @@ export async function recordAssignment(
 }
 
 /**
- * Extra fields a caller may pass when creating a lead: the contact person's name, used for the
- * primary contact of a newly created company (the lead form has none; the CSV import does).
+ * Extra fields a caller may pass when creating a lead (the lead form has none; the CSV imports
+ * do): the contact person's name and email, used for the primary contact of a newly created
+ * company (email falls back to the lead's business email), and the import batch.
  */
-export type LeadCreateExtras = { contactFirstName?: string | null; contactLastName?: string | null };
+export type LeadCreateExtras = {
+  contactFirstName?: string | null;
+  contactLastName?: string | null;
+  contactEmail?: string | null;
+  importBatch?: string | null;
+};
+
+/**
+ * `quiet`: no "Review new lead" task and no notification (bulk migrations).
+ * `trustedLink`: the caller resolved `linkCompanyId` itself (CLI), so it is not checked against
+ * the acting user's company visibility.
+ */
+export type CreateLeadOptions = { quiet?: boolean; trustedLink?: boolean };
+
+/** Company fields as derived from a lead's details (the lead form, a CSV row, resolve-company). */
+export function companyDataFromLead(
+  lead: Pick<LeadCreate, 'companyName' | 'website' | 'businessEmail' | 'country' | 'city'>, createdById: number,
+): Prisma.CompanyUncheckedCreateInput {
+  return {
+    name: lead.companyName,
+    nameNormalised: normaliseCompanyName(lead.companyName),
+    website: lead.website ?? null,
+    businessEmail: lead.businessEmail ?? null,
+    domain: checkDomain({ website: lead.website ?? undefined, businessEmail: lead.businessEmail ?? undefined }),
+    country: lead.country,
+    city: lead.city ?? null,
+    createdById,
+  };
+}
 
 /** Resolves the company for a new lead: explicit link, else an automatic duplicate hit, else a new one. */
 async function resolveCompany(
-  tx: Tx, input: LeadCreate & LeadCreateExtras, user: AuthUser,
+  tx: Tx, input: LeadCreate & LeadCreateExtras, user: AuthUser, opts: CreateLeadOptions,
 ): Promise<{ companyId: number | null; createdCompanyId: number | null; createdContactId: number | null }> {
   const linkId = input.linkCompanyId ?? input.companyId;
   const none = { createdCompanyId: null, createdContactId: null };
-  if (linkId !== undefined) return { companyId: (await assertCompanyVisible(tx, user, linkId)).id, ...none };
+  if (linkId !== undefined) {
+    const company = opts.trustedLink
+      ? await tx.company.findUniqueOrThrow({ where: { id: linkId }, select: { id: true } })
+      : await assertCompanyVisible(tx, user, linkId);
+    return { companyId: company.id, ...none };
+  }
 
   const matches = await findCompanyMatches(tx, {
     name: input.companyName, website: input.website ?? undefined, businessEmail: input.businessEmail ?? undefined,
@@ -182,27 +218,17 @@ async function resolveCompany(
   if (matches.auto) return { companyId: matches.auto.id, ...none };
   if (!input.createCompany) return { companyId: null, ...none };
 
-  const company = await tx.company.create({
-    data: {
-      name: input.companyName,
-      nameNormalised: normaliseCompanyName(input.companyName),
-      website: input.website ?? null,
-      businessEmail: input.businessEmail ?? null,
-      domain: checkDomain({ website: input.website ?? undefined, businessEmail: input.businessEmail ?? undefined }),
-      country: input.country,
-      city: input.city ?? null,
-      createdById: user.id,
-    },
-  });
+  const company = await tx.company.create({ data: companyDataFromLead(input, user.id) });
   const firstName = input.contactFirstName?.trim();
+  const contactEmail = input.contactEmail?.trim() || input.businessEmail;
   let createdContactId: number | null = null;
-  if (firstName && (input.businessEmail || input.phone)) {
+  if (firstName && (contactEmail || input.phone)) {
     ({ id: createdContactId } = await tx.contact.create({
       data: {
         companyId: company.id,
         firstName,
         lastName: input.contactLastName?.trim() ?? '',
-        businessEmail: input.businessEmail?.toLowerCase() ?? null,
+        businessEmail: contactEmail?.toLowerCase() ?? null,
         phone: input.phone ?? null,
         phoneNormalised: normalisePhone(input.phone) || null,
         isPrimary: true,
@@ -220,11 +246,14 @@ export type CreatedLead = { lead: Lead; createdCompanyId: number | null; created
  * Creates a lead: resolves its company (link → automatic match → new company with a primary
  * contact), picks the contact (given, else the company's primary), assigns it (given assignee,
  * else the allocation rule for its country), and writes the "Lead created" activity and the
- * follow-up task. Runs inside the caller's transaction.
+ * follow-up task. With `createCompany: false` and no link or automatic match the lead has no
+ * company (`companyId` null) until resolved. Runs inside the caller's transaction.
  */
-export async function createLeadWithCompany(tx: Tx, input: LeadCreate & LeadCreateExtras, user: AuthUser): Promise<CreatedLead> {
+export async function createLeadWithCompany(
+  tx: Tx, input: LeadCreate & LeadCreateExtras, user: AuthUser, opts: CreateLeadOptions = {},
+): Promise<CreatedLead> {
   await assertStatus(tx, input.status);
-  const { companyId, createdCompanyId, createdContactId } = await resolveCompany(tx, input, user);
+  const { companyId, createdCompanyId, createdContactId } = await resolveCompany(tx, input, user, opts);
 
   let contactId: number | null = null;
   if (input.contactId !== undefined) {
@@ -248,6 +277,7 @@ export async function createLeadWithCompany(tx: Tx, input: LeadCreate & LeadCrea
       city: input.city ?? null,
       leadSource: input.leadSource,
       sourceUrl: input.sourceUrl ?? null,
+      importBatch: input.importBatch ?? null,
       priority: input.priority,
       status: input.status,
       nextFollowUp: input.nextFollowUp ? dateOnly(input.nextFollowUp) : null,
@@ -260,13 +290,26 @@ export async function createLeadWithCompany(tx: Tx, input: LeadCreate & LeadCrea
 
   let current = lead;
   if (input.assignedToId != null) {
-    current = await recordAssignment(tx, current, input.assignedToId, { userId: user.id, isNew: true });
+    current = await recordAssignment(tx, current, input.assignedToId, { userId: user.id, isNew: true, quiet: opts.quiet });
   } else {
     const pick = await pickAllocation(tx, input.country);
     // A rule naming a deactivated user leaves the lead unassigned rather than failing the create.
     const active = pick && (await tx.user.count({ where: { id: pick.userId, isActive: true } })) > 0;
-    if (pick && active) current = await recordAssignment(tx, current, pick.userId, { userId: null, ruleId: pick.ruleId, isNew: true });
+    if (pick && active) current = await recordAssignment(tx, current, pick.userId, { userId: null, ruleId: pick.ruleId, isNew: true, quiet: opts.quiet });
   }
   await syncFollowUpTask(tx, current);
   return { lead: current, createdCompanyId, createdContactId };
+}
+
+/** Audits the lead created by `createLeadWithCompany` and the company / contact it created. */
+export async function auditCreatedLead(tx: Tx, userId: number, created: CreatedLead): Promise<void> {
+  if (created.createdCompanyId !== null) {
+    const company = await tx.company.findUniqueOrThrow({ where: { id: created.createdCompanyId } });
+    await audit(tx, { entityType: 'company', entityId: company.id, action: 'create', userId, after: company });
+  }
+  if (created.createdContactId !== null) {
+    const contact = await tx.contact.findUniqueOrThrow({ where: { id: created.createdContactId } });
+    await audit(tx, { entityType: 'contact', entityId: contact.id, action: 'create', userId, after: contact });
+  }
+  await audit(tx, { entityType: 'lead', entityId: created.lead.id, action: 'create', userId, after: created.lead });
 }
