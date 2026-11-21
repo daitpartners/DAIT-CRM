@@ -132,8 +132,7 @@ export const contactRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post('/contacts/check-duplicates', { preHandler: [requireUser] }, async (request) => {
-    const { mobile, ...body } = parseBody(ContactDuplicateCheck, request.body);
-    const input = body.phone?.trim() ? body : { ...body, phone: mobile };
+    const input = parseBody(ContactDuplicateCheck, request.body);
     const matches = await findContactMatches(prisma, input);
     const companyIds = [
       ...new Set([...(matches.auto ? [matches.auto.companyId] : []), ...matches.review.map((r) => r.candidate.companyId)]),

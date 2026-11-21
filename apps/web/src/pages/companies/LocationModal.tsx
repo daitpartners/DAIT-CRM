@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { Controller, useForm, type Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useQueryClient } from '@tanstack/react-query';
 import { LocationCreate, LocationUpdate, lookupLabel, type LookupGroup } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
 import { useSaveLocation, type LocationSummary } from '../../api/locations';
-import { useLookups } from '../../api/queries';
+import { keys, useLookups } from '../../api/queries';
 import { Combobox, type ComboOption } from '../../components/Combobox';
 import { FormField } from '../../components/FormField';
 import { Modal } from '../../components/Modal';
@@ -66,6 +67,7 @@ export function LocationModal({ companyId, location, onClose }: Props) {
   const lang = useLang();
   const toast = useToast();
   const { data: lookups } = useLookups();
+  const qc = useQueryClient();
   const save = useSaveLocation(companyId);
   const [formError, setFormError] = useState<string | null>(null);
   const editing = Boolean(location);
@@ -102,6 +104,8 @@ export function LocationModal({ companyId, location, onClose }: Props) {
         },
         onError: (err) => {
           const code = err instanceof ApiError ? err.code : 'unknown';
+          // Someone else saved or deleted it first: refetch so the list and a retry are current.
+          if (code === 'stale') void qc.invalidateQueries({ queryKey: keys.locations(companyId) });
           if (err instanceof ApiError && err.issues?.length) {
             for (const i of err.issues) {
               const field = String(i.path[0]) as Field;

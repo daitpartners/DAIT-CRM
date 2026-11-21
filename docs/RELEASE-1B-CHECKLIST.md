@@ -7,8 +7,8 @@ The live site starts with no sample companies, so the steps below have you creat
 ## Companies
 
 - [ ] In the sidebar, under Modules, click **Companies**. The list opens, empty if nothing has been added yet.
-- [ ] Click **Add company**. Enter a name, choose a country and add a website (for example `https://example-one.com`). Save. The company appears in the list with a number such as CO-0001.
-- [ ] Click **Add company** again and type the same company name. A "Possible duplicates" note appears under the form, naming the first company, and you can still save.
+- [ ] Click **Add company**. Enter a name, choose a country (India) and add a website (for example `https://example-one.com`). Save. The company appears in the list with a number such as CO-0001.
+- [ ] Click **Add company** again and type the same company name and choose the same country (India). A "Possible duplicates" note appears under the form, naming the first company, and you can still save.
 - [ ] Now also type the same website as the first company. A red note "This looks like CO-… …" appears and **Save** is greyed out. Change the website to something new; the note goes away and you can save.
 - [ ] Use the search box and the Status, Country and Industry filters. The list narrows, the filters stay after you refresh the page, and **Clear filters** brings everything back.
 - [ ] Tick two companies, choose **Set status…** and pick Inactive. Confirm. Both rows now read Inactive.

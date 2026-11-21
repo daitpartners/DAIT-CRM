@@ -148,6 +148,25 @@ describe('contacts API', () => {
     expect(viaMobile.review).toHaveLength(1);
   });
 
+  it('check-duplicates matches a mobile sent next to a different landline', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const meera = await makeContact({ mobile: '+91 98220 41178' });
+    const r = (await req('POST', '/api/contacts/check-duplicates', admin.cookie, { phone: '020 6710 9999', mobile: '98220 41178' })).json();
+    expect(r).toMatchObject({ auto: null, review: [{ candidate: { id: meera.id }, how: 'phone' }] });
+  });
+
+  // contacts_one_primary_per_company is a hand-written partial unique index
+  // (CREATE UNIQUE INDEX ... ON contacts (company_id) WHERE is_primary) in the 1B migration SQL.
+  // schema.prisma cannot express a partial index, so a future `prisma migrate dev` may generate a
+  // migration that drops it: never accept such a drop. This test fails if the index goes missing.
+  it('database rejects a second primary contact for the same company', async () => {
+    const co = await makeCompany();
+    await prisma.contact.create({ data: { companyId: co.id, firstName: 'A', lastName: 'One', isPrimary: true } });
+    await expect(
+      prisma.contact.create({ data: { companyId: co.id, firstName: 'B', lastName: 'Two', isPrimary: true } }),
+    ).rejects.toMatchObject({ code: 'P2002' });
+  });
+
   it('rejects a stale update', async () => {
     const admin = await as('ADMINISTRATOR');
     const contact = await makeContact();

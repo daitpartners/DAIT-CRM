@@ -24,7 +24,7 @@ export type ContactUpdate = z.infer<typeof ContactUpdate>;
 export const ContactDuplicateCheck = z.object({
   businessEmail: z.string().optional(),
   phone: z.string().optional(),
-  /** Checked as the phone key when `phone` is blank. */
+  /** Checked as a phone key alongside `phone`. */
   mobile: z.string().optional(),
   firstName: z.string().optional(),
   lastName: z.string().optional(),

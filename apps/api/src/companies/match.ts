@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import {
-  checkDomain, normaliseCompanyName, normalisePhone, rankCompanyMatches, rankContactMatches,
+  checkDomain, contactPhoneKeys, normaliseCompanyName, rankCompanyMatches, rankContactMatches,
   type CompanyMatches, type ContactDuplicateCheck, type ContactMatches, type DuplicateCheck,
 } from '@dait-crm/shared';
 
@@ -31,17 +31,17 @@ export async function findCompanyMatches(db: Db, input: DuplicateCheck): Promise
 }
 
 /**
- * Possible duplicates of a contact. One query over business email, phone/mobile key and
+ * Possible duplicates of a contact. One query over business email, phone and mobile keys and
  * first name [+ last name] within the company; each key is used only when it is non-empty.
  */
 export async function findContactMatches(db: Db, input: ContactDuplicateCheck): Promise<ContactMatches> {
   const email = trimmed(input.businessEmail);
-  const phone = normalisePhone(input.phone);
+  const phones = contactPhoneKeys(input);
   const firstName = trimmed(input.firstName);
   const lastName = trimmed(input.lastName);
   const or: Prisma.ContactWhereInput[] = [];
   if (email) or.push({ businessEmail: { equals: email, mode: 'insensitive' } });
-  if (phone) or.push({ phoneNormalised: phone }, { mobileNormalised: phone });
+  if (phones.length > 0) or.push({ phoneNormalised: { in: phones } }, { mobileNormalised: { in: phones } });
   if (firstName && input.companyId !== undefined) {
     or.push({
       companyId: input.companyId,

@@ -1,9 +1,10 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { safeUrl } from '@dait-crm/shared';
 import { ApiError } from '../../../api/client';
 import type { CompanyDetail } from '../../../api/companies';
 import { useDeleteLocation, useLocations, type LocationSummary } from '../../../api/locations';
-import { useLookupText } from '../../../api/queries';
+import { keys, useLookupText } from '../../../api/queries';
 import { useConfirm } from '../../../components/ConfirmDialog';
 import { Icons } from '../../../components/Icons';
 import { Table } from '../../../components/Table';
@@ -22,6 +23,7 @@ export function LocationsTab({ company, canManage }: Props) {
   const confirm = useConfirm();
   const toast = useToast();
   const { data: rows, isPending, error } = useLocations(company.id);
+  const qc = useQueryClient();
   const remove = useDeleteLocation(company.id);
   // undefined = closed; null = adding; a location = editing it.
   const [editing, setEditing] = useState<LocationSummary | null | undefined>(undefined);
@@ -36,7 +38,11 @@ export function LocationsTab({ company, canManage }: Props) {
     if (!ok) return;
     remove.mutate(l.id, {
       onSuccess: () => toast(t('Location deleted')),
-      onError: (err) => toast(errorText(t, err instanceof ApiError ? err.code : 'unknown'), 'warn'),
+      onError: (err) => {
+        toast(errorText(t, err instanceof ApiError ? err.code : 'unknown'), 'warn');
+        // It may already be gone (deleted elsewhere): refetch so the row disappears.
+        void qc.invalidateQueries({ queryKey: keys.locations(company.id) });
+      },
     });
   }
 

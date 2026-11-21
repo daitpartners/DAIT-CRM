@@ -230,6 +230,11 @@ export function CompanyModal({ company, onClose, section }: Props) {
     },
     onError: (err) => {
       const code = err instanceof ApiError ? err.code : 'unknown';
+      // Someone else saved first: refetch so a retry (after reopening) carries the fresh updatedAt.
+      if (code === 'stale') {
+        void qc.invalidateQueries({ queryKey: keys.companiesAll });
+        if (company) void qc.invalidateQueries({ queryKey: keys.company(company.id) });
+      }
       if (code === 'domain_taken') {
         setError('website', { type: 'server', message: errorText(t, code) });
         return;

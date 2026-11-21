@@ -1,4 +1,4 @@
-import { domainOf, isFreeMail, normaliseCompanyName, normalisePhone } from './normalise.js';
+import { domainOf, isFreeMail, isSharedHost, normaliseCompanyName, normalisePhone } from './normalise.js';
 import type { DuplicateCheck } from './schemas/company.js';
 import type { ContactDuplicateCheck } from './schemas/contact.js';
 
@@ -25,12 +25,15 @@ export type ContactMatches = {
 /** Lower-cased, trimmed text; '' for blank or missing (callers treat '' as no key). */
 const key = (s: string | null | undefined): string => (s ?? '').trim().toLowerCase();
 
-/** Domain key for a duplicate check: the website's domain, else the business email's unless it is free-mail. */
+/**
+ * Domain key for a duplicate check: the website's domain unless it is a shared host, else the
+ * business email's unless it is free-mail or a shared host.
+ */
 export function checkDomain(input: Pick<DuplicateCheck, 'website' | 'businessEmail'>): string | null {
   const fromWebsite = domainOf(input.website);
-  if (fromWebsite) return fromWebsite;
+  if (fromWebsite && !isSharedHost(fromWebsite)) return fromWebsite;
   const fromEmail = domainOf(input.businessEmail);
-  return fromEmail && !isFreeMail(fromEmail) ? fromEmail : null;
+  return fromEmail && !isFreeMail(fromEmail) && !isSharedHost(fromEmail) ? fromEmail : null;
 }
 
 /** Builds the result: first `auto` hit wins, review entries keep rule order and each id appears once. */
@@ -70,20 +73,25 @@ export function rankCompanyMatches(input: DuplicateCheck, candidates: CompanyCan
   );
 }
 
+/** Non-empty, distinct phone keys of a contact duplicate check (its phone and its mobile). */
+export function contactPhoneKeys(input: Pick<ContactDuplicateCheck, 'phone' | 'mobile'>): string[] {
+  return [...new Set([normalisePhone(input.phone), normalisePhone(input.mobile)].filter((p) => p !== ''))];
+}
+
 /**
- * Ranks possible duplicate contacts. `auto` only on an exact business email; phone (against
- * phone or mobile) and first name [+ last name] within the same company go to `review`.
+ * Ranks possible duplicate contacts. `auto` only on an exact business email; phone (either input
+ * phone or mobile against stored phone or mobile) and first name [+ last name] within the same company go to `review`.
  */
 export function rankContactMatches(input: ContactDuplicateCheck, candidates: ContactCandidate[]): ContactMatches {
   const email = key(input.businessEmail);
-  const phone = normalisePhone(input.phone);
+  const phones = contactPhoneKeys(input);
   const first = key(input.firstName);
   const last = key(input.lastName);
   return rank<ContactCandidate, ContactMatchHow>(
     candidates, input.excludeId,
     (c) => !!email && key(c.businessEmail) === email,
     [
-      ['phone', (c) => !!phone && (c.phoneNormalised === phone || c.mobileNormalised === phone)],
+      ['phone', (c) => phones.some((p) => c.phoneNormalised === p || c.mobileNormalised === p)],
       ['name_company', (c) => !!first && input.companyId !== undefined && c.companyId === input.companyId
         && key(c.firstName) === first && (!last || key(c.lastName) === last)],
     ],

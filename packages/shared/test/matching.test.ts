@@ -1,4 +1,4 @@
-import { rankCompanyMatches, rankContactMatches } from '../src/matching';
+import { checkDomain, rankCompanyMatches, rankContactMatches } from '../src/matching';
 
 const nw = { id: 1, number: 'CO-0001', name: 'Northwind Logistics', legalName: 'Northwind Logistics Private Limited', domain: 'northwindlogistics.in', country: 'India', city: 'Pune' };
 test('exact domain from website auto-matches', () => expect(rankCompanyMatches({ website: 'https://www.northwindlogistics.in/x' }, [nw]).auto?.id).toBe(1));
@@ -42,4 +42,25 @@ test('contact: name needs the same company, lastName optional, excludeId honoure
 test('contact: short phone is no key', () => {
   const p = { ...asha, phoneNormalised: null, mobileNormalised: null };
   expect(rankContactMatches({ phone: '6710' }, [p]).review).toEqual([]);
+});
+test('contact: a mobile matches even next to a different landline', () => {
+  expect(rankContactMatches({ phone: '020 1111 2222', mobile: '+91 98220 41178' }, [asha]).review).toEqual([{ candidate: asha, how: 'phone' }]);
+  expect(rankContactMatches({ phone: '020 6710 4455', mobile: '' }, [asha]).review).toHaveLength(1);
+  expect(rankContactMatches({ phone: '020 1111 2222', mobile: '98000 00000' }, [asha]).review).toEqual([]);
+});
+
+test.each([
+  [{ businessEmail: 'owner@yahoo.co.in' }, null],
+  [{ businessEmail: 'owner@mail.yahoo.co.in' }, null],
+  [{ businessEmail: 'owner@rediffmail.com' }, null],
+  [{ businessEmail: 'acme@facebook.com' }, null],
+  [{ website: 'https://www.facebook.com/acme' }, null],
+  [{ website: 'acme.wixsite.com/home' }, null],
+  [{ website: 'https://www.instagram.com/acme', businessEmail: 'sales@acme.co.in' }, 'acme.co.in'],
+  [{ website: 'https://www.acme.co.in' }, 'acme.co.in'],
+  [{ businessEmail: 'sales@acme.co.in' }, 'acme.co.in'],
+])('checkDomain(%o) = %s', (input, out) => expect(checkDomain(input)).toBe(out));
+test('shared-host website does not auto-match a company stored with that host', () => {
+  const fb = { ...nw, id: 4, domain: 'facebook.com' };
+  expect(rankCompanyMatches({ website: 'https://facebook.com/other' }, [fb]).auto).toBeNull();
 });
