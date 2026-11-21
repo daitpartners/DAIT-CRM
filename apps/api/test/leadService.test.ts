@@ -183,12 +183,15 @@ describe('recordAssignment', () => {
 describe('createLeadWithCompany', () => {
   const input = (over: Record<string, unknown> = {}) =>
     LeadCreate.parse({ companyName: 'Acme Widgets', country: 'United Kingdom', leadSource: 'Manual Entry', ...over });
+  const create = (fn: (t: Prisma.TransactionClient) => ReturnType<typeof createLeadWithCompany>) => tx(fn).then((r) => r.lead);
 
   it('createLeadWithCompany links on domain match', async () => {
     const admin = await makeUser({ role: 'ADMINISTRATOR' });
     const company = await makeCompany({ name: 'Acme Ltd', website: 'https://acme.co.uk' });
-    const lead = await tx((t) =>
+    const created = await tx((t) =>
       createLeadWithCompany(t, input({ website: 'https://www.acme.co.uk/contact', assignedToId: admin.id }), authUser(admin)));
+    expect(created).toMatchObject({ createdCompanyId: null, createdContactId: null });
+    const lead = created.lead;
     expect(lead.companyId).toBe(company.id);
     expect(lead.number).toMatch(/^LD-\d+$/);
     expect(lead).toMatchObject({ enrichmentStatus: 'Pending', createdById: admin.id, assignedToId: admin.id, status: 'New' });
@@ -204,13 +207,16 @@ describe('createLeadWithCompany', () => {
 
   it('creates company and primary contact when nothing matches', async () => {
     const rep = await makeUser();
-    const lead = await tx((t) =>
+    const created = await tx((t) =>
       createLeadWithCompany(
         t,
         { ...input({ businessEmail: 'Jane@NewCo.example', phone: '+44 20 7946 0000', city: 'London', nextFollowUp: '2026-12-03', assignedToId: rep.id }),
           contactFirstName: 'Jane', contactLastName: 'Doe' },
         authUser(rep),
       ));
+    const lead = created.lead;
+    expect(created.createdCompanyId).toBe(lead.companyId);
+    expect(created.createdContactId).toBe(lead.contactId);
     const company = await prisma.company.findUniqueOrThrow({ where: { id: lead.companyId! } });
     expect(company).toMatchObject({
       name: 'Acme Widgets', nameNormalised: 'acme widgets', domain: 'newco.example', country: 'United Kingdom',
@@ -222,7 +228,7 @@ describe('createLeadWithCompany', () => {
     const fu = await prisma.task.findFirstOrThrow({ where: { leadId: lead.id, origin: 'follow_up' } });
     expect(ymd(fu.dueDate)).toBe('2026-12-03');
     // No name → no contact, but the company is still created.
-    const other = await tx((t) =>
+    const other = await create((t) =>
       createLeadWithCompany(t, input({ companyName: 'Nameless', country: 'India', businessEmail: 'info@nameless.example' }), authUser(rep)));
     expect(other.companyId).not.toBeNull();
     expect(other.contactId).toBeNull();
@@ -232,13 +238,13 @@ describe('createLeadWithCompany', () => {
   it('uses allocation rule when unassigned', async () => {
     const [admin, rep] = [await makeUser({ role: 'ADMINISTRATOR' }), await makeUser()];
     const rule = await prisma.allocationRule.create({ data: { name: 'India', matchCountries: ['India'], assignTo: rep.id, priority: 1 } });
-    const lead = await tx((t) => createLeadWithCompany(t, input({ country: 'India' }), authUser(admin)));
+    const lead = await create((t) => createLeadWithCompany(t, input({ country: 'India' }), authUser(admin)));
     expect(lead.assignedToId).toBe(rep.id);
     expect(await prisma.leadAssignment.findFirstOrThrow({ where: { leadId: lead.id } }))
       .toMatchObject({ fromUserId: null, toUserId: rep.id, byUserId: null, ruleId: rule.id });
     expect(await prisma.notification.count({ where: { userId: rep.id } })).toBe(1);
     // No rule for the country → stays unassigned, no assignment row.
-    const none = await tx((t) => createLeadWithCompany(t, input({ companyName: 'Elsewhere', country: 'France' }), authUser(admin)));
+    const none = await create((t) => createLeadWithCompany(t, input({ companyName: 'Elsewhere', country: 'France' }), authUser(admin)));
     expect(none.assignedToId).toBeNull();
     expect(await prisma.leadAssignment.count({ where: { leadId: none.id } })).toBe(0);
   });

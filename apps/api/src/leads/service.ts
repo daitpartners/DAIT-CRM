@@ -166,16 +166,17 @@ export type LeadCreateExtras = { contactFirstName?: string | null; contactLastNa
 /** Resolves the company for a new lead: explicit link, else an automatic duplicate hit, else a new one. */
 async function resolveCompany(
   tx: Tx, input: LeadCreate & LeadCreateExtras, user: AuthUser,
-): Promise<{ companyId: number | null; created: boolean }> {
+): Promise<{ companyId: number | null; createdCompanyId: number | null; createdContactId: number | null }> {
   const linkId = input.linkCompanyId ?? input.companyId;
-  if (linkId !== undefined) return { companyId: (await assertCompanyVisible(tx, user, linkId)).id, created: false };
+  const none = { createdCompanyId: null, createdContactId: null };
+  if (linkId !== undefined) return { companyId: (await assertCompanyVisible(tx, user, linkId)).id, ...none };
 
   const matches = await findCompanyMatches(tx, {
     name: input.companyName, website: input.website ?? undefined, businessEmail: input.businessEmail ?? undefined,
     country: input.country,
   });
-  if (matches.auto) return { companyId: matches.auto.id, created: false };
-  if (!input.createCompany) return { companyId: null, created: false };
+  if (matches.auto) return { companyId: matches.auto.id, ...none };
+  if (!input.createCompany) return { companyId: null, ...none };
 
   const company = await tx.company.create({
     data: {
@@ -190,8 +191,9 @@ async function resolveCompany(
     },
   });
   const firstName = input.contactFirstName?.trim();
+  let createdContactId: number | null = null;
   if (firstName && (input.businessEmail || input.phone)) {
-    await tx.contact.create({
+    ({ id: createdContactId } = await tx.contact.create({
       data: {
         companyId: company.id,
         firstName,
@@ -201,10 +203,14 @@ async function resolveCompany(
         phoneNormalised: normalisePhone(input.phone) || null,
         isPrimary: true,
       },
-    });
+      select: { id: true },
+    }));
   }
-  return { companyId: company.id, created: true };
+  return { companyId: company.id, createdCompanyId: company.id, createdContactId };
 }
+
+/** The new lead plus the company / contact rows this call created (null when it linked existing ones). */
+export type CreatedLead = { lead: Lead; createdCompanyId: number | null; createdContactId: number | null };
 
 /**
  * Creates a lead: resolves its company (link → automatic match → new company with a primary
@@ -212,9 +218,9 @@ async function resolveCompany(
  * else the allocation rule for its country), and writes the "Lead created" activity and the
  * follow-up task. Runs inside the caller's transaction.
  */
-export async function createLeadWithCompany(tx: Tx, input: LeadCreate & LeadCreateExtras, user: AuthUser): Promise<Lead> {
+export async function createLeadWithCompany(tx: Tx, input: LeadCreate & LeadCreateExtras, user: AuthUser): Promise<CreatedLead> {
   await assertStatus(tx, input.status);
-  const { companyId } = await resolveCompany(tx, input, user);
+  const { companyId, createdCompanyId, createdContactId } = await resolveCompany(tx, input, user);
 
   let contactId: number | null = null;
   if (input.contactId !== undefined) {
@@ -258,5 +264,5 @@ export async function createLeadWithCompany(tx: Tx, input: LeadCreate & LeadCrea
     if (pick && active) current = await recordAssignment(tx, current, pick.userId, { userId: null, ruleId: pick.ruleId, isNew: true });
   }
   await syncFollowUpTask(tx, current);
-  return current;
+  return { lead: current, createdCompanyId, createdContactId };
 }

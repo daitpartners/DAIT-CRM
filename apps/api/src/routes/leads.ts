@@ -1,8 +1,8 @@
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
-import type { Lead, Prisma } from '@prisma/client';
+import { Prisma, type Lead } from '@prisma/client';
 import {
   CLOSED_STATUSES, DuplicateCheck, LeadBulk, LeadCreate, LeadListQuery, LeadStatusChange, LeadUpdate, LogCall,
-  SwitchContact, can, checkDomain, isClosedStatus, pageArgs, type CompanyCandidate,
+  SwitchContact, UpdatedAtOnly, can, checkDomain, isClosedStatus, pageArgs, type CompanyCandidate,
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { audit } from '../audit.js';
@@ -144,12 +144,12 @@ function filterWhere(query: LeadListQuery): Prisma.LeadWhereInput[] {
   return and;
 }
 
-/** Open follow-up tasks on live leads, mine (or everyone's with view_all_leads). */
+/** Open follow-up tasks on visible, live, open leads: mine (or everyone's with view_all_leads). */
 function followUpTasks(user: AuthUser, dueDate: Prisma.DateTimeFilter): Prisma.TaskWhereInput {
   return {
     origin: 'follow_up', isDone: false, dueDate,
     ...(can(user.role, 'view_all_leads') ? {} : { assignedToId: user.id }),
-    lead: { archivedAt: null, status: { notIn: [...CLOSED_STATUSES] } },
+    lead: { AND: [leadWhere(user), { status: { notIn: [...CLOSED_STATUSES] } }] },
   };
 }
 
@@ -196,18 +196,14 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
       return await guard(reply, async () => {
         const id = await prisma.$transaction(async (tx) => {
           if (body.assignedToId != null) await assertAssignable(tx, user, body.assignedToId);
-          // Ids are increasing: a company above this mark created by this user was created by this call.
-          const mark = (await tx.company.findFirst({ orderBy: { id: 'desc' }, select: { id: true } }))?.id ?? 0;
-          const lead = await createLeadWithCompany(tx, body, user);
-          if (lead.companyId !== null && lead.companyId > mark) {
-            const company = await tx.company.findUnique({ where: { id: lead.companyId } });
-            if (company && company.createdById === user.id) {
-              await audit(tx, { entityType: 'company', entityId: company.id, action: 'create', userId: user.id, after: company });
-              const contacts = await tx.contact.findMany({ where: { companyId: company.id } });
-              for (const c of contacts) {
-                await audit(tx, { entityType: 'contact', entityId: c.id, action: 'create', userId: user.id, after: c });
-              }
-            }
+          const { lead, createdCompanyId, createdContactId } = await createLeadWithCompany(tx, body, user);
+          if (createdCompanyId !== null) {
+            const company = await tx.company.findUniqueOrThrow({ where: { id: createdCompanyId } });
+            await audit(tx, { entityType: 'company', entityId: company.id, action: 'create', userId: user.id, after: company });
+          }
+          if (createdContactId !== null) {
+            const contact = await tx.contact.findUniqueOrThrow({ where: { id: createdContactId } });
+            await audit(tx, { entityType: 'contact', entityId: contact.id, action: 'create', userId: user.id, after: contact });
           }
           await audit(tx, { entityType: 'lead', entityId: lead.id, action: 'create', userId: user.id, after: lead });
           return lead.id;
@@ -288,6 +284,8 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
     return guard(reply, async () => {
       await prisma.$transaction(async (tx) => {
         const { before } = await lockFresh(tx, user, id, updatedAt);
+        // A closed lead keeps no follow-up (as Log call): refuse setting one.
+        if (nextFollowUp && isClosedStatus(before.status)) throw new RuleError('lead_closed');
         const data: Prisma.LeadUncheckedUpdateInput = { ...body };
         if (nextFollowUp !== undefined) data.nextFollowUp = nextFollowUp ? dateOnly(nextFollowUp) : null;
         const after = await tx.lead.update({ where: { id }, data });
@@ -382,7 +380,7 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
 
   for (const action of ['archive', 'unarchive'] as const) {
     app.post<{ Params: { id: string } }>(`/leads/:id/${action}`, { preHandler: [requireRight('manage_leads')] }, async (request, reply) => {
-      const body = parseBody(SwitchContact.pick({ updatedAt: true }), request.body);
+      const body = parseBody(UpdatedAtOnly, request.body);
       const user = request.user!;
       const id = leadId(request.params.id);
       return guard(reply, async () => {
@@ -405,11 +403,21 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
 /* ------------------------------------------------------------------ bulk */
 
 /**
+ * Locks the lead rows among `ids` for the rest of the transaction (`FOR UPDATE`, id order so
+ * concurrent bulk calls cannot deadlock). Read after this, the rows cannot change under us.
+ */
+async function lockLeads(tx: Tx, ids: number[]): Promise<void> {
+  const sorted = [...new Set(ids)].sort((a, b) => a - b);
+  await tx.$queryRaw`SELECT id FROM leads WHERE id IN (${Prisma.join(sorted)}) ORDER BY id FOR UPDATE`;
+}
+
+/**
  * Assigns the visible, live leads among `ids` to `toUserId` (null = unassign). A note is required
  * when any of them is currently with someone else. Returns how many changed hands.
  */
 async function bulkAssign(tx: Tx, user: AuthUser, ids: number[], toUserId: number | null, note?: string): Promise<number> {
   await assertAssignable(tx, user, toUserId);
+  await lockLeads(tx, ids);
   const rows = await tx.lead.findMany({ where: { AND: [{ id: { in: ids } }, leadWhere(user)] }, orderBy: { id: 'asc' } });
   const moving = rows.filter((r) => r.assignedToId !== toUserId);
   if (!note?.trim() && moving.some((r) => r.assignedToId !== null)) throw new RuleError('transfer_note_required');
@@ -425,6 +433,7 @@ async function bulkAssign(tx: Tx, user: AuthUser, ids: number[], toUserId: numbe
 
 /** Archives (or restores) the visible leads among `ids`; returns how many changed. */
 async function bulkArchive(tx: Tx, user: AuthUser, ids: number[], archive: boolean): Promise<number> {
+  await lockLeads(tx, ids);
   const rows = await tx.lead.findMany({
     where: { AND: [{ id: { in: ids } }, leadWhere(user, { includeArchived: true }), { archivedAt: archive ? null : { not: null } }] },
     select: { id: true, archivedAt: true },

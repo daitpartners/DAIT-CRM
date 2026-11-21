@@ -142,6 +142,8 @@ describe('leads API', () => {
 
     // A rep sees only own + unassigned in tiles too, and may not ask for archived leads.
     const rep = await as('SALES_REPRESENTATIVE');
+    // A stray follow-up task of the rep's on a lead they cannot see is not counted.
+    await followUp(due.id, rep.user.id, today);
     const repBody = (await req('GET', '/api/leads', rep.cookie)).json();
     expect(repBody.counts).toEqual({ all: 1, leads: 1, prospects: 0, mine: 0, overdue: 0, unassigned: 1 });
     expect(repBody.tiles).toEqual({ newThisWeek: 1, newThisWeekFromWebsite: 1, followUpsDueToday: 0, overdue: 0, unassigned: 1 });
@@ -273,6 +275,47 @@ describe('leads API', () => {
     expect((await reload(free.id)).archivedAt).not.toBeNull();
     const unarchive = await req('POST', '/api/leads/bulk', mgr.cookie, { ids, action: 'unarchive' });
     expect(unarchive.json()).toEqual({ updated: 2 });
+  });
+
+  it('refuses a follow-up on a closed lead', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const lead = await makeLead({ assignedToId: rep.user.id, status: 'Won' });
+    const tomorrow = shift(todayIn(rep.user.timezone), 1);
+    const res = await req('PATCH', `/api/leads/${lead.id}`, rep.cookie, { nextFollowUp: tomorrow, updatedAt: stamp(lead) });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'lead_closed' });
+    expect(await prisma.task.count({ where: { leadId: lead.id } })).toBe(0);
+    const clear = await req('PATCH', `/api/leads/${lead.id}`, rep.cookie, { nextFollowUp: null, notes: 'done', updatedAt: stamp(lead) });
+    expect(clear.statusCode).toBe(200);
+  });
+
+  it('bulk assign locks rows', async () => {
+    const mgr = await as('MANAGER');
+    const [repA, repB] = [await makeUser(), await makeUser()];
+    const lead = await makeLead();
+    // A concurrent transaction holds the row and assigns it to repA while the bulk call is waiting.
+    let locked!: () => void;
+    const isLocked = new Promise<void>((resolve) => { locked = resolve; });
+    const racer = prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM leads WHERE id = ${lead.id} FOR UPDATE`;
+      locked();
+      await new Promise((r) => setTimeout(r, 200));
+      await tx.lead.update({ where: { id: lead.id }, data: { assignedToId: repA.id } });
+    });
+    await isLocked;
+    const bulk = req('POST', '/api/leads/bulk', mgr.cookie, { ids: [lead.id], action: 'assign', toUserId: repB.id });
+    const [res] = await Promise.all([bulk, racer]);
+    // The bulk call saw repA's assignment after the lock, so this is now a transfer needing a note.
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'transfer_note_required' });
+    expect(await prisma.leadAssignment.count({ where: { leadId: lead.id } })).toBe(0);
+
+    const ok = await req('POST', '/api/leads/bulk', mgr.cookie, { ids: [lead.id, lead.id], action: 'assign', toUserId: repB.id, note: 'Rebalance' });
+    expect(ok.json()).toEqual({ updated: 1 });
+    expect(await prisma.leadAssignment.findFirstOrThrow({ where: { leadId: lead.id } }))
+      .toMatchObject({ fromUserId: repA.id, toUserId: repB.id, note: 'Rebalance' });
+    const archive = await req('POST', '/api/leads/bulk', mgr.cookie, { ids: [lead.id], action: 'archive' });
+    expect(archive.json()).toEqual({ updated: 1 });
   });
 
   it('rejects a stale update', async () => {

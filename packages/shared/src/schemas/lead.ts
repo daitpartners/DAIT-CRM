@@ -102,6 +102,10 @@ export const LeadBulk = z.object({
 });
 export type LeadBulk = z.infer<typeof LeadBulk>;
 
+/** Body of archive / unarchive: only the optimistic-lock stamp. */
+export const UpdatedAtOnly = z.object({ updatedAt });
+export type UpdatedAtOnly = z.infer<typeof UpdatedAtOnly>;
+
 export const SwitchContact = z.object({
   contactId: z.number().int().positive().nullable(),
   updatedAt,
