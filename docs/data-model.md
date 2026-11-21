@@ -65,6 +65,12 @@ Every FK gets an index. `created_at`, `updated_at`, `created_by`, `updated_by` e
 | linkedin_url | varchar(255) | |
 | contact_type | enum Decision Maker / Influencer / Other | |
 | is_primary | bool | one per company |
+| is_active | bool | default true (release 1C) |
+| headline, location | varchar(200) | profile header (prototype lead page) |
+| about | text | |
+| experience | json array | `[ { title, company, from, to, description } ]` |
+| education | json array | `[ { school, degree, from, to } ]` |
+| skills, languages | json array of strings | |
 
 ### company_locations
 | Column | Type | Notes |

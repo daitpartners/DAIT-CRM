@@ -167,6 +167,15 @@ to review).
 short lifetime, optional Cloudflare Turnstile (key in env). It is the only unauthenticated write. It returns within one
 second; matching and allocation run synchronously as the spec requires, enrichment is queued.
 
+**Screen layout rule (added 21 Nov 2026, Deepak: "we need to match this prototype for all the pages"):** every
+screen reproduces the layout, sections, section order and visual structure of the corresponding prototype view
+(`prototype/js/views-*.js`, rendered from `prototype/index.html`), not only its stylesheet. Panels whose feature ships in
+a later release are still rendered in their prototype position as muted placeholder cards ("Available in release N")
+so the team learns one layout. Where the prototype shows contact profile data the data model lacks (headline, about,
+experience, education, skills, languages), those fields are added to `contacts` and filled by hand now, by AI later.
+The written spec (`docs/DAIT-CRM-Specification-v2.md`) and data model are updated alongside. Behaviour rules (status
+effects, visibility, concurrency) stay as built; this rule governs presentation only.
+
 ## 6. Pending decisions from Deepak
 
 The development plan (section 8) lists five decisions DAIT Partners put on hold on 20 Nov 2026. They are still open.
