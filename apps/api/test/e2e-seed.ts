@@ -11,12 +11,14 @@ execSync('npx prisma migrate deploy', { cwd: repoRoot, stdio: 'inherit', env: pr
 const { prisma } = await import('../src/db');
 const { resetDb } = await import('./helpers');
 const { seedLookups, seedSampleUsers } = await import('../src/seed/lookups');
+const { seedSampleCompanies } = await import('../src/seed/companies');
 const { encrypt } = await import('../src/crypto/tokens');
 
 try {
   await resetDb();
   await seedLookups(prisma);
   await seedSampleUsers(prisma);
+  await seedSampleCompanies(prisma);
   const maya = await prisma.user.findUniqueOrThrow({ where: { email: 'maya.pillai@daitpartners.com' } });
   await prisma.emailAccount.create({
     data: {
