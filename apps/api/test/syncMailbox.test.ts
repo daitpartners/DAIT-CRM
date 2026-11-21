@@ -235,6 +235,15 @@ describe('mail sync scheduling (2B-2)', () => {
     expect(jobs[1]!.runAt.getTime()).toBeLessThanOrEqual(Date.now());
   });
 
+  test('after a failed run the next one waits 5 minutes, not one', async () => {
+    const { account } = await mailbox({ lastSyncAt: new Date(Date.now() - 3600_000) });
+    const failedAt = new Date(Date.now() - 60_000);
+    await prisma.job.create({ data: { type: 'sync_mailbox', payload: { accountId: account.id }, status: 'failed', runAt: failedAt, updatedAt: failedAt } });
+    await scheduleMailSync(prisma);
+    const next = await prisma.job.findFirstOrThrow({ where: { type: 'sync_mailbox', status: 'queued' } });
+    expect(Math.abs(next.runAt.getTime() - (failedAt.getTime() + 5 * 60_000))).toBeLessThan(1000);
+  });
+
   test('requestSync brings a queued run forward, or queues one now', async () => {
     const { account } = await mailbox({ lastSyncAt: new Date() });
     await scheduleMailSync(prisma);

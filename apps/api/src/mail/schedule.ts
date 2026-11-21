@@ -30,10 +30,21 @@ export async function scheduleMailSync(db: Db = prisma, now = new Date()): Promi
     orderBy: { id: 'asc' },
   });
   const pending = await pendingAccountIds(db);
+  // A run that failed in the last 5 minutes counts as the last run, so a failing mailbox is not retried every minute.
+  const failed = await db.job.findMany({
+    where: { type: 'sync_mailbox', status: 'failed', updatedAt: { gt: new Date(now.getTime() - SYNC_EVERY_MS) } },
+    select: { payload: true, updatedAt: true },
+  });
+  const lastFailure = new Map<number, number>();
+  for (const j of failed) {
+    const id = Number((j.payload as { accountId?: unknown }).accountId);
+    lastFailure.set(id, Math.max(lastFailure.get(id) ?? 0, j.updatedAt.getTime()));
+  }
   let queued = 0;
   for (const a of accounts) {
     if (pending.has(a.id)) continue;
-    const due = a.lastSyncAt ? new Date(Math.max(now.getTime(), a.lastSyncAt.getTime() + SYNC_EVERY_MS)) : now;
+    const last = Math.max(a.lastSyncAt?.getTime() ?? 0, lastFailure.get(a.id) ?? 0);
+    const due = last ? new Date(Math.max(now.getTime(), last + SYNC_EVERY_MS)) : now;
     await enqueue(db, 'sync_mailbox', { accountId: a.id }, { runAt: due, maxAttempts: 1 });
     queued += 1;
   }
