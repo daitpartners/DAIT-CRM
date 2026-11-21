@@ -185,3 +185,8 @@ pm2 stop crm-live crm-live-worker
 pg_restore -Fc --clean --if-exists --no-owner -h localhost -U <db-user> -d dait_crm ~/backups/dait_crm-<stamp>.dump
 pm2 start crm-live crm-live-worker
 ```
+
+## One-time steps after a release
+
+- **Release 2C (Mailer):** fill empty company time zones from their addresses (only companies whose address resolves to one zone; safe to re-run):
+  `cd ~/live/current/apps/api && node --env-file=$HOME/live/shared/.env dist/cli/fill-company-timezones.js`

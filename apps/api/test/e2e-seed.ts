@@ -51,6 +51,8 @@ try {
   });
   await seedLeads(maya.id);
   await seedMail(neha.id);
+  // Release 2C: a template for the Mailer spec.
+  await prisma.emailTemplate.create({ data: { name: 'Intro EN', language: 'en', subject: 'Hello {first_name}', body: 'Hi {first_name},\n\nA quick intro from DAIT Partners.\n\n{me}', sourceType: 'manual' } });
   console.log('e2e seed complete');
 } finally {
   await prisma.$disconnect();

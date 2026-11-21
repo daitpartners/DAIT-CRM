@@ -143,6 +143,16 @@ Prototype `#/settings` (cards "Email & calendar connections" and "Email template
 - [ ] **Archive** moves it to Archive here and in Outlook. Drafts are view-only. Show mail for Client / Lead, search and the smart views (Unlinked, Awaiting reply, My leads) filter the list.
 - [ ] Sign in as a colleague (administrator too): none of your mail is on their Email screen or their lead Emails tab.
 
+## Mailer (release 2C)
+
+- [ ] Leads list → tick a few leads → **Send via mailer** (greyed with the reason when your mailbox is not connected).
+- [ ] Step 1 shows a preview for the first lead; step 2 adds Cc / Bcc (quick "+ name" buttons); step 3 offers Send now / Start at, the delay, and "Only send in the client's working hours".
+- [ ] Step 4 lists every lead with its **local time** (hover: from the company / address / country) and why any are skipped; the lawful basis is required; **Queue n emails** opens the campaign page.
+- [ ] The campaign sends one email every n minutes from your mailbox (in Outlook Sent Items, Bcc copies arrive); a lead outside their working hours waits ("Waiting for the client's working hours"); New / Not Contacted leads move to Contacted; the lead's history says "Email sent" (subject only for you).
+- [ ] Pause / Resume / Start now / Cancel remaining (with confirm); the Mailer page lists your campaigns with progress and replies; Deepak and Carlos also see everyone's, without the buttons.
+- [ ] Edit profile on a lead → **Do not email** → the badge shows and the mailer skips the lead.
+- [ ] Companies: the Time zone field is filled from the address for most companies (one-time fill); correct it where wrong and the mailer uses it.
+
 ## Spanish and French labels
 
 - [ ] In Settings, Preferences, switch to Español and save. Walk the Dashboard, Leads, a lead page and Settings: no English words left on buttons, tabs or headings. Repeat with Français, then switch back to English.
@@ -165,6 +175,7 @@ These differ from the prototype on purpose:
 - **Contacts in the sidebar.** The sidebar has a Contacts entry below Companies; the prototype has no Contacts page, so no entry.
 - **Tasks show the first 100 of each group.** Overdue, Due today and Upcoming each list at most 100 tasks; a longer group ends with "Showing the first n of total." The prototype lists everything.
 - **New lead number on save.** The New lead page says "Lead ID will be generated on save" without predicting the number, and the AI enrichment step reads "Available in release 4". Edit lead stays a dialog on the lead page.
+- **Mailer working hours are the client's** (owner, 22 Nov 2026), Monday–Friday 09:00–18:00 in the recipient's time zone, shown per lead; the prototype uses fixed office hours. The unsubscribe line follows the template's language (English / Español / Français). At most 200 mailer emails per mailbox per day.
 - **Email screen extras (release 2B-2).** The reader has an **Archive** button and lists attachment names; the Project filter, Compose's Project field and "Create meeting" are greyed until release 3; drafts are view-only; a message is marked read when you open it, not when it is shown first on arrival.
 - **AI research queue tile shows "—"** with "Available in release 4" until AI research exists; the prototype shows a count of queued jobs.
 
