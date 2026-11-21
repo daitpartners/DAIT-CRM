@@ -510,6 +510,7 @@
   "This lead is archived. Restore it first.": "Ce lead est archivé. Restaurez-le d'abord.",
   "This lead is closed": "Ce lead est clôturé",
   "This lead is closed. Choose an open status above to reopen it.": "Ce lead est clôturé. Choisissez un statut ouvert ci-dessus pour le rouvrir.",
+  "This lead was changed by someone else. The form now shows the latest values; check them and save again.": "Quelqu'un d'autre a modifié ce lead. Le formulaire affiche maintenant les dernières valeurs ; vérifiez-les et enregistrez à nouveau.",
   "This lead was imported without a company because it may match one that already exists. Link it, or create a new company from the lead.": "Ce lead a été importé sans entreprise car il pourrait correspondre à une entreprise existante. Liez-le, ou créez une nouvelle entreprise à partir du lead.",
   "This looks like {company}.": "Il semble s’agir de {company}.",
   "This module is not available yet.": "Ce module n'est pas encore disponible.",

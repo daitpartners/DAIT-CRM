@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm, useWatch, type Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useQueryClient } from '@tanstack/react-query';
 import { LEAD_TYPES, LeadCreate, LeadUpdate, PRIORITIES, lookupLabel, type LeadType, type Priority } from '@dait-crm/shared';
-import { ApiError } from '../../api/client';
+import { ApiError, api } from '../../api/client';
 import { useDuplicateCheck, type DuplicateCandidate, type DuplicateResult } from '../../api/companies';
 import { contactName, useContacts } from '../../api/contacts';
-import { useSaveLead, type LeadDetail } from '../../api/leads';
-import { useLookups, useUsers } from '../../api/queries';
+import { useSaveLead, type LeadDetail, type LeadFull } from '../../api/leads';
+import { keys, useLookups, useUsers } from '../../api/queries';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Combobox, type ComboOption } from '../../components/Combobox';
 import { CompanyPicker } from '../../components/CompanyPicker';
@@ -81,6 +82,29 @@ function fieldMessage(t: TFn, field: Field): string {
 
 const text = (v: string | null | undefined) => v ?? '';
 
+/** The form's starting values: the lead being edited (with its `updatedAt`), or a new lead (optionally on `company`). */
+function formValues(lead: LeadDetail | undefined, company: Props['company'], defaultSource: string): Values {
+  return {
+    leadType: lead?.leadType ?? 'Lead',
+    companyName: lead ? lead.companyName : (company?.name ?? ''),
+    website: text(lead?.website),
+    businessEmail: text(lead?.businessEmail),
+    phone: text(lead?.phone),
+    country: lead ? lead.country : (company?.country ?? ''),
+    city: text(lead?.city),
+    leadSource: lead?.leadSource ?? defaultSource,
+    sourceUrl: text(lead?.sourceUrl),
+    priority: lead?.priority ?? 'Medium',
+    nextFollowUp: text(lead?.nextFollowUp),
+    notes: text(lead?.notes),
+    status: lead?.status ?? 'New',
+    linkCompanyId: company?.id,
+    contactId: '',
+    assignedToId: '',
+    ...(lead ? { updatedAt: lead.updatedAt } : {}),
+  };
+}
+
 /** Create (no `lead`) or edit a lead (spec §4.2), validated with the shared LeadCreate / LeadUpdate schemas. */
 export function LeadModal({ lead, company, onClose }: Props) {
   const t = useT();
@@ -90,6 +114,7 @@ export function LeadModal({ lead, company, onClose }: Props) {
   const { data: lookups } = useLookups();
   const { data: users } = useUsers();
   const save = useSaveLead();
+  const qc = useQueryClient();
   const [formError, setFormError] = useState<string | null>(null);
   // The linked company's label, for a link made from the duplicate hint (the picker's search may not return it).
   const [linked, setLinked] = useState<ComboOption | null>(company ? { value: String(company.id), label: company.name } : null);
@@ -114,27 +139,9 @@ export function LeadModal({ lead, company, onClose }: Props) {
     };
   }, [editing]);
 
-  const { register, handleSubmit, control, setError, setValue, getValues, formState } = useForm<Values>({
+  const { register, handleSubmit, control, setError, setValue, getValues, reset, formState } = useForm<Values>({
     resolver,
-    defaultValues: {
-      leadType: lead?.leadType ?? 'Lead',
-      companyName: lead ? lead.companyName : (company?.name ?? ''),
-      website: text(lead?.website),
-      businessEmail: text(lead?.businessEmail),
-      phone: text(lead?.phone),
-      country: lead ? lead.country : (company?.country ?? ''),
-      city: text(lead?.city),
-      leadSource: lead?.leadSource ?? defaultSource,
-      sourceUrl: text(lead?.sourceUrl),
-      priority: lead?.priority ?? 'Medium',
-      nextFollowUp: text(lead?.nextFollowUp),
-      notes: text(lead?.notes),
-      status: lead?.status ?? 'New',
-      linkCompanyId: company?.id,
-      contactId: '',
-      assignedToId: '',
-      ...(lead ? { updatedAt: lead.updatedAt } : {}),
-    },
+    defaultValues: formValues(lead, company, defaultSource),
   });
   const { errors } = formState;
 
@@ -161,8 +168,8 @@ export function LeadModal({ lead, company, onClose }: Props) {
 
   function submit(v: Values) {
     save.mutate(
-      // Editing: the lead prop is refetched after a stale refusal, so a retry carries its fresh updatedAt.
-      { id: lead?.id, body: (lead ? { ...v, updatedAt: lead.updatedAt } : v) as unknown as LeadCreate },
+      // Editing sends the updatedAt the form was opened (or last reset) with, never the live one.
+      { id: lead?.id, body: v as unknown as LeadCreate },
       {
         onSuccess: (saved) => {
           toast(editing ? t('Lead updated') : t('{number} created|lead', { number: saved.number }));
@@ -170,8 +177,11 @@ export function LeadModal({ lead, company, onClose }: Props) {
         },
         onError: (err) => {
           const code = err instanceof ApiError ? err.code : 'unknown';
-          // Someone else saved first: useSaveLead refetches leads and tasks so a retry carries the fresh updatedAt.
-          if (code === 'stale') toast(errorText(t, code), 'warn');
+          if (code === 'stale' && lead) {
+            toast(errorText(t, code), 'warn');
+            void reloadAfterStale(lead.id);
+            return;
+          }
           if (code === 'domain_taken') {
             setError('website', { type: 'server', message: errorText(t, code) });
             return;
@@ -184,6 +194,24 @@ export function LeadModal({ lead, company, onClose }: Props) {
         },
       },
     );
+  }
+
+  /**
+   * Someone else saved first: load the lead as it is now and show it in the form (with its new
+   * updatedAt), so the user checks the other change before saving again instead of overwriting it.
+   */
+  async function reloadAfterStale(id: number) {
+    try {
+      const fresh = await qc.fetchQuery({
+        queryKey: keys.lead(id),
+        queryFn: () => api<LeadFull>(`/api/leads/${id}`),
+        staleTime: 0,
+      });
+      reset(formValues(fresh, company, defaultSource));
+      setFormError(t('This lead was changed by someone else. The form now shows the latest values; check them and save again.'));
+    } catch (e) {
+      setFormError(errorText(t, e instanceof ApiError ? e.code : 'unknown'));
+    }
   }
 
   const err = (f: Field) => (errors[f] ? (errors[f]?.type === 'server' ? errors[f]?.message : fieldMessage(t, f)) : undefined);

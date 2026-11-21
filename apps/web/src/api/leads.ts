@@ -185,13 +185,22 @@ export function useCompanyActivities(companyId: number, page: number) {
 }
 
 /**
- * After a `stale` refusal (someone else changed the lead): refetch leads and tasks so a retry
- * carries the fresh `updatedAt`. Every lead mutation calls this from onError.
+ * Refusals that mean "your view of the lead is out of date": someone else changed, claimed,
+ * linked, archived, closed or hid it since it was loaded.
  */
-function useRefreshOnStale() {
+export const OUT_OF_DATE_CODES: ReadonlySet<string> = new Set([
+  'stale', 'already_assigned', 'company_already_linked', 'lead_archived', 'lead_closed', 'not_found',
+]);
+
+/**
+ * After an out-of-date refusal: refetch leads and tasks so the page shows the lead as it is now
+ * (a Claim button or Choose-company box that no longer applies goes away) and a retry carries the
+ * fresh `updatedAt`. Every lead mutation calls this from onError.
+ */
+function useRefreshWhenOutOfDate() {
   const qc = useQueryClient();
   return (err: unknown) => {
-    if (!(err instanceof ApiError) || err.code !== 'stale') return;
+    if (!(err instanceof ApiError) || !OUT_OF_DATE_CODES.has(err.code)) return;
     void qc.invalidateQueries({ queryKey: keys.leadsAll });
     void qc.invalidateQueries({ queryKey: keys.tasksAll });
   };
@@ -222,7 +231,7 @@ export function useSaveLead() {
       qc.setQueryData<LeadFull>(keys.lead(saved.id), (old) => (old ? { ...old, ...saved } : old));
       return refresh();
     },
-    onError: useRefreshOnStale(),
+    onError: useRefreshWhenOutOfDate(),
   });
 }
 
@@ -241,7 +250,7 @@ export function useClaimLead() {
     mutationFn: (lead: Pick<LeadSummary, 'id' | 'updatedAt'>) =>
       api<LeadDetail>(`/api/leads/${lead.id}/claim`, { method: 'POST', body: { updatedAt: lead.updatedAt } }),
     onSuccess: refresh,
-    onError: useRefreshOnStale(),
+    onError: useRefreshWhenOutOfDate(),
   });
 }
 
@@ -276,7 +285,7 @@ export function useLeadAction() {
       qc.setQueryData<LeadFull>(keys.lead(saved.id), (old) => (old ? { ...old, ...saved } : old));
       return refresh();
     },
-    onError: useRefreshOnStale(),
+    onError: useRefreshWhenOutOfDate(),
   });
 }
 
