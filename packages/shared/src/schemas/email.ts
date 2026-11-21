@@ -31,3 +31,15 @@ export const EmailTemplateUpdate = EmailTemplateInput.omit({ sourceType: true, f
   .partial()
   .extend({ updatedAt: z.string().datetime() });
 export type EmailTemplateUpdate = z.infer<typeof EmailTemplateUpdate>;
+
+/** `POST /leads/:id/emails` (release 2B-1): sent through the caller's own Microsoft 365 mailbox. */
+export const LeadEmailSend = z.object({
+  to: z.string().trim().toLowerCase().email(),
+  cc: z.array(z.string().trim().toLowerCase().email()).max(20).default([]),
+  subject: z.string().trim().min(1).max(500),
+  body: z.string().trim().min(1).max(20000),
+  /** Set the lead's next follow-up this many days from today (prototype "Set follow-up in"); null = leave it. */
+  followUpDays: z.union([z.literal(2), z.literal(3), z.literal(7)]).nullish(),
+  updatedAt: z.string().datetime(),
+});
+export type LeadEmailSend = z.infer<typeof LeadEmailSend>;

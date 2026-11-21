@@ -37,8 +37,9 @@ model User {
   sessions       Session[]
   emailAccounts  EmailAccount[]
   emailTemplates EmailTemplate[]
-  notifications Notification[]
-  auditLogs     AuditLog[]
+  emailMessages  EmailMessage[]
+  notifications  Notification[]
+  auditLogs      AuditLog[]
 
   createdCompanies Company[]
 
@@ -117,11 +118,49 @@ model EmailAccount {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user     User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  messages EmailMessage[]
 
   /// One system row and at most one personal row per user; the same address may be both (Deepak's).
   @@unique([address, kind])
   @@map("email_accounts")
+}
+
+/// A user's email (release 2B): sent from the CRM now, synced from their mailbox in 2B-2. Private to `userId`.
+model EmailMessage {
+  id          Int      @id @default(autoincrement())
+  userId      Int      @map("user_id")
+  accountId   Int?     @map("account_id")
+  leadId      Int?     @map("lead_id")
+  contactId   Int?     @map("contact_id")
+  companyId   Int?     @map("company_id")
+  /// 'sent' | 'inbox' | 'drafts' | 'archive'
+  folder      String
+  /// 'queued' | 'sent' | 'failed' (sent from the CRM); synced mail is 'sent'.
+  status      String
+  fromAddress String   @map("from_address")
+  toAddresses Json     @default("[]") @map("to_addresses")
+  ccAddresses Json     @default("[]") @map("cc_addresses")
+  subject     String   @db.VarChar(500)
+  bodyText    String   @default("") @map("body_text")
+  /// Graph / RFC ids, filled by sync (2B-2).
+  messageId   String?  @map("message_id") @db.VarChar(255)
+  threadId    String?  @map("thread_id") @db.VarChar(255)
+  isRead      Boolean  @default(true) @map("is_read")
+  occurredAt  DateTime @default(now()) @map("occurred_at")
+  lastError   String?  @map("last_error")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account EmailAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  lead    Lead?         @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  contact Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  company Company?      @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  @@index([userId, leadId])
+  @@index([userId, folder, occurredAt])
+  @@map("email_messages")
 }
 
 /// Team email templates (release 2A): written in the CRM or read from an uploaded Outlook .oft (file not kept).
@@ -266,6 +305,8 @@ model Company {
   locations CompanyLocation[]
   leads     Lead[]
 
+  emailMessages EmailMessage[]
+
   @@index([name])
   @@index([nameNormalised, country])
   @@index([country])
@@ -307,6 +348,8 @@ model Contact {
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
   leads   Lead[]
+
+  emailMessages EmailMessage[]
 
   @@index([businessEmail])
   @@index([phoneNormalised])
@@ -358,7 +401,7 @@ model Lead {
   /// Lookup `lead_source`.
   leadSource       String    @map("lead_source")
   /// The language the lead is approached in: 'en' | 'es' (outreach-language design, 22 Nov 2026).
-  outreachLanguage String   @default("en") @map("outreach_language") @db.Char(2)
+  outreachLanguage String    @default("en") @map("outreach_language") @db.Char(2)
   sourceUrl        String?   @map("source_url")
   importBatch      String?   @map("import_batch")
   assignedToId     Int?      @map("assigned_to_id")
@@ -384,6 +427,8 @@ model Lead {
   activities  LeadActivity[]
   assignments LeadAssignment[]
   tasks       Task[]
+
+  emailMessages EmailMessage[]
 
   @@index([status])
   @@index([assignedToId])

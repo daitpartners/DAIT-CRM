@@ -275,7 +275,7 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
       if (!row) throw new NotFoundError();
       return {
         ...leadDetail(row, today),
-        activities: activities.map(activityRow),
+        activities: activities.map((a) => activityRow(a, user.id)),
         activityTotal,
         callCount,
         lastContact: lastContact ? { type: lastContact.activityType, at: lastContact.occurredAt } : null,
@@ -303,7 +303,7 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
     ]);
     const ofType = (type: string) => byType.find((g) => g.activityType === type)?._count._all ?? 0;
     return {
-      items: rows.map((r) => ({ ...activityRow(r), lead: { id: r.lead.id, number: r.lead.number } })),
+      items: rows.map((r) => ({ ...activityRow(r, request.user!.id), lead: { id: r.lead.id, number: r.lead.number } })),
       total,
       page: query.page,
       pageSize: query.pageSize,

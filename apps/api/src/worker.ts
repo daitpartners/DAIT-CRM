@@ -1,6 +1,7 @@
 import { prisma } from './db.js';
 import { createGraphClient, type GraphClient } from './graph/client.js';
 import { runForever } from './jobs/runner.js';
+import { sendUserEmailHandler } from './jobs/handlers/sendUserEmail.js';
 import { sendEmailHandler } from './jobs/handlers/sendEmail.js';
 
 export { runOnce, runForever } from './jobs/runner.js';
@@ -31,8 +32,8 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<void> 
   console.log('worker: started');
   try {
     await runForever({
-      types: ['send_email'],
-      handlers: { send_email: sendEmailHandler },
+      types: ['send_email', 'send_user_email'],
+      handlers: { send_email: sendEmailHandler, send_user_email: sendUserEmailHandler },
       graph: opts.graph ?? createGraphClient(process.env),
       pollMs: opts.pollMs,
       signal: controller.signal,
