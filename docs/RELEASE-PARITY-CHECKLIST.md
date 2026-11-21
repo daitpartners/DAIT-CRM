@@ -118,6 +118,13 @@ Prototype `#/settings` (cards "Email & calendar connections" and "Email template
 - [ ] Email templates: merge-field line, **Write a template**, **Upload .oft template** (an Outlook template's subject and body fill the editor), table Template / Source / Language / Subject / Added, **Edit** and **Delete** (asks first), footer help.
 - [ ] Lead page → Email tab → Template: your templates, your language first, others marked "(ES)" / "(FR)", Outlook ones "· .oft". Picking one fills Subject and Message with the contact's first name, the company, your name and the lead number; "— blank —" brings back the intro text.
 
+## Outreach language (English / Español)
+
+- [ ] Leads list: column **Language** after Country and filter **Language: Any / English / Español**; Seba's and Carlos's leads are Español.
+- [ ] A new lead for Mexico, Chile or Spain starts as **Español**, others as **English**; New lead and Edit lead details have an **Outreach language** select; a CSV column "Language" (en/es/English/Español) is read.
+- [ ] Lead page facts grid shows **Outreach language**; on an Español lead the Email tab opens with the Spanish intro ("¿Una llamada esta semana?") and Spanish templates first, whatever your screen language.
+- [ ] Settings → Lead allocation rules: each rule has a **Language** (Any / English / Español); live rules: Español → Carlos Torres + Sebastian Passalacqua; English, United States / Canada → Deepak Singh + Lakshita Singh.
+
 ## Spanish and French labels
 
 - [ ] In Settings, Preferences, switch to Español and save. Walk the Dashboard, Leads, a lead page and Settings: no English words left on buttons, tabs or headings. Repeat with Français, then switch back to English.
