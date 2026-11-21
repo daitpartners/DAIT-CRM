@@ -2,10 +2,12 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 
 import type { LeadFull } from '../../api/leads';
 import { useContacts } from '../../api/contacts';
 import { useUsers } from '../../api/queries';
+import { useTemplates } from '../../api/templates';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Icons } from '../../components/Icons';
 import { useToast } from '../../components/Toast';
-import { useT } from '../../i18n/useT';
+import { useLang, useT } from '../../i18n/useT';
+import { fillTemplate } from '../../lib/mergeFields';
 
 /** Id of the Subject field: "Focus on email" and the topbar Email button put the cursor here. */
 export const EMAIL_SUBJECT_ID = 'em-subject';
@@ -37,6 +39,24 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
     ].join('\n\n'),
   );
   const [follow, setFollow] = useState(true);
+  const lang = useLang();
+  const { data: templates } = useTemplates();
+  const [templateId, setTemplateId] = useState('');
+  const intro = useMemo(() => ({ subject, body }), []);
+
+  /** Picking a template fills Subject and Message with the merge fields applied; "— blank —" restores the intro. */
+  function pickTemplate(id: string) {
+    setTemplateId(id);
+    const tpl = templates?.find((x) => String(x.id) === id);
+    if (!tpl) {
+      setSubject(intro.subject);
+      setBody(intro.body);
+      return;
+    }
+    const ctx = { firstName: first, company, me: me.name, leadNumber: lead.number };
+    setSubject(fillTemplate(tpl.subject, ctx));
+    setBody(fillTemplate(tpl.body, ctx));
+  }
   const [days, setDays] = useState<number>(3);
 
   return (
@@ -77,8 +97,15 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
           <label className="lbl" htmlFor="em-tpl">
             {t('Template')}
           </label>
-          <select id="em-tpl" className="in" disabled={disabled}>
+          <select id="em-tpl" className="in" disabled={disabled} value={templateId} onChange={(e) => pickTemplate(e.target.value)}>
             <option value="">{t('— blank —')}</option>
+            {(templates ?? []).map((x) => (
+              <option key={x.id} value={String(x.id)}>
+                {x.name}
+                {x.sourceType === 'oft' ? ' · .oft' : ''}
+                {x.language !== lang ? ` (${x.language.toUpperCase()})` : ''}
+              </option>
+            ))}
           </select>
         </div>
         <div className="span2">

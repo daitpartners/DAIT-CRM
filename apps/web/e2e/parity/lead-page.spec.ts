@@ -86,6 +86,27 @@ test('lead page: prototype sections in order, a contact without a profile, then 
   await expect(email.getByLabel('Message')).toHaveValue(/Best regards,\nMaya Pillai$/);
   await expect(email.getByRole('checkbox', { name: /Set follow-up in/ })).toBeChecked();
   await expect(email.getByLabel('Follow-up in', { exact: true })).toHaveValue('3');
+  // Templates (release 2A): the library, your language first, others marked; picking one fills Subject and Message.
+  const stamp = Date.now();
+  const mk = (name: string, language: string, subject: string, body: string) =>
+    page.request.post('/api/email-templates', { data: { name, language, subject, body } });
+  expect((await mk(`Follow-up ${stamp}`, 'en', 'Following up, {first_name}', 'Hi {first_name},\n\nAbout {company} ({lead_id}).\n\n{me}')).status()).toBe(201);
+  expect((await mk(`Primer contacto ${stamp}`, 'es', '¿Una llamada?', 'Hola {first_name}')).status()).toBe(201);
+  await page.reload();
+  const tplSelect = email.getByLabel('Template');
+  await expect(tplSelect.locator('option', { hasText: `Follow-up ${stamp}` })).toHaveCount(1);
+  const tplOptions = await tplSelect.locator('option').allTextContents();
+  expect(tplOptions[0]).toBe('— blank —');
+  const en = tplOptions.indexOf(`Follow-up ${stamp}`);
+  const es = tplOptions.indexOf(`Primer contacto ${stamp} (ES)`);
+  expect(en).toBeGreaterThan(0);
+  expect(es).toBeGreaterThan(en);
+  await tplSelect.selectOption({ label: `Follow-up ${stamp}` });
+  await expect(email.getByLabel('Subject')).toHaveValue('Following up, Priya');
+  await expect(email.getByLabel('Message')).toHaveValue(`Hi Priya,\n\nAbout Northwind Logistics (${lead.number}).\n\nMaya Pillai`);
+  await tplSelect.selectOption({ label: '— blank —' });
+  await expect(email.getByLabel('Subject')).toHaveValue('Intro call this week?');
+
   // A typed address becomes a chip.
   await email.getByRole('combobox', { name: 'Cc stakeholders' }).fill('ops@northwindlogistics.in');
   await email.getByRole('combobox', { name: 'Cc stakeholders' }).press('Enter');
