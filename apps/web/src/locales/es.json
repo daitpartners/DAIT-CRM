@@ -962,5 +962,12 @@
   "Lead {number}": "Lead {number}",
   "Edit lead details": "Editar datos del lead",
   "This lead has no contact person yet. Add one from the No contact yet card.": "Este lead aún no tiene persona de contacto. Añádala desde la tarjeta Sin contacto todavía.",
-  "This lead is closed. Choose an open status in the Follow-up tab to reopen it.": "Este lead está cerrado. Elija un estado abierto en la pestaña Seguimiento para reabrirlo."
+  "This lead is closed. Choose an open status in the Follow-up tab to reopen it.": "Este lead está cerrado. Elija un estado abierto en la pestaña Seguimiento para reabrirlo.",
+  "Projects unlock when a lead at this company is marked": "Los proyectos se desbloquean cuando un lead de esta empresa se marca como",
+  "Won|status": "Ganado",
+  "or a quotation is accepted.": "o se acepta un presupuesto.",
+  "Choose the company for this lead first, above.": "Primero elija la empresa de este lead, arriba.",
+  "No AI research yet.": "Aún no hay investigación con IA.",
+  "Coming in release 4": "Llega en la versión 4",
+  "Run research": "Ejecutar investigación"
 }

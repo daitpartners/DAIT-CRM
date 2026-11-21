@@ -153,7 +153,7 @@ function LeadView({ lead }: { lead: LeadFull }) {
             <ComposePanel lead={lead} statuses={statuses} live={live} />
             <FollowUpPanel lead={lead} statuses={statuses} live={live} />
           </div>
-          <SideColumn lead={lead} onEditSkills={canProfile ? () => setDialog('skills') : undefined} />
+          <SideColumn lead={lead} live={live} onEditSkills={canProfile ? () => setDialog('skills') : undefined} />
         </div>
       </div>
       {dialog === 'contact' ? <SwitchContactModal lead={lead} onClose={() => setDialog(null)} /> : null}

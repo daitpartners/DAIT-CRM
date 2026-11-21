@@ -20,6 +20,8 @@ type Props = {
   /** Edit this contact; leave out to add one. */
   contact?: ContactSummary;
   onClose: () => void;
+  /** Called with the saved contact before the dialog closes (the lead page links a new contact to its lead). */
+  onSaved?: (contact: ContactSummary) => void;
 };
 
 /** Form state: text inputs hold strings ('' = empty); the shared schema trims them and turns '' into null. */
@@ -60,7 +62,7 @@ function fieldMessage(t: TFn, field: Field): string {
 }
 
 /** Add or edit a contact (section F), validated with the shared ContactCreate / ContactUpdate schemas. */
-export function ContactModal({ companyId, contact, onClose }: Props) {
+export function ContactModal({ companyId, contact, onClose, onSaved }: Props) {
   const t = useT();
   const lang = useLang();
   const toast = useToast();
@@ -111,6 +113,7 @@ export function ContactModal({ companyId, contact, onClose }: Props) {
       {
         onSuccess: (saved) => {
           toast(editing ? t('Contact updated') : t('{name} added', { name: `${saved.firstName} ${saved.lastName}` }));
+          onSaved?.(saved);
           onClose();
         },
         onError: (err) => {

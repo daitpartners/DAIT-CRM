@@ -540,3 +540,10 @@ fieldset.bare>legend{padding:0}
 
 /* Lead actions row in the Edit profile dialog (Edit lead details, Switch contact, Archive). */
 .lead-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:12px;margin-top:4px}
+
+/* Lead page side column (prototype): AI line without research, link-style button, Projects hint. */
+.note.ai-empty{font-size:12.5px;color:var(--muted)}
+.linkish{border:0;background:none;padding:0;font:inherit;color:var(--purple);font-weight:600;cursor:pointer}
+.linkish:hover{color:#4B0A9A}
+.side-hint{font-size:12.5px;line-height:1.45}
+.side-card h2 .n{color:var(--muted);font-weight:500}

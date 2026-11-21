@@ -9,10 +9,13 @@ function inDays(days: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/** Section titles of the prototype's lead page (views-lead-detail.js + views-leads2.js), in page order. */
+/**
+ * Section titles of the prototype's lead page (views-lead-detail.js + views-leads2.js), in page order. Original
+ * enquiry shows only for a lead that came from a website enquiry (1D), so not here.
+ */
 const PROTOTYPE_ORDER = [
   'Profile', 'Experience', 'Email', 'Call note', 'Meeting', 'Research note', 'Follow-up', 'Emails', 'Calls',
-  'Northwind Logistics Private Limited', 'Skills & languages', 'Projects', 'Coming up', 'Original enquiry',
+  'Northwind Logistics Private Limited', 'Skills & languages', 'Projects', 'Coming up',
 ];
 
 test('lead page: prototype sections in order, a contact without a profile, then the full profile', async ({ page }) => {
@@ -99,7 +102,7 @@ test('lead page: prototype sections in order, a contact without a profile, then 
   await expect(compose.getByRole('tab', { name: 'Email' })).toHaveAttribute('aria-selected', 'true');
   await expect(email.getByLabel('Subject')).toBeFocused();
   await page.getByRole('button', { name: /Show or hide the profile|Profile/ }).first().click();
-  await expect(page.getByRole('region', { name: 'Original enquiry' })).toContainText('Available in release 1D');
+  await expect(page.getByRole('heading', { name: 'Original enquiry' })).toHaveCount(0);
 
   // Fill the profile and add a research note, then capture the page for the side-by-side comparison.
   const detail = (await (await page.request.get(`/api/leads/${lead.id}`)).json()) as { updatedAt: string; contact: { updatedAt: string } };
@@ -145,4 +148,29 @@ test('lead page: a prospect without a contact person', async ({ page }) => {
   await expect(email.getByLabel('Message')).toHaveValue(new RegExp(`^Hi ${helix.name},`));
   await email.getByRole('button', { name: 'Send email' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Sending email arrives in release 2' })).toBeVisible();
+
+  // Right column as in the prototype (LD-2040): No contact yet, the company card, Projects; nothing else.
+  const side = page.getByRole('complementary', { name: 'Company and contact' });
+  const heads = await side.locator('h2, .side-title').evaluateAll((els) => els.map((el) => (el.textContent ?? '').replace(/\s+/g, ' ').trim()));
+  expect(heads).toEqual(['No contact yet', helix.name, 'Projects 0']);
+  const co = side.getByRole('region', { name: helix.name });
+  await expect(co).toContainText('No AI research yet.');
+  await co.getByRole('button', { name: 'Run research' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Coming in release 4' })).toBeVisible();
+  const projects = side.getByRole('region', { name: /Projects/ });
+  await expect(projects).toContainText('Projects unlock when a lead at this company is marked Won or a quotation is accepted.');
+  await expect(projects).not.toHaveAttribute('aria-disabled', 'true');
+  await expect(side.getByRole('heading', { name: 'Coming up' })).toHaveCount(0);
+  await expect(side.getByRole('heading', { name: 'Original enquiry' })).toHaveCount(0);
+  await captureParity(page, 'prospect');
+
+  // Add contact: the new person becomes this lead's contact and the profile shows them.
+  await side.getByRole('button', { name: 'Add contact' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add contact' });
+  await dialog.getByLabel('First name').fill('Layla');
+  await dialog.getByLabel('Last name').fill(`Haddad${Date.now()}`);
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('region', { name: 'Profile' }).getByRole('heading', { name: /^Layla Haddad/ })).toBeVisible();
+  await expect(side.getByText('No contact yet')).toHaveCount(0);
 });
