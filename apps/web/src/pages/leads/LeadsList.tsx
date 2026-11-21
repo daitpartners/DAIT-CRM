@@ -33,9 +33,12 @@ const DEFAULT_PAGE_SIZE = 50;
 /** Combobox value meaning "no filter" (the combobox cannot hold an empty value). */
 const ANY = '*';
 /** Filters kept in the URL and cleared by "Clear"; the tab and page size (also in the URL) are not. */
-const FILTERS = ['status', 'source', 'country', 'assignedTo', 'priority', 'leadType', 'from', 'to'] as const;
+const FILTERS = ['status', 'source', 'country', 'assignedTo', 'priority', 'leadType', 'created', 'from', 'to'] as const;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
-/** The prototype's "Created" select: last N days, as a `from` date. */
+/**
+ * The prototype's "Created" select. A preset is kept in the URL as `created=<days>` so a bookmark stays
+ * relative; `created=custom` (or a bare from/to from an older link) shows the two date inputs.
+ */
 const CREATED_DAYS = [7, 30, 90] as const;
 
 /** YYYY-MM-DD `days` before today (browser local date, as the date filter is entered). */
@@ -70,6 +73,9 @@ export function LeadsList() {
   const dir = explicitSort ? params.dir : 'desc';
   const tab: LeadTab = oneOf(LEAD_TABS, searchParams.get('tab') ?? undefined) ?? 'all';
   const assignedNum = Number(params.assignedTo);
+  const presetDays = CREATED_DAYS.find((n) => String(n) === params.created);
+  const customRange = !presetDays && (params.created === 'custom' || Boolean(params.from || params.to));
+  const createdValue = presetDays ? String(presetDays) : customRange ? 'custom' : '';
   const sizeParam = Number(searchParams.get('size'));
   const pageSize = (PAGE_SIZES as readonly number[]).includes(sizeParam) ? sizeParam : DEFAULT_PAGE_SIZE;
   const query: LeadListQuery = {
@@ -84,8 +90,8 @@ export function LeadsList() {
     assignedTo: params.assignedTo === 'none' ? 'none' : Number.isInteger(assignedNum) && assignedNum > 0 ? assignedNum : undefined,
     priority: oneOf<Priority>(PRIORITIES, params.priority),
     leadType: oneOf<LeadType>(LEAD_TYPES, params.leadType),
-    from: params.from && DAY.test(params.from) ? params.from : undefined,
-    to: params.to && DAY.test(params.to) ? params.to : undefined,
+    from: presetDays ? daysAgo(presetDays) : customRange && params.from && DAY.test(params.from) ? params.from : undefined,
+    to: customRange && params.to && DAY.test(params.to) ? params.to : undefined,
   };
   const { data, isPending, error } = useLeads(query);
   const { data: lookups } = useLookups();
@@ -178,7 +184,7 @@ export function LeadsList() {
     });
   const toggleAll = () => setSelected(allOnPage ? new Set() : new Set(rows?.map((r) => r.id)));
   const filtered = Boolean(
-    query.q || query.status || query.source || query.country || query.assignedTo || query.priority || query.leadType || query.from || query.to,
+    query.q || query.status || query.source || query.country || query.assignedTo || query.priority || query.leadType || createdValue,
   );
 
   const sortable = (column: LeadSort, label: string) => (
@@ -216,8 +222,6 @@ export function LeadsList() {
     { id: 'unassigned', label: t('Unassigned'), count: counts?.unassigned },
   ];
   const tiles = data?.tiles;
-  // The "Created" select: a preset when `from` is N days ago and there is no `to`; else a custom range.
-  const createdPreset = !query.from && !query.to ? '' : (CREATED_DAYS.find((n) => !query.to && query.from === daysAgo(n))?.toString() ?? 'custom');
 
   return (
     <>
@@ -326,12 +330,8 @@ export function LeadsList() {
               <select
                 id="flt-created"
                 className="chip"
-                value={createdPreset}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v === 'custom') return;
-                  update({ from: v ? daysAgo(Number(v)) : undefined, to: undefined });
-                }}
+                value={createdValue}
+                onChange={(e) => update({ created: e.target.value, from: undefined, to: undefined })}
               >
                 <option value="">{t('Created: Any time')}</option>
                 {CREATED_DAYS.map((n) => (
@@ -339,10 +339,20 @@ export function LeadsList() {
                     {t('Created: Last {n} days', { n })}
                   </option>
                 ))}
-                {createdPreset === 'custom' ? (
-                  <option value="custom">{t('Created: {from} – {to}', { from: query.from ? day(query.from) : '…', to: query.to ? day(query.to) : '…' })}</option>
-                ) : null}
+                <option value="custom">{t('Custom range…')}</option>
               </select>
+              {customRange ? (
+                <span className="date-range">
+                  <label className="date-chip">
+                    <span>{t('Created from')}</span>
+                    <input type="date" className="chip" value={query.from ?? ''} max={query.to} onChange={(e) => update({ created: 'custom', from: e.target.value })} />
+                  </label>
+                  <label className="date-chip">
+                    <span>{t('to|date')}</span>
+                    <input type="date" className="chip" value={query.to ?? ''} min={query.from} onChange={(e) => update({ created: 'custom', to: e.target.value })} />
+                  </label>
+                </span>
+              ) : null}
               <label className="sr" htmlFor="flt-priority">
                 {t('Priority')}
               </label>

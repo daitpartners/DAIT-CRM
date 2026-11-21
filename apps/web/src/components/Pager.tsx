@@ -62,7 +62,8 @@ function FullPager({ page, pages, pageSize, from, to, total, onPage, sizes, onPa
   const [typed, setTyped] = useState(String(page));
   useEffect(() => setTyped(String(page)), [page]);
   const jump = () => {
-    const n = Number(typed);
+    // A blank or non-whole entry goes back to the current page rather than jumping.
+    const n = typed.trim() === '' ? NaN : Number(typed);
     const next = Number.isInteger(n) ? Math.min(Math.max(1, n), pages) : page;
     setTyped(String(next));
     if (next !== page) onPage(next);

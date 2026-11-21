@@ -55,6 +55,22 @@ test('leads list: prototype topbar, tiles, tabs, filters, columns and pager', as
   const prospects = Number((await page.getByRole('tab', { name: /Prospects/ }).locator('.n').textContent())?.trim());
   await expect(page.locator('.filters')).toContainText(`Showing ${prospects} of ${all}`);
 
+  // Created presets stay relative in the URL; "Custom range…" reveals the 1C from/to date inputs.
+  const created = page.getByLabel('Created', { exact: true });
+  await created.selectOption({ label: 'Created: Last 7 days' });
+  await expect(page).toHaveURL(/created=7/);
+  await expect(page).not.toHaveURL(/from=/);
+  await expect(page.getByLabel('Created from')).toHaveCount(0);
+  await created.selectOption({ label: 'Custom range…' });
+  await expect(page).toHaveURL(/created=custom/);
+  const d = new Date();
+  d.setDate(d.getDate() - 400);
+  const from = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  await page.getByLabel('Created from').fill(from);
+  await expect(page).toHaveURL(new RegExp(`from=${from}`));
+  await expect(created).toHaveValue('custom');
+  await expect(page.locator('.filters')).toContainText(/Showing \d+ of \d+/);
+
   await page.goto('/leads');
   await captureParity(page, 'leads');
 });

@@ -19,8 +19,9 @@ import { useT } from '../../i18n/useT';
 const inApp = (link: string | null): link is string => Boolean(link && link.startsWith('/') && !link.startsWith('//'));
 
 type Kind = 'leads' | 'tasks' | 'other';
-/** The kind shown on a row (prototype KIND), read from the notification text the API writes. */
-const kindOf = (n: NotificationRow): Kind => (/^(New lead|Lead)\b/i.test(n.text) ? 'leads' : /^Task\b/i.test(n.text) ? 'tasks' : 'other');
+/** The kind shown on a row (prototype KIND), read from where the notification points. */
+const kindOf = (n: NotificationRow): Kind =>
+  n.link?.startsWith('/leads/') ? 'leads' : n.link === '/tasks' || n.link?.startsWith('/tasks?') ? 'tasks' : 'other';
 const KIND_STYLE: Record<Kind, { icon: ReactNode; bg: string }> = {
   leads: { icon: Icons.user, bg: '#EFE6FD' },
   tasks: { icon: Icons.tasks, bg: '#FFF8EC' },
@@ -47,7 +48,7 @@ export function NotificationsList() {
   const allQ = useNotifications(tab === 'all' ? page : 1);
   const unreadQ = useNotifications(tab === 'unread' ? page : 1, true);
   const { data, isPending, error } = tab === 'unread' ? unreadQ : allQ;
-  // The attention strip uses the signed-in user's own task counts.
+  // The attention strip: the signed-in user's own open tasks (every origin), overdue and due today.
   const tasks = useTasks({ tab: 'today', pageSize: 1 });
   const markRead = useMarkNotificationRead();
   const markAll = useMarkAllNotificationsRead();
@@ -84,8 +85,8 @@ export function NotificationsList() {
   const overdue = tasks.data?.counts.overdue ?? 0;
   const dueToday = tasks.data?.counts.today ?? 0;
   const attention = [
-    overdue ? { cls: 'bad', text: overdue === 1 ? t('1 overdue follow-up') : t('{n} overdue follow-ups', { n: overdue }) } : null,
-    dueToday ? { cls: 'warn', text: dueToday === 1 ? t('1 follow-up due today') : t('{n} follow-ups due today', { n: dueToday }) } : null,
+    overdue ? { cls: 'bad', text: overdue === 1 ? t('1 overdue open task') : t('{n} overdue open tasks', { n: overdue }) } : null,
+    dueToday ? { cls: 'warn', text: dueToday === 1 ? t('1 open task due today') : t('{n} open tasks due today', { n: dueToday }) } : null,
   ].filter((x): x is { cls: string; text: string } => x !== null);
 
   let last: string | null = null;

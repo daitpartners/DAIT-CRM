@@ -113,7 +113,7 @@ export function ContactsList() {
               </button>
             ) : null}
             <div className="grow" />
-            {data ? <span className="muted filters-count">{t('Showing {n} contacts', { n: data.total })}</span> : null}
+            {data ? <span className="muted filters-count">{data.total === 1 ? t('Showing 1 contact') : t('Showing {n} contacts', { n: data.total })}</span> : null}
           </div>
           {error ? (
             <div className="empty" role="alert">

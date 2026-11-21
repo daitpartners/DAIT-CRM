@@ -120,7 +120,7 @@ describe('tasks API', () => {
   });
 
   it('open tab returns tasks grouped by section', async () => {
-    const rep = await as('SALES_REPRESENTATIVE');
+    const rep = await as('SALES_REPRESENTATIVE', 'UTC');
     const other = await as('SALES_REPRESENTATIVE');
     const manager = await as('MANAGER');
     const today = todayIn('UTC');

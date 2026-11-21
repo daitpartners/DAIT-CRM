@@ -123,7 +123,9 @@ test('closing as Lost needs a reason and clears follow-up', async ({ page }) => 
   await expect(page.getByRole('region', { name: 'Open tasks' })).toContainText('No open tasks');
   await expect((await timeline(page)).getByRole('listitem').filter({ hasText: 'Contacted → Lost' })).toContainText('Chose a local vendor');
 
-  await page.goto('/tasks?tab=upcoming');
+  await page.goto('/tasks');
   await expect(page.getByRole('heading', { name: 'Tasks', level: 1 })).toBeVisible();
-  await expect(page.getByRole('listitem').filter({ hasText: 'Follow up · Northwind Logistics' })).toHaveCount(0);
+  // The closed follow-up is no longer open (it may be listed under Completed).
+  await expect(page.getByRole('region', { name: 'Upcoming' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Upcoming' }).getByRole('listitem').filter({ hasText: 'Follow up · Northwind Logistics' })).toHaveCount(0);
 });
