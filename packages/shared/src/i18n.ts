@@ -30,6 +30,16 @@ export function formatDate(
   return new Intl.DateTimeFormat(LOCALES[opts.locale], o).format(date);
 }
 
+/** Date and time (24-hour, hours and minutes) in the user's zone and date format (prototype fmtDT). */
+export function formatDateTime(
+  d: Date | string,
+  opts: { locale: Lang; timezone: string; dateFormat: string },
+): string {
+  const date = typeof d === 'string' ? new Date(d) : d;
+  const time = new Intl.DateTimeFormat('en-GB', { timeZone: opts.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(date);
+  return `${formatDate(date, opts)}, ${time}`;
+}
+
 export function lookupLabel(
   v: { label: string; labelEs?: string | null; labelFr?: string | null },
   lang: Lang,

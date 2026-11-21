@@ -11,7 +11,7 @@ import { Progress, StatusBadge, waitText } from './status';
 export function MailerPage() {
   const t = useT();
   const navigate = useNavigate();
-  const { date } = useFormatDate();
+  const { dateTime: date } = useFormatDate();
   const { data: campaigns, isLoading } = useCampaigns();
   const { data: boxes } = useMailboxes();
   const connected = boxes?.mine?.status === 'connected';

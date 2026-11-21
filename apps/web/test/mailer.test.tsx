@@ -115,6 +115,8 @@ describe('Campaign page (prototype mailer detail)', () => {
     const recipients = screen.getByRole('table', { name: 'Recipients' });
     expect(within(recipients).getByText('Replied')).toBeTruthy();
     expect(within(recipients).getByText('America/Mexico_City')).toBeTruthy();
+    // Times, not just dates (prototype fmtDT): sent 10:00 UTC, the user's zone is UTC.
+    expect(within(recipients).getByText('22/11/2026, 10:00')).toBeTruthy();
     await u.click(screen.getByRole('button', { name: 'Pause' }));
     await waitFor(() => expect(posts.map((p) => p.url)).toEqual(['/api/mailer/7/pause']));
   });

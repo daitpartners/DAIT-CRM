@@ -16,7 +16,7 @@ export function CampaignPage() {
   const t = useT();
   const toast = useToast();
   const confirm = useConfirm();
-  const { date } = useFormatDate();
+  const { dateTime: date } = useFormatDate();
   const id = Number(useParams().id);
   const { data: c, isError } = useCampaign(id);
   const action = useCampaignAction(id);
