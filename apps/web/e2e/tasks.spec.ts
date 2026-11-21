@@ -25,15 +25,13 @@ test('follow-up date creates a task that appears under Upcoming and can be ticke
 
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Tasks' }).click();
   await expect(page.getByRole('heading', { name: 'Tasks', level: 1 })).toBeVisible();
-  await page.getByRole('tab', { name: /Upcoming/ }).click();
-  const task = page.getByRole('listitem').filter({ hasText: `Follow up · ${company}` });
+  const task = page.getByRole('region', { name: 'Upcoming' }).getByRole('listitem').filter({ hasText: `Follow up · ${company}` });
   await expect(task).toBeVisible();
   await expect(task.getByRole('link', { name: /LD-\d+/ })).toBeVisible();
 
-  // The box is controlled by the saved state: click, then the row moves to Done once saved.
+  // The box is controlled by the saved state: click, then the row moves to Completed once saved.
   await task.getByRole('checkbox', { name: /Mark done/ }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Task done' })).toBeVisible();
   await expect(task).toHaveCount(0);
-  await page.getByRole('tab', { name: /Done/ }).click();
-  await expect(page.getByRole('listitem').filter({ hasText: `Follow up · ${company}` })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Completed' }).getByRole('listitem').filter({ hasText: `Follow up · ${company}` })).toBeVisible();
 });

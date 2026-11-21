@@ -78,6 +78,7 @@ export function ContactsList() {
     <>
       <Topbar title={t('Contacts')} sub={t('People at every company you can see.')}>
         <label className="search">
+          {Icons.search}
           <span className="sr">{t('Search contacts')}</span>
           <input type="search" value={search.text} onChange={(e) => search.setText(e.target.value)} placeholder={t('Search name, email or company…')} />
         </label>
@@ -95,7 +96,7 @@ export function ContactsList() {
               {t('Contact type')}
             </label>
             <select id="flt-contact-type" className="chip" value={query.contactType ?? ''} onChange={(e) => update({ contactType: e.target.value })}>
-              <option value="">{t('Any contact type')}</option>
+              <option value="">{t('Contact type: Any')}</option>
               {typeOptions.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
@@ -108,9 +109,11 @@ export function ContactsList() {
                 className="btn sm"
                 onClick={reset}
               >
-                {t('Clear filters')}
+                {t('Clear')}
               </button>
             ) : null}
+            <div className="grow" />
+            {data ? <span className="muted filters-count">{t('Showing {n} contacts', { n: data.total })}</span> : null}
           </div>
           {error ? (
             <div className="empty" role="alert">

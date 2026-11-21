@@ -21,9 +21,12 @@ export type TaskUpdate = z.infer<typeof TaskUpdate>;
 
 export const TASK_TABS = ['today', 'overdue', 'upcoming', 'done'] as const;
 
-/** `GET /tasks` query. */
+/**
+ * `GET /tasks` query. `tab=open` returns every open task grouped by section (`overdue`, `today`,
+ * `upcoming`), each section capped at `pageSize`, instead of one paged tab.
+ */
 export const TaskListQuery = PagingQuery.extend({
-  tab: z.enum(TASK_TABS).default('today'),
+  tab: z.enum([...TASK_TABS, 'open']).default('today'),
   assignedTo: z.union([z.literal('all'), z.coerce.number().int().positive()]).optional(),
 });
 export type TaskListQuery = z.infer<typeof TaskListQuery>;

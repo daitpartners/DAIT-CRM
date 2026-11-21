@@ -492,3 +492,9 @@ fieldset.bare>legend{padding:0}
 .loc-card .card-head .row-actions{margin-left:auto}
 .activity-body{padding:18px 20px 6px}
 .search svg{width:16px;height:16px;flex:none;color:var(--muted)}
+/* Tasks page (prototype V.tasks): sections inside one card, help list on the side */
+.task-sec{display:flex;flex-direction:column;gap:8px}
+.task-sec h2{display:flex;align-items:center;gap:8px}
+.card .none{margin:0;font-size:13px}
+.how-list{margin:0;padding-left:18px;font-size:13px;color:var(--body);display:flex;flex-direction:column;gap:6px}
+.task .badge{flex:0 0 auto}

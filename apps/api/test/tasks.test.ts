@@ -119,6 +119,39 @@ describe('tasks API', () => {
     expect((await tab('today')).counts).toEqual({ today: 1, overdue: 0, upcoming: 2, done: 1 });
   });
 
+  it('open tab returns tasks grouped by section', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const other = await as('SALES_REPRESENTATIVE');
+    const manager = await as('MANAGER');
+    const today = todayIn('UTC');
+    const lead = await makeLead({ assignedToId: rep.user.id });
+    const late = await task(rep.user.id, shift(today, -2), { leadId: lead.id });
+    const later = await task(rep.user.id, shift(today, -1));
+    const now = await task(rep.user.id, today);
+    const soon = await task(rep.user.id, shift(today, 2));
+    const ticked = await task(rep.user.id, shift(today, -3), { isDone: true });
+    const hidden = await task(other.user.id, today);
+
+    const res = await req('GET', '/api/tasks?tab=open', rep.cookie);
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    const sec = (k: 'overdue' | 'today' | 'upcoming') => body.sections[k].map((t: { id: number }) => t.id);
+    // Oldest first within a section; done and other people's tasks are left out.
+    expect(sec('overdue')).toEqual([late.id, later.id]);
+    expect(sec('today')).toEqual([now.id]);
+    expect(sec('upcoming')).toEqual([soon.id]);
+    expect(body.counts).toEqual({ today: 1, overdue: 2, upcoming: 1, done: 1 });
+    expect(body.sections.overdue[0]).toMatchObject({ isOverdue: true, lead: { id: lead.id } });
+    expect(JSON.stringify(body)).not.toContain(`"id":${ticked.id},`);
+
+    // Same right rule as the other tabs: only view_all_leads may ask for everyone's.
+    expect((await req('GET', '/api/tasks?tab=open&assignedTo=all', rep.cookie)).statusCode).toBe(403);
+    const team = (await req('GET', '/api/tasks?tab=open&assignedTo=all', manager.cookie)).json();
+    // The manager sees lead tasks on every lead, but not other people's personal tasks.
+    expect(team.sections.overdue.map((t: { id: number }) => t.id)).toEqual([late.id]);
+    expect(team.sections.today.map((t: { id: number }) => t.id)).not.toContain(hidden.id);
+  });
+
   it('tick sets doneAt', async () => {
     const rep = await as('SALES_REPRESENTATIVE');
     const t = await task(rep.user.id, todayIn('UTC'), { title: 'Send deck' });

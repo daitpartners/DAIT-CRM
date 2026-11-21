@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { LEAD_SORTS, LEAD_TABS, LEAD_TYPES, PRIORITIES, lookupLabel, type LeadType, type Priority } from '@dait-crm/shared';
+import { LEAD_SORTS, LEAD_TABS, LEAD_TYPES, PRIORITIES, lookupLabel, safeUrl, type LeadType, type Priority } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
 import {
   useBulkLeads, useClaimLead, useLeads, type LeadListQuery, type LeadSort, type LeadSummary, type LeadTab,
@@ -27,12 +27,23 @@ import { useLang, useT } from '../../i18n/useT';
 import { CsvImportModal } from './CsvImportModal';
 import { LeadModal } from './LeadModal';
 
-const PAGE_SIZE = 25;
+/** Rows per page offered by the pager (prototype SIZES); 50 by default. */
+const PAGE_SIZES = [25, 50, 100] as const;
+const DEFAULT_PAGE_SIZE = 50;
 /** Combobox value meaning "no filter" (the combobox cannot hold an empty value). */
 const ANY = '*';
-/** Filters kept in the URL and cleared by "Clear filters"; the tab (also in the URL) is not one. */
+/** Filters kept in the URL and cleared by "Clear"; the tab and page size (also in the URL) are not. */
 const FILTERS = ['status', 'source', 'country', 'assignedTo', 'priority', 'leadType', 'from', 'to'] as const;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+/** The prototype's "Created" select: last N days, as a `from` date. */
+const CREATED_DAYS = [7, 30, 90] as const;
+
+/** YYYY-MM-DD `days` before today (browser local date, as the date filter is entered). */
+function daysAgo(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 const oneOf = <T extends string>(list: readonly T[], v: string | undefined): T | undefined =>
   v !== undefined && (list as readonly string[]).includes(v) ? (v as T) : undefined;
@@ -59,9 +70,11 @@ export function LeadsList() {
   const dir = explicitSort ? params.dir : 'desc';
   const tab: LeadTab = oneOf(LEAD_TABS, searchParams.get('tab') ?? undefined) ?? 'all';
   const assignedNum = Number(params.assignedTo);
+  const sizeParam = Number(searchParams.get('size'));
+  const pageSize = (PAGE_SIZES as readonly number[]).includes(sizeParam) ? sizeParam : DEFAULT_PAGE_SIZE;
   const query: LeadListQuery = {
     page: params.page,
-    pageSize: PAGE_SIZE,
+    pageSize,
     ...(explicitSort ? { sort, dir } : {}),
     q: params.q,
     tab: tab === 'all' ? undefined : tab,
@@ -100,7 +113,7 @@ export function LeadsList() {
   const countryOptions = useMemo<ComboOption[]>(() => {
     const opts = lookupOptions('country', query.country).map((x) => ({ value: x.value, label: lookupLabel(x, lang) }));
     if (query.country && !opts.some((o) => o.value === query.country)) opts.push({ value: query.country, label: query.country });
-    return [{ value: ANY, label: t('Any country') }, ...opts];
+    return [{ value: ANY, label: t('Country: Any') }, ...opts];
   }, [lookups, lang, query.country, t]);
 
   // Bulk "Assign to…" as the API allows: with transfer_leads anyone active; otherwise only "Me", with
@@ -199,15 +212,18 @@ export function LeadsList() {
     { id: 'leads', label: t('Leads'), count: counts?.leads },
     { id: 'prospects', label: t('Prospects'), count: counts?.prospects },
     { id: 'mine', label: t('My leads'), count: counts?.mine },
-    { id: 'overdue', label: t('Overdue follow-ups'), count: counts?.overdue },
+    { id: 'overdue', label: t('Overdue follow-ups'), count: counts?.overdue, countClass: 'bad' },
     { id: 'unassigned', label: t('Unassigned'), count: counts?.unassigned },
   ];
   const tiles = data?.tiles;
+  // The "Created" select: a preset when `from` is N days ago and there is no `to`; else a custom range.
+  const createdPreset = !query.from && !query.to ? '' : (CREATED_DAYS.find((n) => !query.to && query.from === daysAgo(n))?.toString() ?? 'custom');
 
   return (
     <>
       <Topbar title={t('Leads')} sub={t('Inbound leads and researched prospects, one module')}>
         <label className="search">
+          {Icons.search}
           <span className="sr">{t('Search leads')}</span>
           <input type="search" value={search.text} onChange={(e) => search.setText(e.target.value)} placeholder={t('Search company, contact, email…')} />
         </label>
@@ -241,18 +257,18 @@ export function LeadsList() {
           <Tile
             label={t('Unassigned')}
             value={tiles?.unassigned ?? '—'}
-            meta={t('Waiting to be claimed')}
+            meta={t('mostly CSV + Google Places prospects')}
             to="/leads?tab=unassigned"
           />
         </div>
-        <section className="card flush" aria-label={t('Leads')}>
+        <section className="card flush l2" aria-label={t('Leads')}>
           <Tabs tabs={tabs} active={tab} onChange={(id) => update({ tab: id === 'all' ? undefined : id })} label={t('Lead views')}>
             <div className="filters">
               <label className="sr" htmlFor="flt-status">
                 {t('Status')}
               </label>
               <select id="flt-status" className="chip" value={query.status ?? ''} onChange={(e) => update({ status: e.target.value })}>
-                <option value="">{t('Any status')}</option>
+                <option value="">{t('Status: Any')}</option>
                 {lookupOptions('lead_status', query.status).map((x) => (
                   <option key={x.value} value={x.value}>
                     {leadStatusText(t, x.value)}
@@ -263,7 +279,7 @@ export function LeadsList() {
                 {t('Source')}
               </label>
               <select id="flt-source" className="chip" value={query.source ?? ''} onChange={(e) => update({ source: e.target.value })}>
-                <option value="">{t('Any source')}</option>
+                <option value="">{t('Source: Any')}</option>
                 {lookupOptions('lead_source', query.source).map((x) => (
                   <option key={x.value} value={x.value}>
                     {lookupLabel(x, lang)}
@@ -284,7 +300,7 @@ export function LeadsList() {
                 {t('Assigned to')}
               </label>
               <select id="flt-assigned" className="chip" value={params.assignedTo ?? ''} onChange={(e) => update({ assignedTo: e.target.value })}>
-                <option value="">{t('Anyone')}</option>
+                <option value="">{t('Assigned: Any')}</option>
                 <option value="none">{t('Unassigned')}</option>
                 <option value={String(me.id)}>{t('Me')}</option>
                 {others.map((u) => (
@@ -293,32 +309,58 @@ export function LeadsList() {
                   </option>
                 ))}
               </select>
+              <label className="sr" htmlFor="flt-type">
+                {t('Lead type')}
+              </label>
+              <select id="flt-type" className="chip" value={query.leadType ?? ''} onChange={(e) => update({ leadType: e.target.value })}>
+                <option value="">{t('Lead type: Any')}</option>
+                {LEAD_TYPES.map((x) => (
+                  <option key={x} value={x}>
+                    {leadTypeText(t, x)}
+                  </option>
+                ))}
+              </select>
+              <label className="sr" htmlFor="flt-created">
+                {t('Created')}
+              </label>
+              <select
+                id="flt-created"
+                className="chip"
+                value={createdPreset}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === 'custom') return;
+                  update({ from: v ? daysAgo(Number(v)) : undefined, to: undefined });
+                }}
+              >
+                <option value="">{t('Created: Any time')}</option>
+                {CREATED_DAYS.map((n) => (
+                  <option key={n} value={String(n)}>
+                    {t('Created: Last {n} days', { n })}
+                  </option>
+                ))}
+                {createdPreset === 'custom' ? (
+                  <option value="custom">{t('Created: {from} – {to}', { from: query.from ? day(query.from) : '…', to: query.to ? day(query.to) : '…' })}</option>
+                ) : null}
+              </select>
               <label className="sr" htmlFor="flt-priority">
                 {t('Priority')}
               </label>
               <select id="flt-priority" className="chip" value={query.priority ?? ''} onChange={(e) => update({ priority: e.target.value })}>
-                <option value="">{t('Any priority')}</option>
+                <option value="">{t('Priority: Any')}</option>
                 {PRIORITIES.map((p) => (
                   <option key={p} value={p}>
                     {priorityText(t, p)}
                   </option>
                 ))}
               </select>
-              <span className="date-range">
-                <label className="date-chip">
-                  <span>{t('Created from')}</span>
-                  <input type="date" className="chip" value={query.from ?? ''} max={query.to} onChange={(e) => update({ from: e.target.value })} />
-                </label>
-                <label className="date-chip">
-                  <span>{t('to|date')}</span>
-                  <input type="date" className="chip" value={query.to ?? ''} min={query.from} onChange={(e) => update({ to: e.target.value })} />
-                </label>
-              </span>
               {filtered ? (
                 <button type="button" className="btn sm" onClick={() => reset()}>
-                  {t('Clear filters')}
+                  {t('Clear')}
                 </button>
               ) : null}
+              <div className="grow" />
+              {data && counts ? <span className="muted filters-count">{t('Showing {n} of {total}', { n: data.total, total: counts.all })}</span> : null}
             </div>
             {canManage && selected.size > 0 ? (
               <div className="bulkbar" role="region" aria-label={t('Bulk actions')}>
@@ -375,7 +417,10 @@ export function LeadsList() {
                         </Link>
                       </td>
                       <td className="strong">{l.companyName}</td>
-                      <td>{l.contact ? l.contact.name : <span className="dim">{t('No contact yet')}</span>}</td>
+                      <td className="nm">
+                        {l.contact ? <span className="n">{l.contact.name}</span> : <span className="dim">{t('No contact yet')}</span>}
+                        <LinkedInIcon url={l.contact?.linkedinUrl ?? null} />
+                      </td>
                       <td>{lookupText('country', l.country)}</td>
                       <td>
                         <span className={l.leadType === 'Lead' ? 'badge b-purple' : 'badge b-grey'}>{leadTypeText(t, l.leadType)}</span>
@@ -431,7 +476,14 @@ export function LeadsList() {
             )}
             {data && data.total > 0 ? (
               <div className="foot">
-                <Pager page={data.page} pageSize={data.pageSize} total={data.total} onPage={(page) => update({ page: page > 1 ? page : undefined })} />
+                <Pager
+                  page={data.page}
+                  pageSize={data.pageSize}
+                  total={data.total}
+                  onPage={(page) => update({ page: page > 1 ? page : undefined })}
+                  sizes={PAGE_SIZES}
+                  onPageSize={(size) => update({ size: size === DEFAULT_PAGE_SIZE ? undefined : size })}
+                />
               </div>
             ) : null}
           </Tabs>
@@ -460,6 +512,18 @@ export function LeadsList() {
         />
       ) : null}
     </>
+  );
+}
+
+/** The prototype's LinkedIn mark beside the contact person; only for a safe http(s) URL. */
+function LinkedInIcon({ url }: { url: string | null }) {
+  const t = useT();
+  const href = safeUrl(url);
+  if (!href) return null;
+  return (
+    <a className="li-btn" href={href} target="_blank" rel="noopener noreferrer" title={t('Open LinkedIn profile')} aria-label={t('LinkedIn profile')} onClick={(e) => e.stopPropagation()}>
+      {Icons.linkedin}
+    </a>
   );
 }
 

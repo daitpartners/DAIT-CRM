@@ -38,6 +38,25 @@ export function useTasks(query: TaskListQuery) {
   });
 }
 
+/** Open-task sections shown on the Tasks page. */
+export const TASK_SECTIONS = ['overdue', 'today', 'upcoming'] as const;
+export type TaskSection = (typeof TASK_SECTIONS)[number];
+
+/** `GET /api/tasks?tab=open`: every open task grouped by section, each capped at `pageSize`. */
+export type OpenTasks = { sections: Record<TaskSection, TaskRow[]>; counts: Record<TaskTab, number>; pageSize: number };
+
+export const OPEN_TASKS_CAP = 100;
+
+export function useOpenTasks(assignedTo?: 'all') {
+  const params = new URLSearchParams({ tab: 'open', pageSize: String(OPEN_TASKS_CAP) });
+  if (assignedTo) params.set('assignedTo', assignedTo);
+  return useQuery({
+    queryKey: [...keys.tasksAll, 'open', assignedTo ?? 'me'] as const,
+    queryFn: () => api<OpenTasks>(`/api/tasks?${params.toString()}`),
+    placeholderData: keepPreviousData,
+  });
+}
+
 /** A task write can move a lead's follow-up date, so leads are refreshed too. */
 function useRefresh() {
   const qc = useQueryClient();

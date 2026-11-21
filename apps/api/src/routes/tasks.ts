@@ -21,7 +21,10 @@ const taskWhere = (user: AuthUser): Prisma.TaskWhereInput => ({
   OR: [{ lead: { AND: [leadWhere(user)] } }, { leadId: null, assignedToId: user.id }],
 });
 
-function tabWhere(tab: Query['tab'], today: string): Prisma.TaskWhereInput {
+type Tab = Exclude<Query['tab'], 'open'>;
+const SECTIONS = ['overdue', 'today', 'upcoming'] as const;
+
+function tabWhere(tab: Tab, today: string): Prisma.TaskWhereInput {
   const day = dateOnly(today);
   switch (tab) {
     case 'today': return { isDone: false, dueDate: day };
@@ -31,7 +34,7 @@ function tabWhere(tab: Query['tab'], today: string): Prisma.TaskWhereInput {
   }
 }
 
-const orderBy = (tab: Query['tab']): Prisma.TaskOrderByWithRelationInput[] =>
+const orderBy = (tab: Tab): Prisma.TaskOrderByWithRelationInput[] =>
   tab === 'done' ? [{ doneAt: 'desc' }, { id: 'desc' }] : [{ dueDate: 'asc' }, { id: 'asc' }];
 
 /** A task's assignee must be active and, for a task on a lead, able to see that lead. */
@@ -101,20 +104,36 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
     if (assignedTo !== user.id && !everyone) return reply.code(403).send({ error: 'forbidden' });
     const base: Prisma.TaskWhereInput[] = [taskWhere(user), ...(assignedTo === 'all' ? [] : [{ assignedToId: assignedTo }])];
     const today = todayIn(user.timezone);
-    const where: Prisma.TaskWhereInput = { AND: [...base, tabWhere(query.tab, today)] };
-    const count = (tab: Query['tab']) => prisma.task.count({ where: { AND: [...base, tabWhere(tab, today)] } });
+    const count = (tab: Tab) => prisma.task.count({ where: { AND: [...base, tabWhere(tab, today)] } });
+    const counts = async () => {
+      const [todayCount, overdue, upcoming, done] = await Promise.all([count('today'), count('overdue'), count('upcoming'), count('done')]);
+      return { today: todayCount, overdue, upcoming, done };
+    };
 
-    const [total, rows, todayCount, overdue, upcoming, done] = await Promise.all([
+    if (query.tab === 'open') {
+      // Every open task, grouped as the Tasks page shows them; each section capped at pageSize.
+      const [lists, all] = await Promise.all([
+        Promise.all(SECTIONS.map((tab) =>
+          prisma.task.findMany({ where: { AND: [...base, tabWhere(tab, today)] }, include: taskInclude, orderBy: orderBy(tab), take: query.pageSize }))),
+        counts(),
+      ]);
+      const sections = Object.fromEntries(SECTIONS.map((tab, i) => [tab, lists[i]!.map((r) => taskRow(r, today))]));
+      return { sections, counts: all, pageSize: query.pageSize };
+    }
+
+    const tab = query.tab;
+    const where: Prisma.TaskWhereInput = { AND: [...base, tabWhere(tab, today)] };
+    const [total, rows, all] = await Promise.all([
       prisma.task.count({ where }),
-      prisma.task.findMany({ where, include: taskInclude, orderBy: orderBy(query.tab), ...pageArgs(query) }),
-      count('today'), count('overdue'), count('upcoming'), count('done'),
+      prisma.task.findMany({ where, include: taskInclude, orderBy: orderBy(tab), ...pageArgs(query) }),
+      counts(),
     ]);
     return {
       items: rows.map((r) => taskRow(r, today)),
       total,
       page: query.page,
       pageSize: query.pageSize,
-      counts: { today: todayCount, overdue, upcoming, done },
+      counts: all,
     };
   });
 

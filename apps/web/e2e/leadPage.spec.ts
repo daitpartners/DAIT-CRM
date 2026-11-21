@@ -72,8 +72,7 @@ test('log call sets status and creates a follow-up task', async ({ page }) => {
   await expect((await timeline(page)).getByRole('listitem').filter({ hasText: 'New → Contacted' })).toBeVisible();
 
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Tasks' }).click();
-  await page.getByRole('tab', { name: /Upcoming/ }).click();
-  await expect(page.getByRole('listitem').filter({ hasText: 'Follow up · Northwind Logistics' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Upcoming' }).getByRole('listitem').filter({ hasText: 'Follow up · Northwind Logistics' })).toBeVisible();
 });
 
 test('transfer requires a note and notifies the receiver', async ({ page }) => {

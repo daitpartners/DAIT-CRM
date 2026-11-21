@@ -16,10 +16,12 @@ export type NotificationPage = { items: NotificationRow[]; total: number; unread
 
 export const NOTIFICATION_PAGE_SIZE = 25;
 
-export function useNotifications(page: number) {
+/** One page of notifications, newest first; `unreadOnly` lists only unread ones (the Unread tab). */
+export function useNotifications(page: number, unreadOnly = false) {
   return useQuery({
-    queryKey: keys.notifications(page),
-    queryFn: () => api<NotificationPage>(`/api/notifications?page=${page}&pageSize=${NOTIFICATION_PAGE_SIZE}`),
+    queryKey: [...keys.notifications(page), unreadOnly ? 'unread' : 'all'] as const,
+    queryFn: () =>
+      api<NotificationPage>(`/api/notifications?page=${page}&pageSize=${NOTIFICATION_PAGE_SIZE}${unreadOnly ? '&unread=1' : ''}`),
     placeholderData: keepPreviousData,
   });
 }
