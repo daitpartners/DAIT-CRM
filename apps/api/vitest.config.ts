@@ -4,6 +4,9 @@ export default defineConfig({
   test: {
     environment: 'node',
     fileParallelism: false,
+    // Database-backed tests can exceed the 5 s default on a loaded machine.
+    testTimeout: 20000,
+    hookTimeout: 20000,
     globalSetup: ['./test/global-setup.ts'],
     // test-only values, not secrets
     env: {
