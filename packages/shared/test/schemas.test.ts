@@ -21,6 +21,13 @@ describe('rights', () => {
     expect(can('Data Research User', 'manage_companies')).toBe(true);
     expect(can('Data Research User', 'view_all_companies')).toBe(true);
     expect(can('Manager', 'view_all_companies')).toBe(true);
+    for (const role of ['Administrator', 'Manager', 'Sales Representative', 'Data Research User'] as const) {
+      expect(can(role, 'manage_leads')).toBe(true);
+    }
+    expect(can('Sales Representative', 'claim_leads')).toBe(true);
+    expect(can('Manager', 'claim_leads')).toBe(true);
+    expect(can('Data Research User', 'claim_leads')).toBe(false);
+    expect(can('Data Research User', 'view_all_leads')).toBe(false);
   });
 });
 

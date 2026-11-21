@@ -114,6 +114,8 @@ describe('LeadListQuery', () => {
     expect(LeadListQuery.safeParse({ tab: 'won' }).success).toBe(false);
     expect(LeadListQuery.safeParse({ sort: 'secret' }).success).toBe(false);
     expect(LeadListQuery.safeParse({ to: '2026-13-01' }).success).toBe(false);
+    expect(LeadListQuery.safeParse({ archived: 'yes' }).success).toBe(false);
+    expect(LeadListQuery.parse({ archived: '1' }).archived).toBe('1');
   });
 });
 

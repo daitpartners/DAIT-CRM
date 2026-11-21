@@ -89,6 +89,8 @@ export const LeadListQuery = PagingQuery.extend({
   priority: z.enum(PRIORITIES).optional(),
   from: isoDate.optional(),
   to: isoDate.optional(),
+  /** `1` includes archived leads (view_all_leads only). */
+  archived: z.enum(['0', '1']).optional(),
 });
 export type LeadListQuery = z.infer<typeof LeadListQuery>;
 

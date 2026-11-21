@@ -75,7 +75,7 @@ describe('microsoft sign-in', () => {
     expect(body).toMatchObject({ id: user.id, email: 'manager@daitpartners.com', role: 'Manager' });
     expect(body.rights).toContain('view_all_leads');
     expect(body.rights).not.toContain('manage_users');
-    expect(body.rights).toEqual(expect.arrayContaining(['manage_companies', 'view_all_companies']));
+    expect(body.rights).toEqual(expect.arrayContaining(['manage_companies', 'view_all_companies', 'manage_leads', 'claim_leads']));
 
     const stored = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
     expect(stored.microsoftOid).toBe('oid-1');
