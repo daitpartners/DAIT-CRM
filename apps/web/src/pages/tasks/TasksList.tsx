@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { TASK_TABS } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
+import { useRefreshWhenOutOfDate } from '../../api/leads';
 import { useSaveTask, useSnoozeTask, useTasks, type TaskRow, type TaskTab } from '../../api/tasks';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Icons } from '../../components/Icons';
@@ -44,7 +45,11 @@ export function TasksList() {
       return next;
     });
 
-  const fail = (err: unknown) => toast(errorText(t, err instanceof ApiError ? err.code : 'unknown'), 'warn');
+  const refreshIfOutOfDate = useRefreshWhenOutOfDate();
+  const fail = (err: unknown) => {
+    refreshIfOutOfDate(err);
+    toast(errorText(t, err instanceof ApiError ? err.code : 'unknown'), 'warn');
+  };
 
   function tick(task: TaskRow) {
     save.mutate(

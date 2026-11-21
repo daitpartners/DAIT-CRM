@@ -47,7 +47,12 @@ function fieldText(t: TFn, f: CsvField): string {
 
 function failure(t: TFn, err: unknown): string {
   if (err instanceof ApiError && err.status === 413) return t('The file is too large: 5 MB at most');
-  return errorText(t, err instanceof ApiError ? err.code : 'unknown');
+  if (!(err instanceof ApiError)) return errorText(t, 'unknown');
+  const { rows, max } = err.body;
+  const vars: Record<string, number> = {};
+  if (typeof rows === 'number') vars.rows = rows;
+  if (typeof max === 'number') vars.max = max;
+  return errorText(t, err.code, vars);
 }
 
 /**

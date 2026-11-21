@@ -1,5 +1,6 @@
 /* Translated display labels for fixed enums. Each phrase is a literal t() call so scripts/i18n-check.ts sees it. */
 import type { CompanyStatus, LeadType, LookupGroup, Priority, Role, TaskOrigin } from '@dait-crm/shared';
+import { CSV_MAX_ROWS } from '@dait-crm/shared';
 import type { Lang } from '../api/queries';
 import type { TFn } from './useT';
 
@@ -138,8 +139,8 @@ export function taskOriginText(t: TFn, origin: TaskOrigin): string {
   }
 }
 
-/** Friendly text for API error codes. */
-export function errorText(t: TFn, code: string): string {
+/** Friendly text for API error codes; `vars` fills codes that carry values (csv_too_large: rows, max). */
+export function errorText(t: TFn, code: string, vars: Record<string, string | number> = {}): string {
   switch (code) {
     case 'email_taken':
       return t('That email is already in use');
@@ -191,6 +192,10 @@ export function errorText(t: TFn, code: string): string {
       return t('Someone has already taken this lead');
     case 'csv_invalid':
       return t('The file could not be read as CSV with a header row');
+    case 'csv_too_large':
+      return t('This file has {rows} rows; the limit is {max} per import. Split it and try again.', {
+        rows: vars.rows ?? '?', max: vars.max ?? CSV_MAX_ROWS,
+      });
     case 'company_already_linked':
       return t('This lead is already linked to a company');
     case 'task_done':

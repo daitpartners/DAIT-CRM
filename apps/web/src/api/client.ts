@@ -6,6 +6,8 @@ export class ApiError extends Error {
     readonly status: number,
     readonly code: string,
     readonly issues?: Issue[],
+    /** The whole error body, for codes that carry extra values (e.g. `csv_too_large`: rows, max). */
+    readonly body: Record<string, unknown> = {},
   ) {
     super(code);
     this.name = 'ApiError';
@@ -40,11 +42,11 @@ export async function api<T>(path: string, init: ApiInit = {}): Promise<T> {
   }
 
   if (!res.ok) {
-    const payload = (data ?? {}) as { error?: string; issues?: Issue[] };
+    const payload = (data && typeof data === 'object' ? data : {}) as { error?: string; issues?: Issue[] };
     if (res.status === 401 && !noAuthRedirect && window.location.pathname !== '/sign-in') {
       window.location.assign('/sign-in');
     }
-    throw new ApiError(res.status, payload.error ?? `http_${res.status}`, payload.issues);
+    throw new ApiError(res.status, payload.error ?? `http_${res.status}`, payload.issues, payload as Record<string, unknown>);
   }
   return data as T;
 }

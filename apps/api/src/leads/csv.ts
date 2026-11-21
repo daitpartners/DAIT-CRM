@@ -1,7 +1,7 @@
 import { parse } from 'csv-parse/sync';
 import type { PrismaClient } from '@prisma/client';
 import {
-  CSV_FIELDS, LeadCreate, PRIORITIES, optionalEmail, optionalText, type CompanyMatchHow, type CsvField, type CsvImport,
+  CSV_FIELDS, CSV_MAX_ROWS, LeadCreate, PRIORITIES, optionalEmail, optionalText, type CompanyMatchHow, type CsvField, type CsvImport,
   type CsvSuggestedMapping,
 } from '@dait-crm/shared';
 import type { AuthUser } from '../plugins/auth.js';
@@ -12,8 +12,23 @@ import { RuleError, auditCreatedLead, createLeadWithCompany } from './service.js
 
 export type ParsedCsv = { headers: string[]; rows: Record<string, string>[] };
 
+/** A lead's notes cap (the `notes` field of LeadCreate). */
+const NOTES_MAX = 5000;
+
 /** The CSV cannot be used: parser error, no header row or no data rows. Routes answer 400 `csv_invalid`. */
 export class CsvInvalidError extends Error {}
+
+/** More data rows than one import accepts. Routes answer 400 `{ error: 'csv_too_large', rows, max }`. */
+export class CsvTooLargeError extends Error {
+  constructor(readonly rows: number, readonly max = CSV_MAX_ROWS) {
+    super(`The file has ${rows} rows; at most ${max} per import`);
+  }
+}
+
+/** Refuses a parsed CSV with more than CSV_MAX_ROWS data rows (throws CsvTooLargeError). */
+export function assertRowCap(parsed: ParsedCsv): void {
+  if (parsed.rows.length > CSV_MAX_ROWS) throw new CsvTooLargeError(parsed.rows.length);
+}
 
 /** Parses CSV text with a header row (BOM, blank lines and ragged rows tolerated); throws CsvInvalidError. */
 export function parseCsv(text: string): ParsedCsv {
@@ -141,7 +156,9 @@ function rowMessage(e: unknown): string | null {
 export async function importCsvLeads(
   db: PrismaClient, user: AuthUser, body: CsvImport, onUnexpected: (e: unknown, row: number) => void,
 ): Promise<CsvImportResult> {
-  const { headers, rows } = parseCsv(body.csv);
+  const parsed = parseCsv(body.csv);
+  assertRowCap(parsed);
+  const { headers, rows } = parsed;
   const { columns } = body.mapping;
   assertMappingHeaders(columns, headers);
   const result: CsvImportResult = { batch: csvBatch(), created: 0, linked: 0, review: [], errors: [] };
@@ -193,6 +210,8 @@ export async function importCsvLeads(
           })
           : null;
         if (contact) notes = notes ? `${notes}\n${contact}` : contact;
+        // The notes column cap (5000) still holds once the contact note is appended.
+        if (notes && notes.length > NOTES_MAX) notes = notes.slice(0, NOTES_MAX);
         const created = await createLeadWithCompany(
           tx, { ...input, notes, createCompany: review.length === 0, importBatch: result.batch }, user,
         );

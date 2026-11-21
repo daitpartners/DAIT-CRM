@@ -411,7 +411,8 @@ const canOpen = (c: DuplicateCandidate) => 'country' in c;
 /**
  * Company match under the lead's company name. Unlike the company form nothing blocks: a company
  * may have many leads. An automatic match (same website or email domain) is offered as a link;
- * review matches are listed with a Link button each.
+ * review matches are listed with a Link button each; left unlinked, the lead is saved without a
+ * company (the API never creates a possible duplicate) and resolved on the lead page.
  */
 export function LeadDuplicateHint({ result, onLink }: { result: DuplicateResult; onLink: (c: DuplicateCandidate) => void }) {
   const t = useT();
@@ -452,6 +453,7 @@ export function LeadDuplicateHint({ result, onLink }: { result: DuplicateResult;
           </li>
         ))}
       </ul>
+      <p>{t('If you do not link one, the lead is saved without a company until one is chosen on the lead page.')}</p>
     </div>
   );
 }

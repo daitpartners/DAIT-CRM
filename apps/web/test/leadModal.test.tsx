@@ -106,6 +106,7 @@ describe('LeadModal', () => {
     const note = (await screen.findByText('Possible duplicates')).closest('.note') as HTMLElement;
     expect(note).toHaveClass('warn');
     expect(note).toHaveTextContent('CO-0245 Meridian Textiles');
+    expect(note).toHaveTextContent('the lead is saved without a company until one is chosen on the lead page');
     await u.click(within(note).getByRole('button', { name: 'Link' }));
     expect(screen.getByRole('combobox', { name: 'Link to existing company' })).toHaveValue('Meridian Textiles');
   });

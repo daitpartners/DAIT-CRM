@@ -77,7 +77,7 @@ type Values = {
   socialX: string;
   socialYoutube: string;
   socialOther: string;
-  /** Editing only, and only for roles that may set the Client flag (view_all_companies). */
+  /** Editing only, and only for roles that may set the Client flag (view_all_leads: Administrator / Manager). */
   isClient?: boolean;
   updatedAt?: string;
 };
@@ -148,7 +148,7 @@ export function CompanyModal({ company, onClose, section }: Props) {
   const editing = Boolean(company);
   const me = useCurrentUser();
   // The API refuses isClient from other roles, so it is neither shown nor sent for them.
-  const canSetClient = editing && me.can('view_all_companies');
+  const canSetClient = editing && me.can('view_all_leads');
 
   const resolver = useMemo<Resolver<Values>>(() => {
     // The shared schemas also normalise (trim, '' → null, bare host → https://); their types differ from Values.

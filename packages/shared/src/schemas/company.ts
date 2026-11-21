@@ -51,7 +51,7 @@ export const CompanyCreate = z.object({
 });
 export type CompanyCreate = z.infer<typeof CompanyCreate>;
 
-/** `isClient` is editable only by roles with `view_all_companies` (the route refuses it for others). */
+/** `isClient` is editable only by roles with `view_all_leads` (the route refuses it for others). */
 export const CompanyUpdate = CompanyCreate.partial().extend({ isClient: z.boolean().optional(), updatedAt: z.string().datetime() });
 export type CompanyUpdate = z.infer<typeof CompanyUpdate>;
 

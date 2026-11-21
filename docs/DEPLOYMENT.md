@@ -129,7 +129,13 @@ First a dry run, which writes nothing and prints what it would create:
 source ~/.nvm/nvm.sh && cd ~/live/current/apps/api && node --env-file=$HOME/live/shared/.env dist/cli/import-prospects-2026-11-21.js --file <csv> --owners "Deepak=deepak.singh@daitpartners.com,Carlos=carlos.torres@daitpartners.com" --dry-run
 ```
 
-Check the totals (rows, would create, already imported, skipped owner, unknown companies, errors), then run the same command without `--dry-run`:
+Check the totals (rows, would create, already imported, skipped owner, unknown companies, errors). For the 21 Nov file the last line must read:
+
+```
+DRY RUN - nothing written. rows 189, would create 178, already imported 0, skipped (owner) 11, unknown company 0, errors 0
+```
+
+That is rows 189, would create 178, skipped owner 11, unknown 0, errors 0. Any other numbers: stop and investigate before importing. When they match, run the same command without `--dry-run`:
 
 ```
 source ~/.nvm/nvm.sh && cd ~/live/current/apps/api && node --env-file=$HOME/live/shared/.env dist/cli/import-prospects-2026-11-21.js --file <csv> --owners "Deepak=deepak.singh@daitpartners.com,Carlos=carlos.torres@daitpartners.com"

@@ -235,6 +235,19 @@ describe('createLeadWithCompany', () => {
     expect(await prisma.contact.count({ where: { companyId: other.companyId! } })).toBe(0);
   });
 
+  it('name+country match leaves company null', async () => {
+    const rep = await makeUser();
+    const existing = await makeCompany({ name: 'Acme Widgets', country: 'United Kingdom' });
+    const created = await tx((t) =>
+      createLeadWithCompany(t, { ...input({ phone: '+44 20 7946 0000' }), contactFirstName: 'Jane' }, authUser(rep)));
+    expect(created).toMatchObject({ createdCompanyId: null, createdContactId: null });
+    expect(created.lead).toMatchObject({ companyId: null, contactId: null, companyName: 'Acme Widgets' });
+    // No duplicate company or contact was made; the existing one is untouched.
+    expect(await prisma.company.count()).toBe(1);
+    expect(await prisma.contact.count()).toBe(0);
+    expect((await prisma.company.findFirstOrThrow()).id).toBe(existing.id);
+  });
+
   it('uses allocation rule when unassigned', async () => {
     const [admin, rep] = [await makeUser({ role: 'ADMINISTRATOR' }), await makeUser()];
     const rule = await prisma.allocationRule.create({ data: { name: 'India', matchCountries: ['India'], assignTo: rep.id, priority: 1 } });

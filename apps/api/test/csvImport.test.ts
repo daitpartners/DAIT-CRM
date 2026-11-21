@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { User } from '@prisma/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { CSV_MAX_ROWS } from '@dait-crm/shared';
 import { prisma } from '../src/db';
 import { buildApp } from '../src/app';
 import { resetDb, seedLookups } from './helpers';
@@ -190,6 +191,22 @@ describe('CSV lead import', () => {
     expect(await prisma.lead.count()).toBe(0);
   });
 
+  it('csv over 1000 data rows returns csv_too_large', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const rows = (n: number) => `${HEADER}\n${Array.from({ length: n }, (_, i) => `Bulk Co ${i},,,India,,,,,`).join('\n')}\n`;
+    const atCap = await req('POST', '/api/imports/leads/preview', admin.cookie, { csv: rows(CSV_MAX_ROWS) });
+    expect(atCap.statusCode).toBe(200);
+    expect(atCap.json().rowCount).toBe(1000);
+    const csv = rows(CSV_MAX_ROWS + 1);
+    const preview = await req('POST', '/api/imports/leads/preview', admin.cookie, { csv });
+    expect(preview.statusCode).toBe(400);
+    expect(preview.json()).toEqual({ error: 'csv_too_large', rows: 1001, max: 1000 });
+    const imported = await req('POST', '/api/imports/leads', admin.cookie, { csv, mapping });
+    expect(imported.statusCode).toBe(400);
+    expect(imported.json()).toEqual({ error: 'csv_too_large', rows: 1001, max: 1000 });
+    expect(await prisma.lead.count()).toBe(0);
+  });
+
   it('mapping with unknown header is rejected', async () => {
     const admin = await as('ADMINISTRATOR');
     const csv = `${HEADER}\nAcme,https://acme.com,,India,,,,,\n`;
@@ -214,6 +231,18 @@ describe('CSV lead import', () => {
     const [first, second] = await prisma.lead.findMany({ orderBy: { id: 'asc' } });
     expect(first.notes).toBe('Met at expo\nCSV contact: Ravi Kumar <ravi@zenith-new.com> +91 98765 43210');
     expect(second.notes).toBe('CSV contact: Mina');
+  });
+
+  it('review row notes stay within 5000 characters after the contact note', async () => {
+    const admin = await as('ADMINISTRATOR');
+    await makeCompany({ name: 'Zenith Traders', country: 'India' });
+    const long = 'x'.repeat(4990);
+    const csv = `${HEADER}\nZenith Traders,https://zenith-new.com,,India,,Ravi,Kumar,,${long}\n`;
+    const body = (await req('POST', '/api/imports/leads', admin.cookie, { csv, mapping })).json();
+    expect(body).toMatchObject({ created: 1, errors: [] });
+    const lead = await prisma.lead.findFirstOrThrow();
+    expect(lead.notes).toHaveLength(5000);
+    expect(lead.notes).toBe(`${long}\nCSV contact: Ravi Kumar`.slice(0, 5000));
   });
 
   it('import refuses an unassignable assignee and a caller without manage_leads', async () => {

@@ -198,7 +198,10 @@ export function companyDataFromLead(
   };
 }
 
-/** Resolves the company for a new lead: explicit link, else an automatic duplicate hit, else a new one. */
+/**
+ * Resolves the company for a new lead: explicit link, else an automatic duplicate hit, else (when no
+ * review candidate exists) a new one. With a review candidate the lead is saved without a company.
+ */
 async function resolveCompany(
   tx: Tx, input: LeadCreate & LeadCreateExtras, user: AuthUser, opts: CreateLeadOptions,
 ): Promise<{ companyId: number | null; createdCompanyId: number | null; createdContactId: number | null }> {
@@ -216,7 +219,8 @@ async function resolveCompany(
     country: input.country,
   });
   if (matches.auto) return { companyId: matches.auto.id, ...none };
-  if (!input.createCompany) return { companyId: null, ...none };
+  // A possible (review) match is left for a person to choose: no company rather than a duplicate.
+  if (!input.createCompany || matches.review.length > 0) return { companyId: null, ...none };
 
   const company = await tx.company.create({ data: companyDataFromLead(input, user.id) });
   const firstName = input.contactFirstName?.trim();
@@ -246,8 +250,8 @@ export type CreatedLead = { lead: Lead; createdCompanyId: number | null; created
  * Creates a lead: resolves its company (link → automatic match → new company with a primary
  * contact), picks the contact (given, else the company's primary; inactive contacts never), assigns it (given assignee,
  * else the allocation rule for its country), and writes the "Lead created" activity and the
- * follow-up task. With `createCompany: false` and no link or automatic match the lead has no
- * company (`companyId` null) until resolved. Runs inside the caller's transaction.
+ * follow-up task. With `createCompany: false`, or a review (possible) match, and no link or automatic
+ * match the lead has no company (`companyId` null) until resolved. Runs inside the caller's transaction.
  */
 export async function createLeadWithCompany(
   tx: Tx, input: LeadCreate & LeadCreateExtras, user: AuthUser, opts: CreateLeadOptions = {},

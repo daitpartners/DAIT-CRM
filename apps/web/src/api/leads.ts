@@ -185,19 +185,19 @@ export function useCompanyActivities(companyId: number, page: number) {
 }
 
 /**
- * Refusals that mean "your view of the lead is out of date": someone else changed, claimed,
- * linked, archived, closed or hid it since it was loaded.
+ * Refusals that mean "your view of the lead (or task) is out of date": someone else changed, claimed,
+ * linked, archived, closed or hid it since it was loaded, or already ticked the task.
  */
 export const OUT_OF_DATE_CODES: ReadonlySet<string> = new Set([
-  'stale', 'already_assigned', 'company_already_linked', 'lead_archived', 'lead_closed', 'not_found',
+  'stale', 'already_assigned', 'company_already_linked', 'lead_archived', 'lead_closed', 'not_found', 'task_done',
 ]);
 
 /**
  * After an out-of-date refusal: refetch leads and tasks so the page shows the lead as it is now
  * (a Claim button or Choose-company box that no longer applies goes away) and a retry carries the
- * fresh `updatedAt`. Every lead mutation calls this from onError.
+ * fresh `updatedAt`. Every lead mutation calls this from onError (the task list's tick / snooze too).
  */
-function useRefreshWhenOutOfDate() {
+export function useRefreshWhenOutOfDate() {
   const qc = useQueryClient();
   return (err: unknown) => {
     if (!(err instanceof ApiError) || !OUT_OF_DATE_CODES.has(err.code)) return;
@@ -240,6 +240,7 @@ export function useBulkLeads() {
   return useMutation({
     mutationFn: (body: LeadBulk) => api<{ updated: number }>('/api/leads/bulk', { method: 'POST', body }),
     onSuccess: refresh,
+    onError: useRefreshWhenOutOfDate(),
   });
 }
 

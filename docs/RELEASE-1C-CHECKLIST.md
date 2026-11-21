@@ -6,8 +6,8 @@ You need at least one company from release 1B (with a contact) and a second user
 
 ## Leads
 
-- [ ] In the sidebar, under Modules, click **Leads**. The list opens with the tiles (Follow-ups due today, Overdue follow-ups, New this week, Waiting to be claimed) and the views All leads, My leads, Unassigned and Prospects.
-- [ ] Click **New lead**. Type the name of a company you already have and choose its country. A note under the form names the existing company and offers **Link to CO-…**. Click it: the lead is linked to that company instead of creating a new one. Save. The lead appears with a number such as LD-1001.
+- [ ] In the sidebar, under Modules, click **Leads**. The list opens with three tiles (New this week; Follow-ups due today, with the overdue count; Unassigned, "Waiting to be claimed") and six views (All leads, Leads, Prospects, My leads, Overdue follow-ups, Unassigned).
+- [ ] Click **New lead**. Type the name and website of a company you already have. A note under the form names the existing company and offers **Link to CO-…**. Click it: the lead is linked to that company instead of creating a new one. Save. The lead appears with a number such as LD-1001.
 - [ ] Open the lead. Its page shows the status steps, the company and contact on the right, and a timeline starting with "Lead created".
 
 ## Log a call and follow up
@@ -29,12 +29,13 @@ You need at least one company from release 1B (with a contact) and a second user
 
 - [ ] On the Leads list click **Import CSV**. Choose a small CSV file with a header row (company name, country, website, contact name and email). Map the columns, check the preview and click **Import … rows**. The summary says how many leads were created and how many were linked to existing companies.
 - [ ] Include one row whose company name is close to, but not exactly, a company you already have. That lead is imported without a company and its page says it "may match one that already exists".
-- [ ] On that lead click **Link company**, choose the existing company (or **Create new company**) and save. The lead now shows the company and its primary contact.
+- [ ] On that lead, in the **Choose company** box, pick the existing company and click **Link company** (or click **Create new company**). The lead now shows the company and its primary contact.
+- [ ] Click **New lead**, type the same company name and choose the same country as a company you already have, with no website. The note under the form says a matching company exists and that the lead is saved without a company until one is chosen. Save without linking: the lead is saved without a company. On the lead page use **Choose company** to link it.
 
 ## Sales representative (Carlos)
 
 - [ ] In Settings, Administration, **Users**, make sure Carlos Torres (`carlos.torres@daitpartners.com`) exists with the role **Sales Representative**.
-- [ ] Sign in as Carlos. **Leads** lists only the leads assigned to him and the unassigned ones; leads assigned to other people are not shown.
+- [ ] Sign in as Carlos with the password. **Leads** lists only the leads assigned to him and the unassigned ones; leads assigned to other people are not shown.
 - [ ] Open an unassigned lead and click **Claim**. A message says it is now his; the lead moves to **My leads** and the tile "Waiting to be claimed" goes down by one.
 
 ## Tasks

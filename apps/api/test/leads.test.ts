@@ -266,7 +266,8 @@ describe('leads API', () => {
     const rep = await as('SALES_REPRESENTATIVE');
     const repFree = await makeLead();
     const hidden = await req('POST', '/api/leads/bulk', rep.cookie, { ids: [repFree.id], action: 'assign', toUserId: repB.id });
-    expect(hidden.json()).toEqual({ error: 'cannot_assign_hidden' });
+    expect(hidden.statusCode).toBe(403);
+    expect(hidden.json()).toEqual({ error: 'forbidden' });
     const claim = await req('POST', '/api/leads/bulk', rep.cookie, { ids: [repFree.id, held.id], action: 'assign', toUserId: rep.user.id });
     expect(claim.json()).toEqual({ updated: 1 });
 
@@ -275,6 +276,66 @@ describe('leads API', () => {
     expect((await reload(free.id)).archivedAt).not.toBeNull();
     const unarchive = await req('POST', '/api/leads/bulk', mgr.cookie, { ids, action: 'unarchive' });
     expect(unarchive.json()).toEqual({ updated: 2 });
+  });
+
+  it('creates lead without company when a review match exists', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const meridian = await makeCompany({ name: 'Meridian Textiles', country: 'India' });
+    const res = await req('POST', '/api/leads', admin.cookie, { companyName: 'Meridian Textiles', country: 'India', leadSource: 'Manual Entry' });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body).toMatchObject({ companyId: null, company: null, companyName: 'Meridian Textiles' });
+    expect(await prisma.company.count()).toBe(1);
+    expect(await prisma.auditLog.count({ where: { entityType: 'company' } })).toBe(0);
+
+    // The lead page's Choose company links the existing one.
+    const linked = await req('POST', `/api/leads/${body.id}/resolve-company`, admin.cookie, { companyId: meridian.id, updatedAt: body.updatedAt });
+    expect(linked.statusCode).toBe(200);
+    expect(linked.json()).toMatchObject({ companyId: meridian.id });
+    expect(await prisma.company.count()).toBe(1);
+  });
+
+  it('data research user cannot bulk-assign to self', async () => {
+    const dru = await as('DATA_RESEARCH_USER');
+    const lead = await makeLead({ leadType: 'Prospect' });
+    const res = await req('POST', '/api/leads/bulk', dru.cookie, { ids: [lead.id], action: 'assign', toUserId: dru.user.id });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ error: 'forbidden' });
+    expect((await reload(lead.id)).assignedToId).toBeNull();
+    expect(await prisma.leadAssignment.count()).toBe(0);
+  });
+
+  it('sales rep bulk-claims only unassigned leads', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const other = await makeUser();
+    const [a, b] = [await makeLead(), await makeLead()];
+    const mine = await makeLead({ assignedToId: rep.user.id });
+    const ok = await req('POST', '/api/leads/bulk', rep.cookie, { ids: [a.id, b.id, mine.id], action: 'assign', toUserId: rep.user.id });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual({ updated: 2 });
+    expect((await reload(a.id)).assignedToId).toBe(rep.user.id);
+    expect((await reload(b.id)).assignedToId).toBe(rep.user.id);
+
+    // Assigning to anyone else is refused, even with a note.
+    const c = await makeLead();
+    const toOther = await req('POST', '/api/leads/bulk', rep.cookie, { ids: [c.id], action: 'assign', toUserId: other.id, note: 'Yours' });
+    expect(toOther.statusCode).toBe(403);
+    expect(toOther.json()).toEqual({ error: 'forbidden' });
+    expect((await reload(c.id)).assignedToId).toBeNull();
+  });
+
+  it('sales rep cannot bulk-unassign', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const lead = await makeLead({ assignedToId: rep.user.id });
+    const res = await req('POST', '/api/leads/bulk', rep.cookie, { ids: [lead.id], action: 'assign', toUserId: null, note: 'Release' });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ error: 'forbidden' });
+    expect((await reload(lead.id)).assignedToId).toBe(rep.user.id);
+    // A manager may.
+    const mgr = await as('MANAGER');
+    const ok = await req('POST', '/api/leads/bulk', mgr.cookie, { ids: [lead.id], action: 'assign', toUserId: null, note: 'Release' });
+    expect(ok.json()).toEqual({ updated: 1 });
+    expect((await reload(lead.id)).assignedToId).toBeNull();
   });
 
   it('refuses a follow-up on a closed lead', async () => {

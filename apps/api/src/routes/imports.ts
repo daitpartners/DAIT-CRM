@@ -3,18 +3,22 @@ import { CsvImport, CsvPreview } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { parseBody } from '../validate.js';
 import { requireRight } from '../plugins/auth.js';
-import { CsvInvalidError, importCsvLeads, parseCsv, sampleRows, suggestMapping } from '../leads/csv.js';
+import { CsvInvalidError, CsvTooLargeError, assertRowCap, importCsvLeads, parseCsv, sampleRows, suggestMapping } from '../leads/csv.js';
 import { assertAssignable, guard } from './leads.js';
 
 /** CSV bodies arrive as JSON `{ csv }`; 5 MB instead of Fastify's 1 MB default. */
 const bodyLimit = 5 * 1024 * 1024;
 
-/** Unusable CSV → 400 `{ error: 'csv_invalid', message }`; anything else is rethrown. */
+/**
+ * Unusable CSV → 400 `{ error: 'csv_invalid', message }`; too many rows → 400
+ * `{ error: 'csv_too_large', rows, max }`; anything else is rethrown.
+ */
 async function csvGuard<T>(reply: FastifyReply, fn: () => Promise<T>): Promise<T | FastifyReply> {
   try {
     return await fn();
   } catch (e) {
     if (e instanceof CsvInvalidError) return reply.code(400).send({ error: 'csv_invalid', message: e.message });
+    if (e instanceof CsvTooLargeError) return reply.code(400).send({ error: 'csv_too_large', rows: e.rows, max: e.max });
     throw e;
   }
 }
@@ -24,6 +28,7 @@ export const importRoutes: FastifyPluginAsync = async (app) => {
     const { csv } = parseBody(CsvPreview, request.body);
     return csvGuard(reply, async () => {
       const parsed = parseCsv(csv);
+      assertRowCap(parsed);
       return {
         headers: parsed.headers,
         sample: sampleRows(parsed),

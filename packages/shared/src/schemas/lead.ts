@@ -141,6 +141,9 @@ export type CsvField = (typeof CSV_FIELDS)[number];
 /** Largest CSV text accepted by the import endpoints (characters). */
 export const CSV_MAX_LENGTH = 5_000_000;
 
+/** Most data rows accepted by one CSV preview / import (the CLI prospect import is not capped). */
+export const CSV_MAX_ROWS = 1000;
+
 const csvHeader = z.string().trim().min(1).max(200);
 const optionalHeader = csvHeader.nullish().transform((v) => v ?? null);
 

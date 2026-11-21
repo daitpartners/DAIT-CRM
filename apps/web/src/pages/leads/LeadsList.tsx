@@ -103,9 +103,14 @@ export function LeadsList() {
     return [{ value: ANY, label: t('Any country') }, ...opts];
   }, [lookups, lang, query.country, t]);
 
-  // Who leads can be assigned to, as the API allows: Administrator / Manager anyone active, others themselves.
-  const others = seesAll ? (users ?? []).filter((u) => u.isActive && u.id !== me.id).sort((a, b) => a.name.localeCompare(b.name)) : [];
-  const canUnassign = seesAll || me.role === 'Sales Representative';
+  // Bulk "Assign to…" as the API allows: with transfer_leads anyone active; otherwise only "Me", with
+  // claim_leads and only when every selected lead is unassigned (a bulk claim). Unassign: view_all_leads.
+  const canTransfer = me.can('transfer_leads');
+  const others = canTransfer ? (users ?? []).filter((u) => u.isActive && u.id !== me.id).sort((a, b) => a.name.localeCompare(b.name)) : [];
+  const canUnassign = seesAll;
+  const allSelectedUnassigned = (rows ?? []).every((r) => !selected.has(r.id) || r.assignedTo === null);
+  const canAssignSelf = canTransfer || (me.can('claim_leads') && allSelectedUnassigned);
+  const canBulkAssign = canAssignSelf || others.length > 0 || canUnassign;
 
   function startAssign(value: string) {
     if (!value || !rows) return;
@@ -318,19 +323,23 @@ export function LeadsList() {
             {canManage && selected.size > 0 ? (
               <div className="bulkbar" role="region" aria-label={t('Bulk actions')}>
                 <strong>{t('Selected: {n}', { n: selected.size })}</strong>
-                <label className="sr" htmlFor="ld-bulk-assign">
-                  {t('Assign to…')}
-                </label>
-                <select id="ld-bulk-assign" className="chip" value="" disabled={bulk.isPending} onChange={(e) => startAssign(e.target.value)}>
-                  <option value="">{t('Assign to…')}</option>
-                  <option value={String(me.id)}>{t('Me')}</option>
-                  {others.map((u) => (
-                    <option key={u.id} value={String(u.id)}>
-                      {u.name}
-                    </option>
-                  ))}
-                  {canUnassign ? <option value="none">{t('Unassigned')}</option> : null}
-                </select>
+                {canBulkAssign ? (
+                  <>
+                    <label className="sr" htmlFor="ld-bulk-assign">
+                      {t('Assign to…')}
+                    </label>
+                    <select id="ld-bulk-assign" className="chip" value="" disabled={bulk.isPending} onChange={(e) => startAssign(e.target.value)}>
+                      <option value="">{t('Assign to…')}</option>
+                      {canAssignSelf ? <option value={String(me.id)}>{t('Me')}</option> : null}
+                      {others.map((u) => (
+                        <option key={u.id} value={String(u.id)}>
+                          {u.name}
+                        </option>
+                      ))}
+                      {canUnassign ? <option value="none">{t('Unassigned')}</option> : null}
+                    </select>
+                  </>
+                ) : null}
                 <button type="button" className="btn sm" disabled={bulk.isPending} onClick={() => void archive()}>
                   {t('Archive')}
                 </button>

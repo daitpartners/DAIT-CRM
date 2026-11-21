@@ -247,7 +247,7 @@ function FollowUpBar({ lead, initial, onDone }: { lead: LeadFull; initial: strin
   );
 }
 
-/** A lead imported without a company (unresolved duplicate): link one or create it from the lead. */
+/** A lead saved or imported without a company (unresolved duplicate): link one or create it from the lead. */
 function ChooseCompany({ lead }: { lead: LeadFull }) {
   const t = useT();
   const toast = useToast();
@@ -272,7 +272,7 @@ function ChooseCompany({ lead }: { lead: LeadFull }) {
         {t('Choose company')}
       </h2>
       <p className="muted-text">
-        {t('This lead was imported without a company because it may match one that already exists. Link it, or create a new company from the lead.')}
+        {t('This lead has no company because it may match one that already exists. Link it, or create a new company from the lead.')}
       </p>
       <div className="inline-bar">
         <CompanyPicker

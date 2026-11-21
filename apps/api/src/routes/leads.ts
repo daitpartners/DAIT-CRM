@@ -540,12 +540,23 @@ export async function lockLeads(tx: Tx, ids: number[]): Promise<void> {
 /**
  * Assigns the visible, live leads among `ids` to `toUserId` (null = unassign). A note is required
  * when any of them is currently with someone else. Returns how many changed hands.
+ *
+ * Rights: unassigning needs `view_all_leads`. Without `transfer_leads` this is a bulk claim: the
+ * target must be the actor, who needs `claim_leads`, and every lead that would move must be
+ * unassigned. Anything else is 403 `forbidden`.
  */
 async function bulkAssign(tx: Tx, user: AuthUser, ids: number[], toUserId: number | null, note?: string): Promise<number> {
+  const transfer = can(user.role, 'transfer_leads');
+  if (toUserId === null) {
+    if (!can(user.role, 'view_all_leads')) throw new RuleError('forbidden');
+  } else if (!transfer && (toUserId !== user.id || !can(user.role, 'claim_leads'))) {
+    throw new RuleError('forbidden');
+  }
   await assertAssignable(tx, user, toUserId);
   await lockLeads(tx, ids);
   const rows = await tx.lead.findMany({ where: { AND: [{ id: { in: ids } }, leadWhere(user)] }, orderBy: { id: 'asc' } });
   const moving = rows.filter((r) => r.assignedToId !== toUserId);
+  if (!transfer && moving.some((r) => r.assignedToId !== null)) throw new RuleError('forbidden');
   if (!note?.trim() && moving.some((r) => r.assignedToId !== null)) throw new RuleError('transfer_note_required');
   for (const lead of moving) await assignAndAudit(tx, user, lead, toUserId, note?.trim() || undefined);
   return moving.length;
