@@ -16,6 +16,11 @@ describe('rights', () => {
     expect(can('Sales Representative', 'manage_quotes')).toBe(true);
     expect(can('Data Research User', 'manage_prospects')).toBe(true);
     expect(can('Data Research User', 'use_email')).toBe(false);
+    expect(can('Sales Representative', 'manage_companies')).toBe(true);
+    expect(can('Sales Representative', 'view_all_companies')).toBe(false);
+    expect(can('Data Research User', 'manage_companies')).toBe(true);
+    expect(can('Data Research User', 'view_all_companies')).toBe(true);
+    expect(can('Manager', 'view_all_companies')).toBe(true);
   });
 });
 

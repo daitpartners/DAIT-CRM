@@ -10,7 +10,8 @@ import { lookupRoutes } from './routes/lookups.js';
 import { allocationRoutes } from './routes/allocation.js';
 import { mailboxRoutes } from './routes/mailboxes.js';
 import { jobRoutes } from './routes/jobs.js';
-import { ValidationError } from './validate.js';
+import { companyRoutes } from './routes/companies.js';
+import { NotFoundError, ValidationError } from './validate.js';
 import { registerAuth } from './plugins/auth.js';
 import { createMsalClient, type MicrosoftClient } from './auth/microsoft.js';
 import { createGraphClient, type GraphClient } from './graph/client.js';
@@ -111,6 +112,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   registerAuth(app, { secureCookies });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ValidationError) return reply.code(400).send({ error: 'validation', issues: error.issues });
+    if (error instanceof NotFoundError) return reply.code(404).send({ error: 'not_found' });
     return reply.send(error);
   });
 
@@ -122,5 +124,6 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(allocationRoutes, { prefix: '/api' });
   await app.register(mailboxRoutes, { prefix: '/api' });
   await app.register(jobRoutes, { prefix: '/api' });
+  await app.register(companyRoutes, { prefix: '/api' });
   return app;
 }

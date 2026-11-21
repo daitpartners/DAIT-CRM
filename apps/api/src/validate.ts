@@ -22,3 +22,16 @@ export function parseBody<T>(schema: SchemaLike<T>, body: unknown): T {
   }
   return result.data;
 }
+
+/** Parses a query string object with a Zod schema; same 400 `{ error: 'validation', issues }` as parseBody. */
+export function parseQuery<T>(schema: SchemaLike<T>, query: unknown): T {
+  return parseBody(schema, query);
+}
+
+/** Thrown when a record is absent or hidden from the user; the app answers 404 `{ error: 'not_found' }`. */
+export class NotFoundError extends Error {
+  readonly statusCode = 404;
+  constructor() {
+    super('not_found');
+  }
+}

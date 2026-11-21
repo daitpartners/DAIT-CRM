@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PagingQuery } from './paging.js';
 import { optionalEmail, optionalText, optionalTimezone, optionalUrl, blankToNull } from './common.js';
 
 const stringList = z.array(z.string().trim().min(1).max(100)).max(50).default([]);
@@ -62,3 +63,22 @@ export const DuplicateCheck = z.object({
   excludeId: z.number().int().optional(),
 });
 export type DuplicateCheck = z.infer<typeof DuplicateCheck>;
+
+/** Columns `GET /companies` may sort by; anything else is a 400. */
+export const COMPANY_SORTS = ['name', 'country', 'industry', 'status', 'updatedAt'] as const;
+
+/** `GET /companies` query: paging plus list filters. Query values arrive as strings. */
+export const CompanyListQuery = PagingQuery.extend({
+  sort: z.enum(COMPANY_SORTS).optional(),
+  status: CompanyStatus.optional(),
+  country: z.string().trim().max(80).optional(),
+  industry: z.string().trim().max(100).optional(),
+  isClient: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
+});
+export type CompanyListQuery = z.infer<typeof CompanyListQuery>;
+
+export const CompanyBulkStatus = z.object({
+  ids: z.array(z.number().int().positive()).min(1).max(500),
+  status: CompanyStatus,
+});
+export type CompanyBulkStatus = z.infer<typeof CompanyBulkStatus>;

@@ -1,4 +1,4 @@
-import { CompanyCreate, CompanyUpdate } from '../src/schemas/company';
+import { CompanyBulkStatus, CompanyCreate, CompanyListQuery, CompanyUpdate } from '../src/schemas/company';
 import { ContactCreate } from '../src/schemas/contact';
 import { LocationCreate } from '../src/schemas/location';
 import { PagingQuery, pageArgs } from '../src/schemas/paging';
@@ -77,5 +77,22 @@ describe('PagingQuery', () => {
   });
   test('pageArgs', () => {
     expect(pageArgs({ page: 3, pageSize: 10 })).toEqual({ skip: 20, take: 10 });
+  });
+});
+
+describe('CompanyListQuery', () => {
+  test('whitelists sort and parses filters', () => {
+    expect(CompanyListQuery.safeParse({ sort: 'nameNormalised' }).success).toBe(false);
+    expect(CompanyListQuery.parse({ sort: 'updatedAt', isClient: 'true', status: 'Closed' }))
+      .toMatchObject({ sort: 'updatedAt', isClient: true, status: 'Closed', page: 1 });
+    expect(CompanyListQuery.safeParse({ isClient: 'yes' }).success).toBe(false);
+  });
+});
+
+describe('CompanyBulkStatus', () => {
+  test('needs ids and a known status', () => {
+    expect(CompanyBulkStatus.safeParse({ ids: [], status: 'Inactive' }).success).toBe(false);
+    expect(CompanyBulkStatus.safeParse({ ids: [1], status: 'Gone' }).success).toBe(false);
+    expect(CompanyBulkStatus.parse({ ids: [1, 2], status: 'Inactive' })).toEqual({ ids: [1, 2], status: 'Inactive' });
   });
 });
