@@ -1037,5 +1037,7 @@
   "Outlook template": "Modèle Outlook",
   "Outlook .oft": "Outlook .oft",
   "Written here": "Rédigé ici",
-  "Save a message in Outlook as File → Save As → Outlook Template (*.oft), then upload it here. The subject and body are read from the file; placeholders typed as {first_name} etc. are filled in when you use it. Templates in your language are listed first.": "Enregistrez un message dans Outlook via Fichier → Enregistrer sous → Modèle Outlook (*.oft), puis importez-le ici. L’objet et le corps sont lus dans le fichier ; les champs comme {first_name} sont remplis à l’utilisation. Les modèles dans votre langue apparaissent en premier."
+  "Save a message in Outlook as File → Save As → Outlook Template (*.oft), then upload it here. The subject and body are read from the file; placeholders typed as {first_name} etc. are filled in when you use it. Templates in your language are listed first.": "Enregistrez un message dans Outlook via Fichier → Enregistrer sous → Modèle Outlook (*.oft), puis importez-le ici. L’objet et le corps sont lus dans le fichier ; les champs comme {first_name} sont remplis à l’utilisation. Les modèles dans votre langue apparaissent en premier.",
+  "This mailbox is already connected by another user. Ask them to disconnect it first.": "Cette boîte mail est déjà connectée par un autre utilisateur. Demandez-lui de la déconnecter d’abord.",
+  "That file is larger than 10 MB. Outlook templates are usually under 1 MB.": "Ce fichier dépasse 10 Mo. Les modèles Outlook font généralement moins de 1 Mo."
 }

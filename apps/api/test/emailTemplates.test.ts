@@ -55,5 +55,7 @@ describe('email templates API', () => {
     expect((await call('POST', '/api/email-templates', cookie, { name: 'X', language: 'de', subject: 'Hi' })).statusCode).toBe(400);
     expect((await call('POST', '/api/email-templates', cookie, { name: 'X', language: 'en', subject: '' })).statusCode).toBe(400);
     expect((await call('DELETE', '/api/email-templates/99999', cookie)).statusCode).toBe(404);
+    // A file size beyond what an upload can be (10 MB) is refused rather than overflowing the column.
+    expect((await call('POST', '/api/email-templates', cookie, { name: 'X', language: 'en', subject: 'Hi', sourceType: 'oft', fileName: 'x.oft', fileSize: 3_000_000_000 })).statusCode).toBe(400);
   });
 });

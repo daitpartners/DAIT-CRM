@@ -51,6 +51,11 @@ export async function connectSystemMailbox(args: {
   });
 }
 
+/** The mailbox is already connected by another user (not disconnected): it is never moved silently. */
+export class MailboxTakenError extends Error {
+  readonly code = 'mailbox_taken';
+}
+
 /**
  * Stores a user's own mailbox (release 2A): one `kind='personal'` row per user. Reconnecting with the same
  * address refreshes the token; with another address the old row is replaced. The token is stored encrypted.
@@ -78,6 +83,10 @@ export async function connectPersonalMailbox(args: {
     }
     const key = { address_kind: { address, kind: 'personal' } };
     const before = await tx.emailAccount.findUnique({ where: key });
+    // Another user's live connection stays theirs; a disconnected or orphaned one may be taken over.
+    if (before && before.userId !== null && before.userId !== args.userId && before.status !== 'disconnected') {
+      throw new MailboxTakenError();
+    }
     const account = await tx.emailAccount.upsert({ where: key, create: { address, kind: 'personal', ...data }, update: data });
     await audit(tx, {
       entityType: 'email_account',

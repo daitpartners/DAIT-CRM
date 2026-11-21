@@ -53,3 +53,13 @@ test('email templates: write, upload .oft, edit and delete', async ({ page }) =>
   await page.getByRole('dialog', { name: 'Delete this template?' }).getByRole('button', { name: 'Delete' }).click();
   await expect(card.getByRole('row').filter({ hasText: name })).toHaveCount(0);
 });
+
+test('an Outlook file over 10 MB is refused before it is read', async ({ page }) => {
+  await signInAs(page, MAYA);
+  await page.goto('/settings/templates');
+  await page.getByRole('region', { name: 'Email templates' }).getByLabel('Upload .oft template').setInputFiles({
+    name: 'huge.oft', mimeType: 'application/vnd.ms-outlook', buffer: Buffer.alloc(11 * 1024 * 1024),
+  });
+  await expect(page.getByRole('status').filter({ hasText: 'That file is larger than 10 MB. Outlook templates are usually under 1 MB.' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Write a template' })).toHaveCount(0);
+});

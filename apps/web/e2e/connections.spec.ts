@@ -65,6 +65,13 @@ test('returning from Microsoft shows the result once', async ({ page }) => {
   await expect(page).toHaveURL(/\/settings\/connections$/);
 });
 
+test("a mailbox someone else already connected is refused with an explanation", async ({ page }) => {
+  await signInAs(page, ARJUN);
+  await page.goto('/settings/connections?mailbox=taken');
+  await expect(page.getByRole('status').filter({ hasText: 'This mailbox is already connected by another user. Ask them to disconnect it first.' })).toBeVisible();
+  await expect(page).toHaveURL(/\/settings\/connections$/);
+});
+
 test('Disconnect asks first, then the Connect button is back', async ({ page }) => {
   await signInAs(page, MAYA);
   await page.goto('/settings/connections');

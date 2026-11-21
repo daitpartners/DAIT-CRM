@@ -8,6 +8,9 @@ export const MailboxOptions = z.object({
 }).partial();
 export type MailboxOptions = z.infer<typeof MailboxOptions>;
 
+/** Largest Outlook file the templates card reads (they are usually under 1 MB). */
+export const TEMPLATE_FILE_MAX_BYTES = 10 * 1024 * 1024;
+
 export const TEMPLATE_LANGUAGES = ['en', 'es', 'fr'] as const;
 export type TemplateLanguage = (typeof TEMPLATE_LANGUAGES)[number];
 
@@ -19,7 +22,7 @@ export const EmailTemplateInput = z.object({
   body: z.string().max(20000).default(''),
   sourceType: z.enum(['manual', 'oft']).default('manual'),
   fileName: z.string().trim().max(255).nullable().optional(),
-  fileSize: z.number().int().min(0).nullable().optional(),
+  fileSize: z.number().int().min(0).max(TEMPLATE_FILE_MAX_BYTES).nullable().optional(),
 });
 export type EmailTemplateInput = z.infer<typeof EmailTemplateInput>;
 

@@ -35,6 +35,7 @@ export function Connections() {
     const result = params.get('mailbox');
     if (!result) return;
     if (result === 'connected') toast(t('Your mailbox is connected'));
+    else if (result === 'taken') toast(t('This mailbox is already connected by another user. Ask them to disconnect it first.'), 'warn');
     else toast(t('The mailbox could not be connected. Please try again.'), 'warn');
     params.delete('mailbox');
     setParams(params, { replace: true });

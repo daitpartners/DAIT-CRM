@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { TEMPLATE_FILE_MAX_BYTES } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
 import { useDeleteTemplate, useTemplates, type EmailTemplate } from '../../api/templates';
 import { useCurrentUser } from '../../api/useCurrentUser';
@@ -30,6 +31,11 @@ export function EmailTemplates() {
 
   async function onFile(file: File | undefined) {
     if (!file) return;
+    if (file.size > TEMPLATE_FILE_MAX_BYTES) {
+      toast(t('That file is larger than 10 MB. Outlook templates are usually under 1 MB.'), 'warn');
+      if (fileRef.current) fileRef.current.value = '';
+      return;
+    }
     let parsed = { subject: '', body: '' };
     try {
       parsed = parseOft(await file.arrayBuffer());

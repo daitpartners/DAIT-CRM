@@ -3,7 +3,7 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { prisma } from '../db.js';
 import { can } from '@dait-crm/shared';
 import { CONNECT_SCOPES, type MicrosoftClient } from '../auth/microsoft.js';
-import { connectPersonalMailbox, connectSystemMailbox } from '../graph/accounts.js';
+import { MailboxTakenError, connectPersonalMailbox, connectSystemMailbox } from '../graph/accounts.js';
 import { verifyLocalAdmin } from '../auth/local.js';
 import { SESSION_COOKIE, createSession, deleteSession } from '../auth/session.js';
 import { requireUser, sessionCookieOptions } from '../plugins/auth.js';
@@ -22,6 +22,7 @@ const MAILBOX_CONNECTED = '/settings/mailbox?connected=1';
 const MAILBOX_FAILED = '/settings/mailbox?error=connect-failed';
 const PERSONAL_CONNECTED = '/settings/connections?mailbox=connected';
 const PERSONAL_FAILED = '/settings/connections?mailbox=failed';
+const PERSONAL_TAKEN = '/settings/connections?mailbox=taken';
 
 interface SavedState {
   state?: unknown;
@@ -113,6 +114,7 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
       if (!identity.refreshToken || !identity.email) throw new Error('missing_refresh_token');
       await connectPersonalMailbox({ userId: actor.id, address: identity.email, refreshToken: identity.refreshToken, tokenExpiresAt: identity.expiresOn });
     } catch (err) {
+      if (err instanceof MailboxTakenError) return reply.redirect(PERSONAL_TAKEN);
       request.log.warn({ errName: (err as Error)?.name }, 'personal mailbox connect failed');
       return reply.redirect(PERSONAL_FAILED);
     }

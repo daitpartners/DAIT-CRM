@@ -4,7 +4,7 @@ import { buildApp } from '../src/app';
 import type { MicrosoftClient } from '../src/auth/microsoft';
 import { prisma } from '../src/db';
 import { decrypt, encrypt } from '../src/crypto/tokens';
-import { connectPersonalMailbox } from '../src/graph/accounts';
+import { MailboxTakenError, connectPersonalMailbox } from '../src/graph/accounts';
 import { resetDb } from './helpers';
 import { makeUser, signIn } from './factory';
 
@@ -120,6 +120,41 @@ describe('personal mailboxes', () => {
     const row = await prisma.emailAccount.findFirstOrThrow({ where: { kind: 'personal' } });
     expect(row).toMatchObject({ userId: rep.id, address: 'maya.pillai@daitpartners.com', status: 'connected' });
     expect(decrypt(row.refreshTokenEnc)).toBe('personal-refresh-token');
+  });
+
+  test("connecting a mailbox another user already connected is refused and leaves theirs alone", async () => {
+    const owner = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    const mine = await connectPersonalMailbox({ userId: owner.id, address: 'hello@daitpartners.com', refreshToken: 'owner-tok' });
+    await expect(connectPersonalMailbox({ userId: other.id, address: 'Hello@DaitPartners.com', refreshToken: 'other-tok' })).rejects.toBeInstanceOf(MailboxTakenError);
+    const row = await prisma.emailAccount.findUniqueOrThrow({ where: { id: mine.id } });
+    expect(row.userId).toBe(owner.id);
+    expect(decrypt(row.refreshTokenEnc)).toBe('owner-tok');
+
+    // Through the callback: back to Settings with ?mailbox=taken.
+    const { client } = fakeMicrosoft('hello@daitpartners.com', 'third-tok');
+    const a = await app(client);
+    const cookie = await signIn(a, other);
+    const start = await a.inject({ method: 'GET', url: '/api/auth/microsoft/connect?mode=personal', headers: { cookie } });
+    const state = new URL(start.headers.location as string).searchParams.get('state')!;
+    const msState = start.cookies.find((c) => c.name === 'ms_state')!;
+    const back = await a.inject({
+      method: 'GET',
+      url: `/api/auth/microsoft/callback?code=good-code&state=${encodeURIComponent(state)}`,
+      headers: { cookie: `${cookie}; ms_state=${msState.value}` },
+    });
+    expect(back.headers.location).toBe('/settings/connections?mailbox=taken');
+    expect((await prisma.emailAccount.findUniqueOrThrow({ where: { id: mine.id } })).userId).toBe(owner.id);
+  });
+
+  test('a disconnected mailbox can be connected by another user', async () => {
+    const a = await app();
+    const owner = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    const old = await connectPersonalMailbox({ userId: owner.id, address: 'shared@daitpartners.com', refreshToken: 'x' });
+    await a.inject({ method: 'POST', url: `/api/mailboxes/${old.id}/disconnect`, headers: { cookie: await signIn(a, owner) } });
+    const taken = await connectPersonalMailbox({ userId: other.id, address: 'shared@daitpartners.com', refreshToken: 'y' });
+    expect(taken).toMatchObject({ userId: other.id, status: 'connected' });
   });
 
   test('a Data Research User cannot connect a personal mailbox (no use_email)', async () => {

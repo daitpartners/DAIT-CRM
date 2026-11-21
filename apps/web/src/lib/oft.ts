@@ -17,8 +17,15 @@ function readCfb(buf: ArrayBuffer): Cfb {
   if (buf.byteLength < 512 || dv.getUint32(0, true) !== 0xe011cfd0 || dv.getUint32(4, true) !== 0xe11ab1a1) {
     throw new Error('Not an Outlook template (.oft/.msg) file');
   }
-  const S = 1 << dv.getUint16(30, true);
-  const miniS = 1 << dv.getUint16(32, true);
+  // Only the two sector sizes the format defines (512 B / 4 KiB) and 64-byte mini sectors; anything else is not a
+  // template, and would make `1 << shift` wrap.
+  const shift = dv.getUint16(30, true);
+  const miniShift = dv.getUint16(32, true);
+  if ((shift !== 9 && shift !== 12) || miniShift !== 6) throw new Error('Not an Outlook template (.oft/.msg) file');
+  const S = 1 << shift;
+  const miniS = 1 << miniShift;
+  // No chain can hold more sectors than the file has; a longer walk means a loop (corrupt or crafted file).
+  const maxSectors = Math.ceil(buf.byteLength / S) + 1;
   const numFat = dv.getUint32(44, true);
   const firstDir = dv.getUint32(48, true);
   const miniCutoff = dv.getUint32(56, true);
@@ -34,7 +41,7 @@ function readCfb(buf: ArrayBuffer): Cfb {
     if (v < END) fatSectors.push(v);
   }
   let dif = firstDifat;
-  for (let k = 0; k < numDifat && dif < END; k++) {
+  for (let k = 0; k < numDifat && dif < END && fatSectors.length < numFat && k < maxSectors; k++) {
     const base = sec(dif);
     for (let i = 0; i < S / 4 - 1; i++) {
       const v = dv.getUint32(base + i * 4, true);
@@ -49,9 +56,11 @@ function readCfb(buf: ArrayBuffer): Cfb {
   });
   const chain = (start: number, table: Uint32Array): number[] => {
     const out: number[] = [];
+    const seen = new Set<number>();
     let s = start;
-    let guard = 0;
-    while (s < END && guard++ < 1e6) {
+    // Stop at the end marker, on a sector already visited (a loop) or past what the file can hold.
+    while (s < END && !seen.has(s) && out.length < maxSectors) {
+      seen.add(s);
       out.push(s);
       s = table[s] ?? END;
     }
@@ -61,7 +70,7 @@ function readCfb(buf: ArrayBuffer): Cfb {
     const sectors = chain(start, fat);
     const out = new Uint8Array(sectors.length * S);
     sectors.forEach((s, i) => out.set(u8.subarray(sec(s), sec(s) + S), i * S));
-    return out.subarray(0, size);
+    return out.subarray(0, Math.min(size, out.length));
   };
 
   // Directory: 128-byte entries (UTF-16 name, type, start sector, size).
