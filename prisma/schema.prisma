@@ -153,8 +153,8 @@ model AuditLog {
 
 model Company {
   id                  Int       @id @default(autoincrement())
-  /// CO-0001; default from company_number_seq, set in the migration SQL.
-  number              String    @unique @default(dbgenerated("('CO-'::text || lpad((nextval('company_number_seq'::regclass))::text, 4, '0'::text))"))
+  /// CO-0001 ... CO-10000; next_company_number() over company_number_seq, defined in the migration SQL.
+  number              String    @unique @default(dbgenerated("next_company_number()"))
   name                String
   /// normaliseCompanyName(name); set by the routes on every write, used for duplicate matching.
   nameNormalised      String    @map("name_normalised")

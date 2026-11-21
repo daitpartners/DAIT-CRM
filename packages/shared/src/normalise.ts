@@ -17,11 +17,7 @@ export function domainOf(input: string | null | undefined): string | null {
 }
 
 export const FREE_MAIL_DOMAINS: ReadonlySet<string> = new Set([
-  'gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.in', 'yahoo.co.uk', 'ymail.com',
-  'outlook.com', 'hotmail.com', 'hotmail.co.uk', 'live.com', 'msn.com', 'icloud.com', 'me.com',
-  'mac.com', 'aol.com', 'proton.me', 'protonmail.com', 'zoho.com', 'zohomail.com', 'gmx.com',
-  'gmx.de', 'gmx.net', 'web.de', 'mail.com', 'yandex.com', 'yandex.ru', 'rediffmail.com',
-  'qq.com', '163.com', '126.com', 'free.fr', 'orange.fr', 'laposte.net',
+  'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com',
 ]);
 
 /** True for consumer mailbox providers, whose domain says nothing about the company. */
@@ -31,13 +27,19 @@ export function isFreeMail(domain: string): boolean {
 
 const LEGAL_SUFFIX = /\b(pvt|private|ltd|limited|llc|inc|gmbh|plc|spa|sl|pty|co|corp|corporation|company|group)\b\.?/g;
 
-/** Company name key for duplicate matching: lower-case, legal suffixes removed, punctuation collapsed. */
+/**
+ * Company name key for duplicate matching: lower-case, legal suffixes removed, punctuation collapsed.
+ * Can be '' (e.g. "Company Group Ltd"); callers must treat '' as no key.
+ */
 export function normaliseCompanyName(name: string): string {
   return name.toLowerCase().replace(LEGAL_SUFFIX, '').replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
-/** Digits only, for phone matching; '' when fewer than 8 digits (too short to match on). */
+/**
+ * Phone key for matching: the last 10 digits, so numbers with and without a country code
+ * compare equal. '' when fewer than 8 digits (too short to match on).
+ */
 export function normalisePhone(input: string | null | undefined): string {
   const digits = (input ?? '').replace(/\D/g, '');
-  return digits.length >= 8 ? digits : '';
+  return digits.length >= 8 ? digits.slice(-10) : '';
 }

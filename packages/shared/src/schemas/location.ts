@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { optionalText, optionalTimezone, optionalUrl } from './company.js';
+import { optionalText, optionalTimezone, optionalUrl } from './common.js';
 
 export const LocationCreate = z.object({
   name: z.string().trim().min(1).max(120),

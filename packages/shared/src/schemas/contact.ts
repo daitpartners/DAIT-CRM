@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { optionalEmail, optionalText, optionalUrl } from './company.js';
+import { optionalEmail, optionalText, optionalUrl } from './common.js';
 
 export const ContactCreate = z.object({
   companyId: z.number().int(),

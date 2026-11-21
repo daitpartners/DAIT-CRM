@@ -1,10 +1,15 @@
--- Company numbers CO-0001, CO-0002, ...: the sequence must exist before companies.number's default uses it.
+-- Company numbers CO-0001, CO-0002, ... CO-9999, CO-10000: the sequence and function must exist
+-- before companies.number's default uses them. Padding grows past 4 digits instead of truncating.
 CREATE SEQUENCE company_number_seq START 1;
+
+CREATE FUNCTION next_company_number() RETURNS text LANGUAGE sql AS
+$$ SELECT 'CO-' || lpad(n::text, greatest(4, length(n::text)), '0')
+   FROM (SELECT nextval('company_number_seq') AS n) s $$;
 
 -- CreateTable
 CREATE TABLE "companies" (
     "id" SERIAL NOT NULL,
-    "number" TEXT NOT NULL DEFAULT ('CO-'::text || lpad((nextval('company_number_seq'::regclass))::text, 4, '0'::text)),
+    "number" TEXT NOT NULL DEFAULT next_company_number(),
     "name" TEXT NOT NULL,
     "name_normalised" TEXT NOT NULL,
     "legal_name" TEXT,
