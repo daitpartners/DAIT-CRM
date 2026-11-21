@@ -11,6 +11,7 @@ function view(r: AllocationRule) {
     id: r.id,
     name: r.name,
     matchCountries: r.matchCountries as string[],
+    matchLanguage: r.matchLanguage,
     assignTo: r.assignTo as number | number[],
     priority: r.priority,
     isActive: r.isActive,

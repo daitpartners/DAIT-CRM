@@ -4,21 +4,23 @@ import type { Prisma } from '@prisma/client';
  * Picks the assignee for a lead from `country` using the active allocation rules.
  * Must run inside the caller's transaction so the round-robin advance commits with the lead.
  */
-export async function pickAssignee(tx: Prisma.TransactionClient, country: string): Promise<number | null> {
-  return (await pickAllocation(tx, country))?.userId ?? null;
+export async function pickAssignee(tx: Prisma.TransactionClient, country: string, language = 'en'): Promise<number | null> {
+  return (await pickAllocation(tx, country, language))?.userId ?? null;
 }
 
 /** As `pickAssignee`, also naming the rule that chose the user (for `lead_assignments.rule_id`). */
 export async function pickAllocation(
-  tx: Prisma.TransactionClient, country: string,
+  tx: Prisma.TransactionClient, country: string, language = 'en',
 ): Promise<{ userId: number; ruleId: number } | null> {
   const rules = await tx.allocationRule.findMany({
     where: { isActive: true },
     orderBy: [{ priority: 'asc' }, { id: 'asc' }],
   });
+  // A rule matches on its countries (or '*') and, when it names one, the lead's outreach language.
   const match = rules.find((r) => {
     const countries = r.matchCountries as string[];
-    return countries.includes(country) || (countries.length === 1 && countries[0] === '*');
+    const countryOk = countries.includes(country) || (countries.length === 1 && countries[0] === '*');
+    return countryOk && (r.matchLanguage === null || r.matchLanguage === language);
   });
   if (!match) return null;
 

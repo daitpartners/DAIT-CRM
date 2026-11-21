@@ -84,6 +84,8 @@ model AllocationRule {
   id             Int     @id @default(autoincrement())
   name           String
   matchCountries Json    @map("match_countries")
+  /// Only leads in this outreach language; null = any.
+  matchLanguage  String? @map("match_language") @db.Char(2)
   assignTo       Json    @map("assign_to")
   roundRobinPos  Int     @default(0) @map("round_robin_pos")
   priority       Int
@@ -355,6 +357,8 @@ model Lead {
   city             String?
   /// Lookup `lead_source`.
   leadSource       String    @map("lead_source")
+  /// The language the lead is approached in: 'en' | 'es' (outreach-language design, 22 Nov 2026).
+  outreachLanguage String   @default("en") @map("outreach_language") @db.Char(2)
   sourceUrl        String?   @map("source_url")
   importBatch      String?   @map("import_batch")
   assignedToId     Int?      @map("assigned_to_id")

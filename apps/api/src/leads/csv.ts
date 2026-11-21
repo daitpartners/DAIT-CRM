@@ -2,8 +2,7 @@ import { parse } from 'csv-parse/sync';
 import type { PrismaClient } from '@prisma/client';
 import {
   CSV_FIELDS, CSV_MAX_ROWS, LeadCreate, PRIORITIES, optionalEmail, optionalText, type CompanyMatchHow, type CsvField, type CsvImport,
-  type CsvSuggestedMapping,
-} from '@dait-crm/shared';
+  type CsvSuggestedMapping, parseOutreachLanguage } from '@dait-crm/shared';
 import type { AuthUser } from '../plugins/auth.js';
 import { findCompanyMatches } from '../companies/match.js';
 import { NotFoundError, ValidationError } from '../validate.js';
@@ -92,6 +91,7 @@ const ALIASES: Record<CsvField, string[]> = {
   priority: ['priority'],
   notes: ['notes', 'note', 'comments'],
   sourceUrl: ['sourceurl'],
+  outreachLanguage: ['outreachlanguage', 'language', 'lang', 'idioma'],
 };
 
 /** Suggests a header per field by case-insensitive match on the field name or a common alias. */
@@ -192,6 +192,8 @@ export async function importCsvLeads(
           notes: get('notes'), sourceUrl: get('sourceUrl'), contactFirstName: get('contactFirstName'),
           contactLastName: get('contactLastName'), contactEmail: get('contactEmail'),
           assignedToId: body.assignedToId ?? undefined,
+          // An unknown or empty value falls back to the country default (set when the lead is created).
+          outreachLanguage: parseOutreachLanguage(get('outreachLanguage')) ?? undefined,
         });
         if (!parsed.success) {
           throw new RowError(parsed.error.issues.map((x) => `${x.path.join('.')}: ${x.message}`).join('; '));

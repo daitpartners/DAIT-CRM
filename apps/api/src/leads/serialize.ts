@@ -71,6 +71,7 @@ export function leadSummary(l: LeadSummaryRow, today: string) {
       ? { id: l.contact.id, name: fullName(l.contact), email: l.contact.businessEmail, linkedinUrl: l.contact.linkedinUrl }
       : null,
     country: l.country,
+    outreachLanguage: l.outreachLanguage,
     city: l.city,
     leadSource: l.leadSource,
     status: l.status,

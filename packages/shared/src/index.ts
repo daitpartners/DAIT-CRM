@@ -16,3 +16,4 @@ export * from './leads.js';
 export * from './schemas/lead.js';
 export * from './schemas/task.js';
 export * from './schemas/email.js';
+export * from './outreach.js';

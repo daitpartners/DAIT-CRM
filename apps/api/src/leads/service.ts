@@ -1,5 +1,5 @@
 import type { Lead, Prisma } from '@prisma/client';
-import { checkDomain, isClosedStatus, normaliseCompanyName, normalisePhone, type LeadCreate } from '@dait-crm/shared';
+import { checkDomain, defaultOutreachLanguage, isClosedStatus, normaliseCompanyName, normalisePhone, type LeadCreate } from '@dait-crm/shared';
 import { pickAllocation } from '../allocation/pick.js';
 import { findCompanyMatches } from '../companies/match.js';
 import { assertCompanyVisible } from '../companies/visibility.js';
@@ -280,6 +280,7 @@ export async function createLeadWithCompany(
       country: input.country,
       city: input.city ?? null,
       leadSource: input.leadSource,
+      outreachLanguage: input.outreachLanguage ?? defaultOutreachLanguage(input.country),
       sourceUrl: input.sourceUrl ?? null,
       importBatch: input.importBatch ?? null,
       priority: input.priority,
@@ -296,7 +297,7 @@ export async function createLeadWithCompany(
   if (input.assignedToId != null) {
     current = await recordAssignment(tx, current, input.assignedToId, { userId: user.id, isNew: true, quiet: opts.quiet });
   } else {
-    const pick = await pickAllocation(tx, input.country);
+    const pick = await pickAllocation(tx, input.country, current.outreachLanguage);
     // A rule naming a deactivated user leaves the lead unassigned rather than failing the create.
     const active = pick && (await tx.user.count({ where: { id: pick.userId, isActive: true } })) > 0;
     if (pick && active) current = await recordAssignment(tx, current, pick.userId, { userId: null, ruleId: pick.ruleId, isNew: true, quiet: opts.quiet });

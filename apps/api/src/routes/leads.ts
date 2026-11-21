@@ -136,6 +136,7 @@ function filterWhere(query: LeadListQuery): Prisma.LeadWhereInput[] {
   if (query.country) and.push({ country: { equals: query.country, mode: 'insensitive' } });
   if (query.assignedTo !== undefined) and.push({ assignedToId: query.assignedTo === 'none' ? null : query.assignedTo });
   if (query.leadType) and.push({ leadType: query.leadType });
+  if (query.language) and.push({ outreachLanguage: query.language });
   if (query.priority) and.push({ priority: query.priority });
   if (query.from) and.push({ createdAt: { gte: dateOnly(query.from) } });
   if (query.to) and.push({ createdAt: { lt: new Date(dateOnly(query.to).getTime() + DAY_MS) } });

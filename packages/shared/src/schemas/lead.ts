@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { LEAD_TYPES, PRIORITIES } from '../leads.js';
+import { OUTREACH_LANGUAGES } from '../outreach.js';
 import { isoDate, optionalEmail, optionalText, optionalUrl } from './common.js';
 import { PagingQuery } from './paging.js';
 
@@ -20,6 +21,8 @@ const leadDetails = z.object({
   priority: z.enum(PRIORITIES),
   nextFollowUp: isoDate.nullish(),
   notes: optionalText(5000),
+  /** Left out on create = from the country (defaultOutreachLanguage); a later country edit does not change it. */
+  outreachLanguage: z.enum(OUTREACH_LANGUAGES).optional(),
 });
 
 export const LeadCreate = leadDetails.extend({
@@ -123,6 +126,8 @@ export const LeadListQuery = PagingQuery.extend({
   assignedTo: z.union([z.literal('none'), z.coerce.number().int().positive()]).optional(),
   leadType: z.enum(LEAD_TYPES).optional(),
   priority: z.enum(PRIORITIES).optional(),
+  /** Outreach language: English / Spanish leads. */
+  language: z.enum(OUTREACH_LANGUAGES).optional(),
   from: isoDate.optional(),
   to: isoDate.optional(),
   /** Leads of this company. */
@@ -162,7 +167,7 @@ export type SwitchContact = z.infer<typeof SwitchContact>;
 /** Lead fields a CSV column can map to. */
 export const CSV_FIELDS = [
   'companyName', 'website', 'businessEmail', 'phone', 'country', 'city', 'contactFirstName', 'contactLastName',
-  'contactEmail', 'leadSource', 'priority', 'notes', 'sourceUrl',
+  'contactEmail', 'leadSource', 'priority', 'notes', 'sourceUrl', 'outreachLanguage',
 ] as const;
 export type CsvField = (typeof CSV_FIELDS)[number];
 
@@ -191,6 +196,7 @@ export const CsvMapping = z.object({
     priority: optionalHeader,
     notes: optionalHeader,
     sourceUrl: optionalHeader,
+    outreachLanguage: optionalHeader,
   }),
 });
 export type CsvMapping = z.infer<typeof CsvMapping>;
