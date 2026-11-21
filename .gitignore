@@ -7,3 +7,5 @@ apps/api/uploads/
 test-results/
 playwright-report/
 **/.env
+.claude/worktrees/
+.superpowers/
