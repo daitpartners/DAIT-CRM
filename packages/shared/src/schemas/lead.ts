@@ -79,6 +79,24 @@ export const LogCall = z.object({
 });
 export type LogCall = z.infer<typeof LogCall>;
 
+/** `POST /leads/:id/research`: a `research` activity on the timeline (title, optional link and notes). */
+export const ResearchNote = z.object({
+  title: z.string().trim().min(1).max(200),
+  url: optionalUrl(500),
+  body: optionalText(5000),
+  updatedAt,
+});
+export type ResearchNote = z.infer<typeof ResearchNote>;
+
+/** `POST /leads/:id/meeting`: a `meeting` activity dated when the meeting took place. */
+export const MeetingNote = z.object({
+  title: z.string().trim().min(1).max(200),
+  occurredAt: z.string().datetime({ offset: true }),
+  body: optionalText(5000),
+  updatedAt,
+});
+export type MeetingNote = z.infer<typeof MeetingNote>;
+
 export const LEAD_TABS = ['all', 'leads', 'prospects', 'mine', 'overdue', 'unassigned'] as const;
 export const LEAD_SORTS = [
   'number', 'companyName', 'contact', 'country', 'leadType', 'leadSource', 'status', 'priority', 'assignedTo',

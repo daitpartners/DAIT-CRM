@@ -2,7 +2,7 @@ import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { Prisma, type Lead } from '@prisma/client';
 import {
   CLOSED_STATUSES, CompanyActivityQuery, DuplicateCheck, LeadBulk, LeadCreate, LeadListQuery, LeadStatusChange, LeadTransfer, LeadUnassign,
-  LeadUpdate, LogCall, ResolveCompany, SwitchContact, UpdatedAtOnly, can, checkDomain, isClosedStatus, pageArgs, type CompanyCandidate,
+  LeadUpdate, LogCall, MeetingNote, ResearchNote, ResolveCompany, SwitchContact, UpdatedAtOnly, can, checkDomain, isClosedStatus, pageArgs, type CompanyCandidate,
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { audit } from '../audit.js';
@@ -366,6 +366,52 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
         });
       });
       return detailOf(prisma, id, user);
+    });
+  });
+
+  /** Research and meeting notes: one timeline activity each; the lead is touched (stale check) and audited. */
+  app.post<{ Params: { id: string } }>('/leads/:id/research', { preHandler: [requireRight('manage_leads')] }, async (request, reply) => {
+    const body = parseBody(ResearchNote, request.body);
+    const user = request.user!;
+    const id = leadId(request.params.id);
+    return guard(reply, async () => {
+      const row = await prisma.$transaction(async (tx) => {
+        await lockFresh(tx, user, id, body.updatedAt);
+        const activity = await tx.leadActivity.create({
+          data: { leadId: id, activityType: 'research', title: body.title, url: body.url ?? null, body: body.body ?? null, byUserId: user.id },
+          include: activityInclude,
+        });
+        await audit(tx, {
+          entityType: 'lead', entityId: id, action: 'update', userId: user.id,
+          after: { research: body.title, url: activity.url, activityId: activity.id },
+        });
+        return activity;
+      });
+      return reply.code(201).send(activityRow(row));
+    });
+  });
+
+  app.post<{ Params: { id: string } }>('/leads/:id/meeting', { preHandler: [requireRight('manage_leads')] }, async (request, reply) => {
+    const body = parseBody(MeetingNote, request.body);
+    const user = request.user!;
+    const id = leadId(request.params.id);
+    return guard(reply, async () => {
+      const row = await prisma.$transaction(async (tx) => {
+        await lockFresh(tx, user, id, body.updatedAt);
+        const activity = await tx.leadActivity.create({
+          data: {
+            leadId: id, activityType: 'meeting', title: body.title, body: body.body ?? null,
+            occurredAt: new Date(body.occurredAt), byUserId: user.id,
+          },
+          include: activityInclude,
+        });
+        await audit(tx, {
+          entityType: 'lead', entityId: id, action: 'update', userId: user.id,
+          after: { meeting: body.title, occurredAt: activity.occurredAt, activityId: activity.id },
+        });
+        return activity;
+      });
+      return reply.code(201).send(activityRow(row));
     });
   });
 

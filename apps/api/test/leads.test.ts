@@ -471,4 +471,52 @@ describe('leads API', () => {
       headline: 'Head of Ops', location: 'Pune', about: 'Ops lead', experience: [], education: [], skills: ['Lean'], languages: ['Hindi'],
     });
   });
+  it('research note writes a research activity with url', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const lead = await makeLead({ assignedToId: rep.user.id });
+    const res = await req('POST', `/api/leads/${lead.id}/research`, rep.cookie, {
+      title: 'Annual report 2025', url: 'acme.test/ar-2025', body: 'Revenue up 12%', updatedAt: stamp(lead),
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({
+      leadId: lead.id, activityType: 'research', title: 'Annual report 2025', url: 'https://acme.test/ar-2025',
+      body: 'Revenue up 12%', by: { id: rep.user.id },
+    });
+    const row = await prisma.leadActivity.findFirstOrThrow({ where: { leadId: lead.id, activityType: 'research' } });
+    expect(row).toMatchObject({ url: 'https://acme.test/ar-2025', byUserId: rep.user.id });
+    const log = await prisma.auditLog.findFirstOrThrow({ where: { entityType: 'lead', entityId: String(lead.id), action: 'update' } });
+    expect(log.after).toMatchObject({ research: 'Annual report 2025' });
+    // The lead was touched: the old stamp is stale now.
+    const again = await req('POST', `/api/leads/${lead.id}/research`, rep.cookie, { title: 'Again', updatedAt: stamp(lead) });
+    expect(again.statusCode).toBe(409);
+    const bad = await req('POST', `/api/leads/${lead.id}/research`, rep.cookie, {
+      title: 'X', url: 'javascript:alert(1)', updatedAt: stamp(await reload(lead.id)),
+    });
+    expect(bad.statusCode).toBe(400);
+    const blank = await req('POST', `/api/leads/${lead.id}/research`, rep.cookie, { title: ' ', updatedAt: stamp(await reload(lead.id)) });
+    expect(blank.statusCode).toBe(400);
+    expect((await req('POST', `/api/leads/${lead.id}/research`, undefined, { title: 'X', updatedAt: stamp(lead) })).statusCode).toBe(401);
+  });
+
+  it('meeting note writes a meeting activity', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const lead = await makeLead({ assignedToId: rep.user.id });
+    const res = await req('POST', `/api/leads/${lead.id}/meeting`, rep.cookie, {
+      title: 'Intro call with CFO', occurredAt: '2026-11-20T10:30:00.000Z', body: 'Wants a quote', updatedAt: stamp(lead),
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({
+      leadId: lead.id, activityType: 'meeting', title: 'Intro call with CFO', body: 'Wants a quote',
+      occurredAt: '2026-11-20T10:30:00.000Z', by: { id: rep.user.id },
+    });
+    expect(await prisma.auditLog.count({ where: { entityType: 'lead', entityId: String(lead.id) } })).toBe(1);
+    const missing = await req('POST', `/api/leads/${lead.id}/meeting`, rep.cookie, { title: 'No date', updatedAt: stamp(await reload(lead.id)) });
+    expect(missing.statusCode).toBe(400);
+    const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    const hidden = await makeLead({ assignedToId: other.id });
+    const denied = await req('POST', `/api/leads/${hidden.id}/meeting`, rep.cookie, {
+      title: 'X', occurredAt: '2026-11-20T10:30:00.000Z', updatedAt: stamp(hidden),
+    });
+    expect(denied.statusCode).toBe(404);
+  });
 });
