@@ -130,9 +130,11 @@ function NewLeadForm() {
     name: ['leadType', 'companyName', 'website', 'businessEmail', 'country', 'linkCompanyId'],
   });
 
-  // Outreach language follows the country until the user picks one (outreach-language design).
+  // Outreach language follows the country until the user picks one (outreach-language design). A ref set by the
+  // select itself, not react-hook-form's dirty state (which resets when the value equals the default).
+  const languagePicked = useRef(false);
   useEffect(() => {
-    if (!form.formState.dirtyFields.outreachLanguage) setValue('outreachLanguage', defaultOutreachLanguage(country));
+    if (!languagePicked.current) setValue('outreachLanguage', defaultOutreachLanguage(country));
   }, [country]);
 
   // `?company=<id>` (company profile): start linked to that company with its details filled in.
@@ -293,7 +295,9 @@ function NewLeadForm() {
               {f.input('phone', t('Phone number'), { type: 'tel', placeholder: '+91 …' })}
               {f.country()}
               {f.input('city', t('City'))}
-              {f.outreachLanguage()}
+              {f.outreachLanguage(undefined, () => {
+                languagePicked.current = true;
+              })}
             </div>
           </section>
 

@@ -148,9 +148,10 @@ export function useLeadFormFields(form: UseFormReturn<LeadFormValues>, opts: { c
     </div>
   );
 
-  const outreachLanguage = (label = t('Outreach language')) => (
+  /** `onPick` runs only when the user changes the select (not when the form sets it from the country). */
+  const outreachLanguage = (label = t('Outreach language'), onPick?: () => void) => (
     <FormField id="ld-outreachLanguage" label={label}>
-      <select id="ld-outreachLanguage" className="in" {...register('outreachLanguage')}>
+      <select id="ld-outreachLanguage" className="in" {...register('outreachLanguage', { onChange: onPick })}>
         {OUTREACH_LANGUAGES.map((x) => (
           <option key={x} value={x}>
             {OUTREACH_LABEL[x]}

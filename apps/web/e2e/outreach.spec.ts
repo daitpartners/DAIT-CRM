@@ -37,6 +37,8 @@ test('a Spanish lead: Language column and filter, facts grid, Spanish intro in t
   await dialog.getByRole('button', { name: 'Save' }).click();
   await expect(dialog).toBeHidden();
   await expect(profile.locator('dd').filter({ hasText: 'English' })).toHaveCount(1);
+  // The Email tab follows the new language.
+  await expect(email.getByLabel('Subject')).toHaveValue('Intro call this week?');
 });
 
 test('New lead: Outreach language follows the country until chosen', async ({ page }) => {
@@ -49,8 +51,11 @@ test('New lead: Outreach language follows the country until chosen', async ({ pa
   await country.fill('Spain');
   await country.press('Enter');
   await expect(lang).toHaveValue('es');
+  // Once the user picks a language, later country changes leave it alone (even back to a Spanish-speaking one).
   await lang.selectOption('en');
-  await country.fill('India');
+  await country.fill('Italy');
+  await country.press('Enter');
+  await country.fill('Spain');
   await country.press('Enter');
   await expect(lang).toHaveValue('en');
 });

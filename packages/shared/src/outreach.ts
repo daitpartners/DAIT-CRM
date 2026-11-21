@@ -10,13 +10,18 @@ export const SPANISH_COUNTRIES: readonly string[] = [
 
 /** The language a new lead gets when none is given: Spanish for Spanish-speaking countries, else English. */
 export function defaultOutreachLanguage(country: string | null | undefined): OutreachLanguage {
-  const c = (country ?? '').trim().toLowerCase();
-  return SPANISH_COUNTRIES.some((s) => s.toLowerCase() === c) ? 'es' : 'en';
+  const c = fold(country);
+  return SPANISH_COUNTRIES.some((s) => fold(s) === c) ? 'es' : 'en';
+}
+
+/** Lower case without accents, so "México" and "Mexico" compare equal. */
+function fold(v: string | null | undefined): string {
+  return (v ?? '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
 /** A CSV / free-text value as a language ("es", "Español", "Spanish", "English", "Inglés"…), or null when unknown. */
 export function parseOutreachLanguage(raw: string | null | undefined): OutreachLanguage | null {
-  const v = (raw ?? '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const v = fold(raw);
   if (['es', 'spa', 'spanish', 'espanol', 'castellano'].includes(v)) return 'es';
   if (['en', 'eng', 'english', 'ingles'].includes(v)) return 'en';
   return null;

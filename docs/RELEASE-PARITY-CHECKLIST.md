@@ -120,7 +120,7 @@ Prototype `#/settings` (cards "Email & calendar connections" and "Email template
 
 ## Outreach language (English / Español)
 
-- [ ] Leads list: column **Language** after Country and filter **Language: Any / English / Español**; Seba's and Carlos's leads are Español.
+- [ ] Leads list: column **Language** after Country and filter **Language: Any / English / Español**. The 409 leads imported before this change stay English; new Spanish leads (and any you switch) show Español. Allocation rules only route new leads.
 - [ ] A new lead for Mexico, Chile or Spain starts as **Español**, others as **English**; New lead and Edit lead details have an **Outreach language** select; a CSV column "Language" (en/es/English/Español) is read.
 - [ ] Lead page facts grid shows **Outreach language**; on an Español lead the Email tab opens with the Spanish intro ("¿Una llamada esta semana?") and Spanish templates first, whatever your screen language.
 - [ ] Settings → Lead allocation rules: each rule has a **Language** (Any / English / Español); live rules: Español → Carlos Torres + Sebastian Passalacqua; English, United States / Canada → Deepak Singh + Lakshita Singh.

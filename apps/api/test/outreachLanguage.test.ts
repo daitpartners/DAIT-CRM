@@ -30,6 +30,8 @@ describe('outreach language', () => {
     expect(defaultOutreachLanguage('Mexico')).toBe('es');
     expect(defaultOutreachLanguage('Chile')).toBe('es');
     expect(defaultOutreachLanguage('United States')).toBe('en');
+    // Accented spellings an administrator may type for the country lookup.
+    expect(['México', 'Perú', 'Panamá'].map(defaultOutreachLanguage)).toEqual(['es', 'es', 'es']);
     expect(['es', 'Español', 'spanish', 'ES'].map(parseOutreachLanguage)).toEqual(['es', 'es', 'es', 'es']);
     expect(['en', 'English', 'Inglés'].map(parseOutreachLanguage)).toEqual(['en', 'en', 'en']);
     expect(parseOutreachLanguage('Klingon')).toBeNull();
