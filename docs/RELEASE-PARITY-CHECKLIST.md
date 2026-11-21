@@ -104,8 +104,19 @@ Prototype `#/notifications` · CRM `/notifications`
 Prototype `#/settings` (one long page) · CRM `/settings` and its tabs
 
 - [ ] Title "Settings" with "Configuration the CRM reads at runtime; nothing here is hard-coded in forms".
-- [ ] One tab per prototype card, in the prototype's order: **Preferences** (`/settings`: Language, Date format, Time zone, Save), **Email & calendar connections** (`/settings/connections`: placeholder, release 2; administrators also see the system mailbox), **Email templates** (`/settings/templates`: placeholder, release 2), **Dropdown configuration** (`/settings/lookups`), **Lead allocation rules** (`/settings/allocation`), **Users** (`/settings/users`, where the prototype shows Roles).
+- [ ] One tab per prototype card, in the prototype's order: **Preferences** (`/settings`: Language, Date format, Time zone, Save), **Email & calendar connections** (`/settings/connections`: release 2A card below; administrators also see the system mailbox), **Email templates** (`/settings/templates`: release 2A card below), **Dropdown configuration** (`/settings/lookups`), **Lead allocation rules** (`/settings/allocation`), **Users** (`/settings/users`, where the prototype shows Roles).
 - [ ] Signed in as a Sales Representative, only Preferences, Email & calendar connections and Email templates are offered.
+
+## Email & calendar connections and Email templates (release 2A)
+
+Prototype `#/settings` (cards "Email & calendar connections" and "Email templates") · CRM `/settings/connections` and `/settings/templates`
+
+- [ ] Without a mailbox: **Connect Microsoft 365**, **Other provider** and the yellow "Your mailbox is not connected." note. Connect Microsoft 365 → Microsoft sign-in → back on the tab with "Your mailbox is connected" and your row.
+- [ ] Your row: Microsoft logo, address · your name, "Microsoft 365 · Connected · synced never · 0 messages", **Sync now** (says mail sync arrives with part 2B), **Options** (Sync mail, Sync calendar, Shared mailboxes to include; Save), **Disconnect** (asks first; the Connect button comes back).
+- [ ] Other provider: Microsoft 365 / Outlook connects; Google Workspace / Gmail and Other (IMAP / SMTP) show "Coming later" (Microsoft 365 only for now, owner's choice).
+- [ ] Administrators and managers also see everyone's mailboxes, the collapsed "Administrator: Microsoft 365 app registration (one-time)" note and the System mailbox card.
+- [ ] Email templates: merge-field line, **Write a template**, **Upload .oft template** (an Outlook template's subject and body fill the editor), table Template / Source / Language / Subject / Added, **Edit** and **Delete** (asks first), footer help.
+- [ ] Lead page → Email tab → Template: your templates, your language first, others marked "(ES)" / "(FR)", Outlook ones "· .oft". Picking one fills Subject and Message with the contact's first name, the company, your name and the lead number; "— blank —" brings back the intro text.
 
 ## Spanish and French labels
 

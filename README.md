@@ -31,6 +31,8 @@ Deployment (test and live servers, GitHub Actions, backups): see [docs/DEPLOYMEN
 - **Leads** (release 1C): inbound leads and researched prospects in one list with tiles, views, filters and bulk assign/archive; live duplicate check that links to an existing company; lead page with status steps, log call, follow-up, transfer, claim, close (Won marks the company a client, Lost needs a reason) and a timeline; CSV import with a review step for possible company matches. Sales representatives see their own and unassigned leads.
 - **Tasks** (release 1C): follow-up tasks kept in step with each lead's next follow-up, plus your own tasks; Today, Overdue, Upcoming and Done tabs, tick to complete, snooze to tomorrow.
 - **Notifications** (release 1C): new assignments and transferred leads, with an unread count on the bell and Mark all read.
+- **Reports** (release 1E): leads by source and enquiry conversion, as the prototype.
+- **Email connections and templates** (release 2A): each user connects their own Microsoft 365 mailbox in Settings; a team library of email templates (written or uploaded as Outlook `.oft`) that the lead page's Email tab offers, with merge fields. Mail sync, the Email screen and real sending come in 2B, the Mailer in 2C.
 
 Owner walkthroughs: [docs/PHASE-1A-CHECKLIST.md](docs/PHASE-1A-CHECKLIST.md), [docs/RELEASE-1B-CHECKLIST.md](docs/RELEASE-1B-CHECKLIST.md), [docs/RELEASE-1C-CHECKLIST.md](docs/RELEASE-1C-CHECKLIST.md), [docs/RELEASE-PARITY-CHECKLIST.md](docs/RELEASE-PARITY-CHECKLIST.md).
 
