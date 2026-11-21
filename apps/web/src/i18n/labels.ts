@@ -189,6 +189,8 @@ export function errorText(t: TFn, code: string): string {
       return t('Someone has already taken this lead');
     case 'csv_invalid':
       return t('The file could not be read as CSV with a header row');
+    case 'company_already_linked':
+      return t('This lead is already linked to a company');
     case 'task_done':
       return t('This task is already done');
     default:

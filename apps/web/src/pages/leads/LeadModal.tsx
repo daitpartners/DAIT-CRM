@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm, useWatch, type Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useQueryClient } from '@tanstack/react-query';
 import { LEAD_TYPES, LeadCreate, LeadUpdate, PRIORITIES, lookupLabel, type LeadType, type Priority } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
 import { useDuplicateCheck, type DuplicateCandidate, type DuplicateResult } from '../../api/companies';
 import { contactName, useContacts } from '../../api/contacts';
 import { useSaveLead, type LeadDetail } from '../../api/leads';
-import { keys, useLookups, useUsers } from '../../api/queries';
+import { useLookups, useUsers } from '../../api/queries';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Combobox, type ComboOption } from '../../components/Combobox';
 import { CompanyPicker } from '../../components/CompanyPicker';
@@ -21,6 +20,8 @@ import { useLang, useT, type TFn } from '../../i18n/useT';
 type Props = {
   /** Edit this lead's details; leave out to create one. */
   lead?: LeadDetail;
+  /** New lead only: start linked to this company (the company profile's Leads tab). */
+  company?: { id: number; name: string; country: string };
   onClose: () => void;
 };
 
@@ -81,18 +82,17 @@ function fieldMessage(t: TFn, field: Field): string {
 const text = (v: string | null | undefined) => v ?? '';
 
 /** Create (no `lead`) or edit a lead (spec §4.2), validated with the shared LeadCreate / LeadUpdate schemas. */
-export function LeadModal({ lead, onClose }: Props) {
+export function LeadModal({ lead, company, onClose }: Props) {
   const t = useT();
   const lang = useLang();
   const me = useCurrentUser();
   const toast = useToast();
-  const qc = useQueryClient();
   const { data: lookups } = useLookups();
   const { data: users } = useUsers();
   const save = useSaveLead();
   const [formError, setFormError] = useState<string | null>(null);
   // The linked company's label, for a link made from the duplicate hint (the picker's search may not return it).
-  const [linked, setLinked] = useState<ComboOption | null>(null);
+  const [linked, setLinked] = useState<ComboOption | null>(company ? { value: String(company.id), label: company.name } : null);
   const editing = Boolean(lead);
 
   const sources = (lookups?.lead_source ?? []).filter((x) => x.isActive || x.value === lead?.leadSource);
@@ -118,11 +118,11 @@ export function LeadModal({ lead, onClose }: Props) {
     resolver,
     defaultValues: {
       leadType: lead?.leadType ?? 'Lead',
-      companyName: text(lead?.companyName),
+      companyName: lead ? lead.companyName : (company?.name ?? ''),
       website: text(lead?.website),
       businessEmail: text(lead?.businessEmail),
       phone: text(lead?.phone),
-      country: text(lead?.country),
+      country: lead ? lead.country : (company?.country ?? ''),
       city: text(lead?.city),
       leadSource: lead?.leadSource ?? defaultSource,
       sourceUrl: text(lead?.sourceUrl),
@@ -130,7 +130,7 @@ export function LeadModal({ lead, onClose }: Props) {
       nextFollowUp: text(lead?.nextFollowUp),
       notes: text(lead?.notes),
       status: lead?.status ?? 'New',
-      linkCompanyId: undefined,
+      linkCompanyId: company?.id,
       contactId: '',
       assignedToId: '',
       ...(lead ? { updatedAt: lead.updatedAt } : {}),
@@ -161,7 +161,8 @@ export function LeadModal({ lead, onClose }: Props) {
 
   function submit(v: Values) {
     save.mutate(
-      { id: lead?.id, body: v as unknown as LeadCreate },
+      // Editing: the lead prop is refetched after a stale refusal, so a retry carries its fresh updatedAt.
+      { id: lead?.id, body: (lead ? { ...v, updatedAt: lead.updatedAt } : v) as unknown as LeadCreate },
       {
         onSuccess: (saved) => {
           toast(editing ? t('Lead updated') : t('{number} created|lead', { number: saved.number }));
@@ -169,8 +170,8 @@ export function LeadModal({ lead, onClose }: Props) {
         },
         onError: (err) => {
           const code = err instanceof ApiError ? err.code : 'unknown';
-          // Someone else saved first: refetch so a retry (after reopening) carries the fresh updatedAt.
-          if (code === 'stale') void qc.invalidateQueries({ queryKey: keys.leadsAll });
+          // Someone else saved first: useSaveLead refetches leads and tasks so a retry carries the fresh updatedAt.
+          if (code === 'stale') toast(errorText(t, code), 'warn');
           if (code === 'domain_taken') {
             setError('website', { type: 'server', message: errorText(t, code) });
             return;

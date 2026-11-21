@@ -80,8 +80,27 @@ test('later-release tabs show an empty state', async ({ page }) => {
   // The tab survives a reload through the URL hash.
   await page.reload();
   await expect(page.getByRole('tab', { name: 'AI Intelligence' })).toHaveAttribute('aria-selected', 'true');
+});
+
+test('leads and activities tabs list the company\'s leads', async ({ page }) => {
+  await openNorthwind(page);
   await page.getByRole('tab', { name: 'Leads & Prospects' }).click();
-  await expect(page.getByRole('tabpanel')).toContainText('Available in release 1C');
+  const row = page.getByRole('tabpanel').getByRole('row').filter({ hasText: 'LD-1001' });
+  await expect(row).toContainText('Arjun Mehta');
+  await page.getByRole('tab', { name: 'Activities' }).click();
+  await expect(page.getByRole('tabpanel').getByRole('link', { name: 'LD-1001' }).first()).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Leads & Prospects' }).click();
+  await page.getByRole('tabpanel').getByRole('button', { name: 'New lead' }).click();
+  const modal = page.getByRole('dialog', { name: 'New lead' });
+  await expect(modal.getByRole('combobox', { name: 'Link to existing company' })).toHaveValue('Northwind Logistics');
+  await expect(modal.getByLabel('Company name')).toHaveValue('Northwind Logistics');
+  await modal.getByRole('button', { name: 'Cancel' }).click();
+  await expect(modal).toBeHidden();
+
+  await row.getByRole('link', { name: 'LD-1001' }).click();
+  await expect(page).toHaveURL(/\/leads\/\d+$/);
+  await expect(page.getByRole('heading', { name: 'Northwind Logistics', level: 1 })).toBeVisible();
 });
 
 test('overview edit opens the company form at the chosen section', async ({ page }) => {

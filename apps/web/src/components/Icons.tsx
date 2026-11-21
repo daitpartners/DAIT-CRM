@@ -84,4 +84,64 @@ export const Icons: Record<string, ReactElement> = {
       <path d="M6 6l12 12M18 6L6 18" />
     </svg>
   ),
+  phone: (
+    <svg {...base}>
+      <path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2" />
+    </svg>
+  ),
+  mail: (
+    <svg {...base}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M3 7l9 6 9-6" />
+    </svg>
+  ),
+  note: (
+    <svg {...base}>
+      <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+      <path d="M14 3v6h6M8 13h8M8 17h5" />
+    </svg>
+  ),
+  flag: (
+    <svg {...base}>
+      <path d="M5 21V4M5 4h11l-2 4 2 4H5" />
+    </svg>
+  ),
+  swap: (
+    <svg {...base}>
+      <path d="M7 4L3 8l4 4M3 8h14M17 12l4 4-4 4M21 16H7" />
+    </svg>
+  ),
+  user: (
+    <svg {...base}>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21a8 8 0 0 1 16 0" />
+    </svg>
+  ),
+  calendar: (
+    <svg {...base}>
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path d="M3 10h18M8 3v4M16 3v4" />
+    </svg>
+  ),
+  search: (
+    <svg {...base}>
+      <circle cx="11" cy="11" r="7" />
+      <path d="M21 21l-4.3-4.3" />
+    </svg>
+  ),
+  spark: (
+    <svg {...base}>
+      <path d="M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z" />
+    </svg>
+  ),
+  star: (
+    <svg {...base}>
+      <path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z" />
+    </svg>
+  ),
+  more: (
+    <svg {...base} strokeWidth={2.4}>
+      <path d="M5 12h.01M12 12h.01M19 12h.01" />
+    </svg>
+  ),
 };

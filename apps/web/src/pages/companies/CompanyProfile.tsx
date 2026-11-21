@@ -10,8 +10,10 @@ import { Topbar } from '../../components/Topbar';
 import { companyStatusBadge, companyStatusText, errorText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
 import { CompanyModal, type CompanySection } from './CompanyModal';
+import { ActivitiesTab } from './tabs/ActivitiesTab';
 import { ContactsTab } from './tabs/ContactsTab';
 import { EmptyTab } from './tabs/EmptyTab';
+import { LeadsTab } from './tabs/LeadsTab';
 import { LocationsTab } from './tabs/LocationsTab';
 import { OverviewTab } from './tabs/OverviewTab';
 
@@ -80,8 +82,10 @@ export function CompanyProfile() {
       panel = <LocationsTab company={company} canManage={canManage} />;
       break;
     case 'leads':
+      panel = <LeadsTab company={company} canManage={me.can('manage_leads')} />;
+      break;
     case 'activities':
-      panel = <EmptyTab release="1C" />;
+      panel = <ActivitiesTab company={company} />;
       break;
     default:
       panel = <EmptyTab release="4" />;

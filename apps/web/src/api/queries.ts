@@ -102,6 +102,11 @@ export const keys = {
   leadsAll: ['leads'] as const,
   leads: (query: LeadListQuery) => ['leads', 'list', query] as const,
   leadDuplicates: (input: DuplicateInput) => ['leads', 'duplicates', input] as const,
+  /** A lead page (detail, activities page 1, assignments, open tasks); prefix of its later activity pages. */
+  lead: (id: number) => ['leads', 'detail', id] as const,
+  leadActivities: (id: number, page: number) => ['leads', 'detail', id, 'activities', page] as const,
+  /** Activities across a company's leads: under the leads prefix so any lead write refreshes it. */
+  companyActivities: (companyId: number, page: number) => ['leads', 'company-activities', companyId, page] as const,
   /** Prefix of every task query: a lead write can create, move or close tasks. */
   tasksAll: ['tasks'] as const,
   tasks: (query: TaskListQuery) => ['tasks', 'list', query] as const,

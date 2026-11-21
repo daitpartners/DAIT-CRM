@@ -5,6 +5,7 @@ import { NotFound } from './pages/NotFound';
 import { CompaniesList } from './pages/companies/CompaniesList';
 import { CompanyProfile } from './pages/companies/CompanyProfile';
 import { ContactsList } from './pages/contacts/ContactsList';
+import { LeadPage } from './pages/leads/LeadPage';
 import { LeadsList } from './pages/leads/LeadsList';
 import { NotificationsList } from './pages/notifications/NotificationsList';
 import { ReportsPage } from './pages/Placeholder';
@@ -25,6 +26,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <Dashboard /> },
       { path: 'leads', element: <LeadsList /> },
+      { path: 'leads/:id', element: <LeadPage /> },
       { path: 'companies', element: <CompaniesList /> },
       { path: 'companies/:id', element: <CompanyProfile /> },
       { path: 'contacts', element: <ContactsList /> },

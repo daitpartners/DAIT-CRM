@@ -1,10 +1,11 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
-  CompanyMatchHow, CsvField, CsvMapping, CsvSuggestedMapping, LEAD_SORTS, LEAD_TABS, LeadBulk, LeadCreate, LeadType, LeadUpdate,
+  ActivityType, CallOutcome, CompanyMatchHow, CsvField, CsvMapping, CsvSuggestedMapping, LEAD_SORTS, LEAD_TABS, LeadBulk, LeadCreate, LeadType, LeadUpdate,
   Priority,
 } from '@dait-crm/shared';
-import { api } from './client';
+import { ApiError, api } from './client';
 import { keys } from './queries';
+import type { TaskRow } from './tasks';
 
 export type LeadSort = (typeof LEAD_SORTS)[number];
 export type LeadTab = (typeof LEAD_TABS)[number];
@@ -72,6 +73,8 @@ export type LeadListQuery = {
   /** Created on or after / on or before (YYYY-MM-DD). */
   from?: string;
   to?: string;
+  /** Leads of this company. */
+  companyId?: number;
 };
 
 export type LeadTiles = {
@@ -109,6 +112,91 @@ export function useLeads(query: LeadListQuery, enabled = true) {
   });
 }
 
+/** A timeline entry (`activityRow`). `by: null` = system. */
+export type ActivityRow = {
+  id: number;
+  leadId: number;
+  activityType: ActivityType | string;
+  title: string;
+  body: string | null;
+  url: string | null;
+  statusFrom: string | null;
+  statusTo: string | null;
+  relatedType: string | null;
+  relatedId: number | null;
+  by: Ref | null;
+  occurredAt: string;
+};
+
+/** An assignment history row (`assignmentRow`). `to: null` = unassigned; `by: null` = rule / system. */
+export type AssignmentRow = {
+  id: number;
+  leadId: number;
+  from: Ref | null;
+  to: Ref | null;
+  by: Ref | null;
+  rule: Ref | null;
+  note: string | null;
+  assignedAt: string;
+};
+
+/** `GET /api/leads/:id`: the lead, its newest activities (15 per page), assignment history and open tasks. */
+export type LeadFull = LeadDetail & {
+  activities: ActivityRow[];
+  activityTotal: number;
+  assignments: AssignmentRow[];
+  tasks: TaskRow[];
+};
+
+/** Activities shown per page on the lead page (the API's page size). */
+export const LEAD_ACTIVITY_PAGE_SIZE = 15;
+
+export function useLead(id: number) {
+  return useQuery({
+    queryKey: keys.lead(id),
+    queryFn: () => api<LeadFull>(`/api/leads/${id}`),
+    enabled: Number.isInteger(id),
+  });
+}
+
+/** Activity pages 2..`pages` of a lead ("Show earlier"); page 1 comes with `useLead`. */
+export function useEarlierActivities(id: number, pages: number) {
+  return useQueries({
+    queries: Array.from({ length: Math.max(0, pages - 1) }, (_, i) => i + 2).map((page) => ({
+      queryKey: keys.leadActivities(id, page),
+      queryFn: async () => (await api<LeadFull>(`/api/leads/${id}?activitiesPage=${page}`)).activities,
+      placeholderData: keepPreviousData,
+    })),
+  });
+}
+
+export type CompanyActivity = ActivityRow & { lead: { id: number; number: string } };
+export type CompanyActivityPage = { items: CompanyActivity[]; total: number; page: number; pageSize: number };
+export const COMPANY_ACTIVITY_PAGE_SIZE = 20;
+
+/** Activities across the company's leads the user may see, newest first. */
+export function useCompanyActivities(companyId: number, page: number) {
+  return useQuery({
+    queryKey: keys.companyActivities(companyId, page),
+    queryFn: () =>
+      api<CompanyActivityPage>(`/api/companies/${companyId}/activities?page=${page}&pageSize=${COMPANY_ACTIVITY_PAGE_SIZE}`),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * After a `stale` refusal (someone else changed the lead): refetch leads and tasks so a retry
+ * carries the fresh `updatedAt`. Every lead mutation calls this from onError.
+ */
+function useRefreshOnStale() {
+  const qc = useQueryClient();
+  return (err: unknown) => {
+    if (!(err instanceof ApiError) || err.code !== 'stale') return;
+    void qc.invalidateQueries({ queryKey: keys.leadsAll });
+    void qc.invalidateQueries({ queryKey: keys.tasksAll });
+  };
+}
+
 /** A lead write can touch tasks (follow-up, review task) and companies (new or linked company). */
 function useInvalidateAfterLeadWrite() {
   const qc = useQueryClient();
@@ -123,13 +211,18 @@ function useInvalidateAfterLeadWrite() {
 
 /** Create (no `id`) or update a lead's details. */
 export function useSaveLead() {
+  const qc = useQueryClient();
   const refresh = useInvalidateAfterLeadWrite();
   return useMutation({
     mutationFn: (v: { id?: number; body: LeadCreate | LeadUpdate }) =>
       v.id
         ? api<LeadDetail>(`/api/leads/${v.id}`, { method: 'PATCH', body: v.body })
         : api<LeadDetail>('/api/leads', { method: 'POST', body: v.body }),
-    onSuccess: refresh,
+    onSuccess: (saved) => {
+      qc.setQueryData<LeadFull>(keys.lead(saved.id), (old) => (old ? { ...old, ...saved } : old));
+      return refresh();
+    },
+    onError: useRefreshOnStale(),
   });
 }
 
@@ -148,6 +241,42 @@ export function useClaimLead() {
     mutationFn: (lead: Pick<LeadSummary, 'id' | 'updatedAt'>) =>
       api<LeadDetail>(`/api/leads/${lead.id}/claim`, { method: 'POST', body: { updatedAt: lead.updatedAt } }),
     onSuccess: refresh,
+    onError: useRefreshOnStale(),
+  });
+}
+
+/** Bodies of the lead page's POST actions (`POST /api/leads/:id/<action>`); `updatedAt` is added from the lead. */
+export type LeadActionBody = {
+  status: { status: string; reason?: string };
+  'log-call': { outcome: CallOutcome; minutes?: number; body?: string; statusAfter?: string; nextFollowUp?: string | null };
+  contact: { contactId: number | null };
+  archive: Record<string, never>;
+  unarchive: Record<string, never>;
+  transfer: { toUserId: number; note?: string };
+  claim: Record<string, never>;
+  unassign: { note: string };
+  'resolve-company': { companyId: number | 'create' };
+};
+export type LeadAction = keyof LeadActionBody;
+export type LeadActionInput = {
+  [A in LeadAction]: { lead: Pick<LeadDetail, 'id' | 'updatedAt'>; action: A; body: LeadActionBody[A] };
+}[LeadAction];
+
+/**
+ * One of the lead page's actions. On success the returned lead (with its new `updatedAt`) goes
+ * straight into the page's cache, so a second action right after does not read as stale.
+ */
+export function useLeadAction() {
+  const qc = useQueryClient();
+  const refresh = useInvalidateAfterLeadWrite();
+  return useMutation({
+    mutationFn: ({ lead, action, body }: LeadActionInput) =>
+      api<LeadDetail>(`/api/leads/${lead.id}/${action}`, { method: 'POST', body: { ...body, updatedAt: lead.updatedAt } }),
+    onSuccess: (saved) => {
+      qc.setQueryData<LeadFull>(keys.lead(saved.id), (old) => (old ? { ...old, ...saved } : old));
+      return refresh();
+    },
+    onError: useRefreshOnStale(),
   });
 }
 
