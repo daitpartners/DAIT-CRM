@@ -269,6 +269,13 @@ list, reader, linked-records rail), Calendar (week view default, event editor), 
 revisions, status, PDF preview). The Dashboard shows the current user's tasks (overdue/today/upcoming), today's agenda,
 notifications and pipeline. See the design canvas and prototype for layouts.
 
+**Screens match the prototype (added 21 Nov 2026).** Every screen reproduces the layout, sections, section order and
+visual structure of its prototype view (`prototype/index.html`, `prototype/js/views-*.js`). Panels for features that ship in
+a later release are rendered in their prototype position as muted placeholder cards ("Available in release N"). The lead
+page is contact-first as in the prototype: profile header with headline, experience, skills and languages (new `contacts`
+columns), compose panel, Follow-up / Emails / Calls tabs, company card with verification and AI summary, projects, coming
+up, original enquiry. Acceptance for each screen is a side-by-side comparison with the prototype at the same viewport.
+
 **Dropdown rule.** Every dropdown with eight or more options (country, company, contact, lead, industry, status, source,
 lookup lists, list-page filters, modal selects) is a searchable combobox: type to filter, matches highlighted, arrow keys and
 Enter to pick, Escape to close, keyboard and screen-reader accessible (`role="combobox"` + listbox). Short lists stay plain
