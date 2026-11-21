@@ -14,7 +14,7 @@ import { errorText, leadStatusText } from '../../i18n/labels';
 import { useT, type TFn } from '../../i18n/useT';
 import { ChooseCompany } from './ChooseCompany';
 import { CloseLeadModal } from './CloseLeadModal';
-import { ComposePanel } from './ComposePanel';
+import { ComposeContext, ComposePanel, useComposeControl } from './ComposePanel';
 import { EditProfileModal } from './EditProfileModal';
 import { FollowUpPanel } from './FollowUpPanel';
 import { LeadModal } from './LeadModal';
@@ -73,6 +73,7 @@ function LeadView({ lead, crumb }: { lead: LeadFull; crumb: ReactNode }) {
   const { date } = useFormatDate();
   const { data: lookups } = useLookups();
   const [dialog, setDialog] = useState<Dialog>(null);
+  const compose = useComposeControl();
 
   const canManage = me.can('manage_leads');
   const archived = lead.archivedAt !== null;
@@ -118,7 +119,7 @@ function LeadView({ lead, crumb }: { lead: LeadFull; crumb: ReactNode }) {
   );
 
   return (
-    <>
+    <ComposeContext.Provider value={compose}>
       <Topbar title={lead.number} sub={sub} crumb={crumb} badges={archived ? <span className="badge b-grey">{t('Archived|lead')}</span> : undefined}>
         <div className="hdr-actions">
           {live && me.can('claim_leads') && lead.assignedTo === null ? (
@@ -185,6 +186,6 @@ function LeadView({ lead, crumb }: { lead: LeadFull; crumb: ReactNode }) {
       {dialog === 'edit' ? <LeadModal lead={lead} onClose={() => setDialog(null)} /> : null}
       {dialog === 'profile' && lead.contact ? <EditProfileModal contact={lead.contact} onClose={() => setDialog(null)} /> : null}
       {dialog === 'skills' && lead.contact ? <SkillsModal contact={lead.contact} onClose={() => setDialog(null)} /> : null}
-    </>
+    </ComposeContext.Provider>
   );
 }

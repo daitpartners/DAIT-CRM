@@ -57,7 +57,36 @@ test('lead page: prototype sections in order, a contact without a profile, then 
   }
   // Placeholders are in place and inert.
   await expect(page.getByRole('button', { name: 'Email', exact: true }).first()).toBeDisabled();
-  await expect(page.getByRole('button', { name: /Focus on email/ })).toBeDisabled();
+
+  // Composer: Email is the first tab and open, with the prototype's form; sending arrives in release 2.
+  const compose = page.getByRole('region', { name: 'Compose' });
+  const ctabs = await compose.getByRole('tab').evaluateAll((els) => els.map((el) => (el.textContent ?? '').trim()));
+  expect(ctabs).toEqual(['Email', 'Call note', 'Meeting', 'Research note']);
+  await expect(compose.getByRole('tab', { name: 'Email' })).toHaveAttribute('aria-selected', 'true');
+  const email = compose.getByRole('form', { name: 'Email' });
+  await expect(email.getByLabel('To', { exact: true })).toHaveValue('priya.raman@northwindlogistics.in');
+  await expect(email.getByRole('combobox', { name: 'Cc stakeholders' })).toHaveAttribute('placeholder', 'Choose people or type an email…');
+  await expect(email.getByLabel('Project')).toBeDisabled();
+  await expect(email.getByLabel('Project').locator('option:checked')).toHaveText('available once the lead is Won');
+  await expect(email.getByLabel('Template').locator('option:checked')).toHaveText('— blank —');
+  await expect(email.getByLabel('Subject')).toHaveValue('Intro call this week?');
+  await expect(email.getByLabel('Message')).toHaveValue(/^Hi Priya,\n\nThanks for getting in touch with DAIT Partners\. I'd love to hear more about what you're working on at Northwind Logistics\./);
+  await expect(email.getByLabel('Message')).toHaveValue(/Best regards,\nMaya Pillai$/);
+  await expect(email.getByRole('checkbox', { name: /Set follow-up in/ })).toBeChecked();
+  await expect(email.getByLabel('Follow-up in', { exact: true })).toHaveValue('3');
+  // A typed address becomes a chip.
+  await email.getByRole('combobox', { name: 'Cc stakeholders' }).fill('ops@northwindlogistics.in');
+  await email.getByRole('combobox', { name: 'Cc stakeholders' }).press('Enter');
+  await expect(email.getByRole('button', { name: 'Remove ops@northwindlogistics.in' })).toBeVisible();
+  await email.getByRole('button', { name: 'Send email' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Sending email arrives in release 2' })).toBeVisible();
+  await expect(email.getByLabel('Subject')).toHaveValue('Intro call this week?');
+  // Focus on email folds the profile and puts the cursor in Subject.
+  await compose.getByRole('tab', { name: 'Call note' }).click();
+  await page.getByRole('button', { name: /Focus on email/ }).click();
+  await expect(compose.getByRole('tab', { name: 'Email' })).toHaveAttribute('aria-selected', 'true');
+  await expect(email.getByLabel('Subject')).toBeFocused();
+  await page.getByRole('button', { name: /Show or hide the profile|Profile/ }).first().click();
   await expect(page.getByRole('region', { name: 'Original enquiry' })).toContainText('Available in release 1D');
 
   // Fill the profile and add a research note, then capture the page for the side-by-side comparison.
@@ -85,4 +114,23 @@ test('lead page: prototype sections in order, a contact without a profile, then 
   await expect(profile.getByText('Current')).toBeVisible();
   await expect(page.locator('.sk')).toHaveCount(6);
   await captureParity(page, 'lead-page');
+});
+
+test('lead page: a prospect without a contact person', async ({ page }) => {
+  await signInAs(page, MAYA);
+  const companies = (await (await page.request.get('/api/companies?q=Helix')).json()) as { items: { id: number; name: string }[] };
+  const helix = companies.items[0]!;
+  const created = await page.request.post('/api/leads', {
+    data: { leadType: 'Prospect', companyName: helix.name, linkCompanyId: helix.id, country: 'United Arab Emirates', leadSource: 'Google Places API' },
+  });
+  expect(created.status()).toBe(201);
+  const lead = (await created.json()) as { id: number };
+  await page.goto(`/leads/${lead.id}`);
+
+  const email = page.getByRole('region', { name: 'Compose' }).getByRole('form', { name: 'Email' });
+  await expect(email.getByLabel('To', { exact: true })).toHaveValue('');
+  await expect(email.getByLabel('To', { exact: true })).toHaveAttribute('placeholder', 'No email on file – add a contact');
+  await expect(email.getByLabel('Message')).toHaveValue(new RegExp(`^Hi ${helix.name},`));
+  await email.getByRole('button', { name: 'Send email' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Sending email arrives in release 2' })).toBeVisible();
 });

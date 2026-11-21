@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from 'react';
+import { useContext, useId, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { safeUrl } from '@dait-crm/shared';
 import type { LeadFull } from '../../api/leads';
@@ -7,6 +7,7 @@ import { Icons } from '../../components/Icons';
 import { PriorityLabel, StatusBadge } from '../../components/StatusBadge';
 import { leadTypeText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
+import { ComposeContext } from './ComposePanel';
 import { ExperienceColumn } from './ExperienceColumn';
 
 const FOLD_KEY = 'dait-lead-profile-closed';
@@ -53,12 +54,13 @@ export function completeness(p: Contact): number {
  * The PROFILE card (prototype `views-leads2.js` l2sec): a collapsible box with the contact person on the left
  * (name and badges, headline, company line, LinkedIn / phones / email, the lead's facts grid, the status stepper
  * passed in as `children`, about) and their experience on the right. Without a contact: the company name, a
- * note and the facts grid. "Focus on email" stays in place but disabled until email ships (release 2).
+ * note and the facts grid. "Focus on email" folds the profile and opens the composer on the Email tab.
  */
 export function ProfileCard({ lead, children }: { lead: LeadFull; children?: ReactNode }) {
   const t = useT();
   const lookup = useLookupText(useLang());
   const [closed, setClosed] = useState(readFold);
+  const compose = useContext(ComposeContext);
   const foldId = useId();
   const c = lead.company;
   const p = lead.contact;
@@ -105,7 +107,16 @@ export function ProfileCard({ lead, children }: { lead: LeadFull; children?: Rea
             {phone ? <span>{phone}</span> : null}
           </span>
         </button>
-        <button type="button" className="btn xs l2focus" disabled title={t('Available in release 2')}>
+        <button
+          type="button"
+          className="btn xs l2focus"
+          title={t('Hide the profile and jump to the email box')}
+          onClick={() => {
+            setClosed(true);
+            saveFold(true);
+            compose?.openEmail();
+          }}
+        >
           {Icons.mail}
           {t('Focus on email')}
         </button>

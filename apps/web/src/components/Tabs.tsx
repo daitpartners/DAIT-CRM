@@ -1,7 +1,7 @@
 import { useId, useRef, type KeyboardEvent, type ReactNode } from 'react';
 
-/** `countClass` styles the count (e.g. 'bad' for the duplicate-review queue). */
-export type TabDef = { id: string; label: string; count?: number; countClass?: string };
+/** `countClass` styles the count (e.g. 'bad' for the duplicate-review queue); `icon` sits before the label. */
+export type TabDef = { id: string; label: string; count?: number; countClass?: string; icon?: ReactNode };
 
 type TabsProps = {
   tabs: TabDef[];
@@ -67,7 +67,14 @@ export function Tabs({ tabs, active, onChange, label, children, className, panel
               onClick={() => onChange(t.id)}
               onKeyDown={(e) => onKeyDown(e, i)}
             >
-              {t.label}
+              {t.icon ? (
+                <span className="ctab">
+                  {t.icon}
+                  {t.label}
+                </span>
+              ) : (
+                t.label
+              )}
               {t.count !== undefined ? (
                 <>
                   {' '}

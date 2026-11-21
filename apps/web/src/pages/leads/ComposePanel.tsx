@@ -1,10 +1,11 @@
-import { useId, useState } from 'react';
+import { createContext, useContext, useState } from 'react';
 import type { LeadFull } from '../../api/leads';
 import type { LookupValue } from '../../api/queries';
 import { Icons } from '../../components/Icons';
 import { Tabs } from '../../components/Tabs';
 import { useT } from '../../i18n/useT';
 import { CallNoteForm } from './CallNoteForm';
+import { EMAIL_SUBJECT_ID, EmailForm } from './EmailForm';
 import { MeetingForm, ResearchForm } from './NoteForms';
 
 const FOLD_KEY = 'dait-lead-composer-closed';
@@ -17,16 +18,22 @@ function readFold(): boolean {
   }
 }
 
-/**
- * The prototype's composer (`#composer`): Email (release 2: a disabled button in the tab's place), then the
- * working tabs Call note / Meeting / Research note, and a Hide / Show toggle that folds the box. Picking a
- * tab always opens it; every form stays mounted so drafts survive switching tabs. `live` = the user may act on the lead (manage_leads, not archived).
- */
-export function ComposePanel({ lead, statuses, live }: { lead: LeadFull; statuses: LookupValue[]; live: boolean }) {
-  const t = useT();
-  const [tab, setTab] = useState('call');
+/** What the lead page shares with the composer: which tab is open, whether the box is folded, and "open Email". */
+export type ComposeControl = {
+  tab: string;
+  setTab: (tab: string) => void;
+  closed: boolean;
+  setClosed: (closed: boolean) => void;
+  /** Opens the box on the Email tab, scrolls to it and puts the cursor in Subject. */
+  openEmail: () => void;
+};
+
+export const ComposeContext = createContext<ComposeControl | null>(null);
+
+/** State for `ComposeContext`, created once by the lead page. */
+export function useComposeControl(): ComposeControl {
+  const [tab, setTab] = useState('email');
   const [closed, setClosedState] = useState(readFold);
-  const hint = useId();
 
   function setClosed(next: boolean) {
     setClosedState(next);
@@ -37,18 +44,31 @@ export function ComposePanel({ lead, statuses, live }: { lead: LeadFull; statuse
     }
   }
 
+  function openEmail() {
+    setTab('email');
+    setClosed(false);
+    // After the panel is shown: bring the composer into view and focus Subject.
+    requestAnimationFrame(() => {
+      document.getElementById('composer')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      document.getElementById(EMAIL_SUBJECT_ID)?.focus({ preventScroll: true });
+    });
+  }
+
+  return { tab, setTab, closed, setClosed, openEmail };
+}
+
+/**
+ * The prototype's composer (`#composer`): tabs Email / Call note / Meeting / Research note (Email first and open
+ * by default) and a Hide / Show toggle that folds the box. Picking a tab always opens it; every form stays mounted
+ * so drafts survive switching tabs. `live` = the user may act on the lead (manage_leads, not archived).
+ */
+export function ComposePanel({ lead, statuses, live }: { lead: LeadFull; statuses: LookupValue[]; live: boolean }) {
+  const t = useT();
+  const { tab, setTab, closed, setClosed } = useContext(ComposeContext)!;
+
   return (
     <section id="composer" className={closed ? 'card flush composer is-closed' : 'card flush composer'} aria-label={t('Compose')}>
       <div className="composer-head">
-        <button type="button" className="tab ctab-ph" disabled title={t('Available in release 2')} aria-describedby={hint}>
-          <span className="ctab">
-            {Icons.mail}
-            {t('Email')}
-          </span>
-        </button>
-        <span id={hint} hidden>
-          {t('Available in release 2')}
-        </span>
         <Tabs
           label={t('Compose')}
           active={tab}
@@ -57,13 +77,17 @@ export function ComposePanel({ lead, statuses, live }: { lead: LeadFull; statuse
             setClosed(false);
           }}
           tabs={[
-            { id: 'call', label: t('Call note') },
-            { id: 'meeting', label: t('Meeting') },
-            { id: 'research', label: t('Research note') },
+            { id: 'email', label: t('Email'), icon: Icons.mail },
+            { id: 'call', label: t('Call note'), icon: Icons.phone },
+            { id: 'meeting', label: t('Meeting'), icon: Icons.calendar },
+            { id: 'research', label: t('Research note'), icon: Icons.book },
           ]}
           panelClassName="body"
         >
-          {/* All three forms stay mounted (hidden when inactive or folded) so a draft survives a tab switch. */}
+          {/* All four forms stay mounted (hidden when inactive or folded) so a draft survives a tab switch. */}
+          <div hidden={closed || tab !== 'email'}>
+            <EmailForm lead={lead} disabled={!live} />
+          </div>
           <div hidden={closed || tab !== 'call'}>
             <CallNoteForm lead={lead} statuses={statuses} disabled={!live} />
           </div>
