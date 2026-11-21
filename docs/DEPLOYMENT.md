@@ -143,6 +143,10 @@ source ~/.nvm/nvm.sh && cd ~/live/current/apps/api && node --env-file=$HOME/live
 
 Then sign in and open **Leads**, **Prospects** view: the imported rows are there, assigned to Deepak and Carlos.
 
+## Prototype parity release
+
+No one-off step. Its migration (`20261124100000_contact_profile`) only adds nullable and defaulted columns to contacts and runs with the normal `prisma migrate deploy`.
+
 ## Day to day
 
 - On the server over non-interactive SSH, start every command with `source ~/.nvm/nvm.sh &&` so `node` and `pm2` are found.

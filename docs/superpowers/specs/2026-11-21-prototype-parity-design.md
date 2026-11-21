@@ -53,3 +53,18 @@ corresponding prototype view's layout, sections, order and look, so the sales te
 
 Component split, CSS porting details, which prototype micro-interactions (collapsible side column, quick-date
 buttons) map to existing hooks.
+
+## Deviations recorded during build
+
+- Contacts page kept (the prototype has none), restyled like the other lists.
+- Leads list keeps the "Unassigned" tab (rep claim flow) and the Priority filter.
+- Clone lead omitted (ruled in 1C).
+- Email, Mailer, Calendar, Quotations, Projects and Enquiries stay out of the sidebar; placeholders appear inside pages.
+- Placeholder releases: email/mailer/templates 2, calendar/quotations/projects 3, AI/research 4, enquiries 1D.
+- Dashboard greeting uses the hour in the user's preference time zone.
+- Preferences preview line ("a call logged at 14:05 …") omitted; explicit Save kept.
+- Settings stay tabbed, one tab per prototype card; Users sits at Roles; Prototype data / Hosting omitted.
+- Lead page keeps the status stepper and quick follow-up buttons, and shows the owner in the topbar line.
+- Meeting note has no length/where/invite fields until the calendar (release 3).
+- Notifications have no kind chips (no stored kind); the company Projects tab is omitted until release 3.
+- New lead stays a dialog rather than a separate page.

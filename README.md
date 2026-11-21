@@ -32,7 +32,22 @@ Deployment (test and live servers, GitHub Actions, backups): see [docs/DEPLOYMEN
 - **Tasks** (release 1C): follow-up tasks kept in step with each lead's next follow-up, plus your own tasks; Today, Overdue, Upcoming and Done tabs, tick to complete, snooze to tomorrow.
 - **Notifications** (release 1C): new assignments and transferred leads, with an unread count on the bell and Mark all read.
 
-Owner walkthroughs: [docs/PHASE-1A-CHECKLIST.md](docs/PHASE-1A-CHECKLIST.md), [docs/RELEASE-1B-CHECKLIST.md](docs/RELEASE-1B-CHECKLIST.md), [docs/RELEASE-1C-CHECKLIST.md](docs/RELEASE-1C-CHECKLIST.md).
+Owner walkthroughs: [docs/PHASE-1A-CHECKLIST.md](docs/PHASE-1A-CHECKLIST.md), [docs/RELEASE-1B-CHECKLIST.md](docs/RELEASE-1B-CHECKLIST.md), [docs/RELEASE-1C-CHECKLIST.md](docs/RELEASE-1C-CHECKLIST.md), [docs/RELEASE-PARITY-CHECKLIST.md](docs/RELEASE-PARITY-CHECKLIST.md).
+
+## Screens follow the prototype
+
+Every screen of the CRM follows the matching view of the prototype in `prototype/`: same sections in the same order,
+same headings, buttons and empty texts. Modules from later releases appear as greyed "Available in release …" cards
+inside the pages, not in the sidebar. The deliberate differences are listed at the end of
+[docs/RELEASE-PARITY-CHECKLIST.md](docs/RELEASE-PARITY-CHECKLIST.md).
+
+To compare a screen:
+
+1. Serve the prototype: `cd prototype && python3 -m http.server 8765`.
+2. Open `http://127.0.0.1:8765/index.html#/…` (for example `#/leads/LD-2041`) in a private window, so its
+   `localStorage` sample data starts fresh, next to the same page of the running CRM.
+3. Compare section order, controls and empty states, not pixels. The parity e2e specs in `apps/web/e2e/parity/`
+   save CRM screenshots to `apps/web/e2e/parity/out/` (see the README there for capturing the prototype side).
 
 ## Prototype (reference)
 
