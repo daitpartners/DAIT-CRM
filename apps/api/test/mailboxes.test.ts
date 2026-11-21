@@ -362,3 +362,22 @@ describe('job routes', () => {
     expect(box.json()).toMatchObject({ pendingJobs: 2, failedJobs: 0, staleJobs: 1 });
   });
 });
+
+describe('personal and system mailboxes (release 2A)', () => {
+  beforeEach(resetDb);
+  test('a personal mailbox may use the same address as the system mailbox', async () => {
+    const admin = await makeUser({ role: 'ADMINISTRATOR' });
+    const address = 'deepak.singh@daitpartners.com';
+    await prisma.emailAccount.create({
+      data: { address, provider: 'microsoft', kind: 'system', userId: admin.id, refreshTokenEnc: encrypt(RAW_TOKEN), status: 'connected' },
+    });
+    const personal = await prisma.emailAccount.create({
+      data: { address, provider: 'microsoft', kind: 'personal', userId: admin.id, refreshTokenEnc: encrypt(RAW_TOKEN), status: 'connected' },
+    });
+    expect(personal.syncMail).toBe(true);
+    expect(personal.syncCalendar).toBe(false);
+    expect(personal.sharedMailboxes).toEqual([]);
+    expect(personal.messageCount).toBe(0);
+    expect(await prisma.emailAccount.count({ where: { address } })).toBe(2);
+  });
+});

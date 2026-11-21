@@ -34,8 +34,9 @@ model User {
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
-  sessions      Session[]
-  emailAccounts EmailAccount[]
+  sessions       Session[]
+  emailAccounts  EmailAccount[]
+  emailTemplates EmailTemplate[]
   notifications Notification[]
   auditLogs     AuditLog[]
 
@@ -96,7 +97,7 @@ model AllocationRule {
 model EmailAccount {
   id              Int       @id @default(autoincrement())
   userId          Int?      @map("user_id")
-  address         String    @unique
+  address         String
   /// Mailbox the CRM sends as (a shared mailbox the connecting user has Send-As on); null = `address`.
   sendAs          String?   @map("send_as")
   provider        String
@@ -105,12 +106,40 @@ model EmailAccount {
   tokenExpiresAt  DateTime? @map("token_expires_at")
   status          String
   lastError       String?   @map("last_error")
+  /// Release 2A personal mailbox options (prototype "Mailbox options"); sync itself arrives in 2B.
+  syncMail        Boolean   @default(true) @map("sync_mail")
+  syncCalendar    Boolean   @default(false) @map("sync_calendar")
+  sharedMailboxes String[]  @default([]) @map("shared_mailboxes")
+  lastSyncAt      DateTime? @map("last_sync_at")
+  messageCount    Int       @default(0) @map("message_count")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
+  /// One system row and at most one personal row per user; the same address may be both (Deepak's).
+  @@unique([address, kind])
   @@map("email_accounts")
+}
+
+/// Team email templates (release 2A): written in the CRM or read from an uploaded Outlook .oft (file not kept).
+model EmailTemplate {
+  id          Int      @id @default(autoincrement())
+  name        String   @db.VarChar(150)
+  language    String   @db.Char(2)
+  subject     String   @db.VarChar(500)
+  body        String   @default("")
+  /// 'manual' | 'oft'
+  sourceType  String   @map("source_type")
+  fileName    String?  @map("file_name") @db.VarChar(255)
+  fileSize    Int?     @map("file_size")
+  createdById Int?     @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@map("email_templates")
 }
 
 model Job {

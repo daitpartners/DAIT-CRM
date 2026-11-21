@@ -36,8 +36,9 @@ export async function connectSystemMailbox(args: {
       await tx.emailAccount.delete({ where: { id: p.id } });
       await audit(tx, { entityType: 'email_account', entityId: p.id, action: 'delete', userId: args.actorId, before: accountSummary(p) });
     }
-    const before = await tx.emailAccount.findUnique({ where: { address } });
-    const account = await tx.emailAccount.upsert({ where: { address }, create: { address, ...data }, update: data });
+    const key = { address_kind: { address, kind: 'system' } };
+    const before = await tx.emailAccount.findUnique({ where: key });
+    const account = await tx.emailAccount.upsert({ where: key, create: { address, ...data }, update: data });
     await audit(tx, {
       entityType: 'email_account',
       entityId: account.id,
