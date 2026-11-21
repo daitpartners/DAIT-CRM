@@ -68,3 +68,31 @@ export const MailRead = z.object({ isRead: z.boolean() });
 
 /** `POST /mail/:id/link`. */
 export const MailLink = z.object({ leadId: z.number().int().positive() });
+
+/** Prototype mailer lawful bases (views-mailer.js `lawful`); one is required before queueing. */
+export const LAWFUL_BASES = [
+  'Legitimate interest (B2B outreach relevant to their role)',
+  'Consent (they asked to be contacted)',
+  'Existing client or business relationship',
+] as const;
+/** Delay between mailer emails, in minutes (prototype options). */
+export const MAILER_INTERVALS = [1, 2, 3, 5, 10, 15] as const;
+/** Mailer emails per mailbox per day (owner, 22 Nov 2026). */
+export const MAILER_DAILY_LIMIT = 200;
+
+/** `POST /mailer/check` (release 2C). */
+export const MailerCheck = z.object({ leadIds: z.array(z.number().int().positive()).min(1).max(500) });
+
+/** `POST /mailer` (release 2C): the wizard's four steps. */
+export const MailerCreate = MailerCheck.extend({
+  name: z.string().trim().max(160).default(''),
+  templateId: z.number().int().positive(),
+  cc: mailCc,
+  bcc: mailCc,
+  startAt: z.string().datetime().nullish(),
+  intervalMinutes: z.number().int().refine((n) => (MAILER_INTERVALS as readonly number[]).includes(n), 'Choose 1, 2, 3, 5, 10 or 15 minutes'),
+  workingHoursOnly: z.boolean().default(false),
+  unsubscribeLine: z.boolean().default(true),
+  lawfulBasis: z.enum(LAWFUL_BASES),
+});
+export type MailerCreate = z.infer<typeof MailerCreate>;

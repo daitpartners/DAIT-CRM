@@ -58,6 +58,6 @@ describe('nav counts API', () => {
 
     const res = await get(await signIn(app, rep));
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ leads: 3, overdueTasks: 2, unread: 1, mailUnread: 0 });
+    expect(res.json()).toEqual({ leads: 3, overdueTasks: 2, unread: 1, mailUnread: 0, mailerLive: 0 });
   });
 });

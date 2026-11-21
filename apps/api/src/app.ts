@@ -23,6 +23,7 @@ import { reportRoutes } from './routes/reports.js';
 import { emailTemplateRoutes } from './routes/emailTemplates.js';
 import { leadEmailRoutes } from './routes/leadEmails.js';
 import { mailRoutes } from './routes/mail.js';
+import { mailerRoutes } from './routes/mailer.js';
 import { NotFoundError, ValidationError } from './validate.js';
 import { registerAuth } from './plugins/auth.js';
 import { createMsalClient, type MicrosoftClient } from './auth/microsoft.js';
@@ -147,6 +148,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(emailTemplateRoutes, { prefix: '/api' });
   await app.register(leadEmailRoutes, { prefix: '/api' });
   await app.register(mailRoutes, { prefix: '/api' });
+  await app.register(mailerRoutes, { prefix: '/api' });
   await app.register(dashboardRoutes, { prefix: '/api' });
   await app.register(importRoutes, { prefix: '/api' });
   return app;
