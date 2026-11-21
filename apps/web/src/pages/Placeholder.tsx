@@ -23,10 +23,6 @@ export function LeadsPage() {
   const t = useT();
   return <Placeholder title={t('Leads')} release="1C" />;
 }
-export function CompaniesPage() {
-  const t = useT();
-  return <Placeholder title={t('Companies')} release="1B" />;
-}
 export function TasksPage() {
   const t = useT();
   return <Placeholder title={t('Tasks')} release="1C" />;

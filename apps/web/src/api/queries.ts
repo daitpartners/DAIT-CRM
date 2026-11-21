@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import type { Action, LookupGroup, Role } from '@dait-crm/shared';
 import { api } from './client';
+import type { CompanyListQuery, DuplicateInput } from './companies';
 
 export type Lang = 'en' | 'es' | 'fr';
 
@@ -81,6 +82,11 @@ export const keys = {
   allocation: ['allocation-rules'] as const,
   systemMailbox: ['mailboxes', 'system'] as const,
   failedEmailJobs: ['jobs', 'send_email', 'failed'] as const,
+  /** Prefix of every company query: invalidate this after any company write. */
+  companiesAll: ['companies'] as const,
+  companies: (query: CompanyListQuery) => ['companies', 'list', query] as const,
+  company: (id: number) => ['companies', 'detail', id] as const,
+  companyDuplicates: (input: DuplicateInput) => ['companies', 'duplicates', input] as const,
 };
 
 export function useMe() {

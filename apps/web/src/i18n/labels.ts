@@ -1,5 +1,5 @@
 /* Translated display labels for fixed enums. Each phrase is a literal t() call so scripts/i18n-check.ts sees it. */
-import type { LookupGroup, Role } from '@dait-crm/shared';
+import type { CompanyStatus, LookupGroup, Role } from '@dait-crm/shared';
 import type { Lang } from '../api/queries';
 import type { TFn } from './useT';
 
@@ -42,6 +42,24 @@ export function groupText(t: TFn, group: LookupGroup): string {
   return labels[group] ?? group;
 }
 
+export function companyStatusText(t: TFn, status: CompanyStatus): string {
+  switch (status) {
+    case 'Active':
+      return t('Active');
+    case 'Inactive':
+      return t('Inactive');
+    case 'Closed':
+      return t('Closed');
+    default:
+      return status;
+  }
+}
+
+/** Badge class for a company status: Active green, Inactive grey, Closed amber. */
+export function companyStatusBadge(status: CompanyStatus): string {
+  return status === 'Active' ? 'badge b-ok' : status === 'Closed' ? 'badge b-warn' : 'badge b-grey';
+}
+
 /** Friendly text for API error codes. */
 export function errorText(t: TFn, code: string): string {
   switch (code) {
@@ -69,6 +87,14 @@ export function errorText(t: TFn, code: string): string {
       return t('Enter a valid email address for Send as, or leave it empty');
     case 'validation':
       return t('Please check the highlighted fields');
+    case 'stale':
+      return t('Someone else changed this record. Reload and try again.');
+    case 'domain_taken':
+      return t('A company with this website domain already exists');
+    case 'company_inactive':
+      return t('This company is closed');
+    case 'last_primary_contact':
+      return t('A company must keep one primary contact');
     default:
       return t('Something went wrong. Please try again.');
   }

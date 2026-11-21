@@ -2,7 +2,8 @@ import { createBrowserRouter } from 'react-router-dom';
 import { RequireAuth } from './components/RequireAuth';
 import { Dashboard } from './pages/Dashboard';
 import { NotFound } from './pages/NotFound';
-import { CompaniesPage, LeadsPage, NotificationsPage, ReportsPage, TasksPage } from './pages/Placeholder';
+import { CompaniesList } from './pages/companies/CompaniesList';
+import { LeadsPage, NotificationsPage, ReportsPage, TasksPage } from './pages/Placeholder';
 import { SignIn } from './pages/SignIn';
 import { AllocationRules } from './pages/settings/AllocationRules';
 import { Lookups } from './pages/settings/Lookups';
@@ -19,7 +20,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <Dashboard /> },
       { path: 'leads', element: <LeadsPage /> },
-      { path: 'companies', element: <CompaniesPage /> },
+      { path: 'companies', element: <CompaniesList /> },
       { path: 'tasks', element: <TasksPage /> },
       { path: 'notifications', element: <NotificationsPage /> },
       { path: 'reports', element: <ReportsPage /> },
