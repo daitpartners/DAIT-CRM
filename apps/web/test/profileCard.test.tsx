@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { ComposeContext } from '../src/pages/leads/ComposePanel';
 import { ProfileCard } from '../src/pages/leads/ProfileCard';
 import { Wrap, makeClient, makeLead } from './leadFixture';
 
@@ -80,19 +81,23 @@ describe('ProfileCard', () => {
     expect(container.textContent).not.toMatch(/undefined|null|NaN/);
   });
 
-  it('the profile collapses and "Focus on email" is a disabled placeholder', async () => {
+  it('the profile collapses, and "Focus on email" folds it and opens the Email tab', async () => {
     const u = userEvent.setup();
+    const openEmail = vi.fn();
     render(
       <Wrap qc={makeClient()}>
-        <ProfileCard lead={makeLead()} />
+        <ComposeContext.Provider value={{ tab: 'call', setTab: vi.fn(), closed: false, setClosed: vi.fn(), openEmail }}>
+          <ProfileCard lead={makeLead()} />
+        </ComposeContext.Provider>
       </Wrap>,
     );
     const toggle = screen.getByRole('button', { name: /^Profile/ });
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     await u.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    const focus = screen.getByRole('button', { name: /Focus on email/ });
-    expect(focus).toBeDisabled();
-    expect(focus).toHaveAttribute('title', 'Available in release 2');
+    await u.click(toggle);
+    await u.click(screen.getByRole('button', { name: /Focus on email/ }));
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(openEmail).toHaveBeenCalledTimes(1);
   });
 });
