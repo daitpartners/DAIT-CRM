@@ -155,6 +155,11 @@ test('lead page: a prospect without a contact person', async ({ page }) => {
   expect(heads).toEqual(['No contact yet', helix.name, 'Projects 0']);
   const co = side.getByRole('region', { name: helix.name });
   await expect(co).toContainText('No AI research yet.');
+  await expect(co.locator('.ai-empty')).toHaveCSS('border-top-style', 'solid');
+  await expect(page.getByRole('region', { name: 'Profile' })).toContainText(
+    'No contact person on this lead yet. Add one from the Contact card on the right and the profile will appear here.',
+  );
+  await expect(page.getByRole('tab', { name: /^Emails/ })).toHaveText('Emails 0');
   await co.getByRole('button', { name: 'Run research' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Coming in release 4' })).toBeVisible();
   const projects = side.getByRole('region', { name: /Projects/ });

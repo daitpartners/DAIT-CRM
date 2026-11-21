@@ -45,7 +45,7 @@ export function FollowUpPanel({ lead, statuses, live }: Props) {
         onChange={setTab}
         tabs={[
           { id: 'followup', label: t('Follow-up'), count: lead.tasks.length },
-          { id: 'email', label: t('Emails') },
+          { id: 'email', label: t('Emails'), count: 0 },
           { id: 'call', label: t('Calls'), count: lead.callCount ?? 0 },
         ]}
         panelClassName="l2tlb"

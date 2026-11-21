@@ -143,7 +143,7 @@ function NoContact({ name }: { name: string }) {
   return (
     <div className="pinfo">
       <h2 className="pname">{name}</h2>
-      <div className="note info">{t('No contact person on this lead yet. Add one from the company and the profile will appear here.')}</div>
+      <div className="note info">{t('No contact person on this lead yet. Add one from the Contact card on the right and the profile will appear here.')}</div>
     </div>
   );
 }
