@@ -266,7 +266,8 @@ function FollowUpControls({ lead, statuses, live }: Props) {
           }}
         >
           {statusOptions.map((s) => (
-            <option key={s.value} value={s.value}>
+            // On a closed lead the other closed statuses wait until it is reopened (as before the Status row moved here).
+            <option key={s.value} value={s.value} disabled={closed && isClosedStatus(s.value) && s.value !== lead.status}>
               {leadStatusText(t, s.value)}
             </option>
           ))}

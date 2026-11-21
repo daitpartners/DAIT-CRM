@@ -970,5 +970,7 @@
   "No AI research yet.": "Pas encore de recherche IA.",
   "Coming in release 4": "Arrive dans la version 4",
   "Run research": "Lancer la recherche",
-  "No contact person on this lead yet. Add one from the Contact card on the right and the profile will appear here.": "Ce lead n’a pas encore de contact. Ajoutez-en un depuis la carte Contact à droite et le profil apparaîtra ici."
+  "No contact person on this lead yet. Add one from the Contact card on the right and the profile will appear here.": "Ce lead n’a pas encore de contact. Ajoutez-en un depuis la carte Contact à droite et le profil apparaîtra ici.",
+  "Contact linked to {number}": "Contact lié à {number}",
+  "{name} was added to the company but not linked to this lead. Use Switch contact in Edit profile.": "{name} a été ajouté à l’entreprise mais pas lié à ce lead. Utilisez Changer de contact dans Modifier le profil."
 }

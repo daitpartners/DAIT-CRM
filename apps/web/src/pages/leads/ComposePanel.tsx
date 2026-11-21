@@ -86,7 +86,8 @@ export function ComposePanel({ lead, statuses, live }: { lead: LeadFull; statuse
         >
           {/* All four forms stay mounted (hidden when inactive or folded) so a draft survives a tab switch. */}
           <div hidden={closed || tab !== 'email'}>
-            <EmailForm lead={lead} disabled={!live} />
+            {/* Remount when the contact changes so To and the greeting follow the new person. */}
+            <EmailForm key={lead.contact?.id ?? 'none'} lead={lead} disabled={!live} />
           </div>
           <div hidden={closed || tab !== 'call'}>
             <CallNoteForm lead={lead} statuses={statuses} disabled={!live} />

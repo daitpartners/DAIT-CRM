@@ -1,4 +1,4 @@
-import { useId, useMemo, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { LeadFull } from '../../api/leads';
 import { useContacts } from '../../api/contacts';
 import { useUsers } from '../../api/queries';
@@ -13,7 +13,7 @@ export const EMAIL_SUBJECT_ID = 'em-subject';
 const FOLLOW_DAYS = [2, 3, 7] as const;
 const EMAIL_RE = /^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]{2,}$/;
 
-type Person = { email: string; name: string; sub: string; group: string };
+type Person = { email: string; name: string; sub: string };
 
 /**
  * The prototype's Email panel (views-lead-detail.js `data-cpanel="email"`, laid out by views-leads2.js):
@@ -131,17 +131,19 @@ function CcField({ lead, to, disabled }: { lead: LeadFull; to: string; disabled?
   const [text, setText] = useState('');
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
+  const blurTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(blurTimer.current), []);
 
   const people = useMemo<Person[]>(
     () => [
       ...(contacts.data?.items ?? [])
         .filter((c) => c.businessEmail)
-        .map((c) => ({ email: c.businessEmail!, name: `${c.firstName} ${c.lastName}`.trim(), sub: c.designation ?? '', group: lead.companyName })),
+        .map((c) => ({ email: c.businessEmail!, name: `${c.firstName} ${c.lastName}`.trim(), sub: c.designation ?? '' })),
       ...(users ?? [])
         .filter((u) => u.isActive && u.id !== me.id)
-        .map((u) => ({ email: u.email, name: u.name, sub: '', group: t('DAIT Partners') })),
+        .map((u) => ({ email: u.email, name: u.name, sub: '' })),
     ],
-    [contacts.data, users, me.id, lead.companyName, t],
+    [contacts.data, users, me.id],
   );
   const has = (e: string) => picked.some((x) => x.toLowerCase() === e.toLowerCase());
   const q = text.trim().toLowerCase();
@@ -160,8 +162,11 @@ function CcField({ lead, to, disabled }: { lead: LeadFull; to: string; disabled?
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setOpen(true);
-      setActive((a) => Math.min(shown.length - 1, a + 1));
+      // A closed list opens on the first person; an open one moves down.
+      if (!open) {
+        setOpen(true);
+        setActive(0);
+      } else setActive((a) => Math.max(0, Math.min(shown.length - 1, a + 1)));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setActive((a) => Math.max(0, a - 1));
@@ -204,7 +209,10 @@ function CcField({ lead, to, disabled }: { lead: LeadFull; to: string; disabled?
             value={text}
             placeholder={picked.length ? t('Add another…') : t('Choose people or type an email…')}
             onFocus={() => setOpen(true)}
-            onBlur={() => setTimeout(() => setOpen(false), 140)}
+            aria-activedescendant={open && shown[active] ? `${listId}-${active}` : undefined}
+            onBlur={() => {
+              blurTimer.current = setTimeout(() => setOpen(false), 140);
+            }}
             onChange={(e) => {
               setText(e.target.value);
               setOpen(true);
@@ -217,6 +225,7 @@ function CcField({ lead, to, disabled }: { lead: LeadFull; to: string; disabled?
           {shown.map((p, i) => (
             <li
               key={p.email}
+              id={`${listId}-${i}`}
               role="option"
               aria-selected={i === active}
               className={i === active ? 'on' : undefined}

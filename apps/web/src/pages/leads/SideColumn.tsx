@@ -1,14 +1,13 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { isClosedStatus, safeUrl } from '@dait-crm/shared';
-import { useLeadAction, type LeadFull } from '../../api/leads';
+import { useLeadAction, useRefreshWhenOutOfDate, type LeadFull } from '../../api/leads';
 import { useLookupText } from '../../api/queries';
 import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
 import { verificationBadge, verificationText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
 import { ContactModal } from '../companies/ContactModal';
-import { useActionError } from './staleToast';
 
 
 /**
@@ -62,7 +61,7 @@ export function SideColumn({ lead, live, onEditSkills }: { lead: LeadFull; live:
 function NoContactCard({ lead, live }: { lead: LeadFull; live: boolean }) {
   const t = useT();
   const toast = useToast();
-  const onFail = useActionError();
+  const refreshIfOutOfDate = useRefreshWhenOutOfDate();
   const action = useLeadAction();
   const [adding, setAdding] = useState(false);
   return (
@@ -90,7 +89,24 @@ function NoContactCard({ lead, live }: { lead: LeadFull; live: boolean }) {
         <ContactModal
           companyId={lead.companyId}
           onClose={() => setAdding(false)}
-          onSaved={(c) => action.mutate({ lead, action: 'contact', body: { contactId: c.id } }, { onError: (err) => onFail(err, true) })}
+          onSaved={(c) =>
+            action.mutate(
+              { lead, action: 'contact', body: { contactId: c.id } },
+              {
+                onSuccess: () => toast(t('Contact linked to {number}', { number: lead.number })),
+                // The contact exists on the company now: say so, so nobody adds the same person twice.
+                onError: (err) => {
+                  refreshIfOutOfDate(err);
+                  toast(
+                    t('{name} was added to the company but not linked to this lead. Use Switch contact in Edit profile.', {
+                      name: `${c.firstName} ${c.lastName}`.trim(),
+                    }),
+                    'warn',
+                  );
+                },
+              },
+            )
+          }
         />
       ) : null}
     </section>
