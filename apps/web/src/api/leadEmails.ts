@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from './client';
+import { ApiError, api } from './client';
 import { keys } from './queries';
 
 /** One of your own emails (release 2B-1). Nobody else's mail is ever returned. */
@@ -7,7 +7,7 @@ export type LeadEmail = {
   id: number;
   leadId: number | null;
   folder: string;
-  status: 'queued' | 'sent' | 'failed';
+  status: 'queued' | 'sending' | 'sent' | 'failed';
   fromAddress: string;
   toAddresses: string[];
   ccAddresses: string[];
@@ -34,7 +34,7 @@ export function useLeadEmails(leadId: number, enabled = true) {
     queryFn: async () => (await api<{ items: LeadEmail[] }>(`/api/leads/${leadId}/emails`)).items,
     enabled,
     // A queued email becomes Sent within seconds: check again while any is still sending.
-    refetchInterval: (q) => (q.state.data?.some((m) => m.status === 'queued') ? 5000 : false),
+    refetchInterval: (q) => (q.state.data?.some((m) => m.status === 'queued' || m.status === 'sending') ? 5000 : false),
   });
 }
 
@@ -44,5 +44,9 @@ export function useSendLeadEmail(leadId: number) {
     mutationFn: (body: LeadEmailSend) => api<LeadEmail>(`/api/leads/${leadId}/emails`, { method: 'POST', body }),
     // The lead changed too (timeline entry, follow-up, updatedAt).
     onSettled: () => qc.invalidateQueries({ queryKey: keys.lead(leadId) }),
+    // The mailbox was disconnected or put in error since the page loaded: refresh it so the form shows the connect note.
+    onError: (err) => {
+      if (err instanceof ApiError && err.code === 'no_mailbox') void qc.invalidateQueries({ queryKey: ['mailboxes'] });
+    },
   });
 }

@@ -179,6 +179,8 @@ export function errorText(t: TFn, code: string, vars: Record<string, string | nu
   switch (code) {
     case 'email_taken':
       return t('That email is already in use');
+    case 'no_mailbox':
+      return t('Connect your Microsoft 365 mailbox in Settings to send email from the CRM.');
     case 'cannot_deactivate_self':
       return t('You cannot deactivate your own account');
     case 'last_administrator':

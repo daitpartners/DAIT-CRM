@@ -147,4 +147,55 @@ describe('sending email from a lead (release 2B-1)', () => {
     expect((await prisma.emailAccount.findUniqueOrThrow({ where: { id: box.id } })).status).toBe('error');
     expect((await prisma.job.findFirstOrThrow()).status).toBe('done');
   });
+
+  it('a final failure removes the "Email sent" history line (the sender sees Failed in the Emails tab)', async () => {
+    const { rep, lead } = await setup();
+    await personal(rep.id, 'seba@daitpartners.com');
+    await call('POST', `/api/leads/${lead.id}/emails`, await signIn(app, rep), body(lead.updatedAt));
+    const job = await prisma.job.findFirstOrThrow();
+    await prisma.job.update({ where: { id: job.id }, data: { attempts: job.maxAttempts - 1 } });
+    await run(recordingGraph(new GraphError('unavailable', 503)));
+    expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ status: 'failed' });
+    expect(await prisma.leadActivity.count({ where: { activityType: 'email' } })).toBe(0);
+  });
+
+  it('a revoked send does not turn a since-disconnected mailbox into an error', async () => {
+    const { rep, lead } = await setup();
+    const box = await personal(rep.id, 'seba@daitpartners.com');
+    await call('POST', `/api/leads/${lead.id}/emails`, await signIn(app, rep), body(lead.updatedAt));
+    const graph: GraphClient = {
+      async sendMail() {
+        // The user disconnects while the send is in flight; then Microsoft answers 401.
+        await prisma.emailAccount.update({ where: { id: box.id }, data: { status: 'disconnected', refreshTokenEnc: '' } });
+        throw new GraphError('InvalidAuthenticationToken', 401);
+      },
+    };
+    await run(graph);
+    expect((await prisma.emailAccount.findUniqueOrThrow({ where: { id: box.id } })).status).toBe('disconnected');
+    expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ status: 'failed' });
+  });
+
+  it('an interrupted send is never handed to Microsoft twice', async () => {
+    const { rep, lead } = await setup();
+    await personal(rep.id, 'seba@daitpartners.com');
+    await call('POST', `/api/leads/${lead.id}/emails`, await signIn(app, rep), body(lead.updatedAt));
+    // A previous attempt claimed the message and then died before recording the result.
+    await prisma.emailMessage.updateMany({ data: { status: 'sending' } });
+    const graph = recordingGraph();
+    await run(graph);
+    expect(graph.calls).toHaveLength(0);
+    expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ status: 'failed', lastError: 'interrupted_may_have_sent' });
+  });
+
+  it('a queued message never goes out through a mailbox that now belongs to someone else', async () => {
+    const { rep, lead } = await setup();
+    const box = await personal(rep.id, 'seba@daitpartners.com');
+    await call('POST', `/api/leads/${lead.id}/emails`, await signIn(app, rep), body(lead.updatedAt));
+    const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    await prisma.emailAccount.update({ where: { id: box.id }, data: { userId: other.id } });
+    const graph = recordingGraph();
+    await run(graph);
+    expect(graph.calls).toHaveLength(0);
+    expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ status: 'failed', lastError: 'mailbox_not_connected' });
+  });
 });
