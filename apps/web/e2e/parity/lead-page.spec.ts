@@ -111,12 +111,15 @@ test('lead page: prototype sections in order, a contact without a profile, then 
       updatedAt: detail.contact.updatedAt,
       headline: 'Head of Operations at Northwind Logistics · Warehouse automation & 3PL',
       location: 'Pune, Maharashtra, India',
-      about: 'Operations leader with 14 years in logistics and supply chain. Runs three warehouses across Maharashtra.',
+      about:
+        "Operations leader with 14 years in logistics and supply chain. Runs three warehouses across Maharashtra and is leading Northwind's automation programme. Interested in advisory partners who have delivered WMS roll-outs in pharma logistics.",
       experience: [
-        { title: 'Head of Operations', company: 'Northwind Logistics', from: '2021', to: null, description: 'Leads warehousing and transport for 3 sites.' },
-        { title: 'Regional Operations Manager', company: 'Gati-KWE', from: '2016', to: '2021', description: null },
+        { title: 'Head of Operations', company: 'Northwind Logistics', from: '2021', to: null, description: 'Leads warehousing and transport for 3 sites; owner of the automation roadmap.' },
+        { title: 'Regional Operations Manager', company: 'Gati-KWE', from: '2016', to: '2021', description: 'Western region hub operations, 400+ staff.' },
+        { title: 'Operations Analyst', company: 'Mahindra Logistics', from: '2012', to: '2016', description: null },
       ],
-      skills: ['Warehouse management', 'WMS implementation', 'Lean'],
+      education: [{ school: 'Symbiosis Institute of Operations Management', degree: 'MBA, Operations', from: '2010', to: '2012' }],
+      skills: ['Warehouse management', 'WMS implementation', 'Supply chain', 'Lean', 'Vendor management'],
       languages: ['English', 'Hindi', 'Marathi'],
     },
   });
@@ -127,7 +130,18 @@ test('lead page: prototype sections in order, a contact without a profile, then 
   expect(note.status()).toBe(201);
   await page.reload();
   await expect(profile.getByText('Current')).toBeVisible();
-  await expect(page.locator('.sk')).toHaveCount(6);
+  // Prototype structure: the facts grid and About sit inside the person block (7px rhythm), and the Experience
+  // dates use the normal text colour at 12px.
+  await expect(profile.locator('.pinfo .l2facts')).toHaveCount(1);
+  await expect(profile.locator('.pinfo .pabout')).toHaveCount(1);
+  // The prototype's right-hand column lists Experience only (education still counts towards the ring).
+  await expect(profile.getByText('Education', { exact: true })).toHaveCount(0);
+  await expect(profile.getByRole('img', { name: 'Profile 100% complete' })).toBeVisible();
+  const date = profile.locator('.xp-span').first();
+  await expect(date).toHaveCSS('font-size', '12px');
+  const text = await profile.locator('.pname').evaluate((el) => getComputedStyle(el).color);
+  await expect(date).toHaveCSS('color', text);
+  await expect(page.locator('.sk')).toHaveCount(8);
   await captureParity(page, 'lead-page');
 });
 

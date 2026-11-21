@@ -1,4 +1,4 @@
-import type { EducationEntry, ExperienceEntry } from '@dait-crm/shared';
+import type { ExperienceEntry } from '@dait-crm/shared';
 import { useT } from '../../i18n/useT';
 
 /** "2016 – 2021", or "2021 – Present" for the current role. */
@@ -8,9 +8,10 @@ function span(from: string, to: string | null, present: string): string {
 
 /**
  * Right column of the PROFILE card (prototype `xpCol`): the contact's experience as a timeline, the current
- * role (no end) marked with a dot in brand purple and a "Current" badge. Education follows when recorded.
+ * role (no end) marked with a dot in brand purple and a "Current" badge. Like the prototype, it lists experience
+ * only; education is edited in Edit profile and counts towards the completeness ring.
  */
-export function ExperienceColumn({ experience, education }: { experience: ExperienceEntry[]; education: EducationEntry[] }) {
+export function ExperienceColumn({ experience }: { experience: ExperienceEntry[] }) {
   const t = useT();
   return (
     <div className="l2col">
@@ -42,25 +43,6 @@ export function ExperienceColumn({ experience, education }: { experience: Experi
           ))}
         </ul>
       )}
-      {education.length > 0 ? (
-        <>
-          <div className="l2h" role="heading" aria-level={3} id="lead-edu-title">
-            <span>{t('Education')}</span>
-          </div>
-          <ul className="xp" aria-labelledby="lead-edu-title">
-            {education.map((e, i) => (
-              <li key={`${e.school}-${i}`} className="xpi">
-                <div className="xpdot" aria-hidden="true" />
-                <div>
-                  <strong>{e.school}</strong>
-                  <div>{e.degree}</div>
-                  <div className="dim xp-span">{span(e.from, e.to, t('Present'))}</div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </>
-      ) : null}
     </div>
   );
 }

@@ -52,8 +52,8 @@ export function completeness(p: Contact): number {
 
 /**
  * The PROFILE card (prototype `views-leads2.js` l2sec): a collapsible box with the contact person on the left
- * (name and badges, headline, company line, LinkedIn / phones / email, the lead's facts grid, the status stepper
- * passed in as `children`, about) and their experience on the right. Without a contact: the company name, a
+ * (name and badges, headline, company line, LinkedIn / phones / email, the lead's facts grid, the closed-lead
+ * banner passed in as `children`, about) and their experience on the right. Without a contact: the company name, a
  * note and the facts grid. "Focus on email" folds the profile and opens the composer on the Email tab.
  */
 export function ProfileCard({ lead, children }: { lead: LeadFull; children?: ReactNode }) {
@@ -125,12 +125,21 @@ export function ProfileCard({ lead, children }: { lead: LeadFull; children?: Rea
         <div className="l2foldin">
           <div className={p ? 'l2box' : 'l2box two'}>
             <div className="l2col">
-              {p ? <Person lead={lead} p={p} /> : <NoContact name={lead.companyName} />}
-              {facts}
-              {children}
-              {p?.about ? <p className="pabout">{p.about}</p> : null}
+              {/* As in the prototype, the facts grid, the closed banner and About sit inside the person block. */}
+              {p ? (
+                <Person lead={lead} p={p}>
+                  {facts}
+                  {children}
+                  {p.about ? <p className="pabout">{p.about}</p> : null}
+                </Person>
+              ) : (
+                <NoContact name={lead.companyName}>
+                  {facts}
+                  {children}
+                </NoContact>
+              )}
             </div>
-            {p ? <ExperienceColumn experience={p.experience ?? []} education={p.education ?? []} /> : null}
+            {p ? <ExperienceColumn experience={p.experience ?? []} /> : null}
           </div>
         </div>
       </div>
@@ -138,18 +147,19 @@ export function ProfileCard({ lead, children }: { lead: LeadFull; children?: Rea
   );
 }
 
-function NoContact({ name }: { name: string }) {
+function NoContact({ name, children }: { name: string; children?: ReactNode }) {
   const t = useT();
   return (
     <div className="pinfo">
       <h2 className="pname">{name}</h2>
       <div className="note info">{t('No contact person on this lead yet. Add one from the Contact card on the right and the profile will appear here.')}</div>
+      {children}
     </div>
   );
 }
 
 /** Name, badges, headline, company line, completeness ring and the contact line (LinkedIn, phones, email). */
-function Person({ lead, p }: { lead: LeadFull; p: Contact }) {
+function Person({ lead, p, children }: { lead: LeadFull; p: Contact; children?: ReactNode }) {
   const t = useT();
   const lookup = useLookupText(useLang());
   const pct = completeness(p);
@@ -209,6 +219,7 @@ function Person({ lead, p }: { lead: LeadFull; p: Contact }) {
         ) : null}
         {p.phone ? tel(p.phone, t('office')) : null}
       </div>
+      {children}
     </div>
   );
 }
