@@ -116,7 +116,7 @@ describe('personal mailboxes', () => {
       headers: { cookie: `${cookie}; ms_state=${msState.value}` },
     });
     expect(back.statusCode).toBe(302);
-    expect(back.headers.location).toBe('/settings/connections?connected=1');
+    expect(back.headers.location).toBe('/settings/connections?mailbox=connected');
     const row = await prisma.emailAccount.findFirstOrThrow({ where: { kind: 'personal' } });
     expect(row).toMatchObject({ userId: rep.id, address: 'maya.pillai@daitpartners.com', status: 'connected' });
     expect(decrypt(row.refreshTokenEnc)).toBe('personal-refresh-token');

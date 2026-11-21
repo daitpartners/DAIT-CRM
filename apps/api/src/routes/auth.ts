@@ -20,8 +20,8 @@ const MS_STATE_MAX_AGE_S = 10 * 60;
 const NOT_REGISTERED = '/sign-in?error=not-registered';
 const MAILBOX_CONNECTED = '/settings/mailbox?connected=1';
 const MAILBOX_FAILED = '/settings/mailbox?error=connect-failed';
-const PERSONAL_CONNECTED = '/settings/connections?connected=1';
-const PERSONAL_FAILED = '/settings/connections?error=connect-failed';
+const PERSONAL_CONNECTED = '/settings/connections?mailbox=connected';
+const PERSONAL_FAILED = '/settings/connections?mailbox=failed';
 
 interface SavedState {
   state?: unknown;

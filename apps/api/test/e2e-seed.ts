@@ -34,6 +34,13 @@ try {
       status: 'connected',
     },
   });
+  // Release 2A: Maya has connected her own mailbox; Arjun has not.
+  await prisma.emailAccount.create({
+    data: {
+      address: 'maya.pillai@daitpartners.com', provider: 'microsoft', kind: 'personal', userId: maya.id,
+      refreshTokenEnc: encrypt('fake-personal-token'), status: 'connected',
+    },
+  });
   await seedLeads(maya.id);
   console.log('e2e seed complete');
 } finally {

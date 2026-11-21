@@ -19,11 +19,9 @@ test('settings: prototype cards as tabs, in prototype order', async ({ page }) =
   expect(fieldOrder.map((s) => s.replace('*', '').trim())).toEqual(['Language', 'Date format', 'Time zone']);
   await captureParity(page, 'settings');
 
-  // Email & calendar connections: release-2 placeholder, then the 1A system mailbox for administrators.
+  // Email & calendar connections (release 2A card, connections.spec.ts), then the 1A system mailbox for administrators.
   await nav.getByRole('link', { name: 'Email & calendar connections' }).click();
-  const conn = page.getByRole('region', { name: 'Email & calendar connections' });
-  await expect(conn).toHaveAttribute('aria-disabled', 'true');
-  await expect(conn).toContainText('Available in release 2');
+  await expect(page.getByRole('region', { name: 'Email & calendar connections' }).getByRole('button', { name: 'Other provider' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'System mailbox' })).toBeVisible();
 
   // The 1A mailbox path (also the Microsoft callback target) still lands there, query string kept

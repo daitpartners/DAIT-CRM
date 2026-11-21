@@ -553,3 +553,19 @@ fieldset.bare>legend{padding:0}
 .rep-bars{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px;font-size:12.5px}
 .rep-row{display:flex;justify-content:space-between}
 .rep-kv{grid-template-columns:200px 1fr}
+
+/* Settings → Email & calendar connections (prototype V.connectionsCard). */
+.conn-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.conn-head h2{margin:0}.conn-sub{font-size:12.5px;color:var(--muted)}
+.conn-head .btn svg{margin-right:2px}
+.conn-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.conn-row{display:flex;gap:12px;align-items:center;padding:12px 14px;border:1px solid var(--line);border-radius:10px;flex-wrap:wrap}
+.conn-logo{width:36px;height:36px;border-radius:8px;background:#F3F6FB;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto}
+.conn-main{min-width:0;flex:1 1 220px}.conn-addr{font-weight:700}.conn-owner{font-weight:500;color:var(--muted)}
+.conn-meta{font-size:12.5px;color:var(--muted)}
+.conn-acts{display:flex;gap:6px;flex-wrap:wrap}
+.conn-admin{font-size:12.5px;color:var(--body)}.conn-admin summary{cursor:pointer;font-weight:600}.conn-admin div{margin-top:8px;line-height:1.6}
+.provider-list{display:flex;flex-direction:column;gap:8px}
+.btn.provider{height:auto;padding:12px 14px;justify-content:flex-start;text-align:left;gap:12px}
+.provider-mark{width:18px;text-align:center;font-weight:800}
+.provider-desc{display:block;font-size:12px;color:var(--muted);font-weight:400}
