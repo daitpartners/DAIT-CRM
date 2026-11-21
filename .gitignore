@@ -9,3 +9,4 @@ playwright-report/
 **/.env
 .claude/worktrees/
 .superpowers/
+apps/web/e2e/parity/out/
