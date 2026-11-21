@@ -135,6 +135,36 @@ describe('Mailer step: one email per step from the sender’s mailbox (release 2
     expect(after.nextSendAt!.toISOString()).toBe('2026-11-26T03:00:00.000Z');
   });
 
+  test("a lead whose contact changed since queueing is skipped, not emailed at the old address; an unsubscribed queued contact too", async () => {
+    at(WED_NOON_SANTIAGO);
+    const { c } = await campaign({ leads: 3 });
+    const lead0 = await prisma.lead.findUniqueOrThrow({ where: { id: c.recipients[0]!.leadId! } });
+    const maria = await makeContact({ companyId: lead0.companyId!, firstName: 'Maria', businessEmail: 'maria@andino.cl' });
+    await prisma.lead.update({ where: { id: lead0.id }, data: { contactId: maria.id } });
+    await prisma.contact.update({ where: { id: c.recipients[1]!.contactId! }, data: { unsubscribedAt: new Date() } });
+    await prisma.lead.update({ where: { id: c.recipients[1]!.leadId! }, data: { contactId: null, businessEmail: 'ana1@andino.cl' } });
+    const { sent, graph } = recording();
+    await campaignStepHandler(job(c.id), { graph });
+    expect(sent.map((m) => m.to[0])).toEqual(['ana2@andino.cl']);
+    expect((await recipients(c.id)).map((r) => [r.status, r.error])).toEqual([
+      ['Skipped', 'Email address changed since the campaign was queued'], ['Skipped', 'Unsubscribed'], ['Sent', null],
+    ]);
+  });
+
+  test('a campaign cancelled while its email was in flight stays cancelled when the mailbox turns out revoked', async () => {
+    at(WED_NOON_SANTIAGO);
+    const { c } = await campaign({ leads: 1 });
+    const graph = fakeGraph({
+      async sendMail() {
+        await prisma.emailCampaign.update({ where: { id: c.id }, data: { status: 'Cancelled', completedAt: new Date() } });
+        throw new GraphError('graph_send_failed status=401', 401);
+      },
+    });
+    await campaignStepHandler(job(c.id), { graph });
+    expect((await prisma.emailCampaign.findUniqueOrThrow({ where: { id: c.id } })).status).toBe('Cancelled');
+    expect((await recipients(c.id))[0]).toMatchObject({ status: 'Skipped', error: 'Campaign cancelled' });
+  });
+
   test('a revoked mailbox pauses the campaign and puts the mailbox in error; the recipient stays queued', async () => {
     at(WED_NOON_SANTIAGO);
     const { sender, account, c } = await campaign();

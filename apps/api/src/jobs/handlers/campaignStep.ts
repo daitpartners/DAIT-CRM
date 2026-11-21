@@ -53,7 +53,7 @@ export async function campaignStepHandler(job: Job, ctx: JobContext): Promise<vo
     const queued = await tx.emailCampaignRecipient.findMany({ where: { campaignId, status: 'Queued' }, orderBy: { position: 'asc' } });
     let waiting = false;
     for (const r of queued) {
-      const block = await sendBlock(tx, user, r.leadId, c.createdAt);
+      const block = await sendBlock(tx, user, r.leadId, c.createdAt, { toAddress: r.toAddress, contactId: r.contactId });
       if (block) {
         await tx.emailCampaignRecipient.update({ where: { id: r.id }, data: { status: 'Skipped', error: block } });
         continue;
@@ -95,7 +95,15 @@ export async function campaignStepHandler(job: Job, ctx: JobContext): Promise<vo
     if (isAuthFailure(err)) {
       await prisma.$transaction(async (tx) => {
         await tx.emailAccount.updateMany({ where: { id: account.id, status: 'connected', refreshTokenEnc: account.refreshTokenEnc }, data: { status: 'error', lastError: reason } });
+        // The sender may have paused or cancelled while the send was in flight: that choice stands.
+        await tx.$queryRaw`SELECT id FROM email_campaigns WHERE id = ${c.id} FOR UPDATE`;
+        const now = await tx.emailCampaign.findUniqueOrThrow({ where: { id: c.id }, select: { status: true } });
+        if (now.status === 'Cancelled') {
+          await tx.emailCampaignRecipient.update({ where: { id: r.id }, data: { status: 'Skipped', error: 'Campaign cancelled' } });
+          return;
+        }
         await tx.emailCampaignRecipient.update({ where: { id: r.id }, data: { status: 'Queued' } });
+        if (now.status !== 'Sending') return;
         await tx.emailCampaign.update({ where: { id: c.id }, data: { status: 'Paused', pauseReason: 'Mailbox needs reconnecting', waitReason: null } });
         await notifyUser(tx, c.senderId, `Mailer paused · ${c.name}`, 'Your Microsoft 365 mailbox needs reconnecting in Settings.', `/mailer/${c.id}`);
       });

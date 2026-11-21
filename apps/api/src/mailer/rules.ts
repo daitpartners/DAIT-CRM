@@ -74,12 +74,25 @@ export async function checkRecipients(db: Db, user: AuthUser, leadIds: number[])
   });
 }
 
-/** The same rule at send time, plus "replied since the campaign was created" (a received message in the sender's mail). */
-export async function sendBlock(db: Db, user: AuthUser, leadId: number | null, since: Date): Promise<string | null> {
+/**
+ * The same rule at send time, plus "replied since the campaign was created" (a received message in the sender's mail).
+ * With `queued` (the recipient as queued): the lead must still be emailed at that address (a switched contact is not
+ * mailed under the new name at the old address), and the queued contact must not have unsubscribed since.
+ */
+export async function sendBlock(
+  db: Db, user: AuthUser, leadId: number | null, since: Date, queued?: { toAddress: string; contactId: number | null },
+): Promise<string | null> {
   const l = leadId === null ? null : await db.lead.findFirst({ where: { AND: [{ id: leadId }, leadWhere(user, { includeArchived: true })] }, include: leadInclude });
   if (!l) return 'Lead no longer available';
   const block = blockOf(l);
   if (block) return block;
+  if (queued) {
+    if (addressOf(l) !== queued.toAddress.toLowerCase()) return 'Email address changed since the campaign was queued';
+    if (queued.contactId !== null && queued.contactId !== l.contactId) {
+      const was = await db.contact.findUnique({ where: { id: queued.contactId }, select: { unsubscribedAt: true } });
+      if (was?.unsubscribedAt) return 'Unsubscribed';
+    }
+  }
   const replied = await db.emailMessage.count({ where: { userId: user.id, leadId: l.id, status: 'received', occurredAt: { gt: since } } });
   return replied > 0 ? 'Replied before this email was due' : null;
 }
