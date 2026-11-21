@@ -7,13 +7,14 @@ import { GraphError, createGraphClient } from '../src/graph/client';
 import { enqueue } from '../src/jobs/queue';
 import { runOnce } from '../src/jobs/runner';
 import { sendEmailHandler } from '../src/jobs/handlers/sendEmail';
-import { resetDb } from './helpers';
+import { fakeGraph, resetDb } from './helpers';
 
 const payload = { to: ['client@example.com'], cc: ['boss@example.com'], subject: 'Quote', html: '<p>Q</p>', text: 'Q' };
 
 function recordingGraph(error?: Error): GraphClient & { calls: { account: EmailAccount; msg: MailMessage }[] } {
   const calls: { account: EmailAccount; msg: MailMessage }[] = [];
   return {
+    ...fakeGraph(),
     calls,
     async sendMail(account, msg) {
       calls.push({ account, msg });

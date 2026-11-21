@@ -1,3 +1,4 @@
+import type { GraphClient } from '../src/graph/client';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../src/db';
 import { seedLookups as seedLookupsWith } from '../src/seed/lookups';
@@ -23,4 +24,16 @@ export async function resetDb(): Promise<void> {
 
 export async function seedLookups(): Promise<void> {
   await seedLookupsWith(prisma);
+}
+
+/** A GraphClient for tests: the given methods, every other one fails loudly if called. */
+export function fakeGraph(impl: Partial<GraphClient> = {}): GraphClient {
+  const unexpected = (name: string) => async () => {
+    throw new Error(`unexpected graph.${name}`);
+  };
+  return {
+    sendMail: unexpected('sendMail'), deltaPage: unexpected('deltaPage'), attachmentNames: unexpected('attachmentNames'),
+    markRead: unexpected('markRead'), moveTo: unexpected('moveTo'), reply: unexpected('reply'),
+    ...impl,
+  };
 }

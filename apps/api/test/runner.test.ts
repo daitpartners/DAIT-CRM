@@ -4,9 +4,9 @@ import { prisma } from '../src/db';
 import { enqueue } from '../src/jobs/queue';
 import { runForever, runOnce } from '../src/jobs/runner';
 import type { GraphClient } from '../src/graph/client';
-import { resetDb } from './helpers';
+import { fakeGraph, resetDb } from './helpers';
 
-const graph: GraphClient = { async sendMail() {} };
+const graph: GraphClient = fakeGraph({ async sendMail() {} });
 const payload = { to: ['a@example.com'], subject: 's', html: 'h', text: 't' };
 
 beforeEach(async () => {

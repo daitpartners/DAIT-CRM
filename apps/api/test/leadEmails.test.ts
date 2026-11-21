@@ -9,7 +9,7 @@ import { GraphError } from '../src/graph/client';
 import { runOnce } from '../src/jobs/runner';
 import { sendUserEmailHandler } from '../src/jobs/handlers/sendUserEmail';
 import { todayIn } from '../src/leads/dates';
-import { resetDb, seedLookups } from './helpers';
+import { fakeGraph, resetDb, seedLookups } from './helpers';
 import { makeCompany, makeContact, makeLead, makeUser, signIn } from './factory';
 
 let app: FastifyInstance;
@@ -47,7 +47,7 @@ const body = (updatedAt: Date, extra: Record<string, unknown> = {}) => ({
 
 function recordingGraph(error?: Error): GraphClient & { calls: { account: EmailAccount; msg: MailMessage }[] } {
   const calls: { account: EmailAccount; msg: MailMessage }[] = [];
-  return { calls, async sendMail(account, msg) { calls.push({ account, msg }); if (error) throw error; } };
+  return { ...fakeGraph(), calls, async sendMail(account, msg) { calls.push({ account, msg }); if (error) throw error; } };
 }
 const run = (graph: GraphClient) => runOnce({ types: ['send_user_email'], handlers: { send_user_email: sendUserEmailHandler }, graph });
 
@@ -164,6 +164,7 @@ describe('sending email from a lead (release 2B-1)', () => {
     const box = await personal(rep.id, 'seba@daitpartners.com');
     await call('POST', `/api/leads/${lead.id}/emails`, await signIn(app, rep), body(lead.updatedAt));
     const graph: GraphClient = {
+      ...fakeGraph(),
       async sendMail() {
         // The user disconnects while the send is in flight; then Microsoft answers 401.
         await prisma.emailAccount.update({ where: { id: box.id }, data: { status: 'disconnected', refreshTokenEnc: '' } });
