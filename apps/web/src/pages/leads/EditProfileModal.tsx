@@ -6,6 +6,7 @@ import { useUpdateContactProfile } from '../../api/contacts';
 import type { LeadFull } from '../../api/leads';
 import { FormField } from '../../components/FormField';
 import { Modal } from '../../components/Modal';
+import { useDoNotEmail } from '../../api/mailer';
 import { useToast } from '../../components/Toast';
 import { errorText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
@@ -24,10 +25,18 @@ const filled = (o: Record<string, string>) => Object.values(o).some((v) => v.tri
  * education rows), saved with PATCH /contacts/:id. Blank rows are dropped; a role with no end date is current.
  * `footer` holds the lead actions (Edit lead details, Switch contact, Archive) under the form.
  */
-export function EditProfileModal({ contact, onClose, footer }: { contact: Contact; onClose: () => void; footer?: ReactNode }) {
+export function EditProfileModal({ contact, lead, onClose, footer }: {
+  contact: Contact;
+  /** Release 2C: the lead whose Do not email box this dialog shows (prototype Edit profile). */
+  lead?: { id: number; doNotEmail?: boolean; updatedAt: string };
+  onClose: () => void;
+  footer?: ReactNode;
+}) {
   const t = useT();
   const toast = useToast();
   const save = useUpdateContactProfile();
+  const optOut = useDoNotEmail(lead?.id ?? 0);
+  const [doNotEmail, setDoNotEmail] = useState(!!lead?.doNotEmail);
   const [formError, setFormError] = useState<string | null>(null);
   const { register, control, handleSubmit, formState } = useForm<Values>({
     defaultValues: {
@@ -63,6 +72,12 @@ export function EditProfileModal({ contact, onClose, footer }: { contact: Contac
       },
       {
         onSuccess: () => {
+          if (lead && doNotEmail !== !!lead.doNotEmail) {
+            optOut.mutate(
+              { doNotEmail, updatedAt: lead.updatedAt },
+              { onError: (err) => toast(errorText(t, err instanceof ApiError ? err.code : 'unknown'), 'warn') },
+            );
+          }
           toast(t('Profile saved'));
           onClose();
         },
@@ -134,6 +149,14 @@ export function EditProfileModal({ contact, onClose, footer }: { contact: Contac
         {formError ? (
           <div className="span2 note warn" role="alert">
             {formError}
+          </div>
+        ) : null}
+        {lead ? (
+          <div className="span2">
+            <label className="sw">
+              <input type="checkbox" checked={doNotEmail} onChange={(e) => setDoNotEmail(e.target.checked)} /> {t('Do not email')}{' '}
+              <span className="dim">{t('· opted out or unsubscribed; the mailer skips this lead')}</span>
+            </label>
           </div>
         ) : null}
       </form>

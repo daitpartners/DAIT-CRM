@@ -177,3 +177,14 @@ export function inWorkingHours(zones: string[], at: Date): boolean {
     return weekday !== 'Sat' && weekday !== 'Sun' && hour >= WORK_START_HOUR && hour < WORK_END_HOUR;
   });
 }
+
+/** The country whose main zones these are, when a recipient's zone is "all zones of a country" (for labels). */
+export function allZonesOf(zones: string[]): string | null {
+  const k = zones.join(',');
+  if (k === US_ZONES.join(',')) return 'United States';
+  if (k === CA_ZONES.join(',')) return 'Canada';
+  if (k === MX_ZONES.join(',')) return 'Mexico';
+  if (k === BR_ZONES.join(',')) return 'Brazil';
+  if (k === AU_ZONES.join(',')) return 'Australia';
+  return null;
+}

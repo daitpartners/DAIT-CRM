@@ -243,6 +243,14 @@ export function errorText(t: TFn, code: string, vars: Record<string, string | nu
       return t('Drafts are edited in Outlook.');
     case 'not_connected':
       return t('Your mailbox needs reconnecting in Settings → Email & calendar connections.');
+    case 'nothing_to_send':
+      return t('None of the selected leads can be emailed.');
+    case 'not_running':
+      return t('This campaign is not running.');
+    case 'not_paused':
+      return t('This campaign is not paused.');
+    case 'not_scheduled':
+      return t('This campaign is not scheduled.');
     case 'task_done':
       return t('This task is already done');
     default:

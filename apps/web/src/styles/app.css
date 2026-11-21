@@ -641,3 +641,27 @@ td.nowrap{white-space:nowrap}
 }
 .mail-connect{margin:16px 28px 0;padding:12px 16px;border:1px solid #F0C98A;background:#FFF8EC;border-radius:10px;font-size:13px;color:var(--body);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 @media (max-width:760px){.mail-connect{margin:12px 16px 0}}
+
+/* Mailer (release 2C; prototype .wsteps, .mprev, .mquick, .mradio, .mrec, .mbar, .l2line, .hdr-actions). */
+.wiz{display:flex;flex-direction:column;gap:14px}
+.wsteps{display:flex;gap:6px;list-style:none;margin:0;padding:0;flex-wrap:wrap}
+.wsteps li{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--muted);padding:6px 12px 6px 6px;border-radius:999px;background:#F6F3FB}
+.wsteps li span{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--line);color:var(--text);font-size:11.5px}
+.wsteps li.on{background:var(--tint);color:#4B0A9A}
+.wsteps li.on span{background:var(--purple);color:#fff}
+.wsteps li.done span{background:#CDEBD7;color:#176B3A}
+.mprev{border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:#FBFAFE}
+.mprev .msub{font-weight:700;font-size:13.5px;margin:2px 0 8px}
+.mprev pre{margin:0;font:inherit;font-size:13px;white-space:pre-wrap;color:var(--body);max-height:190px;overflow:auto}
+.mquick{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.mradio{display:flex;align-items:center;gap:8px;font-size:13px;margin-top:8px;cursor:pointer;flex-wrap:wrap}
+.mradio input[type=radio]{accent-color:var(--purple)}
+.mw-start{width:210px;height:32px;margin-left:6px}
+.mw-hours{margin-top:10px;font-size:12.5px}
+.mw-help{font-size:12.5px}
+.mw-err{font-size:12px;margin-top:3px}
+.mw-kv{grid-template-columns:120px 1fr}
+.mrec{max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+.mrec td,.mrec th{padding:7px 10px}
+.mbar{display:inline-block;width:90px;height:6px;border-radius:3px;background:var(--tint);overflow:hidden;vertical-align:middle}
+.mbar i{display:block;height:100%;background:linear-gradient(90deg,var(--purple),var(--peach));transition:width .4s ease}

@@ -44,6 +44,8 @@ export type LeadDetail = Omit<LeadSummary, 'company' | 'contact'> & {
   sourceUrl: string | null;
   importBatch: string | null;
   notes: string | null;
+  /** Release 2C: opted out; the Mailer skips this lead. */
+  doNotEmail?: boolean;
   contactId: number | null;
   assignedToId: number | null;
   company: {

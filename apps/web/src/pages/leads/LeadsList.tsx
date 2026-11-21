@@ -26,6 +26,8 @@ import { usePageClamp, useUrlListState } from '../../hooks/useUrlListState';
 import { errorText, leadStatusText, leadTypeText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
 import { CsvImportModal } from './CsvImportModal';
+import { MailerWizard } from '../mailer/MailerWizard';
+import { useMailboxes } from '../../api/mailboxes';
 
 /** Rows per page offered by the pager (prototype SIZES); 50 by default. */
 const PAGE_SIZES = [25, 50, 100] as const;
@@ -101,6 +103,10 @@ export function LeadsList() {
   const claim = useClaimLead();
   const [importing, setImporting] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // Release 2C: Send via mailer for the ticked leads (prototype bulk bar).
+  const [mailer, setMailer] = useState<number[] | null>(null);
+  const { data: mailboxes } = useMailboxes();
+  const mailboxConnected = mailboxes?.mine?.status === 'connected';
   const [assigning, setAssigning] = useState<PendingAssign | null>(null);
 
   usePageClamp(data, update);
@@ -392,6 +398,18 @@ export function LeadsList() {
                     </select>
                   </>
                 ) : null}
+                {me.rights.includes('use_email') ? (
+                  <button
+                    type="button"
+                    className="btn sm"
+                    disabled={!mailboxConnected}
+                    title={mailboxConnected ? undefined : t('Connect your Microsoft 365 mailbox in Settings to use the mailer.')}
+                    onClick={() => setMailer([...selected])}
+                  >
+                    {Icons.send}
+                    {t('Send via mailer')}
+                  </button>
+                ) : null}
                 <button type="button" className="btn sm" disabled={bulk.isPending} onClick={() => void archive()}>
                   {t('Archive')}
                 </button>
@@ -501,6 +519,7 @@ export function LeadsList() {
         </section>
       </div>
       {importing ? <CsvImportModal onClose={() => setImporting(false)} /> : null}
+      {mailer ? <MailerWizard leadIds={mailer} onClose={() => setMailer(null)} onQueued={() => setSelected(new Set())} /> : null}
       {assigning ? (
         <BulkAssignModal
           pending={assigning}

@@ -159,7 +159,7 @@ function LeadView({ lead }: { lead: LeadFull }) {
       {dialog === 'contact' ? <SwitchContactModal lead={lead} onClose={() => setDialog(null)} /> : null}
       {dialog === 'edit' ? <LeadModal lead={lead} onClose={() => setDialog(null)} /> : null}
       {dialog === 'profile' && lead.contact && canProfile ? (
-        <EditProfileModal contact={lead.contact} onClose={() => setDialog(null)} footer={<LeadActionsFooter {...leadActions} />} />
+        <EditProfileModal contact={lead.contact} lead={lead} onClose={() => setDialog(null)} footer={<LeadActionsFooter {...leadActions} />} />
       ) : null}
       {dialog === 'profile' && !(lead.contact && canProfile) ? <LeadActionsModal {...leadActions} onClose={() => setDialog(null)} /> : null}
       {dialog === 'skills' && lead.contact ? <SkillsModal contact={lead.contact} onClose={() => setDialog(null)} /> : null}
