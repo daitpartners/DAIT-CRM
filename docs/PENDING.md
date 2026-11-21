@@ -19,3 +19,19 @@ Kept here at the owner's request; picked up when the owner says so.
 - Link-to-lead dialog falls back to "create a new lead" when a search hides the lead you had picked.
 - Message count on a taken-over mailbox includes the previous owner's mail; Awaiting reply is capped before filters.
 - Reply route swallows a database error while locking the lead (inside the transaction).
+
+## Release 2C (Mailer) follow-ups (from the final review, 22 Nov 2026)
+- Daily-limit day boundary is an hour off on some daylight-saving change days (e.g. Santiago, Sydney).
+- Pause reason ("Paused by …", "Mailbox needs reconnecting") is shown in English for Spanish / French users.
+- The Do not email badge and tick box ignore a contact unsubscribed through another lead (the mailer still skips it).
+- A lead without a contact has no way to set Do not email (same as the prototype).
+- Over a weekend a waiting campaign re-checks every 5 minutes (extra background work; could jump to Monday 09:00).
+- If the template is deleted, the unsubscribe line falls back to English.
+- Time zone: a company with only a country ignores the lead's own city; some Mexican / Brazilian states are not in the table.
+- Wizard still opens when none of the ticked leads can be emailed (prototype refuses with a message); more than 500
+  ticked leads shows a generic error.
+- Wizard lists all templates (your language first) instead of only your language; "Local time" shows the zone name,
+  not the current time there; campaign page has no Message column and links to the lead page, not its Email tab.
+- The Mailer list loads every recipient of every campaign (fine now, slower later); no automated test of two steps
+  running at once (the lock is correct by reading).
+- A mailbox put in error by mail sync pauses a campaign with "Mailbox disconnected" instead of "needs reconnecting".
