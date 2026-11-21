@@ -54,7 +54,7 @@ export function UserModal({ user, onClose }: Props) {
       }
       if (err instanceof ApiError && err.issues?.length) {
         for (const i of err.issues) {
-          const field = i.path.split('.')[0] as keyof Values;
+          const field = String(i.path[0]) as keyof Values;
           if (['email', 'name', 'role', 'language', 'timezone'].includes(field)) setError(field, { message: fieldMessage(field) });
         }
       }

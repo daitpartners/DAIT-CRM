@@ -71,3 +71,11 @@ test('filters live in the address bar and survive a reload', async ({ page }) =>
   await expect(page.getByLabel('Status')).toHaveValue('Inactive');
   await expect(page.getByRole('row').filter({ hasText: 'Northwind Logistics' })).toHaveCount(0);
 });
+
+test('a page number past the end shows the last page', async ({ page }) => {
+  await signInAs(page, MAYA);
+  await page.goto('/companies?page=99');
+  await expect(page.getByRole('row').filter({ hasText: 'Northwind Logistics' })).toBeVisible();
+  await expect(page.getByText(/Showing 1–\d+ of \d+/)).toBeVisible();
+  await expect(page).not.toHaveURL(/page=99/);
+});

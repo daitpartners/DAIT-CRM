@@ -7,6 +7,8 @@ export function Pager({ page, pageSize, total, onPage }: PagerProps) {
   const t = useT();
   if (total === 0) return null;
   const pages = Math.max(1, Math.ceil(total / pageSize));
+  // A stale URL can ask for a page past the end; show the last real page instead of "2451–25 of 25".
+  page = Math.min(Math.max(1, page), pages);
   const from = (page - 1) * pageSize + 1;
   const to = Math.min(total, page * pageSize);
   return (

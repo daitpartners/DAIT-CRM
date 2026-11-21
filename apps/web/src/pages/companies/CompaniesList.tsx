@@ -93,6 +93,14 @@ export function CompaniesList() {
     }
   }, [query.q]);
 
+  // A page past the end (old link, or rows removed since): go to the last page that has rows.
+  useEffect(() => {
+    if (!data || data.items.length > 0 || data.total === 0) return;
+    const last = Math.ceil(data.total / data.pageSize);
+    if (data.page > last) update({ page: last > 1 ? last : undefined }, true);
+    // `update` is recreated every render; only new data should trigger this.
+  }, [data]);
+
   // Selection only covers rows on screen: clear it when a different set of rows is shown.
   const rows = data?.items;
   const rowIds = rows?.map((r) => r.id).join(',');
@@ -177,7 +185,7 @@ export function CompaniesList() {
     sortable('country', t('Country')),
     plain('contact', t('Primary contact')),
     sortable('status', t('Status')),
-    sortable('updatedAt', t('Updated')),
+    sortable('updatedAt', t('Last updated')),
   ];
 
   return (
@@ -236,7 +244,7 @@ export function CompaniesList() {
           </div>
           {canManage && selected.size > 0 ? (
             <div className="bulkbar" role="region" aria-label={t('Bulk actions')}>
-              <strong>{t('{n} selected', { n: selected.size })}</strong>
+              <strong>{t('Selected: {n}', { n: selected.size })}</strong>
               <label className="sr" htmlFor="co-bulk-status">
                 {t('Set status…')}
               </label>

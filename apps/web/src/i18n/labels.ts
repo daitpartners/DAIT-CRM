@@ -44,12 +44,13 @@ export function groupText(t: TFn, group: LookupGroup): string {
 
 export function companyStatusText(t: TFn, status: CompanyStatus): string {
   switch (status) {
+    // Company-specific keys: Spanish and French statuses agree with "empresa" / "entreprise" (feminine).
     case 'Active':
-      return t('Active');
+      return t('Active|company');
     case 'Inactive':
-      return t('Inactive');
+      return t('Inactive|company');
     case 'Closed':
-      return t('Closed');
+      return t('Closed|company');
     default:
       return status;
   }

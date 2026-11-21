@@ -122,7 +122,7 @@ export function CompanyModal({ company, onClose }: Props) {
     onSuccess: async (saved) => {
       qc.setQueryData(keys.company(saved.id), saved);
       await qc.invalidateQueries({ queryKey: keys.companiesAll });
-      toast(editing ? t('Company updated') : t('{number} created', { number: saved.number }));
+      toast(editing ? t('Company updated') : t('{number} created|company', { number: saved.number }));
       onClose();
     },
     onError: (err) => {
@@ -133,7 +133,7 @@ export function CompanyModal({ company, onClose }: Props) {
       }
       if (err instanceof ApiError && err.issues?.length) {
         for (const i of err.issues) {
-          const field = i.path.split('.')[0] as Field;
+          const field = String(i.path[0]) as Field;
           if (FIELDS.includes(field)) setError(field, { type: 'server', message: fieldMessage(t, field) });
         }
       }
@@ -175,7 +175,15 @@ export function CompanyModal({ company, onClose }: Props) {
         if (opts.length + 1 < COMBO_MIN) {
           return (
             <FormField id={`co-${f}`} label={label} error={err(f)}>
-              <select id={`co-${f}`} className="in" value={field.value} onChange={(e) => field.onChange(e.target.value)} onBlur={field.onBlur}>
+              <select
+                id={`co-${f}`}
+                className={errors[f] ? 'in err' : 'in'}
+                aria-invalid={Boolean(errors[f])}
+                aria-describedby={errors[f] ? `co-${f}-err` : undefined}
+                value={field.value}
+                onChange={(e) => field.onChange(e.target.value)}
+                onBlur={field.onBlur}
+              >
                 <option value="">{t('None')}</option>
                 {opts.map((o) => (
                   <option key={o.value} value={o.value}>
@@ -189,7 +197,7 @@ export function CompanyModal({ company, onClose }: Props) {
         return (
           <div>
             <Combobox id={`co-${f}`} label={label} options={[{ value: '', label: t('None') }, ...opts]} value={field.value} onChange={field.onChange} />
-            {errors[f] ? <div className="err-msg" role="alert">{err(f)}</div> : null}
+            {errors[f] ? <div id={`co-${f}-err`} className="err-msg" role="alert">{err(f)}</div> : null}
           </div>
         );
       }}
@@ -219,7 +227,11 @@ export function CompanyModal({ company, onClose }: Props) {
         </>
       }
     >
-      <form id="company-form" noValidate onSubmit={handleSubmit((v) => !blocked && save.mutate(v))} className="grid2 company-form">
+      <form id="company-form" noValidate onSubmit={(e) => {
+          // A message from an earlier attempt must not outlive the next one.
+          setFormError(null);
+          void handleSubmit((v) => !blocked && save.mutate(v))(e);
+        }} className="grid2 company-form">
         <h3 className="span2 form-sec">{t('Overview')}</h3>
         {input('name', t('Company name'), { required: true, span: true })}
         {duplicates ? (

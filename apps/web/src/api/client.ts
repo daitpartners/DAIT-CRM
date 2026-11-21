@@ -1,4 +1,5 @@
-export type Issue = { path: string; message: string };
+/** A validation issue from the API: `path` is the Zod path, e.g. `['industry']` or `['contacts', 0, 'email']`. */
+export type Issue = { path: (string | number)[]; message: string };
 
 export class ApiError extends Error {
   constructor(
