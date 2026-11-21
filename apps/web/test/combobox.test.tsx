@@ -98,4 +98,17 @@ describe('Combobox', () => {
     render(<Combobox id="c" label="Country" options={names(12)} value="Kenya" onChange={() => {}} />);
     expect(screen.getByRole('combobox', { name: 'Country' })).toHaveValue('Kenya');
   });
+
+  it('searchable keeps the search box for a short list and reports typed text', async () => {
+    const user = userEvent.setup();
+    const onQuery = vi.fn();
+    render(<Combobox id="c" label="Company" searchable options={names(2)} value={null} onChange={() => {}} onQuery={onQuery} />);
+    const input = screen.getByRole('combobox', { name: 'Company' });
+    expect(input.tagName).toBe('INPUT');
+    await user.click(input);
+    await user.type(input, 'au');
+    expect(onQuery).toHaveBeenLastCalledWith('au');
+    await user.keyboard('{Escape}');
+    expect(onQuery).toHaveBeenLastCalledWith('');
+  });
 });

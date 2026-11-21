@@ -14,6 +14,12 @@ export type ComboboxProps = {
   required?: boolean;
   /** Keep the label for screen readers only (e.g. inside a toolbar). */
   hideLabel?: boolean;
+  /** Always show the search box, even for a short list (options that are searched server-side). */
+  searchable?: boolean;
+  /** Called with the typed text as it changes ('' when the list closes), for server-side search. */
+  onQuery?: (text: string) => void;
+  /** Marks the input invalid and points it at an error message. */
+  errorId?: string;
 };
 
 /** Below this many options a plain <select> is easier than a search box (prototype's COMBO_MIN). */
@@ -40,7 +46,7 @@ export function Combobox(props: ComboboxProps) {
         {label}
         {required && !hideLabel ? <span className="req" aria-hidden="true">*</span> : null}
       </label>
-      {props.options.length < COMBO_MIN ? <PlainSelect {...props} /> : <SearchBox {...props} />}
+      {props.options.length < COMBO_MIN && !props.searchable ? <PlainSelect {...props} /> : <SearchBox {...props} />}
     </div>
   );
 }
@@ -68,7 +74,7 @@ function PlainSelect({ id, options, value, onChange, placeholder, required }: Co
   );
 }
 
-function SearchBox({ id, options, value, onChange, placeholder, required }: ComboboxProps) {
+function SearchBox({ id, options, value, onChange, placeholder, required, onQuery, errorId }: ComboboxProps) {
   const t = useT();
   const listId = `${id}-list`;
   const selected = options.find((o) => o.value === value);
@@ -103,6 +109,7 @@ function SearchBox({ id, options, value, onChange, placeholder, required }: Comb
     setOpen(false);
     setQuery('');
     setActive(-1);
+    onQuery?.('');
   }
 
   function choose(i: number) {
@@ -144,13 +151,15 @@ function SearchBox({ id, options, value, onChange, placeholder, required }: Comb
       <input
         id={id}
         type="text"
-        className="in"
+        className={errorId ? 'in err' : 'in'}
         role="combobox"
         aria-autocomplete="list"
         aria-expanded={open}
         aria-controls={listId}
         aria-activedescendant={open && active >= 0 && shown[active] ? `${id}-opt-${active}` : undefined}
         aria-required={required || undefined}
+        aria-invalid={errorId ? true : undefined}
+        aria-describedby={errorId}
         autoComplete="off"
         placeholder={placeholder ?? t('Type to search…')}
         value={text}
@@ -162,6 +171,7 @@ function SearchBox({ id, options, value, onChange, placeholder, required }: Comb
         onChange={(e) => {
           setText(e.target.value);
           setQuery(e.target.value);
+          onQuery?.(e.target.value);
           setOpen(true);
           setActive(e.target.value.trim() ? 0 : -1);
         }}

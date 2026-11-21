@@ -23,6 +23,14 @@ To serve the built web app from the API: `WEB_DIST=apps/web/dist node apps/api/d
 
 Deployment (test and live servers, GitHub Actions, backups): see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
+## Modules
+
+- **Settings** (release 1A): my settings, users, lookups, allocation rules, system mailbox.
+- **Companies** (release 1B): list with search, filters, sorting and bulk status; live duplicate check; profile with Overview, Contacts and Locations tabs. Sales representatives see only the companies they created.
+- **Contacts** (release 1B): every visible contact across companies, with search, type filter and an Add contact form that picks the company.
+
+Owner walkthroughs: [docs/PHASE-1A-CHECKLIST.md](docs/PHASE-1A-CHECKLIST.md), [docs/RELEASE-1B-CHECKLIST.md](docs/RELEASE-1B-CHECKLIST.md).
+
 ## Prototype (reference)
 
 A working single-page prototype of the enhanced CRM. No build step, no server: open `prototype/index.html` in a browser

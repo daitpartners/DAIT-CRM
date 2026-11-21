@@ -34,6 +34,13 @@ export const Icons: Record<string, ReactElement> = {
       <path d="M9 7h2M13 7h2M9 11h2M13 11h2M9 15h2M13 15h2M10 21v-3h4v3" />
     </svg>
   ),
+  contacts: (
+    <svg {...base}>
+      <rect x="4" y="3" width="15" height="18" rx="2" />
+      <circle cx="11.5" cy="10" r="2.5" />
+      <path d="M7.5 17c.6-2 2.2-3 4-3s3.4 1 4 3M2 7h3M2 12h3M2 17h3" />
+    </svg>
+  ),
   tasks: (
     <svg {...base}>
       <rect x="3" y="3" width="18" height="18" rx="2" />

@@ -45,6 +45,7 @@ export function Sidebar({ me, open, onNavigate }: SidebarProps) {
       <div className="navsec">{t('Modules')}</div>
       {item('/leads', t('Leads'), 'leads')}
       {item('/companies', t('Companies'), 'companies')}
+      {item('/contacts', t('Contacts'), 'contacts')}
       <div className="navsec">{t('Work')}</div>
       {item('/tasks', t('Tasks'), 'tasks')}
       {item('/notifications', t('Notifications'), 'bell')}

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { safeUrl } from '@dait-crm/shared';
 import { ApiError } from '../../../api/client';
 import type { CompanyDetail } from '../../../api/companies';
 import { useContacts, useSaveContact, type ContactSummary } from '../../../api/contacts';
-import { useLookupText } from '../../../api/queries';
+import { keys, useLookupText } from '../../../api/queries';
 import { useConfirm } from '../../../components/ConfirmDialog';
 import { Icons } from '../../../components/Icons';
 import { Pager } from '../../../components/Pager';
@@ -26,6 +27,7 @@ export function ContactsTab({ company, canManage }: Props) {
   const lookup = useLookupText(lang);
   const confirm = useConfirm();
   const toast = useToast();
+  const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const { data, isPending, error } = useContacts({ companyId: company.id, page, pageSize: PAGE_SIZE, sort: 'lastName', dir: 'asc' });
   const save = useSaveContact();
@@ -49,7 +51,15 @@ export function ContactsTab({ company, canManage }: Props) {
       { id: c.id, body: { isPrimary: true, updatedAt: c.updatedAt } },
       {
         onSuccess: () => toast(t('{name} is now the primary contact', { name: contactName(c) })),
-        onError: (err) => toast(errorText(t, err instanceof ApiError ? err.code : 'unknown'), 'warn'),
+        onError: (err) => {
+          const code = err instanceof ApiError ? err.code : 'unknown';
+          // Someone else changed this contact: refetch so a retry carries the fresh updatedAt.
+          if (code === 'stale') {
+            void qc.invalidateQueries({ queryKey: keys.contactsAll });
+            void qc.invalidateQueries({ queryKey: keys.companiesAll });
+          }
+          toast(errorText(t, code), 'warn');
+        },
       },
     );
   }

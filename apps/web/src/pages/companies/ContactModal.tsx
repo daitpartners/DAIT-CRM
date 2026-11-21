@@ -1,30 +1,32 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useForm, useWatch, type Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Link } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { ContactCreate, ContactUpdate, lookupLabel } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
-import {
-  useContactDuplicateCheck, useSaveContact,
-  type ContactCandidate, type ContactDuplicateResult, type ContactSummary,
-} from '../../api/contacts';
-import { useLookups } from '../../api/queries';
+import { useCompanies } from '../../api/companies';
+import { useContactDuplicateCheck, useSaveContact, type ContactSummary } from '../../api/contacts';
+import { keys, useLookups } from '../../api/queries';
+import { Combobox, type ComboOption } from '../../components/Combobox';
 import { FormField } from '../../components/FormField';
 import { Modal } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
+import { useDebounce } from '../../hooks/useDebounce';
 import { errorText } from '../../i18n/labels';
 import { useLang, useT, type TFn } from '../../i18n/useT';
+import { ContactDuplicateHint } from './ContactDuplicateHint';
 
 type Props = {
-  companyId: number;
-  /** Edit this contact; leave out to add one to `companyId`. */
+  /** The company to add to. Leave out (when adding) to choose the company in the form. */
+  companyId?: number;
+  /** Edit this contact; leave out to add one. */
   contact?: ContactSummary;
   onClose: () => void;
 };
 
 /** Form state: text inputs hold strings ('' = empty); the shared schema trims them and turns '' into null. */
 type Values = {
-  companyId: number;
+  companyId: number | undefined;
   firstName: string;
   lastName: string;
   designation: string;
@@ -59,38 +61,6 @@ function fieldMessage(t: TFn, field: Field): string {
   }
 }
 
-const candidateName = (c: ContactCandidate) => `${c.firstName} ${c.lastName}`;
-
-/** Live duplicate warning: the same email blocks saving; the same phone, or the same name at this company, is listed for review. */
-export function ContactDuplicateHint({ result }: { result: ContactDuplicateResult | undefined }) {
-  const t = useT();
-  if (!result) return null;
-  if (result.auto) {
-    const c = result.auto;
-    return (
-      <div className="note danger" role="alert">
-        {t('{name} already has this email address.', { name: candidateName(c) })}{' '}
-        <Link to={`/companies/${c.companyId}#contacts`}>{t('Open their company')}</Link>
-      </div>
-    );
-  }
-  if (result.review.length === 0) return null;
-  return (
-    <div className="note warn" role="status">
-      <strong>{t('Possible duplicates')}</strong>
-      <ul className="dup-list">
-        {result.review.map(({ candidate, how }) => (
-          <li key={candidate.id}>
-            <Link to={`/companies/${candidate.companyId}#contacts`}>{candidateName(candidate)}</Link>
-            {' · '}
-            {how === 'phone' ? t('same phone number') : t('same name at this company')}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 /** Add or edit a contact (section F), validated with the shared ContactCreate / ContactUpdate schemas. */
 export function ContactModal({ companyId, contact, onClose }: Props) {
   const t = useT();
@@ -100,12 +70,15 @@ export function ContactModal({ companyId, contact, onClose }: Props) {
   const save = useSaveContact();
   const [formError, setFormError] = useState<string | null>(null);
   const editing = Boolean(contact);
+  const qc = useQueryClient();
+  // A fixed company (profile tab, or editing) hides the company picker.
+  const fixedCompanyId = contact?.companyId ?? companyId;
 
-  const { register, handleSubmit, control, setError, formState } = useForm<Values>({
+  const { register, handleSubmit, control, setError, setValue, formState } = useForm<Values>({
     // ContactUpdate strips companyId; both schemas normalise blanks to null.
     resolver: (editing ? zodResolver(ContactUpdate) : zodResolver(ContactCreate)) as unknown as Resolver<Values>,
     defaultValues: {
-      companyId: contact?.companyId ?? companyId,
+      companyId: fixedCompanyId,
       firstName: contact?.firstName ?? '',
       lastName: contact?.lastName ?? '',
       designation: contact?.designation ?? '',
@@ -121,13 +94,13 @@ export function ContactModal({ companyId, contact, onClose }: Props) {
   });
   const { errors } = formState;
 
-  const [businessEmail, phone, mobile, firstName, lastName] = useWatch({
+  const [businessEmail, phone, mobile, firstName, lastName, chosenCompanyId] = useWatch({
     control,
-    name: ['businessEmail', 'phone', 'mobile', 'firstName', 'lastName'],
+    name: ['businessEmail', 'phone', 'mobile', 'firstName', 'lastName', 'companyId'],
   });
   const checkEnabled = Boolean(businessEmail.trim() || phone.trim() || mobile.trim() || (firstName.trim() && lastName.trim()));
   const dup = useContactDuplicateCheck(
-    { businessEmail, phone, mobile, firstName, lastName, companyId: contact?.companyId ?? companyId, excludeId: contact?.id },
+    { businessEmail, phone, mobile, firstName, lastName, companyId: chosenCompanyId, excludeId: contact?.id },
     checkEnabled,
   );
   const duplicates = checkEnabled ? dup.data : undefined;
@@ -144,6 +117,14 @@ export function ContactModal({ companyId, contact, onClose }: Props) {
         },
         onError: (err) => {
           const code = err instanceof ApiError ? err.code : 'unknown';
+          // Someone else saved first: refetch so a retry (after reopening) carries the fresh updatedAt.
+          if (code === 'stale') {
+            void qc.invalidateQueries({ queryKey: keys.contactsAll });
+            void qc.invalidateQueries({ queryKey: keys.companiesAll });
+          }
+          if (err instanceof ApiError && err.issues?.length) {
+            if (err.issues.some((i) => i.path[0] === 'companyId')) setError('companyId', { type: 'server' });
+          }
           if (err instanceof ApiError && err.issues?.length) {
             for (const i of err.issues) {
               const field = String(i.path[0]) as Field;
@@ -210,6 +191,13 @@ export function ContactModal({ companyId, contact, onClose }: Props) {
           void handleSubmit(submit)(e);
         }}
       >
+        {fixedCompanyId === undefined ? (
+          <CompanyPicker
+            value={chosenCompanyId}
+            invalid={Boolean(errors.companyId)}
+            onChange={(id) => setValue('companyId', id, { shouldValidate: formState.isSubmitted })}
+          />
+        ) : null}
         {input('firstName', t('First name'), { required: true })}
         {input('lastName', t('Last name'), { required: true })}
         {input('designation', t('Designation'))}
@@ -254,5 +242,47 @@ export function ContactModal({ companyId, contact, onClose }: Props) {
         ) : null}
       </form>
     </Modal>
+  );
+}
+
+/** Company chooser for a contact added outside a company profile; searches companies server-side as the user types. */
+function CompanyPicker({ value, invalid, onChange }: { value: number | undefined; invalid: boolean; onChange: (id: number) => void }) {
+  const t = useT();
+  const [text, setText] = useState('');
+  const q = useDebounce(text.trim(), 400);
+  const { data } = useCompanies({ page: 1, pageSize: 100, sort: 'name', dir: 'asc', q: q || undefined });
+  // Remember the chosen company so its name stays shown when a later search no longer returns it.
+  const [chosen, setChosen] = useState<ComboOption | null>(null);
+  const options = useMemo(() => {
+    // A Closed company takes no new contacts, so it is not offered.
+    const opts = (data?.items ?? []).filter((c) => c.status !== 'Closed').map((c) => ({ value: String(c.id), label: c.name }));
+    if (chosen && !opts.some((o) => o.value === chosen.value)) opts.unshift(chosen);
+    return opts;
+  }, [data, chosen]);
+
+  return (
+    <div className="span2">
+      <Combobox
+        id="ct-companyId"
+        label={t('Company')}
+        required
+        searchable
+        options={options}
+        value={value === undefined ? null : String(value)}
+        placeholder={t('Type to search companies…')}
+        onQuery={setText}
+        errorId={invalid ? 'ct-companyId-err' : undefined}
+        onChange={(v) => {
+          const o = options.find((x) => x.value === v);
+          if (o) setChosen(o);
+          onChange(Number(v));
+        }}
+      />
+      {invalid ? (
+        <div id="ct-companyId-err" className="err-msg" role="alert">
+          {t('Choose a company')}
+        </div>
+      ) : null}
+    </div>
   );
 }
