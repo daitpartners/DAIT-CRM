@@ -6,16 +6,12 @@ import {
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { audit } from '../audit.js';
-import { parseBody, parseQuery } from '../validate.js';
+import { NotFoundError, parseBody, parseQuery } from '../validate.js';
 import { requireRight, requireUser } from '../plugins/auth.js';
-import { companyWhere } from '../companies/visibility.js';
+import { assertCompanyVisible, companyWhere, visibleCompanyIds } from '../companies/visibility.js';
 import { companyDetail, companyDetailInclude, companySummary, companySummaryInclude } from '../companies/serialize.js';
 import { findCompanyMatches } from '../companies/match.js';
-
-const isUniqueViolation = (e: unknown) => e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002';
-const isNotFound = (e: unknown) => e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025';
-
-class StaleError extends Error {}
+import { StaleError, isNotFound, isUniqueViolation } from '../prismaErrors.js';
 
 /** The company's own columns for the audit log (drops included relations). */
 const columns = <T extends { contacts?: unknown; _count?: unknown; createdBy?: unknown }>(row: T) => {
@@ -85,24 +81,21 @@ export const companyRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
-  app.get<{ Params: { id: string } }>('/companies/:id', { preHandler: [requireUser] }, async (request, reply) => {
-    const id = Number(request.params.id);
-    if (!Number.isInteger(id)) return reply.code(404).send({ error: 'not_found' });
-    const row = await prisma.company.findFirst({ where: { id, ...companyWhere(request.user!) }, include: companyDetailInclude });
-    if (!row) return reply.code(404).send({ error: 'not_found' });
+  app.get<{ Params: { id: string } }>('/companies/:id', { preHandler: [requireUser] }, async (request) => {
+    const { id } = await assertCompanyVisible(prisma, request.user!, Number(request.params.id));
+    const row = await prisma.company.findUnique({ where: { id }, include: companyDetailInclude });
+    if (!row) throw new NotFoundError();
     return companyDetail(row);
   });
 
   app.patch<{ Params: { id: string } }>('/companies/:id', { preHandler: [requireRight('manage_companies')] }, async (request, reply) => {
     const { updatedAt, ...body } = parseBody(CompanyUpdate, request.body);
     const id = Number(request.params.id);
-    if (!Number.isInteger(id)) return reply.code(404).send({ error: 'not_found' });
     const user = request.user!;
     let domain: string | null = null;
     try {
       const updated = await prisma.$transaction(async (tx) => {
-        const before = await tx.company.findFirst({ where: { id, ...companyWhere(user) } });
-        if (!before) return null;
+        const before = await assertCompanyVisible(tx, user, id);
         if (new Date(updatedAt).getTime() !== before.updatedAt.getTime()) throw new StaleError();
         const data: Prisma.CompanyUpdateInput = { ...body };
         if (body.name !== undefined) data.nameNormalised = normaliseCompanyName(body.name);
@@ -119,7 +112,6 @@ export const companyRoutes: FastifyPluginAsync = async (app) => {
         await audit(tx, { entityType: 'company', entityId: id, action: 'update', userId: user.id, before, after: columns(after) });
         return after;
       });
-      if (!updated) return reply.code(404).send({ error: 'not_found' });
       return companyDetail(updated);
     } catch (e) {
       if (e instanceof StaleError || isNotFound(e)) return reply.code(409).send({ error: 'stale' });
@@ -135,12 +127,7 @@ export const companyRoutes: FastifyPluginAsync = async (app) => {
     const body = parseBody(DuplicateCheck, request.body);
     const matches = await findCompanyMatches(prisma, body);
     const ids = [...(matches.auto ? [matches.auto.id] : []), ...matches.review.map((r) => r.candidate.id)];
-    const where = companyWhere(request.user!);
-    const visible = new Set(
-      Object.keys(where).length === 0 || ids.length === 0
-        ? ids
-        : (await prisma.company.findMany({ where: { id: { in: ids }, ...where }, select: { id: true } })).map((c) => c.id),
-    );
+    const visible = await visibleCompanyIds(prisma, request.user!, ids);
     // A hidden company is still reported (id, number, name) so the user knows it exists.
     const shown = (c: CompanyCandidate) => (visible.has(c.id) ? c : { id: c.id, number: c.number, name: c.name });
     return {

@@ -13,6 +13,7 @@ import { useToast } from '../../components/Toast';
 import { companyStatusText, errorText } from '../../i18n/labels';
 import { useLang, useT, type TFn } from '../../i18n/useT';
 import { timezoneOptions } from '../settings/timezones';
+import { applyServerIssues } from '../../forms/applyServerIssues';
 import { DuplicateHint } from './DuplicateHint';
 
 /** Field groups of the company form: A Overview, B Address, C Size & financial, D Products & services, E Digital presence. */
@@ -239,13 +240,7 @@ export function CompanyModal({ company, onClose, section }: Props) {
         setError('website', { type: 'server', message: errorText(t, code) });
         return;
       }
-      if (err instanceof ApiError && err.issues?.length) {
-        for (const i of err.issues) {
-          const field = String(i.path[0]) as Field;
-          if (FIELDS.includes(field)) setError(field, { type: 'server', message: fieldMessage(t, field) });
-        }
-      }
-      setFormError(errorText(t, code));
+      setFormError(applyServerIssues(err, FIELDS, setError, t, (f) => fieldMessage(t, f)).formMessage);
     },
   });
 

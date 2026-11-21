@@ -19,3 +19,11 @@ export async function assertCompanyVisible(db: Db, user: AuthUser, id: number): 
   if (!company) throw new NotFoundError();
   return company;
 }
+
+/** Of `ids`, the companies the user may see (no query when the user sees every company or `ids` is empty). */
+export async function visibleCompanyIds(db: Db, user: AuthUser, ids: number[]): Promise<Set<number>> {
+  const where = companyWhere(user);
+  if (Object.keys(where).length === 0 || ids.length === 0) return new Set(ids);
+  const rows = await db.company.findMany({ where: { id: { in: ids }, ...where }, select: { id: true } });
+  return new Set(rows.map((c) => c.id));
+}

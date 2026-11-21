@@ -1,12 +1,12 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { Prisma, type LookupValue } from '@prisma/client';
+import type { LookupValue } from '@prisma/client';
 import { LookupValueCreate, LookupValuePatch, LookupOrder, LOOKUP_GROUPS } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { audit } from '../audit.js';
 import { parseBody } from '../validate.js';
 import { requireRight, requireUser } from '../plugins/auth.js';
+import { isUniqueViolation } from '../prismaErrors.js';
 
-const isUniqueViolation = (e: unknown) => e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002';
 const byOrder = [{ sortOrder: 'asc' as const }, { id: 'asc' as const }];
 
 export const lookupRoutes: FastifyPluginAsync = async (app) => {

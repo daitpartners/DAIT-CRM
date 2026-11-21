@@ -90,7 +90,8 @@ function SearchBox({ id, options, value, onChange, placeholder, required, onQuer
   }, [open, selected?.label]);
 
   const q = query.trim().toLowerCase();
-  const shown = useMemo(() => (q ? options.filter((o) => o.label.toLowerCase().includes(q)) : options), [options, q]);
+  // With onQuery the caller searches server-side, so `options` are already the matches.
+  const shown = useMemo(() => (q && !onQuery ? options.filter((o) => o.label.toLowerCase().includes(q)) : options), [options, q, onQuery]);
 
   useEffect(() => {
     if (!open || active < 0) return;

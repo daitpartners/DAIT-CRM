@@ -25,6 +25,9 @@ export type ContactSummary = {
   updatedAt: string;
 };
 
+/** A contact's display name. */
+export const contactName = (c: Pick<ContactSummary, 'firstName' | 'lastName'>) => `${c.firstName} ${c.lastName}`;
+
 /** `GET /api/contacts` parameters; anything left out takes the API default. */
 export type ContactListQuery = {
   companyId?: number;

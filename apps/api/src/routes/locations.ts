@@ -1,5 +1,4 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { Prisma } from '@prisma/client';
 import { LocationCreate, LocationUpdate } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { audit } from '../audit.js';
@@ -8,10 +7,7 @@ import { requireRight, requireUser } from '../plugins/auth.js';
 import { assertCompanyVisible } from '../companies/visibility.js';
 import { locationSummary } from '../companies/serialize.js';
 import { assertLookupValue } from '../companies/lookups.js';
-
-const isNotFound = (e: unknown) => e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025';
-
-class StaleError extends Error {}
+import { StaleError, isNotFound } from '../prismaErrors.js';
 
 type Params = { id: string };
 type LocParams = { id: string; locId: string };

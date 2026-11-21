@@ -11,9 +11,11 @@ import { Modal } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
 import { LANGUAGE_NAMES, errorText, roleText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
+import { applyServerIssues } from '../../forms/applyServerIssues';
 import { timezoneOptions } from './timezones';
 
 type Props = { user?: UserSummary; onClose: () => void };
+const FIELDS = ['email', 'name', 'role', 'language', 'timezone'] as const;
 type Values = { email: string; name: string; role: (typeof ROLES)[number]; language: Lang; timezone: string };
 
 /** Add (no `user`) or edit a user. Validation uses the shared UserCreate / UserUpdate schemas. */
@@ -52,13 +54,7 @@ export function UserModal({ user, onClose }: Props) {
         setError('email', { type: 'server', message: errorText(t, err.code) });
         return;
       }
-      if (err instanceof ApiError && err.issues?.length) {
-        for (const i of err.issues) {
-          const field = String(i.path[0]) as keyof Values;
-          if (['email', 'name', 'role', 'language', 'timezone'].includes(field)) setError(field, { message: fieldMessage(field) });
-        }
-      }
-      setFormError(errorText(t, err instanceof ApiError ? err.code : 'unknown'));
+      setFormError(applyServerIssues(err, FIELDS, setError, t, fieldMessage).formMessage);
     },
   });
 

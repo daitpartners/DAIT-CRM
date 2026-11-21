@@ -5,6 +5,7 @@ import { prisma } from '../db.js';
 import { audit } from '../audit.js';
 import { parseBody } from '../validate.js';
 import { requireRight, requireUser } from '../plugins/auth.js';
+import { isUniqueViolation } from '../prismaErrors.js';
 
 function summary(u: User) {
   return {
@@ -24,8 +25,6 @@ class RuleError extends Error {
     super(code);
   }
 }
-
-const isUniqueViolation = (e: unknown) => e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002';
 
 export const userRoutes: FastifyPluginAsync = async (app) => {
   app.get('/users', { preHandler: [requireUser] }, async () => {

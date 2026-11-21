@@ -12,8 +12,8 @@ import { FormField } from '../../components/FormField';
 import { Modal } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
 import { useDebounce } from '../../hooks/useDebounce';
-import { errorText } from '../../i18n/labels';
 import { useLang, useT, type TFn } from '../../i18n/useT';
+import { applyServerIssues } from '../../forms/applyServerIssues';
 import { ContactDuplicateHint } from './ContactDuplicateHint';
 
 type Props = {
@@ -125,13 +125,7 @@ export function ContactModal({ companyId, contact, onClose }: Props) {
           if (err instanceof ApiError && err.issues?.length) {
             if (err.issues.some((i) => i.path[0] === 'companyId')) setError('companyId', { type: 'server' });
           }
-          if (err instanceof ApiError && err.issues?.length) {
-            for (const i of err.issues) {
-              const field = String(i.path[0]) as Field;
-              if (FIELDS.includes(field)) setError(field, { type: 'server', message: fieldMessage(t, field) });
-            }
-          }
-          setFormError(errorText(t, code));
+          setFormError(applyServerIssues(err, FIELDS, setError, t, (f) => fieldMessage(t, f)).formMessage);
         },
       },
     );

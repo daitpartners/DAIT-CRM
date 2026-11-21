@@ -10,8 +10,8 @@ import { Combobox, type ComboOption } from '../../components/Combobox';
 import { FormField } from '../../components/FormField';
 import { Modal } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
-import { errorText } from '../../i18n/labels';
 import { useLang, useT, type TFn } from '../../i18n/useT';
+import { applyServerIssues } from '../../forms/applyServerIssues';
 import { timezoneOptions } from '../settings/timezones';
 
 type Props = { companyId: number; location?: LocationSummary; onClose: () => void };
@@ -106,13 +106,7 @@ export function LocationModal({ companyId, location, onClose }: Props) {
           const code = err instanceof ApiError ? err.code : 'unknown';
           // Someone else saved or deleted it first: refetch so the list and a retry are current.
           if (code === 'stale') void qc.invalidateQueries({ queryKey: keys.locations(companyId) });
-          if (err instanceof ApiError && err.issues?.length) {
-            for (const i of err.issues) {
-              const field = String(i.path[0]) as Field;
-              if (FIELDS.includes(field)) setError(field, { type: 'server', message: fieldMessage(t, field) });
-            }
-          }
-          setFormError(errorText(t, code));
+          setFormError(applyServerIssues(err, FIELDS, setError, t, (f) => fieldMessage(t, f)).formMessage);
         },
       },
     );

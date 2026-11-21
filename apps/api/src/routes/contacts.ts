@@ -8,17 +8,15 @@ import { prisma } from '../db.js';
 import { audit } from '../audit.js';
 import { NotFoundError, parseBody, parseQuery } from '../validate.js';
 import { requireRight, requireUser } from '../plugins/auth.js';
-import { assertCompanyVisible, companyWhere } from '../companies/visibility.js';
+import { assertCompanyVisible, companyWhere, visibleCompanyIds } from '../companies/visibility.js';
 import { contactSummary, contactSummaryInclude } from '../companies/serialize.js';
 import { findContactMatches } from '../companies/match.js';
 import { assertLookupValue } from '../companies/lookups.js';
+import { StaleError, isNotFound, isUniqueViolation } from '../prismaErrors.js';
 
 type Tx = Prisma.TransactionClient;
 
-const isUniqueViolation = (e: unknown) => e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002';
-const isNotFound = (e: unknown) => e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025';
 
-class StaleError extends Error {}
 class CompanyInactiveError extends Error {}
 class LastPrimaryError extends Error {}
 
@@ -137,12 +135,7 @@ export const contactRoutes: FastifyPluginAsync = async (app) => {
     const companyIds = [
       ...new Set([...(matches.auto ? [matches.auto.companyId] : []), ...matches.review.map((r) => r.candidate.companyId)]),
     ];
-    const where = companyWhere(request.user!);
-    const visible = new Set(
-      Object.keys(where).length === 0 || companyIds.length === 0
-        ? companyIds
-        : (await prisma.company.findMany({ where: { id: { in: companyIds }, ...where }, select: { id: true } })).map((c) => c.id),
-    );
+    const visible = await visibleCompanyIds(prisma, request.user!, companyIds);
     // A contact on a hidden company is still reported (no email or phone keys) so the user knows it exists.
     const shown = (c: ContactCandidate) =>
       visible.has(c.companyId) ? c : { id: c.id, companyId: c.companyId, firstName: c.firstName, lastName: c.lastName };

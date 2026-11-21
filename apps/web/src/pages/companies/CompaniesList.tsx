@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { COMPANY_SORTS, CompanyStatus, formatDate, lookupLabel } from '@dait-crm/shared';
 import { ApiError, api } from '../../api/client';
-import { useCompanies, type CompanyListQuery, type CompanySort, type CompanySummary, type SortDir } from '../../api/companies';
+import { useCompanies, type CompanyListQuery, type CompanySort, type CompanySummary } from '../../api/companies';
 import { keys, useLookups, type LookupValue } from '../../api/queries';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Combobox, type ComboOption } from '../../components/Combobox';
@@ -14,7 +14,7 @@ import { SortHeader } from '../../components/SortHeader';
 import { Table } from '../../components/Table';
 import { Topbar } from '../../components/Topbar';
 import { useToast } from '../../components/Toast';
-import { useDebounce } from '../../hooks/useDebounce';
+import { usePageClamp, useUrlListState } from '../../hooks/useUrlListState';
 import { companyStatusBadge, companyStatusText, errorText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
 import { CompanyModal } from './CompanyModal';
@@ -22,42 +22,6 @@ import { CompanyModal } from './CompanyModal';
 const PAGE_SIZE = 25;
 /** Combobox value meaning "no filter" (the combobox cannot hold an empty value). */
 const ANY = '*';
-
-const isSort = (v: string | null): v is CompanySort => (COMPANY_SORTS as readonly string[]).includes(v ?? '');
-
-/** List state lives in the address bar so Back, refresh and shared links keep the filters. */
-function useListParams() {
-  const [params, setParams] = useSearchParams();
-  const status = CompanyStatus.safeParse(params.get('status'));
-  const page = Number(params.get('page'));
-  const sortParam = params.get('sort');
-  const query: CompanyListQuery & { page: number; sort: CompanySort; dir: SortDir } = {
-    page: Number.isInteger(page) && page > 0 ? page : 1,
-    pageSize: PAGE_SIZE,
-    sort: isSort(sortParam) ? sortParam : 'name',
-    dir: params.get('dir') === 'desc' ? 'desc' : 'asc',
-    q: params.get('q') || undefined,
-    status: status.success ? status.data : undefined,
-    country: params.get('country') || undefined,
-    industry: params.get('industry') || undefined,
-  };
-  /** Sets (or with '' / undefined removes) params; any change other than the page goes back to page 1. */
-  const update = (patch: Record<string, string | number | undefined>, replace = false) => {
-    setParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        for (const [k, v] of Object.entries(patch)) {
-          if (v === undefined || v === '') next.delete(k);
-          else next.set(k, String(v));
-        }
-        if (!('page' in patch)) next.delete('page');
-        return next;
-      },
-      { replace },
-    );
-  };
-  return { query, update };
-}
 
 export function CompaniesList() {
   const t = useT();
@@ -68,38 +32,24 @@ export function CompaniesList() {
   const qc = useQueryClient();
   const toast = useToast();
   const confirm = useConfirm();
-  const { query, update } = useListParams();
+  const { params, set: update, reset, search } = useUrlListState({ sorts: COMPANY_SORTS, defaultSort: 'name', extra: ['status', 'country', 'industry'] });
+  const status = CompanyStatus.safeParse(params.status);
+  const query: CompanyListQuery & Pick<typeof params, 'page' | 'sort' | 'dir'> = {
+    page: params.page,
+    pageSize: PAGE_SIZE,
+    sort: params.sort,
+    dir: params.dir,
+    q: params.q,
+    status: status.success ? status.data : undefined,
+    country: params.country,
+    industry: params.industry,
+  };
   const { data, isPending, error } = useCompanies(query);
   const { data: lookups } = useLookups();
   const [adding, setAdding] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
-  // Search box: typed text goes to the URL 300 ms after the last keystroke.
-  const [text, setText] = useState(query.q ?? '');
-  const debouncedText = useDebounce(text, 300);
-  const pushed = useRef(query.q ?? '');
-  useEffect(() => {
-    const q = debouncedText.trim();
-    if (q === (query.q ?? '')) return;
-    pushed.current = q;
-    update({ q }, true);
-    // Only a settled keystroke writes the URL, so `query.q` is deliberately not a dependency.
-  }, [debouncedText]);
-  useEffect(() => {
-    // Back/forward changed q: show it, unless it is the value this box just wrote.
-    if ((query.q ?? '') !== pushed.current) {
-      pushed.current = query.q ?? '';
-      setText(query.q ?? '');
-    }
-  }, [query.q]);
-
-  // A page past the end (old link, or rows removed since): go to the last page that has rows.
-  useEffect(() => {
-    if (!data || data.items.length > 0 || data.total === 0) return;
-    const last = Math.ceil(data.total / data.pageSize);
-    if (data.page > last) update({ page: last > 1 ? last : undefined }, true);
-    // `update` is recreated every render; only new data should trigger this.
-  }, [data]);
+  usePageClamp(data, update);
 
   // Selection only covers rows on screen: clear it when a different set of rows is shown.
   const rows = data?.items;
@@ -193,7 +143,7 @@ export function CompaniesList() {
       <Topbar title={t('Companies')} sub={t('Master database of every organisation. A company is not a lead.')}>
         <label className="search">
           <span className="sr">{t('Search companies')}</span>
-          <input type="search" value={text} onChange={(e) => setText(e.target.value)} placeholder={t('Search name, domain or number…')} />
+          <input type="search" value={search.text} onChange={(e) => search.setText(e.target.value)} placeholder={t('Search name, domain or number…')} />
         </label>
         {canManage ? (
           <button type="button" className="btn primary" onClick={() => setAdding(true)}>
@@ -237,7 +187,7 @@ export function CompaniesList() {
               />
             </div>
             {filtered ? (
-              <button type="button" className="btn sm" onClick={() => { setText(''); pushed.current = ''; update({ q: undefined, status: undefined, country: undefined, industry: undefined }); }}>
+              <button type="button" className="btn sm" onClick={reset}>
                 {t('Clear filters')}
               </button>
             ) : null}

@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { CONTACT_SORTS, lookupLabel, safeUrl } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
-import type { SortDir } from '../../api/companies';
-import { useContacts, type ContactListQuery, type ContactSort } from '../../api/contacts';
+import { contactName, useContacts, type ContactListQuery, type ContactSort } from '../../api/contacts';
 import { useLookups } from '../../api/queries';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Icons } from '../../components/Icons';
@@ -11,46 +10,12 @@ import { Pager } from '../../components/Pager';
 import { SortHeader } from '../../components/SortHeader';
 import { Table } from '../../components/Table';
 import { Topbar } from '../../components/Topbar';
-import { useDebounce } from '../../hooks/useDebounce';
+import { usePageClamp, useUrlListState } from '../../hooks/useUrlListState';
 import { errorText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
 import { ContactModal } from '../companies/ContactModal';
-import { contactName } from '../companies/tabs/ContactsTab';
 
 const PAGE_SIZE = 25;
-
-const isSort = (v: string | null): v is ContactSort => (CONTACT_SORTS as readonly string[]).includes(v ?? '');
-
-/** List state lives in the address bar so Back, refresh and shared links keep the filters. */
-function useListParams() {
-  const [params, setParams] = useSearchParams();
-  const page = Number(params.get('page'));
-  const sortParam = params.get('sort');
-  const query: ContactListQuery & { page: number; sort: ContactSort; dir: SortDir } = {
-    page: Number.isInteger(page) && page > 0 ? page : 1,
-    pageSize: PAGE_SIZE,
-    sort: isSort(sortParam) ? sortParam : 'lastName',
-    dir: params.get('dir') === 'desc' ? 'desc' : 'asc',
-    q: params.get('q') || undefined,
-    contactType: params.get('contactType') || undefined,
-  };
-  /** Sets (or with '' / undefined removes) params; any change other than the page goes back to page 1. */
-  const update = (patch: Record<string, string | number | undefined>, replace = false) => {
-    setParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        for (const [k, v] of Object.entries(patch)) {
-          if (v === undefined || v === '') next.delete(k);
-          else next.set(k, String(v));
-        }
-        if (!('page' in patch)) next.delete('page');
-        return next;
-      },
-      { replace },
-    );
-  };
-  return { query, update };
-}
 
 /** Every contact the user can see, across companies (section F, contacts page). */
 export function ContactsList() {
@@ -58,37 +23,20 @@ export function ContactsList() {
   const lang = useLang();
   const me = useCurrentUser();
   const canManage = me.can('manage_companies');
-  const { query, update } = useListParams();
+  const { params, set: update, reset, search } = useUrlListState({ sorts: CONTACT_SORTS, defaultSort: 'lastName', extra: ['contactType'] });
+  const query: ContactListQuery & Pick<typeof params, 'page' | 'sort' | 'dir'> = {
+    page: params.page,
+    pageSize: PAGE_SIZE,
+    sort: params.sort,
+    dir: params.dir,
+    q: params.q,
+    contactType: params.contactType,
+  };
   const { data, isPending, error } = useContacts(query);
   const { data: lookups } = useLookups();
   const [adding, setAdding] = useState(false);
 
-  // Search box: typed text goes to the URL 300 ms after the last keystroke.
-  const [text, setText] = useState(query.q ?? '');
-  const debouncedText = useDebounce(text, 300);
-  const pushed = useRef(query.q ?? '');
-  useEffect(() => {
-    const q = debouncedText.trim();
-    if (q === (query.q ?? '')) return;
-    pushed.current = q;
-    update({ q }, true);
-    // Only a settled keystroke writes the URL, so `query.q` is deliberately not a dependency.
-  }, [debouncedText]);
-  useEffect(() => {
-    // Back/forward changed q: show it, unless it is the value this box just wrote.
-    if ((query.q ?? '') !== pushed.current) {
-      pushed.current = query.q ?? '';
-      setText(query.q ?? '');
-    }
-  }, [query.q]);
-
-  // A page past the end (old link, or rows removed since): go to the last page that has rows.
-  useEffect(() => {
-    if (!data || data.items.length > 0 || data.total === 0) return;
-    const last = Math.ceil(data.total / data.pageSize);
-    if (data.page > last) update({ page: last > 1 ? last : undefined }, true);
-    // `update` is recreated every render; only new data should trigger this.
-  }, [data]);
+  usePageClamp(data, update);
 
   const types = lookups?.contact_type ?? [];
   const typeText = (v: string) => {
@@ -131,7 +79,7 @@ export function ContactsList() {
       <Topbar title={t('Contacts')} sub={t('People at every company you can see.')}>
         <label className="search">
           <span className="sr">{t('Search contacts')}</span>
-          <input type="search" value={text} onChange={(e) => setText(e.target.value)} placeholder={t('Search name, email or company…')} />
+          <input type="search" value={search.text} onChange={(e) => search.setText(e.target.value)} placeholder={t('Search name, email or company…')} />
         </label>
         {canManage ? (
           <button type="button" className="btn primary" onClick={() => setAdding(true)}>
@@ -158,11 +106,7 @@ export function ContactsList() {
               <button
                 type="button"
                 className="btn sm"
-                onClick={() => {
-                  setText('');
-                  pushed.current = '';
-                  update({ q: undefined, contactType: undefined });
-                }}
+                onClick={reset}
               >
                 {t('Clear filters')}
               </button>

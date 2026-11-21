@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { safeUrl } from '@dait-crm/shared';
 import { ApiError } from '../../../api/client';
 import type { CompanyDetail } from '../../../api/companies';
-import { useContacts, useSaveContact, type ContactSummary } from '../../../api/contacts';
+import { contactName, useContacts, useSaveContact, type ContactSummary } from '../../../api/contacts';
 import { keys, useLookupText } from '../../../api/queries';
 import { useConfirm } from '../../../components/ConfirmDialog';
 import { Icons } from '../../../components/Icons';
@@ -17,8 +17,6 @@ import { ContactModal } from '../ContactModal';
 const PAGE_SIZE = 25;
 
 type Props = { company: CompanyDetail; canManage: boolean };
-
-export const contactName = (c: Pick<ContactSummary, 'firstName' | 'lastName'>) => `${c.firstName} ${c.lastName}`;
 
 /** The company's contacts: add, edit, and promote one to primary (a company with contacts always has exactly one). */
 export function ContactsTab({ company, canManage }: Props) {
