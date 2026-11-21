@@ -19,18 +19,6 @@ export function Placeholder({ title, release }: { title: string; release?: strin
   );
 }
 
-export function LeadsPage() {
-  const t = useT();
-  return <Placeholder title={t('Leads')} release="1C" />;
-}
-export function TasksPage() {
-  const t = useT();
-  return <Placeholder title={t('Tasks')} release="1C" />;
-}
-export function NotificationsPage() {
-  const t = useT();
-  return <Placeholder title={t('Notifications')} />;
-}
 export function ReportsPage() {
   const t = useT();
   return <Placeholder title={t('Reports')} release="1E" />;

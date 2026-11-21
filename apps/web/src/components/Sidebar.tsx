@@ -1,6 +1,8 @@
+import type { ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { useNotificationCount } from '../api/notifications';
 import type { Me } from '../api/queries';
 import { useT } from '../i18n/useT';
 import { initials, roleText } from '../i18n/labels';
@@ -15,6 +17,7 @@ export function Sidebar({ me, open, onNavigate }: SidebarProps) {
   const t = useT();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const unread = useNotificationCount().data?.unread ?? 0;
 
   async function signOut() {
     try {
@@ -25,10 +28,11 @@ export function Sidebar({ me, open, onNavigate }: SidebarProps) {
     }
   }
 
-  const item = (to: string, label: string, icon: keyof typeof Icons, end = false) => (
+  const item = (to: string, label: string, icon: keyof typeof Icons, end = false, badge?: ReactNode) => (
     <NavLink to={to} end={end} className={cls} onClick={onNavigate}>
       {Icons[icon]}
       {label}
+      {badge}
     </NavLink>
   );
 
@@ -48,7 +52,18 @@ export function Sidebar({ me, open, onNavigate }: SidebarProps) {
       {item('/contacts', t('Contacts'), 'contacts')}
       <div className="navsec">{t('Work')}</div>
       {item('/tasks', t('Tasks'), 'tasks')}
-      {item('/notifications', t('Notifications'), 'bell')}
+      {item(
+        '/notifications',
+        t('Notifications'),
+        'bell',
+        false,
+        unread > 0 ? (
+          <span className="cnt hot">
+            {unread}
+            <span className="sr">{t('unread')}</span>
+          </span>
+        ) : null,
+      )}
       {item('/reports', t('Reports'), 'reports')}
       <div className="grow" />
       {item('/settings', t('Settings'), 'settings')}

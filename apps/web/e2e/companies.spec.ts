@@ -43,7 +43,10 @@ test('a sales representative sees only their own companies', async ({ page }) =>
   const stamp = Date.now();
   await signInAs(page, ARJUN);
   await page.goto('/companies');
-  await expect(page.getByText('No companies yet')).toBeVisible();
+  // The seed assigns Arjun a lead on Northwind Logistics: that company is visible to him, no other.
+  const rows = page.locator('tbody tr');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText('Northwind Logistics');
 
   await page.getByRole('button', { name: 'Add company' }).click();
   const modal = page.getByRole('dialog', { name: 'Add company' });
@@ -54,10 +57,9 @@ test('a sales representative sees only their own companies', async ({ page }) =>
   await modal.getByRole('button', { name: 'Save' }).click();
 
   await expect(modal).toBeHidden();
-  const rows = page.locator('tbody tr');
-  await expect(rows).toHaveCount(1);
-  await expect(rows.first()).toContainText(`Arjun Prospect ${stamp}`);
-  await expect(page.getByText('Northwind Logistics')).toHaveCount(0);
+  await expect(rows).toHaveCount(2);
+  await expect(page.getByRole('row').filter({ hasText: `Arjun Prospect ${stamp}` })).toBeVisible();
+  await expect(page.getByText('Sunrise Pharma')).toHaveCount(0);
 });
 
 test('filters live in the address bar and survive a reload', async ({ page }) => {

@@ -5,6 +5,8 @@ import type { Action, LookupGroup, Role } from '@dait-crm/shared';
 import { api } from './client';
 import type { CompanyListQuery, DuplicateInput } from './companies';
 import type { ContactDuplicateInput, ContactListQuery } from './contacts';
+import type { LeadListQuery } from './leads';
+import type { TaskListQuery } from './tasks';
 
 export type Lang = 'en' | 'es' | 'fr';
 
@@ -96,6 +98,17 @@ export const keys = {
   contactsAll: ['contacts'] as const,
   contacts: (query: ContactListQuery) => ['contacts', 'list', query] as const,
   contactDuplicates: (input: ContactDuplicateInput) => ['contacts', 'duplicates', input] as const,
+  /** Prefix of every lead query: invalidate this after any lead write. */
+  leadsAll: ['leads'] as const,
+  leads: (query: LeadListQuery) => ['leads', 'list', query] as const,
+  leadDuplicates: (input: DuplicateInput) => ['leads', 'duplicates', input] as const,
+  /** Prefix of every task query: a lead write can create, move or close tasks. */
+  tasksAll: ['tasks'] as const,
+  tasks: (query: TaskListQuery) => ['tasks', 'list', query] as const,
+  /** Prefix of every notification query (list and unread count). */
+  notificationsAll: ['notifications'] as const,
+  notifications: (page: number) => ['notifications', 'list', page] as const,
+  notificationCount: ['notifications', 'count'] as const,
 };
 
 export function useMe() {

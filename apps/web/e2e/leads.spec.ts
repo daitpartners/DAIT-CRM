@@ -1,0 +1,66 @@
+import { expect, test } from '@playwright/test';
+import { ARJUN, MAYA, signInAs } from './fixtures';
+
+test('creates a lead linked to an existing company via duplicate hint', async ({ page }) => {
+  await signInAs(page, MAYA);
+  await page.goto('/leads');
+  await expect(page.getByRole('heading', { name: 'Leads', level: 1 })).toBeVisible();
+  await expect(page.getByRole('row').filter({ hasText: 'Orbit Fintech' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'New lead' }).click();
+  const modal = page.getByRole('dialog', { name: 'New lead' });
+  await modal.getByLabel('Company name').fill('Northwind Logistics');
+  await modal.getByLabel('Website').fill('https://northwindlogistics.in');
+
+  // A lead may join an existing company: the match is offered, not blocking.
+  await expect(modal.getByText('This company exists: CO-0318 Northwind Logistics')).toBeVisible();
+  const save = modal.getByRole('button', { name: 'Save' });
+  await expect(save).toBeEnabled();
+  await modal.getByRole('button', { name: 'Link to CO-0318' }).click();
+  await expect(modal.getByRole('combobox', { name: 'Link to existing company' })).toHaveValue('Northwind Logistics');
+
+  const country = modal.getByRole('combobox', { name: 'Country' });
+  await country.fill('India');
+  await country.press('Enter');
+  await modal.getByLabel('Lead source').selectOption('Referral');
+  await save.click();
+  await expect(modal).toBeHidden();
+
+  const toast = page.getByRole('status').filter({ hasText: /LD-\d+ created/ });
+  await expect(toast).toBeVisible();
+  const number = (await toast.textContent())!.match(/LD-\d+/)![0];
+
+  await page.getByRole('searchbox', { name: 'Search leads' }).fill(number);
+  const row = page.getByRole('row').filter({ hasText: number });
+  await expect(row).toContainText('Northwind Logistics');
+  await expect(page.locator('tbody tr')).toHaveCount(1);
+
+  const res = await page.request.get(`/api/leads?q=${number}`);
+  const body = (await res.json()) as { items: { number: string; company: { number: string } | null }[] };
+  expect(body.items[0]?.company?.number).toBe('CO-0318');
+});
+
+test('sales rep sees unassigned leads and claims one from the list', async ({ page }) => {
+  await signInAs(page, ARJUN);
+  await page.goto('/leads');
+  // Arjun sees his own lead and the unassigned pool, never Maya's.
+  await expect(page.getByRole('row').filter({ hasText: 'LD-1001' })).toContainText('Northwind Logistics');
+  await expect(page.getByRole('row').filter({ hasText: 'Orbit Fintech' })).toHaveCount(0);
+
+  await page.getByRole('tab', { name: /Unassigned/ }).click();
+  await expect(page).toHaveURL(/tab=unassigned/);
+  const row = page.getByRole('row').filter({ hasText: 'Meridian Textiles' });
+  await expect(row).toBeVisible();
+  await row.getByRole('checkbox').check();
+
+  await page.getByLabel('Assign to…').selectOption({ label: 'Me' });
+  const dialog = page.getByRole('dialog', { name: 'Assign leads' });
+  await dialog.getByRole('button', { name: 'Assign' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('status').filter({ hasText: 'Leads assigned: 1' })).toBeVisible();
+  await expect(row).toHaveCount(0);
+
+  await page.getByRole('tab', { name: /My leads/ }).click();
+  const mine = page.getByRole('row').filter({ hasText: 'Meridian Textiles' });
+  await expect(mine).toContainText('Arjun Mehta');
+});

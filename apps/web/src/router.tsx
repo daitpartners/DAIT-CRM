@@ -5,8 +5,11 @@ import { NotFound } from './pages/NotFound';
 import { CompaniesList } from './pages/companies/CompaniesList';
 import { CompanyProfile } from './pages/companies/CompanyProfile';
 import { ContactsList } from './pages/contacts/ContactsList';
-import { LeadsPage, NotificationsPage, ReportsPage, TasksPage } from './pages/Placeholder';
+import { LeadsList } from './pages/leads/LeadsList';
+import { NotificationsList } from './pages/notifications/NotificationsList';
+import { ReportsPage } from './pages/Placeholder';
 import { SignIn } from './pages/SignIn';
+import { TasksList } from './pages/tasks/TasksList';
 import { AllocationRules } from './pages/settings/AllocationRules';
 import { Lookups } from './pages/settings/Lookups';
 import { MySettings } from './pages/settings/MySettings';
@@ -21,12 +24,12 @@ export const router = createBrowserRouter([
     element: <RequireAuth />,
     children: [
       { index: true, element: <Dashboard /> },
-      { path: 'leads', element: <LeadsPage /> },
+      { path: 'leads', element: <LeadsList /> },
       { path: 'companies', element: <CompaniesList /> },
       { path: 'companies/:id', element: <CompanyProfile /> },
       { path: 'contacts', element: <ContactsList /> },
-      { path: 'tasks', element: <TasksPage /> },
-      { path: 'notifications', element: <NotificationsPage /> },
+      { path: 'tasks', element: <TasksList /> },
+      { path: 'notifications', element: <NotificationsList /> },
       { path: 'reports', element: <ReportsPage /> },
       {
         path: 'settings',

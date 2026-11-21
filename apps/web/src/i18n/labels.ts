@@ -1,5 +1,5 @@
 /* Translated display labels for fixed enums. Each phrase is a literal t() call so scripts/i18n-check.ts sees it. */
-import type { CompanyStatus, LookupGroup, Role } from '@dait-crm/shared';
+import type { CompanyStatus, LeadType, LookupGroup, Priority, Role, TaskOrigin } from '@dait-crm/shared';
 import type { Lang } from '../api/queries';
 import type { TFn } from './useT';
 
@@ -61,6 +61,83 @@ export function companyStatusBadge(status: CompanyStatus): string {
   return status === 'Active' ? 'badge b-ok' : status === 'Closed' ? 'badge b-warn' : 'badge b-grey';
 }
 
+/**
+ * A lead status. Statuses are a lookup group (administrators may add more): the seeded ones are
+ * translated here (`|lead`: Spanish and French agree with the masculine "el lead" / "le lead");
+ * any other value shows as stored.
+ */
+export function leadStatusText(t: TFn, status: string): string {
+  switch (status) {
+    case 'New':
+      return t('New|lead');
+    case 'Not Contacted':
+      return t('Not Contacted|lead');
+    case 'Contacted':
+      return t('Contacted|lead');
+    case 'Interested':
+      return t('Interested|lead');
+    case 'Qualified':
+      return t('Qualified|lead');
+    case 'Proposal Sent':
+      return t('Proposal Sent|lead');
+    case 'Negotiation':
+      return t('Negotiation|lead');
+    case 'Won':
+      return t('Won|lead');
+    case 'Lost':
+      return t('Lost|lead');
+    case 'Not Relevant':
+      return t('Not Relevant|lead');
+    default:
+      return status;
+  }
+}
+
+/** Badge class per lead status (prototype/js/ui.js STATUS); unknown statuses are grey. */
+export function leadStatusBadge(status: string): string {
+  const cls: Record<string, string> = {
+    New: 'b-purple', 'Not Contacted': 'b-grey', Contacted: 'b-info', Interested: 'b-ok', Qualified: 'b-ok',
+    'Proposal Sent': 'b-purple2', Negotiation: 'b-warn', Won: 'b-ok', Lost: 'b-bad', 'Not Relevant': 'b-grey',
+  };
+  return `badge ${cls[status] ?? 'b-grey'}`;
+}
+
+export function leadTypeText(t: TFn, type: LeadType): string {
+  return type === 'Prospect' ? t('Prospect') : t('Lead');
+}
+
+/** `|priority`: Spanish "prioridad" and French "priorité" are feminine. */
+export function priorityText(t: TFn, priority: Priority): string {
+  switch (priority) {
+    case 'High':
+      return t('High|priority');
+    case 'Medium':
+      return t('Medium|priority');
+    case 'Low':
+      return t('Low|priority');
+    default:
+      return priority;
+  }
+}
+
+/** How a task came about. */
+export function taskOriginText(t: TFn, origin: TaskOrigin): string {
+  switch (origin) {
+    case 'follow_up':
+      return t('Follow-up');
+    case 'new_assignment':
+      return t('New assignment');
+    case 'transfer':
+      return t('Transfer');
+    case 'manual':
+      return t('Manual|task');
+    case 'quotation':
+      return t('Quotation');
+    default:
+      return origin;
+  }
+}
+
 /** Friendly text for API error codes. */
 export function errorText(t: TFn, code: string): string {
   switch (code) {
@@ -96,6 +173,24 @@ export function errorText(t: TFn, code: string): string {
       return t('This company is closed');
     case 'last_primary_contact':
       return t('A company must keep one primary contact');
+    case 'lead_closed':
+      return t('This lead is closed');
+    case 'lead_archived':
+      return t('This lead is archived. Restore it first.');
+    case 'reason_required':
+      return t('Enter a reason');
+    case 'transfer_note_required':
+      return t('Add a note for the person receiving the lead');
+    case 'cannot_assign_hidden':
+      return t('You cannot assign to that person');
+    case 'invalid_status':
+      return t('That status is not available');
+    case 'already_assigned':
+      return t('Someone has already taken this lead');
+    case 'csv_invalid':
+      return t('The file could not be read as CSV with a header row');
+    case 'task_done':
+      return t('This task is already done');
     default:
       return t('Something went wrong. Please try again.');
   }

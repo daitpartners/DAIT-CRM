@@ -143,15 +143,18 @@ function compact(input: DuplicateInput): DuplicateInput {
   return out as DuplicateInput;
 }
 
-/** Live duplicate check, debounced 400 ms after the last keystroke. */
-export function useDuplicateCheck(input: DuplicateInput, enabled: boolean) {
+/**
+ * Live duplicate check, debounced 400 ms after the last keystroke. `scope: 'leads'` asks the lead
+ * endpoint, which also reports companies the user may not open (number and name only).
+ */
+export function useDuplicateCheck(input: DuplicateInput, enabled: boolean, scope: 'companies' | 'leads' = 'companies') {
   // Debounce the serialised input: a fresh object every render would restart the timer forever.
   const json = useDebounce(JSON.stringify(compact(input)), 400);
   const debounced = useMemo(() => JSON.parse(json) as DuplicateInput, [json]);
   const hasKey = Boolean(debounced.name || debounced.website || debounced.businessEmail || debounced.legalName);
   return useQuery({
-    queryKey: keys.companyDuplicates(debounced),
-    queryFn: () => api<DuplicateResult>('/api/companies/check-duplicates', { method: 'POST', body: debounced }),
+    queryKey: scope === 'leads' ? keys.leadDuplicates(debounced) : keys.companyDuplicates(debounced),
+    queryFn: () => api<DuplicateResult>(`/api/${scope}/check-duplicates`, { method: 'POST', body: debounced }),
     enabled: enabled && hasKey,
     staleTime: 30_000,
     placeholderData: keepPreviousData,

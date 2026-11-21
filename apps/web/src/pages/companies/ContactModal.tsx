@@ -1,17 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useForm, useWatch, type Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
 import { ContactCreate, ContactUpdate, lookupLabel } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
-import { useCompanies } from '../../api/companies';
 import { useContactDuplicateCheck, useSaveContact, type ContactSummary } from '../../api/contacts';
 import { keys, useLookups } from '../../api/queries';
-import { Combobox, type ComboOption } from '../../components/Combobox';
+import { CompanyPicker } from '../../components/CompanyPicker';
 import { FormField } from '../../components/FormField';
 import { Modal } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
-import { useDebounce } from '../../hooks/useDebounce';
 import { useLang, useT, type TFn } from '../../i18n/useT';
 import { applyServerIssues } from '../../forms/applyServerIssues';
 import { ContactDuplicateHint } from './ContactDuplicateHint';
@@ -187,8 +185,13 @@ export function ContactModal({ companyId, contact, onClose }: Props) {
       >
         {fixedCompanyId === undefined ? (
           <CompanyPicker
+            id="ct-companyId"
+            label={t('Company')}
+            required
+            className="span2"
             value={chosenCompanyId}
             invalid={Boolean(errors.companyId)}
+            errorText={t('Choose a company')}
             onChange={(id) => setValue('companyId', id, { shouldValidate: formState.isSubmitted })}
           />
         ) : null}
@@ -236,47 +239,5 @@ export function ContactModal({ companyId, contact, onClose }: Props) {
         ) : null}
       </form>
     </Modal>
-  );
-}
-
-/** Company chooser for a contact added outside a company profile; searches companies server-side as the user types. */
-function CompanyPicker({ value, invalid, onChange }: { value: number | undefined; invalid: boolean; onChange: (id: number) => void }) {
-  const t = useT();
-  const [text, setText] = useState('');
-  const q = useDebounce(text.trim(), 400);
-  const { data } = useCompanies({ page: 1, pageSize: 100, sort: 'name', dir: 'asc', q: q || undefined });
-  // Remember the chosen company so its name stays shown when a later search no longer returns it.
-  const [chosen, setChosen] = useState<ComboOption | null>(null);
-  const options = useMemo(() => {
-    // A Closed company takes no new contacts, so it is not offered.
-    const opts = (data?.items ?? []).filter((c) => c.status !== 'Closed').map((c) => ({ value: String(c.id), label: c.name }));
-    if (chosen && !opts.some((o) => o.value === chosen.value)) opts.unshift(chosen);
-    return opts;
-  }, [data, chosen]);
-
-  return (
-    <div className="span2">
-      <Combobox
-        id="ct-companyId"
-        label={t('Company')}
-        required
-        searchable
-        options={options}
-        value={value === undefined ? null : String(value)}
-        placeholder={t('Type to search companies…')}
-        onQuery={setText}
-        errorId={invalid ? 'ct-companyId-err' : undefined}
-        onChange={(v) => {
-          const o = options.find((x) => x.value === v);
-          if (o) setChosen(o);
-          onChange(Number(v));
-        }}
-      />
-      {invalid ? (
-        <div id="ct-companyId-err" className="err-msg" role="alert">
-          {t('Choose a company')}
-        </div>
-      ) : null}
-    </div>
   );
 }
