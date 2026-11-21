@@ -27,7 +27,7 @@ const DAY_MS = 86_400_000;
 
 /* ------------------------------------------------------------------ errors */
 
-/** RuleError codes answered with 409; every other rule refusal is a 400. */
+/** RuleError codes answered with 409; `forbidden` is a 403; every other rule refusal is a 400. */
 const CONFLICT_CODES = new Set(['stale', 'company_inactive', 'already_assigned']);
 
 /** Maps a business-rule / concurrency error to its HTTP reply; anything else is rethrown. */
@@ -36,7 +36,10 @@ export async function guard<T>(reply: FastifyReply, fn: () => Promise<T>): Promi
     return await fn();
   } catch (e) {
     if (e instanceof StaleError || isNotFound(e)) return reply.code(409).send({ error: 'stale' });
-    if (e instanceof RuleError) return reply.code(CONFLICT_CODES.has(e.code) ? 409 : 400).send({ error: e.code });
+    if (e instanceof RuleError) {
+      const code = e.code === 'forbidden' ? 403 : CONFLICT_CODES.has(e.code) ? 409 : 400;
+      return reply.code(code).send({ error: e.code });
+    }
     throw e;
   }
 }
@@ -461,7 +464,7 @@ async function assignAndAudit(tx: Tx, user: AuthUser, lead: Lead, toUserId: numb
  * Locks the lead rows among `ids` for the rest of the transaction (`FOR UPDATE`, id order so
  * concurrent bulk calls cannot deadlock). Read after this, the rows cannot change under us.
  */
-async function lockLeads(tx: Tx, ids: number[]): Promise<void> {
+export async function lockLeads(tx: Tx, ids: number[]): Promise<void> {
   const sorted = [...new Set(ids)].sort((a, b) => a - b);
   await tx.$queryRaw`SELECT id FROM leads WHERE id IN (${Prisma.join(sorted)}) ORDER BY id FOR UPDATE`;
 }

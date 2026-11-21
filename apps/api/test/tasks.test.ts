@@ -200,3 +200,96 @@ describe('tasks API', () => {
     expect(personal.json()).toMatchObject({ leadId: null, lead: null });
   });
 });
+
+describe('follow-up tasks stay in step with the lead', () => {
+  const setup = async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const lead = await makeLead({ companyName: 'Acme', assignedToId: rep.user.id, nextFollowUp: day('2027-01-05') });
+    const t = await prisma.task.create({
+      data: { leadId: lead.id, assignedToId: rep.user.id, title: 'Follow up · Acme', dueDate: day('2027-01-05'), origin: 'follow_up' },
+    });
+    return { rep, lead, t };
+  };
+  const leadOf = (id: number) => prisma.lead.findUniqueOrThrow({ where: { id } });
+  const leadAudits = (id: number) => prisma.auditLog.findMany({ where: { entityType: 'lead', entityId: String(id) } });
+
+  it('re-dating a follow-up task updates the lead', async () => {
+    const { rep, lead, t } = await setup();
+    const res = await req('PATCH', `/api/tasks/${t.id}`, rep.cookie, { dueDate: '2027-02-01', updatedAt: stamp(t) });
+    expect(res.statusCode).toBe(200);
+    expect((await leadOf(lead.id)).nextFollowUp).toEqual(day('2027-02-01'));
+    const logs = await leadAudits(lead.id);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({ userId: rep.user.id, before: { nextFollowUp: '2027-01-05' }, after: { nextFollowUp: '2027-02-01' } });
+
+    // Reassigning leaves the lead's assignee alone.
+    const manager = await makeUser({ role: 'MANAGER' });
+    const mgr = await as('MANAGER');
+    await req('PATCH', `/api/tasks/${t.id}`, mgr.cookie, { assignedToId: manager.id, updatedAt: res.json().updatedAt });
+    expect((await leadOf(lead.id)).assignedToId).toBe(rep.user.id);
+    expect((await prisma.task.findUniqueOrThrow({ where: { id: t.id } })).assignedToId).toBe(manager.id);
+  });
+
+  it('ticking a follow-up task clears the lead follow-up', async () => {
+    const { rep, lead, t } = await setup();
+    const res = await req('PATCH', `/api/tasks/${t.id}`, rep.cookie, { isDone: true, updatedAt: stamp(t) });
+    expect(res.statusCode).toBe(200);
+    expect((await leadOf(lead.id)).nextFollowUp).toBeNull();
+    // Unticking restores it from the task's date.
+    const untick = await req('PATCH', `/api/tasks/${t.id}`, rep.cookie, { isDone: false, updatedAt: res.json().updatedAt });
+    expect(untick.statusCode).toBe(200);
+    expect((await leadOf(lead.id)).nextFollowUp).toEqual(day('2027-01-05'));
+    expect(await leadAudits(lead.id)).toHaveLength(2);
+  });
+
+  it('snoozing a follow-up task moves the lead follow-up', async () => {
+    const { rep, lead, t } = await setup();
+    const res = await req('POST', `/api/tasks/${t.id}/snooze`, rep.cookie, { updatedAt: stamp(t) });
+    expect(res.statusCode).toBe(200);
+    const tomorrow = shift(todayIn('UTC'), 1);
+    expect((await leadOf(lead.id)).nextFollowUp).toEqual(day(tomorrow));
+    expect(await leadAudits(lead.id)).toHaveLength(1);
+  });
+
+  it('a later lead edit does not resurrect a ticked follow-up', async () => {
+    const { rep, lead, t } = await setup();
+    expect((await req('PATCH', `/api/tasks/${t.id}`, rep.cookie, { isDone: true, updatedAt: stamp(t) })).statusCode).toBe(200);
+    const current = await leadOf(lead.id);
+    const edit = await req('PATCH', `/api/leads/${lead.id}`, rep.cookie, {
+      notes: 'Spoke briefly', companyName: 'Acme Ltd', updatedAt: current.updatedAt.toISOString(),
+    });
+    expect(edit.statusCode).toBe(200);
+    expect(await prisma.task.count({ where: { leadId: lead.id, origin: 'follow_up', isDone: false } })).toBe(0);
+    expect((await leadOf(lead.id)).nextFollowUp).toBeNull();
+    expect((await prisma.task.findUniqueOrThrow({ where: { id: t.id } })).isDone).toBe(true);
+  });
+});
+
+describe('task edit permission', () => {
+  it('another rep cannot edit a task on an unassigned lead', async () => {
+    const repA = await as('SALES_REPRESENTATIVE');
+    const repB = await as('SALES_REPRESENTATIVE');
+    const manager = await as('MANAGER');
+    const lead = await makeLead({ assignedToId: repA.user.id });
+    const t = await task(repA.user.id, '2027-01-05', { leadId: lead.id });
+    const un = await req('POST', `/api/leads/${lead.id}/unassign`, manager.cookie, { note: 'Pool', updatedAt: lead.updatedAt.toISOString() });
+    expect(un.statusCode).toBe(200);
+    const kept = await prisma.task.findUniqueOrThrow({ where: { id: t.id } });
+    expect(kept.assignedToId).toBe(repA.user.id);
+
+    // Rep B can see the unassigned lead and its task, but may not edit it.
+    expect((await req('GET', `/api/leads/${lead.id}`, repB.cookie)).statusCode).toBe(200);
+    const res = await req('PATCH', `/api/tasks/${t.id}`, repB.cookie, { isDone: true, updatedAt: stamp(kept) });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ error: 'forbidden' });
+    expect((await req('POST', `/api/tasks/${t.id}/snooze`, repB.cookie, { updatedAt: stamp(kept) })).statusCode).toBe(403);
+    expect((await prisma.task.findUniqueOrThrow({ where: { id: t.id } })).isDone).toBe(false);
+
+    // The assignee and a manager may.
+    const own = await req('PATCH', `/api/tasks/${t.id}`, repA.cookie, { title: 'Still mine', updatedAt: stamp(kept) });
+    expect(own.statusCode).toBe(200);
+    const mgr = await req('PATCH', `/api/tasks/${t.id}`, manager.cookie, { title: 'Checked', updatedAt: own.json().updatedAt });
+    expect(mgr.statusCode).toBe(200);
+  });
+});
+

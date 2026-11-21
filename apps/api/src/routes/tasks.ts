@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { Prisma, Task } from '@prisma/client';
-import { TaskCreate, TaskListQuery, TaskUpdate, UpdatedAtOnly, can, pageArgs, type TaskListQuery as Query } from '@dait-crm/shared';
+import type { Lead, Prisma, Task } from '@prisma/client';
+import { TaskCreate, TaskListQuery, TaskUpdate, UpdatedAtOnly, can, isClosedStatus, pageArgs, type TaskListQuery as Query } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { audit } from '../audit.js';
 import { NotFoundError, parseBody, parseQuery } from '../validate.js';
@@ -11,7 +11,7 @@ import { taskInclude, taskRow } from '../leads/serialize.js';
 import { RuleError } from '../leads/service.js';
 import { notifyUser } from '../leads/notify.js';
 import { dateOnly, todayIn, ymd } from '../leads/dates.js';
-import { guard } from './leads.js';
+import { guard, lockLeads } from './leads.js';
 
 type Tx = Prisma.TransactionClient;
 const DAY_MS = 86_400_000;
@@ -45,12 +45,46 @@ async function assertTaskAssignee(tx: Tx, assigneeId: number, leadId: number | n
 const notifyAssignee = (tx: Tx, task: Pick<Task, 'assignedToId' | 'title'>) =>
   notifyUser(tx, task.assignedToId, `Task assigned to you · ${task.title}`, null, '/tasks');
 
-/** The visible task checked against the client's `updatedAt` (409 `stale` when it has moved on). */
-async function freshTask(tx: Tx, user: AuthUser, id: number, updatedAt: string): Promise<Task> {
-  const task = Number.isInteger(id) ? await tx.task.findFirst({ where: { AND: [{ id }, taskWhere(user)] } }) : null;
-  if (!task) throw new NotFoundError();
+/**
+ * The visible task the user may edit, checked against the client's `updatedAt` (409 `stale` when it
+ * has moved on). Editing needs more than seeing: the actor is the task's assignee, the lead's
+ * assignee, or has `view_all_leads` (else 403 `forbidden`). For a follow-up task the lead row is
+ * locked too (returned as `followUpLead`), since the edit is mirrored onto `lead.nextFollowUp`.
+ */
+async function editableTask(
+  tx: Tx, user: AuthUser, id: number, updatedAt: string,
+): Promise<{ task: Task; followUpLead: Lead | null }> {
+  const found = Number.isInteger(id) ? await tx.task.findFirst({ where: { AND: [{ id }, taskWhere(user)] } }) : null;
+  if (!found) throw new NotFoundError();
+  let followUpLead: Lead | null = null;
+  if (found.leadId !== null) {
+    await lockLeads(tx, [found.leadId]);
+    const lead = await tx.lead.findUniqueOrThrow({ where: { id: found.leadId } });
+    if (found.origin === 'follow_up') followUpLead = lead;
+    if (found.assignedToId !== user.id && lead.assignedToId !== user.id && !can(user.role, 'view_all_leads')) {
+      throw new RuleError('forbidden');
+    }
+  } else if (found.assignedToId !== user.id && !can(user.role, 'view_all_leads')) {
+    throw new RuleError('forbidden');
+  }
+  // Re-read under the lead lock: the stale check sees the latest row.
+  const task = await tx.task.findUniqueOrThrow({ where: { id } });
   if (new Date(updatedAt).getTime() !== task.updatedAt.getTime()) throw new StaleError();
-  return task;
+  return { task, followUpLead };
+}
+
+/**
+ * Mirrors a follow-up task edit onto its lead: `nextFollowUp` becomes `next` (null when ticked),
+ * audited. Without this the next `syncFollowUpTask` would undo the edit. Refuses on a closed lead.
+ */
+async function mirrorFollowUp(tx: Tx, user: AuthUser, lead: Lead, next: Date | null): Promise<void> {
+  if ((lead.nextFollowUp?.getTime() ?? null) === (next?.getTime() ?? null)) return;
+  if (next !== null && isClosedStatus(lead.status)) throw new RuleError('lead_closed');
+  await tx.lead.update({ where: { id: lead.id }, data: { nextFollowUp: next } });
+  await audit(tx, {
+    entityType: 'lead', entityId: lead.id, action: 'update', userId: user.id,
+    before: { nextFollowUp: ymd(lead.nextFollowUp) }, after: { nextFollowUp: ymd(next) },
+  });
 }
 
 async function rowOf(id: number, user: AuthUser) {
@@ -109,7 +143,7 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
     const id = Number(request.params.id);
     return guard(reply, async () => {
       await prisma.$transaction(async (tx) => {
-        const before = await freshTask(tx, user, id, updatedAt);
+        const { task: before, followUpLead } = await editableTask(tx, user, id, updatedAt);
         const data: Prisma.TaskUncheckedUpdateInput = {};
         if (body.title !== undefined) data.title = body.title;
         if (body.dueDate !== undefined) data.dueDate = dateOnly(body.dueDate);
@@ -124,6 +158,8 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
           data.assignedToId = body.assignedToId;
         }
         const after = await tx.task.update({ where: { id, updatedAt: before.updatedAt }, data });
+        // The lead's assignee is left alone on a reassign; only the date / done state is mirrored.
+        if (followUpLead) await mirrorFollowUp(tx, user, followUpLead, after.isDone ? null : after.dueDate);
         if (reassigned && after.assignedToId !== user.id) await notifyAssignee(tx, after);
         await audit(tx, { entityType: 'task', entityId: id, action: 'update', userId: user.id, before, after });
       });
@@ -137,10 +173,11 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
     const id = Number(request.params.id);
     return guard(reply, async () => {
       await prisma.$transaction(async (tx) => {
-        const before = await freshTask(tx, user, id, updatedAt);
+        const { task: before, followUpLead } = await editableTask(tx, user, id, updatedAt);
         if (before.isDone) throw new RuleError('task_done');
         const dueDate = new Date(dateOnly(todayIn(user.timezone)).getTime() + DAY_MS);
         const after = await tx.task.update({ where: { id, updatedAt: before.updatedAt }, data: { dueDate } });
+        if (followUpLead) await mirrorFollowUp(tx, user, followUpLead, after.dueDate);
         await audit(tx, {
           entityType: 'task', entityId: id, action: 'update', userId: user.id,
           before: { dueDate: ymd(before.dueDate) }, after: { dueDate: ymd(after.dueDate), snoozed: true },
