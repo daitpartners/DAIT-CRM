@@ -87,7 +87,9 @@ export async function connectPersonalMailbox(args: {
     if (before && before.userId !== null && before.userId !== args.userId && before.status !== 'disconnected') {
       throw new MailboxTakenError();
     }
-    const account = await tx.emailAccount.upsert({ where: key, create: { address, kind: 'personal', ...data }, update: data });
+    // Taken over by another user: their sync starts afresh (messages stay with the user they were synced for).
+    const reset = before && before.userId !== args.userId ? { syncState: {} } : {};
+    const account = await tx.emailAccount.upsert({ where: key, create: { address, kind: 'personal', ...data }, update: { ...data, ...reset } });
     await audit(tx, {
       entityType: 'email_account',
       entityId: account.id,

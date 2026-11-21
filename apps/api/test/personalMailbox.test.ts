@@ -157,6 +157,19 @@ describe('personal mailboxes', () => {
     expect(taken).toMatchObject({ userId: other.id, status: 'connected' });
   });
 
+  test('a mailbox taken over by another user starts its sync afresh; the same user reconnecting keeps it (2B-2)', async () => {
+    const maya = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    const neha = await makeUser({ role: 'MANAGER' });
+    const first = await connectPersonalMailbox({ userId: maya.id, address: 'shared@daitpartners.com', refreshToken: 't1' });
+    await prisma.emailAccount.update({ where: { id: first.id }, data: { syncState: { inbox: { link: 'delta-1' } } } });
+    const again = await connectPersonalMailbox({ userId: maya.id, address: 'shared@daitpartners.com', refreshToken: 't2' });
+    expect(again.syncState).toEqual({ inbox: { link: 'delta-1' } });
+    await prisma.emailAccount.update({ where: { id: first.id }, data: { status: 'disconnected' } });
+    const taken = await connectPersonalMailbox({ userId: neha.id, address: 'shared@daitpartners.com', refreshToken: 't3' });
+    expect(taken.id).toBe(first.id);
+    expect(taken.syncState).toEqual({});
+  });
+
   test('a Data Research User cannot connect a personal mailbox (no use_email)', async () => {
     const { client } = fakeMicrosoft();
     const a = await app(client);

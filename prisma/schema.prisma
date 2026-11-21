@@ -115,6 +115,8 @@ model EmailAccount {
   sharedMailboxes String[]  @default([]) @map("shared_mailboxes")
   lastSyncAt      DateTime? @map("last_sync_at")
   messageCount    Int       @default(0) @map("message_count")
+  /// Release 2B-2 mail sync: per folder `{ link }`, the Graph next or delta link to continue from.
+  syncState       Json      @default("{}") @map("sync_state")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
@@ -128,36 +130,50 @@ model EmailAccount {
 
 /// A user's email (release 2B): sent from the CRM now, synced from their mailbox in 2B-2. Private to `userId`.
 model EmailMessage {
-  id          Int      @id @default(autoincrement())
-  userId      Int      @map("user_id")
-  accountId   Int?     @map("account_id")
-  leadId      Int?     @map("lead_id")
-  contactId   Int?     @map("contact_id")
-  companyId   Int?     @map("company_id")
+  id              Int       @id @default(autoincrement())
+  userId          Int       @map("user_id")
+  accountId       Int?      @map("account_id")
+  leadId          Int?      @map("lead_id")
+  contactId       Int?      @map("contact_id")
+  companyId       Int?      @map("company_id")
   /// 'sent' | 'inbox' | 'drafts' | 'archive'
-  folder      String
-  /// 'queued' | 'sent' | 'failed' (sent from the CRM); synced mail is 'sent'.
-  status      String
-  fromAddress String   @map("from_address")
-  toAddresses Json     @default("[]") @map("to_addresses")
-  ccAddresses Json     @default("[]") @map("cc_addresses")
-  subject     String   @db.VarChar(500)
-  bodyText    String   @default("") @map("body_text")
-  /// Graph / RFC ids, filled by sync (2B-2).
-  messageId   String?  @map("message_id") @db.VarChar(255)
-  threadId    String?  @map("thread_id") @db.VarChar(255)
-  isRead      Boolean  @default(true) @map("is_read")
-  occurredAt  DateTime @default(now()) @map("occurred_at")
-  lastError   String?  @map("last_error")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  folder          String
+  /// 'queued' | 'sending' | 'sent' | 'failed' (sent from the CRM); synced mail is 'received' | 'sent' | 'draft'.
+  status          String
+  /// 'crm' written in the CRM | 'sync' read from the mailbox.
+  source          String    @default("crm")
+  fromAddress     String    @map("from_address")
+  fromName        String?   @map("from_name") @db.VarChar(255)
+  toAddresses     Json      @default("[]") @map("to_addresses")
+  ccAddresses     Json      @default("[]") @map("cc_addresses")
+  subject         String    @db.VarChar(500)
+  bodyText        String    @default("") @map("body_text")
+  /// Graph immutable id (2B-2 sync); unique per user.
+  graphId         String?   @map("graph_id") @db.VarChar(255)
+  /// RFC message id and Graph conversation id, filled by sync (2B-2).
+  messageId       String?   @map("message_id") @db.VarChar(255)
+  threadId        String?   @map("thread_id") @db.VarChar(255)
+  isRead          Boolean   @default(true) @map("is_read")
+  occurredAt      DateTime  @default(now()) @map("occurred_at")
+  attachmentNames Json      @default("[]") @map("attachment_names")
+  /// The message this one answers (a CRM reply goes through Graph reply).
+  replyToId       Int?      @map("reply_to_id")
+  /// When the user logged it on the lead ("Log as activity"); once per message.
+  loggedAt        DateTime? @map("logged_at")
+  lastError       String?   @map("last_error")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  account EmailAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
-  lead    Lead?         @relation(fields: [leadId], references: [id], onDelete: SetNull)
-  contact Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  company Company?      @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account EmailAccount?  @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  lead    Lead?          @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  contact Contact?       @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  company Company?       @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  replyTo EmailMessage?  @relation("EmailReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies EmailMessage[] @relation("EmailReplies")
 
+  @@unique([userId, graphId])
+  @@index([userId, threadId])
   @@index([userId, leadId])
   @@index([userId, folder, occurredAt])
   @@map("email_messages")
