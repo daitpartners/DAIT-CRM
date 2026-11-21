@@ -102,9 +102,42 @@ async function applyRemovals(userId: number, removed: { graphId: string; folder:
 }
 
 /**
+ * Reads one folder from `link` (else a delta query from `since`) for at most MAX_PAGES pages. Returns the link to
+ * continue from, the removals seen, and whether pages remain. An expired delta link (410) restarts the folder once.
+ */
+async function readFolder(
+  account: EmailAccount, user: AuthUser, f: { graph: MailFolder; folder: string }, link: string | undefined, since: Date, ctx: JobContext,
+): Promise<{ link: string | null; removed: { graphId: string; folder: string }[]; more: boolean }> {
+  let url = link ?? deltaStartUrl(f.graph, since);
+  let restarted = !link;
+  const removed: { graphId: string; folder: string }[] = [];
+  for (let pages = 0; pages < MAX_PAGES; pages++) {
+    let page;
+    try {
+      page = await ctx.graph.deltaPage(account, url);
+    } catch (err) {
+      if (err instanceof GraphError && err.status === 410 && !restarted) {
+        restarted = true;
+        removed.length = 0;
+        url = deltaStartUrl(f.graph, since);
+        pages = -1;
+        continue;
+      }
+      throw err;
+    }
+    for (const m of page.messages) await storeMessage(account, user, f.folder, m, ctx);
+    for (const graphId of page.removed) removed.push({ graphId, folder: f.folder });
+    if (!page.nextLink) return { link: page.deltaLink ?? url, removed, more: false };
+    url = page.nextLink;
+  }
+  return { link: url, removed, more: true };
+}
+
+/**
  * Reads new mail from a personal mailbox (release 2B-2): each folder continues from its stored delta link, or starts
  * 90 days back; at most MAX_PAGES pages per folder per run (the rest a minute later). A revoked token puts the mailbox
- * in `error`; other failures fail the run and the next scheduled one tries again.
+ * in `error`; a folder that fails is skipped (noted in `lastError`) and read again next run; the run fails only when
+ * every folder does.
  */
 export async function syncMailboxHandler(job: Job, ctx: JobContext): Promise<void> {
   const { accountId } = job.payload as unknown as SyncMailboxPayload;
@@ -114,40 +147,28 @@ export async function syncMailboxHandler(job: Job, ctx: JobContext): Promise<voi
   if (!user) return;
 
   const state: SyncState = { ...(account.syncState as SyncState) };
-  const save = () => prisma.emailAccount.update({ where: { id: account.id }, data: { syncState: state } });
   const since = new Date(Date.now() - INITIAL_DAYS * 86_400_000);
   const removed: { graphId: string; folder: string }[] = [];
+  const failures: { folder: MailFolder; err: unknown }[] = [];
   let more = false;
   try {
     for (const f of FOLDERS) {
-      let url = state[f.graph]?.link ?? deltaStartUrl(f.graph, since);
-      for (let pages = 0; ; pages++) {
-        if (pages === MAX_PAGES) {
-          more = true;
-          break;
-        }
-        let page;
-        try {
-          page = await ctx.graph.deltaPage(account, url);
-        } catch (err) {
-          // Expired delta link: read the folder again from the start (stored rows are matched by Graph id).
-          if (err instanceof GraphError && err.status === 410 && state[f.graph]) {
-            delete state[f.graph];
-            await save();
-            url = deltaStartUrl(f.graph, since);
-            continue;
-          }
-          throw err;
-        }
-        for (const m of page.messages) await storeMessage(account, user, f.folder, m, ctx);
-        for (const graphId of page.removed) removed.push({ graphId, folder: f.folder });
-        state[f.graph] = { link: page.nextLink ?? page.deltaLink ?? url };
-        await save();
-        if (!page.nextLink) break;
-        url = page.nextLink;
+      // A folder's new link and removals count only once the folder is read to a stopping point; a folder that fails
+      // keeps its old link, so the same changes (removals included) are read again next time. Storing is idempotent.
+      try {
+        const done = await readFolder(account, user, f, state[f.graph]?.link, since, ctx);
+        if (done.link) state[f.graph] = { link: done.link };
+        else delete state[f.graph];
+        removed.push(...done.removed);
+        more ||= done.more;
+      } catch (err) {
+        if (isAuthFailure(err)) throw err;
+        failures.push({ folder: f.graph, err });
       }
     }
+    if (failures.length === FOLDERS.length) throw failures[0]!.err;
     await applyRemovals(user.id, removed);
+    await prisma.emailAccount.update({ where: { id: account.id }, data: { syncState: state } });
   } catch (err) {
     if (isAuthFailure(err)) {
       // Only the connection this run used: a mailbox disconnected or reconnected meanwhile keeps its new state.
@@ -159,7 +180,8 @@ export async function syncMailboxHandler(job: Job, ctx: JobContext): Promise<voi
     }
     throw err;
   }
+  const lastError = failures.length ? errorMessage(failures.map((x) => `${x.folder}: ${errorMessage(x.err)}`).join('; ')) : null;
   const messageCount = await prisma.emailMessage.count({ where: { accountId: account.id } });
-  await prisma.emailAccount.update({ where: { id: account.id }, data: { lastSyncAt: new Date(), messageCount, lastError: null } });
+  await prisma.emailAccount.update({ where: { id: account.id }, data: { lastSyncAt: new Date(), messageCount, lastError } });
   if (more) await enqueue(prisma, 'sync_mailbox', { accountId: account.id }, { runAt: new Date(Date.now() + MORE_AFTER_MS), maxAttempts: 1 });
 }

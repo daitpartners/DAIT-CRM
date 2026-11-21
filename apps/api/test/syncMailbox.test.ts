@@ -177,6 +177,46 @@ describe('mail sync (2B-2)', () => {
     expect(await prisma.emailMessage.count({ where: { graphId: fresh.id } })).toBe(1);
   });
 
+  test('a folder that keeps failing is skipped: the others are saved and their removals applied, and the run completes', async () => {
+    const { user, account } = await mailbox();
+    await prisma.emailMessage.create({ data: { userId: user.id, accountId: account.id, graphId: 'deleted', folder: 'inbox', status: 'received', source: 'sync', fromAddress: 'a@b.com', subject: 's' } });
+    const fresh = msg();
+    const { graph } = scripted({
+      'start:inbox': final('inbox', [fresh], ['deleted']),
+      'start:archive': new GraphError('graph_request_failed status=404 code=ErrorItemNotFound', 404),
+    });
+    await syncMailboxHandler(job(account.id), { graph });
+    expect((await prisma.emailMessage.findMany({ where: { userId: user.id } })).map((r) => r.graphId)).toEqual([fresh.id]);
+    const after = await prisma.emailAccount.findUniqueOrThrow({ where: { id: account.id } });
+    expect(after.lastSyncAt).toBeInstanceOf(Date);
+    expect(after.lastError).toContain('archive');
+    const state = after.syncState as Record<string, unknown>;
+    expect(state.inbox).toBeDefined();
+    expect(state.archive).toBeUndefined();
+  });
+
+  test('a folder failing after some pages keeps its old link, so its removals are read again next time', async () => {
+    const old = 'https://graph.microsoft.com/v1.0/delta/inbox/old';
+    const { user, account } = await mailbox({ syncState: { inbox: { link: old } } });
+    await prisma.emailMessage.create({ data: { userId: user.id, accountId: account.id, graphId: 'deleted', folder: 'inbox', status: 'received', source: 'sync', fromAddress: 'a@b.com', subject: 's' } });
+    const { graph } = scripted({
+      [old]: { messages: [], removed: ['deleted'], nextLink: 'https://graph.microsoft.com/v1.0/p/2' },
+      'https://graph.microsoft.com/v1.0/p/2': new GraphError('graph_request_failed status=503', 503),
+    });
+    await syncMailboxHandler(job(account.id), { graph });
+    const after = await prisma.emailAccount.findUniqueOrThrow({ where: { id: account.id } });
+    expect((after.syncState as Record<string, { link: string }>).inbox!.link).toBe(old);
+    expect(await prisma.emailMessage.count({ where: { graphId: 'deleted' } })).toBe(1);
+  });
+
+  test('when every folder fails the run fails', async () => {
+    const { account } = await mailbox();
+    const down = new GraphError('graph_request_failed status=503', 503);
+    const { graph } = scripted({ 'start:inbox': down, 'start:sentitems': down, 'start:drafts': down, 'start:archive': down });
+    await expect(syncMailboxHandler(job(account.id), { graph })).rejects.toThrow('503');
+    expect((await prisma.emailAccount.findUniqueOrThrow({ where: { id: account.id } })).lastSyncAt).toBeNull();
+  });
+
   test('a revoked token puts the mailbox in error and stops', async () => {
     const { account } = await mailbox();
     const { graph } = scripted({ 'start:inbox': new GraphError('graph_request_failed status=401', 401) });
@@ -186,9 +226,10 @@ describe('mail sync (2B-2)', () => {
     expect(after.lastError).toContain('401');
   });
 
-  test('other failures fail the job and leave the mailbox connected', async () => {
+  test('other failures leave the mailbox connected', async () => {
     const { account } = await mailbox();
-    const { graph } = scripted({ 'start:inbox': new GraphError('graph_request_failed status=503', 503) });
+    const down = new GraphError('graph_request_failed status=503', 503);
+    const { graph } = scripted({ 'start:inbox': down, 'start:sentitems': down, 'start:drafts': down, 'start:archive': down });
     await expect(syncMailboxHandler(job(account.id), { graph })).rejects.toThrow('503');
     expect((await prisma.emailAccount.findUniqueOrThrow({ where: { id: account.id } })).status).toBe('connected');
   });
