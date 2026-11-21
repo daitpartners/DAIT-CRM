@@ -1,5 +1,5 @@
 import { CompanyBulkStatus, CompanyCreate, CompanyListQuery, CompanyUpdate } from '../src/schemas/company';
-import { ContactCreate } from '../src/schemas/contact';
+import { ContactCreate, ContactListQuery } from '../src/schemas/contact';
 import { LocationCreate } from '../src/schemas/location';
 import { PagingQuery, pageArgs } from '../src/schemas/paging';
 
@@ -86,6 +86,15 @@ describe('CompanyListQuery', () => {
     expect(CompanyListQuery.parse({ sort: 'updatedAt', isClient: 'true', status: 'Closed' }))
       .toMatchObject({ sort: 'updatedAt', isClient: true, status: 'Closed', page: 1 });
     expect(CompanyListQuery.safeParse({ isClient: 'yes' }).success).toBe(false);
+  });
+});
+
+describe('ContactListQuery', () => {
+  test('whitelists sort and coerces companyId', () => {
+    expect(ContactListQuery.safeParse({ sort: 'phoneNormalised' }).success).toBe(false);
+    expect(ContactListQuery.parse({ sort: 'company', companyId: '7', contactType: 'Other' }))
+      .toMatchObject({ sort: 'company', companyId: 7, contactType: 'Other', page: 1 });
+    expect(ContactListQuery.safeParse({ companyId: 'x' }).success).toBe(false);
   });
 });
 

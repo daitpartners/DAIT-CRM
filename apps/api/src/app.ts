@@ -11,6 +11,8 @@ import { allocationRoutes } from './routes/allocation.js';
 import { mailboxRoutes } from './routes/mailboxes.js';
 import { jobRoutes } from './routes/jobs.js';
 import { companyRoutes } from './routes/companies.js';
+import { contactRoutes } from './routes/contacts.js';
+import { locationRoutes } from './routes/locations.js';
 import { NotFoundError, ValidationError } from './validate.js';
 import { registerAuth } from './plugins/auth.js';
 import { createMsalClient, type MicrosoftClient } from './auth/microsoft.js';
@@ -125,5 +127,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(mailboxRoutes, { prefix: '/api' });
   await app.register(jobRoutes, { prefix: '/api' });
   await app.register(companyRoutes, { prefix: '/api' });
+  await app.register(contactRoutes, { prefix: '/api' });
+  await app.register(locationRoutes, { prefix: '/api' });
   return app;
 }

@@ -59,3 +59,36 @@ export function companyDetail(c: DetailRow) {
     createdBy: createdBy ? { id: createdBy.id, name: createdBy.name } : null,
   };
 }
+
+/** Relations a contact response needs: its company's id, number and name. */
+export const contactSummaryInclude = {
+  company: { select: { id: true, number: true, name: true } },
+} satisfies Prisma.ContactInclude;
+
+type ContactRow = Prisma.ContactGetPayload<{ include: typeof contactSummaryInclude }>;
+
+/** A contact (list row and detail); drops the internal phone/mobile matching keys. */
+export function contactSummary(c: ContactRow) {
+  return {
+    id: c.id,
+    companyId: c.companyId,
+    company: { id: c.company.id, number: c.company.number, name: c.company.name },
+    firstName: c.firstName,
+    lastName: c.lastName,
+    designation: c.designation,
+    department: c.department,
+    businessEmail: c.businessEmail,
+    phone: c.phone,
+    mobile: c.mobile,
+    linkedinUrl: c.linkedinUrl,
+    contactType: c.contactType,
+    isPrimary: c.isPrimary,
+    updatedAt: c.updatedAt,
+  };
+}
+
+/** A company location: every column, decimals as numbers. */
+export function locationSummary(l: Prisma.CompanyLocationGetPayload<object>) {
+  const { lat, lng, ...fields } = l;
+  return { ...fields, lat: num(lat), lng: num(lng) };
+}
