@@ -1,6 +1,6 @@
-export type JobType = 'send_email' | 'send_user_email' | 'sync_mailbox' | 'mail_action';
+export type JobType = 'send_email' | 'send_user_email' | 'sync_mailbox' | 'mail_action' | 'campaign_step';
 
-export const JOB_TYPES: readonly JobType[] = ['send_email', 'send_user_email', 'sync_mailbox', 'mail_action'];
+export const JOB_TYPES: readonly JobType[] = ['send_email', 'send_user_email', 'sync_mailbox', 'mail_action', 'campaign_step'];
 
 export const JOB_STATUSES = ['queued', 'running', 'done', 'failed'] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];

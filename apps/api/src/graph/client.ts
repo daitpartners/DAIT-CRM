@@ -7,6 +7,8 @@ import { readRefreshToken, type MsEnv } from '../auth/microsoft.js';
 export interface MailMessage {
   to: string[];
   cc?: string[];
+  /** Release 2C Mailer: hidden copies. */
+  bcc?: string[];
   subject: string;
   html: string;
   text: string;
@@ -237,6 +239,7 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
             body: { contentType: 'HTML', content: msg.html },
             toRecipients: recipients(msg.to),
             ccRecipients: recipients(msg.cc),
+            ...(msg.bcc?.length ? { bccRecipients: recipients(msg.bcc) } : {}),
           },
           saveToSentItems: true,
         },

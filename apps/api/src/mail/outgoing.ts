@@ -45,8 +45,18 @@ export async function queueOutgoing(tx: Tx, user: AuthUser, account: EmailAccoun
     },
   });
   await enqueue(tx, 'send_user_email', { emailMessageId: msg.id }, { maxAttempts: SEND_ATTEMPTS });
-  if (!lead) return msg;
+  if (lead) await recordOnLead(tx, user, lead, msg, o.subject, o.followUpDays);
+  return msg;
+}
 
+/**
+ * An email the user sent on a lead: the private "Email sent" history line, New / Not Contacted → Contacted, the
+ * follow-up when asked (open leads), audited with the message id only (also used by the Mailer, release 2C).
+ */
+export async function recordOnLead(
+  tx: Tx, user: Pick<AuthUser, 'id' | 'timezone'>, lead: Lead, msg: EmailMessage, subject: string, followUpDays?: number | null,
+): Promise<void> {
+  const o = { subject, followUpDays };
   await tx.leadActivity.create({
     data: { leadId: lead.id, activityType: 'email', title: `Email sent · ${o.subject}`, relatedType: 'email_message', relatedId: msg.id, byUserId: user.id },
   });
@@ -61,5 +71,4 @@ export async function queueOutgoing(tx: Tx, user: AuthUser, account: EmailAccoun
     await syncFollowUpTask(tx, updated);
   }
   await audit(tx, { entityType: 'lead', entityId: lead.id, action: 'update', userId: user.id, after: { emailMessageId: msg.id } });
-  return msg;
 }

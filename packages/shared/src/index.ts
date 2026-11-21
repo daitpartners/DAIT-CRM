@@ -18,3 +18,4 @@ export * from './schemas/task.js';
 export * from './schemas/email.js';
 export * from './outreach.js';
 export * from './timezones.js';
+export * from './mergeFields.js';
