@@ -74,3 +74,21 @@ note in the parity design that this doc supersedes its Leads deviations.
 
 Component split, CSS for the Cc chips (port prototype `.ccbox/.cchip`), test updates. Existing e2e specs that click
 More ▾, the stepper or quick buttons move to the new places.
+
+## Addendum, 22 Nov 2026: Experience on every lead
+
+Owner: "While editing Leads there should be experience field. Also, you can keep title Experience, and recent company
+name, rest you may put --"; chose option 1 (experience belongs to the contact person).
+
+- **Profile card:** the EXPERIENCE column always shows, with or without a contact. With no roles recorded it shows one
+  row: job title "—", the lead's company name as the most recent company, dates "—".
+- **Edit lead details** (the Edit lead dialog) gets an **Experience** section: rows of job title, company, from, to
+  (blank = current), description, "+ Add role", remove per row; the same rules as Edit profile (each role needs a job
+  title, a company and a start; current role first).
+  - Lead with a contact: the rows are that person's experience; Save updates the lead and then the contact.
+  - Lead without a contact: the section also asks for **First name** and **Last name**. If a name or any role is
+    entered, Save creates the contact on the lead's company, saves the roles on it and links it to the lead; leave it
+    all blank to save only the lead.
+  - Lead without a company: the section says to choose the company first (the Choose company card) and is disabled.
+- No API change: the dialog calls the existing PATCH /leads/:id, POST /contacts, PATCH /contacts/:id and
+  POST /leads/:id/contact in that order and reports which step failed.
