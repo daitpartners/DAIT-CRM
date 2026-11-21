@@ -97,10 +97,19 @@ export const LeadListQuery = PagingQuery.extend({
   priority: z.enum(PRIORITIES).optional(),
   from: isoDate.optional(),
   to: isoDate.optional(),
+  /** Leads of this company. */
+  companyId: z.coerce.number().int().positive().optional(),
   /** `1` includes archived leads (view_all_leads only). */
   archived: z.enum(['0', '1']).optional(),
 });
 export type LeadListQuery = z.infer<typeof LeadListQuery>;
+
+/** `GET /companies/:id/activities`: 20 per page by default, newest first. */
+export const CompanyActivityQuery = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+export type CompanyActivityQuery = z.infer<typeof CompanyActivityQuery>;
 
 export const LeadBulk = z.object({
   ids: z.array(z.number().int().positive()).min(1).max(100),

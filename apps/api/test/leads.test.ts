@@ -350,4 +350,48 @@ describe('leads API', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().auto).toEqual({ id: hidden.id, number: hidden.number, name: 'Hidden Corp' });
   });
+  it('filters by companyId', async () => {
+    const mgr = await as('MANAGER');
+    const acme = await makeCompany({ name: 'Acme' });
+    const a = await makeLead({ companyId: acme.id });
+    const b = await makeLead({ companyId: acme.id });
+    await makeLead();
+    const list = (await req('GET', `/api/leads?companyId=${acme.id}`, mgr.cookie)).json();
+    expect(list.total).toBe(2);
+    expect(list.items.map((i: { id: number }) => i.id).sort()).toEqual([a.id, b.id].sort());
+    expect((await req('GET', '/api/leads?companyId=abc', mgr.cookie)).statusCode).toBe(400);
+  });
+
+  it('company activities respect lead visibility', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const other = await makeUser();
+    const acme = await makeCompany({ name: 'Acme' });
+    const mine = await makeLead({ companyId: acme.id, assignedToId: rep.user.id });
+    const theirs = await makeLead({ companyId: acme.id, assignedToId: other.id });
+    const elsewhere = await makeLead({ assignedToId: rep.user.id });
+    const at = (min: number) => new Date(Date.UTC(2026, 0, 1, 9, min));
+    await prisma.leadActivity.create({ data: { leadId: mine.id, activityType: 'note', title: 'Older mine', occurredAt: at(1) } });
+    await prisma.leadActivity.create({ data: { leadId: mine.id, activityType: 'call', title: 'Newer mine', occurredAt: at(2), byUserId: rep.user.id } });
+    await prisma.leadActivity.create({ data: { leadId: theirs.id, activityType: 'note', title: 'Hidden', occurredAt: at(3) } });
+    await prisma.leadActivity.create({ data: { leadId: elsewhere.id, activityType: 'note', title: 'Other company', occurredAt: at(4) } });
+
+    const res = await req('GET', `/api/companies/${acme.id}/activities`, rep.cookie);
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body).toMatchObject({ total: 2, page: 1, pageSize: 20 });
+    expect(body.items.map((i: { title: string }) => i.title)).toEqual(['Newer mine', 'Older mine']);
+    expect(body.items[0]).toMatchObject({ activityType: 'call', lead: { id: mine.id, number: mine.number }, by: { id: rep.user.id } });
+
+    const paged = (await req('GET', `/api/companies/${acme.id}/activities?page=2&pageSize=1`, rep.cookie)).json();
+    expect(paged.items.map((i: { title: string }) => i.title)).toEqual(['Older mine']);
+
+    const mgr = await as('MANAGER');
+    expect((await req('GET', `/api/companies/${acme.id}/activities`, mgr.cookie)).json().total).toBe(3);
+
+    // A company the rep cannot see is a 404.
+    const hidden = await makeCompany({ name: 'Hidden' });
+    await makeLead({ companyId: hidden.id, assignedToId: other.id });
+    expect((await req('GET', `/api/companies/${hidden.id}/activities`, rep.cookie)).statusCode).toBe(404);
+    expect((await req('GET', `/api/companies/${acme.id}/activities`)).statusCode).toBe(401);
+  });
 });

@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { Prisma, type Lead } from '@prisma/client';
 import {
-  CLOSED_STATUSES, DuplicateCheck, LeadBulk, LeadCreate, LeadListQuery, LeadStatusChange, LeadTransfer, LeadUnassign,
+  CLOSED_STATUSES, CompanyActivityQuery, DuplicateCheck, LeadBulk, LeadCreate, LeadListQuery, LeadStatusChange, LeadTransfer, LeadUnassign,
   LeadUpdate, LogCall, ResolveCompany, SwitchContact, UpdatedAtOnly, can, checkDomain, isClosedStatus, pageArgs, type CompanyCandidate,
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
@@ -130,6 +130,7 @@ function tabWhere(tab: LeadListQuery['tab'], user: AuthUser, today: string): Pri
 
 function filterWhere(query: LeadListQuery): Prisma.LeadWhereInput[] {
   const and: Prisma.LeadWhereInput[] = [];
+  if (query.companyId !== undefined) and.push({ companyId: query.companyId });
   if (query.status) and.push({ status: query.status });
   if (query.source) and.push({ leadSource: query.source });
   if (query.country) and.push({ country: { equals: query.country, mode: 'insensitive' } });
@@ -274,6 +275,27 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
       };
     },
   );
+
+  /** Activities of the company's leads the user may see (live leads), newest first, with the lead's number. */
+  app.get<{ Params: { id: string } }>('/companies/:id/activities', { preHandler: [requireUser] }, async (request) => {
+    const user = request.user!;
+    const query = parseQuery(CompanyActivityQuery, request.query);
+    const company = await assertCompanyVisible(prisma, user, Number(request.params.id));
+    const where: Prisma.LeadActivityWhereInput = { lead: { AND: [{ companyId: company.id }, leadWhere(user)] } };
+    const [total, rows] = await Promise.all([
+      prisma.leadActivity.count({ where }),
+      prisma.leadActivity.findMany({
+        where, include: { ...activityInclude, lead: { select: { id: true, number: true } } },
+        orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], ...pageArgs(query),
+      }),
+    ]);
+    return {
+      items: rows.map((r) => ({ ...activityRow(r), lead: { id: r.lead.id, number: r.lead.number } })),
+      total,
+      page: query.page,
+      pageSize: query.pageSize,
+    };
+  });
 
   app.patch<{ Params: { id: string } }>('/leads/:id', { preHandler: [requireRight('manage_leads')] }, async (request, reply) => {
     const { updatedAt, nextFollowUp, ...body } = parseBody(LeadUpdate, request.body);
