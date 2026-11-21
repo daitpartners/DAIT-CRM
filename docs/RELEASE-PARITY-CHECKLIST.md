@@ -125,6 +125,14 @@ Prototype `#/settings` (cards "Email & calendar connections" and "Email template
 - [ ] Lead page facts grid shows **Outreach language**; on an Español lead the Email tab opens with the Spanish intro ("¿Una llamada esta semana?") and Spanish templates first, whatever your screen language.
 - [ ] Settings → Lead allocation rules: each rule has a **Language** (Any / English / Español); live rules: Español → Carlos Torres + Sebastian Passalacqua; English, United States / Canada → Deepak Singh + Lakshita Singh.
 
+## Sending email from the lead page (release 2B-1)
+
+- [ ] With your mailbox connected: lead page → Email tab → To, Subject, Message → **Send email** → "Email queued — it is sent from {your address}"; the email arrives at the recipient and is in your Outlook **Sent Items**.
+- [ ] **Emails** tab: your email with Sending, then Sent (or Failed with the reason); open it to read it. The count is on the tab.
+- [ ] "Set follow-up in 3 days" sets the lead's next follow-up (open leads only).
+- [ ] History (Calls tab): you see "Email sent · {subject}"; a colleague, administrators included, sees only "Email sent", and their Emails tab does not show your email.
+- [ ] Without a connected mailbox the Email tab says "Connect your Microsoft 365 mailbox in Settings to send email from the CRM." and Send is greyed out.
+
 ## Spanish and French labels
 
 - [ ] In Settings, Preferences, switch to Español and save. Walk the Dashboard, Leads, a lead page and Settings: no English words left on buttons, tabs or headings. Repeat with Français, then switch back to English.

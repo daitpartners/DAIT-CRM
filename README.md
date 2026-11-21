@@ -32,6 +32,7 @@ Deployment (test and live servers, GitHub Actions, backups): see [docs/DEPLOYMEN
 - **Tasks** (release 1C): follow-up tasks kept in step with each lead's next follow-up, plus your own tasks; Today, Overdue, Upcoming and Done tabs, tick to complete, snooze to tomorrow.
 - **Notifications** (release 1C): new assignments and transferred leads, with an unread count on the bell and Mark all read.
 - **Reports** (release 1E): leads by source and enquiry conversion, as the prototype.
+- **Email sending** (release 2B-1): the lead page's Email tab sends through your own connected Microsoft 365 mailbox (it also lands in Outlook's Sent Items); the Emails tab lists your own emails with the lead. Mail is private to its owner: nobody else, administrators included, sees it; others see only "Email sent" in the lead's history. Mail sync and the Email screen follow in 2B-2.
 - **Outreach language** (22 Nov 2026): every lead is English or Español (from its country unless chosen; set on New lead, Edit lead details and CSV import); Leads filter and column, a fact on the lead page; allocation rules can match a language; the Email tab starts in the lead's language.
 - **Email connections and templates** (release 2A): each user connects their own Microsoft 365 mailbox in Settings; a team library of email templates (written or uploaded as Outlook `.oft`) that the lead page's Email tab offers, with merge fields. Mail sync, the Email screen and real sending come in 2B, the Mailer in 2C.
 
