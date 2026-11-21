@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { AllocationRuleCreate, lookupLabel } from '@dait-crm/shared';
+import { AllocationRuleCreate, lookupLabel, OUTREACH_LANGUAGES } from '@dait-crm/shared';
+import { OUTREACH_LABEL } from '../../lib/outreach';
 import { ApiError, api } from '../../api/client';
 import { keys, useLookups, useUsers, type AllocationRule } from '../../api/queries';
 import { FormField } from '../../components/FormField';
@@ -26,6 +27,7 @@ export function AllocationModal({ rule, onClose }: Props) {
   const [countries, setCountries] = useState<string[]>(rule && !isAll ? rule.matchCountries : []);
   const [assignees, setAssignees] = useState<string[]>(rule ? (Array.isArray(rule.assignTo) ? rule.assignTo : [rule.assignTo]).map(String) : []);
   const [priority, setPriority] = useState(String(rule?.priority ?? 10));
+  const [language, setLanguage] = useState<string>(rule?.matchLanguage ?? '');
   const [errors, setErrors] = useState<Partial<Record<'name' | 'countries' | 'assignees' | 'priority' | 'form', string>>>({});
 
   const countryOptions = (lookups?.country ?? []).map((c) => ({ value: c.value, label: lookupLabel(c, lang) }));
@@ -54,6 +56,7 @@ export function AllocationModal({ rule, onClose }: Props) {
       matchCountries: allCountries ? ['*'] : countries,
       assignTo: ids.length === 1 ? ids[0] : ids,
       priority: Number(priority),
+      matchLanguage: language === 'en' || language === 'es' ? language : null,
     };
     const parsed = AllocationRuleCreate.safeParse(body);
     if (!parsed.success) {
@@ -105,6 +108,19 @@ export function AllocationModal({ rule, onClose }: Props) {
         <div>
           <MultiCombobox id="rule-countries" label={t('Countries')} options={countryOptions} values={countries} onChange={setCountries} disabled={allCountries} required={!allCountries} />
           {errors.countries ? <div className="err-msg" role="alert">{errors.countries}</div> : null}
+        </div>
+        <div>
+          <label className="lbl" htmlFor="rule-language">
+            {t('Language')}
+          </label>
+          <select id="rule-language" className="in" value={language} onChange={(e) => setLanguage(e.target.value)}>
+            <option value="">{t('Any language')}</option>
+            {OUTREACH_LANGUAGES.map((x) => (
+              <option key={x} value={x}>
+                {OUTREACH_LABEL[x]}
+              </option>
+            ))}
+          </select>
         </div>
         <div>
           <MultiCombobox id="rule-users" label={t('Assign to')} options={userOptions} values={assignees} onChange={setAssignees} required />

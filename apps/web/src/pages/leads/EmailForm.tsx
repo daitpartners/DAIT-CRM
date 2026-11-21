@@ -6,8 +6,23 @@ import { useTemplates } from '../../api/templates';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Icons } from '../../components/Icons';
 import { useToast } from '../../components/Toast';
-import { useLang, useT } from '../../i18n/useT';
+import { useT } from '../../i18n/useT';
 import { fillTemplate } from '../../lib/mergeFields';
+
+/**
+ * The prototype's intro email (TPL.intro) per outreach language. Not run through t(): it follows the lead's language,
+ * not the screen language.
+ */
+const INTRO: Record<'en' | 'es', (first: string, company: string, me: string) => { subject: string; body: string }> = {
+  en: (first, company, me) => ({
+    subject: 'Intro call this week?',
+    body: `Hi ${first},\n\nThanks for getting in touch with DAIT Partners. I'd love to hear more about what you're working on at ${company}. Would a 30-minute call this week suit you?\n\nBest regards,\n${me}`,
+  }),
+  es: (first, company, me) => ({
+    subject: '¿Una llamada esta semana?',
+    body: `Hola ${first}:\n\nGracias por ponerse en contacto con DAIT Partners. Me encantaría saber más sobre lo que están haciendo en ${company}. ¿Le vendría bien una llamada de 30 minutos esta semana?\n\nSaludos cordiales,\n${me}`,
+  }),
+};
 
 /** Id of the Subject field: "Focus on email" and the topbar Email button put the cursor here. */
 export const EMAIL_SUBJECT_ID = 'em-subject';
@@ -29,18 +44,18 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
   const company = lead.company?.name ?? lead.companyName;
   const first = lead.contact?.firstName || company;
   const [to, setTo] = useState(lead.contact?.email ?? '');
-  const [subject, setSubject] = useState(t('Intro call this week?'));
-  // The prototype's intro template (TPL.intro), one translatable phrase per paragraph.
-  const [body, setBody] = useState(
-    [
-      t('Hi {first},', { first }),
-      t("Thanks for getting in touch with DAIT Partners. I'd love to hear more about what you're working on at {company}. Would a 30-minute call this week suit you?", { company }),
-      `${t('Best regards,')}\n${me.name}`,
-    ].join('\n\n'),
-  );
+  // The intro is written in the lead's outreach language, whatever the user's screen language.
+  const leadLang = lead.outreachLanguage ?? 'en';
+  const opening = INTRO[leadLang](first, company, me.name);
+  const [subject, setSubject] = useState(opening.subject);
+  const [body, setBody] = useState(opening.body);
   const [follow, setFollow] = useState(true);
-  const lang = useLang();
-  const { data: templates } = useTemplates();
+  const { data: allTemplates } = useTemplates();
+  // Templates in the lead's language first (stable otherwise: the API already orders by the user's language).
+  const templates = useMemo(
+    () => (allTemplates ? [...allTemplates].sort((a, b) => Number(b.language === leadLang) - Number(a.language === leadLang)) : undefined),
+    [allTemplates, leadLang],
+  );
   const [templateId, setTemplateId] = useState('');
   const intro = useMemo(() => ({ subject, body }), []);
 
@@ -103,7 +118,7 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
               <option key={x.id} value={String(x.id)}>
                 {x.name}
                 {x.sourceType === 'oft' ? ' · .oft' : ''}
-                {x.language !== lang ? ` (${x.language.toUpperCase()})` : ''}
+                {x.language !== leadLang ? ` (${x.language.toUpperCase()})` : ''}
               </option>
             ))}
           </select>

@@ -1039,5 +1039,10 @@
   "Written here": "Escrita aquí",
   "Save a message in Outlook as File → Save As → Outlook Template (*.oft), then upload it here. The subject and body are read from the file; placeholders typed as {first_name} etc. are filled in when you use it. Templates in your language are listed first.": "Guarde un mensaje en Outlook con Archivo → Guardar como → Plantilla de Outlook (*.oft) y súbalo aquí. El asunto y el cuerpo se leen del archivo; los marcadores como {first_name} se rellenan al usarla. Las plantillas en su idioma aparecen primero.",
   "This mailbox is already connected by another user. Ask them to disconnect it first.": "Este buzón ya lo ha conectado otro usuario. Pídale que lo desconecte primero.",
-  "That file is larger than 10 MB. Outlook templates are usually under 1 MB.": "Ese archivo pesa más de 10 MB. Las plantillas de Outlook suelen pesar menos de 1 MB."
+  "That file is larger than 10 MB. Outlook templates are usually under 1 MB.": "Ese archivo pesa más de 10 MB. Las plantillas de Outlook suelen pesar menos de 1 MB.",
+  "Outreach language": "Idioma de contacto",
+  "Language: Any": "Idioma: cualquiera",
+  "Language: {language}": "Idioma: {language}",
+  "Any language": "Cualquier idioma",
+  "New leads go to the first active rule (lowest priority number) that matches their country and outreach language.": "Los leads nuevos van a la primera regla activa (número de prioridad más bajo) que coincide con su país e idioma de contacto."
 }

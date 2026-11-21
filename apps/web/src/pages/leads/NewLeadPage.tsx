@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useForm, useWatch, type Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { LEAD_TYPES, LeadCreate, type CompanyMatchHow, type LeadType } from '@dait-crm/shared';
+import { LEAD_TYPES, LeadCreate, type CompanyMatchHow, type LeadType, defaultOutreachLanguage } from '@dait-crm/shared';
 import {
   useCompany, useCompanyPipeline, useDuplicateCheck, type DuplicateCandidate, type DuplicateResult,
 } from '../../api/companies';
@@ -104,6 +104,7 @@ function NewLeadForm() {
       // The prototype's lead form starts on India, where most leads come from.
       country: 'India',
       city: '',
+      outreachLanguage: 'en',
       leadSource: defaultSource,
       sourceUrl: '',
       priority: 'Medium',
@@ -128,6 +129,11 @@ function NewLeadForm() {
     control,
     name: ['leadType', 'companyName', 'website', 'businessEmail', 'country', 'linkCompanyId'],
   });
+
+  // Outreach language follows the country until the user picks one (outreach-language design).
+  useEffect(() => {
+    if (!form.formState.dirtyFields.outreachLanguage) setValue('outreachLanguage', defaultOutreachLanguage(country));
+  }, [country]);
 
   // `?company=<id>` (company profile): start linked to that company with its details filled in.
   const raw = params.get('company');
@@ -287,6 +293,7 @@ function NewLeadForm() {
               {f.input('phone', t('Phone number'), { type: 'tel', placeholder: '+91 …' })}
               {f.country()}
               {f.input('city', t('City'))}
+              {f.outreachLanguage()}
             </div>
           </section>
 

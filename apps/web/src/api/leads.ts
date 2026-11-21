@@ -22,6 +22,7 @@ export type LeadSummary = {
   company: { id: number; number: string; name: string } | null;
   contact: { id: number; name: string; email: string | null; linkedinUrl: string | null } | null;
   country: string;
+  outreachLanguage: 'en' | 'es';
   city: string | null;
   leadSource: string;
   status: string;
@@ -66,6 +67,7 @@ export type LeadListQuery = {
   status?: string;
   source?: string;
   country?: string;
+  language?: 'en' | 'es';
   /** A user id, or 'none' for unassigned leads. */
   assignedTo?: number | 'none';
   leadType?: LeadType;

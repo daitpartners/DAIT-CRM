@@ -7,6 +7,7 @@ import { Icons } from '../../components/Icons';
 import { PriorityLabel, StatusBadge } from '../../components/StatusBadge';
 import { leadTypeText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
+import { OUTREACH_LABEL } from '../../lib/outreach';
 import { ComposeContext } from './ComposePanel';
 import { ExperienceColumn } from './ExperienceColumn';
 
@@ -89,6 +90,7 @@ export function ProfileCard({ lead, children }: { lead: LeadFull; children?: Rea
         {c?.employeeRange ? t('{range} employees', { range: lookup('employee_range', c.employeeRange) ?? c.employeeRange }) : null}
       </Fact>
       <Fact label={t('Time zone')}>{c?.timezone ?? null}</Fact>
+      <Fact label={t('Outreach language')}>{OUTREACH_LABEL[lead.outreachLanguage] ?? lead.outreachLanguage}</Fact>
     </dl>
   );
 

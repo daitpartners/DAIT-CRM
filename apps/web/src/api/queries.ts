@@ -47,6 +47,7 @@ export type AllocationRule = {
   id: number;
   name: string;
   matchCountries: string[];
+  matchLanguage: 'en' | 'es' | null;
   assignTo: number | number[];
   priority: number;
   isActive: boolean;

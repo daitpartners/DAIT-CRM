@@ -40,6 +40,8 @@ function fieldText(t: TFn, f: CsvField): string {
       return t('Notes');
     case 'sourceUrl':
       return t('Source URL');
+    case 'outreachLanguage':
+      return t('Outreach language');
     default:
       return f;
   }

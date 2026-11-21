@@ -23,7 +23,7 @@ export const STATUSES: LookupValue[] = [
 /** A lead with a company and a contact that has no profile fields at all. */
 export function makeLead(overrides: Partial<LeadFull> = {}): LeadFull {
   return {
-    id: 5, number: 'LD-1005', leadType: 'Lead', companyName: 'Meridian Textiles', companyId: 4, country: 'India', city: null,
+    id: 5, number: 'LD-1005', leadType: 'Lead', companyName: 'Meridian Textiles', companyId: 4, country: 'India', outreachLanguage: 'en' as const, city: null,
     leadSource: 'Referral', status: 'New', priority: 'Medium', assignedTo: { id: 2, name: 'Arjun Mehta' }, assignedToId: 2,
     nextFollowUp: null, isOverdue: false, archivedAt: null, createdAt: '2026-11-01T10:00:00.000Z', updatedAt: '2026-11-20T10:00:00.000Z',
     website: null, businessEmail: null, phone: null, sourceUrl: null, importBatch: null, notes: null, contactId: 9,

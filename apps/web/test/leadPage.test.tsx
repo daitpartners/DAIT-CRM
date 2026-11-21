@@ -19,7 +19,7 @@ const lookup = (group: LookupValue['group'], value: string, id: number): LookupV
 });
 
 const baseLead: LeadFull = {
-  id: 5, number: 'LD-1005', leadType: 'Lead', companyName: 'Meridian Textiles', companyId: 4, country: 'India', city: null,
+  id: 5, number: 'LD-1005', leadType: 'Lead', companyName: 'Meridian Textiles', companyId: 4, country: 'India', outreachLanguage: 'en' as const, city: null,
   leadSource: 'Referral', status: 'New', priority: 'Medium', assignedTo: null, assignedToId: null, nextFollowUp: null,
   isOverdue: false, archivedAt: null, createdAt: '2026-11-01T10:00:00.000Z', updatedAt: '2026-11-20T10:00:00.000Z',
   website: null, businessEmail: null, phone: null, sourceUrl: null, importBatch: null, notes: 'Mine', contactId: null,

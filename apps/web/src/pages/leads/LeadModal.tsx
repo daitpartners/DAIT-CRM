@@ -24,7 +24,7 @@ type Props = {
 /** Fields PATCH /leads/:id accepts (status, assignee, company and contact have their own endpoints). */
 const DETAIL_FIELDS = [
   'leadType', 'companyName', 'website', 'businessEmail', 'phone', 'country', 'city', 'leadSource', 'sourceUrl', 'priority',
-  'nextFollowUp', 'notes',
+  'nextFollowUp', 'notes', 'outreachLanguage',
 ] as const;
 
 const text = (v: string | null | undefined) => v ?? '';
@@ -39,6 +39,7 @@ function formValues(lead: LeadDetail): LeadFormValues {
     phone: text(lead.phone),
     country: lead.country,
     city: text(lead.city),
+    outreachLanguage: lead.outreachLanguage,
     leadSource: lead.leadSource,
     sourceUrl: text(lead.sourceUrl),
     priority: lead.priority,
@@ -191,6 +192,7 @@ export function LeadModal({ lead, onClose }: Props) {
         {f.input('phone', t('Phone number'), { type: 'tel' })}
         {f.country()}
         {f.input('city', t('City'))}
+        {f.outreachLanguage()}
         {f.leadSource()}
         {f.input('sourceUrl', t('Source URL'), { type: 'url', placeholder: 'https://' })}
         {f.input('nextFollowUp', t('Next follow-up'), { type: 'date' })}

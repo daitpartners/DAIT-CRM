@@ -1,5 +1,6 @@
 import { Controller, type UseFormReturn } from 'react-hook-form';
-import { PRIORITIES, lookupLabel, type LeadType, type Priority } from '@dait-crm/shared';
+import { PRIORITIES, lookupLabel, type LeadType, type Priority, OUTREACH_LANGUAGES } from '@dait-crm/shared';
+import { OUTREACH_LABEL } from '../../lib/outreach';
 import { ApiError } from '../../api/client';
 import { useLookups } from '../../api/queries';
 import { Combobox, type ComboOption } from '../../components/Combobox';
@@ -20,6 +21,7 @@ export type LeadFormValues = {
   phone: string;
   country: string;
   city: string;
+  outreachLanguage: 'en' | 'es';
   leadSource: string;
   sourceUrl: string;
   priority: Priority;
@@ -36,7 +38,7 @@ export type LeadFormValues = {
 };
 export type LeadField = Exclude<keyof LeadFormValues, 'updatedAt'>;
 export const LEAD_FIELDS: LeadField[] = [
-  'leadType', 'companyName', 'website', 'businessEmail', 'phone', 'country', 'city', 'leadSource', 'sourceUrl', 'priority',
+  'leadType', 'companyName', 'website', 'businessEmail', 'phone', 'country', 'city', 'outreachLanguage', 'leadSource', 'sourceUrl', 'priority',
   'nextFollowUp', 'notes', 'status', 'linkCompanyId', 'contactId', 'assignedToId',
 ];
 
@@ -146,6 +148,18 @@ export function useLeadFormFields(form: UseFormReturn<LeadFormValues>, opts: { c
     </div>
   );
 
+  const outreachLanguage = (label = t('Outreach language')) => (
+    <FormField id="ld-outreachLanguage" label={label}>
+      <select id="ld-outreachLanguage" className="in" {...register('outreachLanguage')}>
+        {OUTREACH_LANGUAGES.map((x) => (
+          <option key={x} value={x}>
+            {OUTREACH_LABEL[x]}
+          </option>
+        ))}
+      </select>
+    </FormField>
+  );
+
   const leadSource = (label = t('Lead source')) => (
     <FormField id="ld-leadSource" label={label} required error={err('leadSource')}>
       <select id="ld-leadSource" className={errors.leadSource ? 'in err' : 'in'} {...aria('leadSource')} {...register('leadSource')}>
@@ -176,5 +190,5 @@ export function useLeadFormFields(form: UseFormReturn<LeadFormValues>, opts: { c
     </FormField>
   );
 
-  return { err, aria, input, country, leadSource, priority, notes };
+  return { err, aria, input, country, outreachLanguage, leadSource, priority, notes };
 }

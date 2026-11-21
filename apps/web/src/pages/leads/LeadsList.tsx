@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { LEAD_SORTS, LEAD_TABS, LEAD_TYPES, PRIORITIES, lookupLabel, safeUrl, type LeadType, type Priority } from '@dait-crm/shared';
+import { LEAD_SORTS, LEAD_TABS, LEAD_TYPES, PRIORITIES, lookupLabel, safeUrl, type LeadType, type Priority, OUTREACH_LANGUAGES, type OutreachLanguage } from '@dait-crm/shared';
+import { OUTREACH_LABEL } from '../../lib/outreach';
 import { ApiError } from '../../api/client';
 import {
   useBulkLeads, useClaimLead, useLeads, type LeadListQuery, type LeadSort, type LeadSummary, type LeadTab,
@@ -32,7 +33,7 @@ const DEFAULT_PAGE_SIZE = 50;
 /** Combobox value meaning "no filter" (the combobox cannot hold an empty value). */
 const ANY = '*';
 /** Filters kept in the URL and cleared by "Clear"; the tab and page size (also in the URL) are not. */
-const FILTERS = ['status', 'source', 'country', 'assignedTo', 'priority', 'leadType', 'created', 'from', 'to'] as const;
+const FILTERS = ['status', 'source', 'country', 'language', 'assignedTo', 'priority', 'leadType', 'created', 'from', 'to'] as const;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 /**
  * The prototype's "Created" select. A preset is kept in the URL as `created=<days>` so a bookmark stays
@@ -86,6 +87,7 @@ export function LeadsList() {
     status: params.status,
     source: params.source,
     country: params.country,
+    language: oneOf<OutreachLanguage>(OUTREACH_LANGUAGES, params.language),
     assignedTo: params.assignedTo === 'none' ? 'none' : Number.isInteger(assignedNum) && assignedNum > 0 ? assignedNum : undefined,
     priority: oneOf<Priority>(PRIORITIES, params.priority),
     leadType: oneOf<LeadType>(LEAD_TYPES, params.leadType),
@@ -201,6 +203,7 @@ export function LeadsList() {
     sortable('companyName', t('Company name')),
     sortable('contact', t('Contact person')),
     sortable('country', t('Country')),
+    plain('language', t('Language')),
     sortable('leadType', t('Type')),
     sortable('leadSource', t('Source')),
     sortable('status', t('Status')),
@@ -297,6 +300,17 @@ export function LeadsList() {
                   onChange={(v) => update({ country: v === ANY ? undefined : v })}
                 />
               </div>
+              <label className="sr" htmlFor="flt-language">
+                {t('Language')}
+              </label>
+              <select id="flt-language" className="chip" value={query.language ?? ''} onChange={(e) => update({ language: e.target.value })}>
+                <option value="">{t('Language: Any')}</option>
+                {OUTREACH_LANGUAGES.map((x) => (
+                  <option key={x} value={x}>
+                    {t('Language: {language}', { language: OUTREACH_LABEL[x] })}
+                  </option>
+                ))}
+              </select>
               <label className="sr" htmlFor="flt-assigned">
                 {t('Assigned to')}
               </label>
@@ -418,6 +432,7 @@ export function LeadsList() {
                         <LinkedInIcon url={l.contact?.linkedinUrl ?? null} />
                       </td>
                       <td>{lookupText('country', l.country)}</td>
+                      <td>{OUTREACH_LABEL[l.outreachLanguage] ?? l.outreachLanguage}</td>
                       <td>
                         <span className={l.leadType === 'Lead' ? 'badge b-purple' : 'badge b-grey'}>{leadTypeText(t, l.leadType)}</span>
                       </td>

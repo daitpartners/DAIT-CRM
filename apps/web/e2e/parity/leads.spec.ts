@@ -6,8 +6,9 @@ import { captureParity } from './_shared';
 const TILES = ['New this week', 'Follow-ups due today', 'Unassigned'];
 const TABS = ['All leads', 'Leads', 'Prospects', 'My leads', 'Overdue follow-ups'];
 /** The selects' empty options, in order (the country combobox sits between Source and Assigned). */
-const FILTERS = ['Status: Any', 'Source: Any', 'Assigned: Any', 'Lead type: Any', 'Created: Any time'];
-const COLUMNS = ['Lead ID', 'Company name', 'Contact person', 'Country', 'Type', 'Source', 'Status', 'Priority', 'Assigned to', 'Next follow-up', 'Created'];
+/** Language (outreach language, owner 22 Nov 2026) sits after the country combobox. */
+const FILTERS = ['Status: Any', 'Source: Any', 'Language: Any', 'Assigned: Any', 'Lead type: Any', 'Created: Any time'];
+const COLUMNS = ['Lead ID', 'Company name', 'Contact person', 'Country', 'Language', 'Type', 'Source', 'Status', 'Priority', 'Assigned to', 'Next follow-up', 'Created'];
 
 test('leads list: prototype topbar, tiles, tabs, filters, columns and pager', async ({ page }) => {
   await signInAs(page, MAYA);

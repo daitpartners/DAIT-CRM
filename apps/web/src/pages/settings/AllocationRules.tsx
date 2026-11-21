@@ -8,6 +8,7 @@ import { AccessDenied } from '../../components/AccessDenied';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { Icons } from '../../components/Icons';
 import { Table } from '../../components/Table';
+import { OUTREACH_LABEL } from '../../lib/outreach';
 import { useToast } from '../../components/Toast';
 import { errorText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
@@ -67,13 +68,13 @@ function RulesTable({ canEdit }: { canEdit: boolean }) {
     if (ok) remove.mutate(r.id);
   }
 
-  const head = [t('Rule'), t('Countries'), t('Assign to'), t('Priority'), t('Active')];
+  const head = [t('Rule'), t('Countries'), t('Language'), t('Assign to'), t('Priority'), t('Active')];
   return (
     <section className="card flush" aria-labelledby="alloc-title">
       <div className="head">
         <div>
           <h2 id="alloc-title">{t('Lead allocation rules')}</h2>
-          <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 2 }}>{t('New leads go to the first active rule (lowest priority number) that matches their country.')}</div>
+          <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 2 }}>{t('New leads go to the first active rule (lowest priority number) that matches their country and outreach language.')}</div>
         </div>
         <div className="grow" />
         {canEdit ? (
@@ -95,6 +96,7 @@ function RulesTable({ canEdit }: { canEdit: boolean }) {
             <tr key={r.id}>
               <td>{r.name}</td>
               <td className="wrap">{countriesText(r)}</td>
+              <td>{r.matchLanguage ? OUTREACH_LABEL[r.matchLanguage] : t('Any language')}</td>
               <td className="wrap">{assignText(r)}</td>
               <td>{r.priority}</td>
               <td>
