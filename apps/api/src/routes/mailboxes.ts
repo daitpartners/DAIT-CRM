@@ -8,6 +8,7 @@ import { parseBody } from '../validate.js';
 import { accountSummary } from '../graph/accounts.js';
 import { staleRunningWhere } from '../jobs/queue.js';
 import { sendSystemEmail } from '../email/system.js';
+import { requestSync } from '../mail/schedule.js';
 
 export const TEST_EMAIL_SUBJECT = 'DAIT CRM test email';
 
@@ -70,6 +71,16 @@ export const mailboxRoutes: FastifyPluginAsync = async (app) => {
       await audit(tx, { entityType: 'email_account', entityId: a.id, action: 'update', userId: request.user!.id, before: accountSummary(a), after: accountSummary(updated) });
     });
     return reply.code(204).send();
+  });
+
+  /** Sync now (release 2B-2): the mailbox's owner only (the mail is theirs alone). */
+  app.post<{ Params: { id: string } }>('/mailboxes/:id/sync', { preHandler: [requireUser] }, async (request, reply) => {
+    const id = Number(request.params.id);
+    const a = Number.isInteger(id) ? await prisma.emailAccount.findFirst({ where: { id, kind: 'personal', userId: request.user!.id } }) : null;
+    if (!a) return reply.code(404).send({ error: 'not_found' });
+    if (a.status !== 'connected') return reply.code(409).send({ error: 'not_connected' });
+    await requestSync(prisma, a.id);
+    return reply.code(202).send({ queued: true });
   });
 
   app.get('/mailboxes/system', { preHandler: [requireRight('view_admin_settings')] }, async () => {

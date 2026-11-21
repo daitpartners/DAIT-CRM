@@ -170,6 +170,24 @@ describe('personal mailboxes', () => {
     expect(taken.syncState).toEqual({});
   });
 
+  test('Sync now queues a run for the owner only, and only for a connected mailbox (2B-2)', async () => {
+    const a = await app();
+    const maya = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    const admin = await makeUser({ role: 'ADMINISTRATOR' });
+    const box = await connectPersonalMailbox({ userId: maya.id, address: 'maya@daitpartners.com', refreshToken: 't' });
+    expect((await req(a, 'POST', `/api/mailboxes/${box.id}/sync`, await signIn(a, admin))).statusCode).toBe(404);
+    expect(await prisma.job.count()).toBe(0);
+    const res = await req(a, 'POST', `/api/mailboxes/${box.id}/sync`, await signIn(a, maya));
+    expect(res.statusCode).toBe(202);
+    const job = await prisma.job.findFirstOrThrow({ where: { type: 'sync_mailbox' } });
+    expect(job.payload).toEqual({ accountId: box.id });
+    expect(job.runAt.getTime()).toBeLessThanOrEqual(Date.now());
+    await prisma.emailAccount.update({ where: { id: box.id }, data: { status: 'error' } });
+    const refused = await req(a, 'POST', `/api/mailboxes/${box.id}/sync`, await signIn(a, maya));
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error).toBe('not_connected');
+  });
+
   test('a Data Research User cannot connect a personal mailbox (no use_email)', async () => {
     const { client } = fakeMicrosoft();
     const a = await app(client);
