@@ -537,3 +537,6 @@ fieldset.bare>legend{padding:0}
 .email-foot{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .email-foot .sw{font-size:12.5px}
 .email-foot .email-days{width:90px;height:28px}
+
+/* Lead actions row in the Edit profile dialog (Edit lead details, Switch contact, Archive). */
+.lead-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:12px;margin-top:4px}

@@ -36,6 +36,16 @@ test('lead page: prototype sections in order, a contact without a profile, then 
   await expect(page.getByRole('heading', { name: lead.number, level: 1 })).toBeVisible();
   await expect(page.locator('.topbar .sub')).toContainText('Lead created:');
   await expect(page.locator('.topbar .sub')).toContainText('Last contact: —');
+  // Topbar as in the prototype: number, created, last contact; Email and Edit profile only.
+  const topbar = page.locator('.topbar');
+  await expect(topbar.getByRole('link', { name: 'Leads' })).toHaveCount(0);
+  await expect(topbar).not.toContainText('Owner:');
+  await expect(topbar.getByRole('button', { name: 'More' })).toHaveCount(0);
+  await expect(topbar.getByRole('button', { name: 'Claim' })).toHaveCount(0);
+  await expect(topbar.getByRole('button', { name: 'Email' })).toBeEnabled();
+  await expect(topbar.getByRole('button', { name: 'Edit profile' })).toBeVisible();
+  // No status steps bar: status lives in the Follow-up tab.
+  await expect(page.getByRole('list', { name: 'Lead status' })).toHaveCount(0);
 
   // No profile yet: no "undefined", no empty pills, the empty states read as text.
   const profile = page.getByRole('region', { name: 'Profile' });
@@ -55,8 +65,6 @@ test('lead page: prototype sections in order, a contact without a profile, then 
     expect(next, `"${want}" after position ${at} in ${JSON.stringify(titles)}`).toBeGreaterThan(at);
     at = next;
   }
-  // Placeholders are in place and inert.
-  await expect(page.getByRole('button', { name: 'Email', exact: true }).first()).toBeDisabled();
 
   // Composer: Email is the first tab and open, with the prototype's form; sending arrives in release 2.
   const compose = page.getByRole('region', { name: 'Compose' });
@@ -81,6 +89,10 @@ test('lead page: prototype sections in order, a contact without a profile, then 
   await email.getByRole('button', { name: 'Send email' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Sending email arrives in release 2' })).toBeVisible();
   await expect(email.getByLabel('Subject')).toHaveValue('Intro call this week?');
+  // The topbar Email button opens the Email tab.
+  await compose.getByRole('tab', { name: 'Meeting' }).click();
+  await topbar.getByRole('button', { name: 'Email' }).click();
+  await expect(compose.getByRole('tab', { name: 'Email' })).toHaveAttribute('aria-selected', 'true');
   // Focus on email folds the profile and puts the cursor in Subject.
   await compose.getByRole('tab', { name: 'Call note' }).click();
   await page.getByRole('button', { name: /Focus on email/ }).click();

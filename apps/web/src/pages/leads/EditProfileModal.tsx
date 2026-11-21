@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import type { EducationEntry, ExperienceEntry } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
@@ -22,8 +22,9 @@ const filled = (o: Record<string, string>) => Object.values(o).some((v) => v.tri
 /**
  * "Edit profile" on the lead page: the contact's LinkedIn-style profile (headline, location, about, experience and
  * education rows), saved with PATCH /contacts/:id. Blank rows are dropped; a role with no end date is current.
+ * `footer` holds the lead actions (Edit lead details, Switch contact, Archive) under the form.
  */
-export function EditProfileModal({ contact, onClose }: { contact: Contact; onClose: () => void }) {
+export function EditProfileModal({ contact, onClose, footer }: { contact: Contact; onClose: () => void; footer?: ReactNode }) {
   const t = useT();
   const toast = useToast();
   const save = useUpdateContactProfile();
@@ -136,6 +137,7 @@ export function EditProfileModal({ contact, onClose }: { contact: Contact; onClo
           </div>
         ) : null}
       </form>
+      {footer}
     </Modal>
   );
 }

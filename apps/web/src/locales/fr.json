@@ -958,5 +958,9 @@
   "Remove {name}": "Retirer {name}",
   "Add another…": "Ajouter un autre…",
   "Choose people or type an email…": "Choisissez des personnes ou saisissez un e-mail…",
-  "Hide the profile and jump to the email box": "Masquer le profil et aller à l’e-mail"
+  "Hide the profile and jump to the email box": "Masquer le profil et aller à l’e-mail",
+  "Lead {number}": "Lead {number}",
+  "Edit lead details": "Modifier les détails du lead",
+  "This lead has no contact person yet. Add one from the No contact yet card.": "Ce lead n’a pas encore de contact. Ajoutez-en un depuis la carte Pas encore de contact.",
+  "This lead is closed. Choose an open status in the Follow-up tab to reopen it.": "Ce lead est clôturé. Choisissez un statut ouvert dans l’onglet Suivi pour le rouvrir."
 }

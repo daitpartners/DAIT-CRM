@@ -169,3 +169,30 @@ test('the Follow-up tab has no quick date buttons', async ({ page }) => {
     await expect(page.getByRole('region', { name: 'Follow-up and history' }).getByRole('button', { name, exact: true })).toHaveCount(0);
   }
 });
+
+test('Edit profile holds Edit lead details, Switch contact and Archive; an archived lead is read-only', async ({ page }) => {
+  const company = `Archiveco ${Date.now()}`;
+  await signInAs(page, MAYA);
+  const me = (await (await page.request.get('/api/me')).json()) as { id: number };
+  const created = await page.request.post('/api/leads', { data: { companyName: company, country: 'India', leadSource: 'Referral', assignedToId: me.id } });
+  expect(created.status()).toBe(201);
+  const { id } = (await created.json()) as { id: number };
+  await page.goto(`/leads/${id}`);
+
+  await page.locator('.topbar').getByRole('button', { name: 'Edit profile' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('button', { name: 'Edit lead details' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Switch contact' })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Archive' }).click();
+  const confirm = page.getByRole('dialog', { name: 'Archive lead?' });
+  await confirm.getByRole('button', { name: 'Archive' }).click();
+  await expect(page.getByText('This lead is archived.')).toBeVisible();
+
+  // Read-only while archived: no Owner actions, Status disabled, Restore offered.
+  await page.getByRole('tab', { name: /^Follow-up/ }).click();
+  await expect(page.getByLabel('Status', { exact: true })).toBeDisabled();
+  await expect(page.getByRole('group', { name: 'Owner' }).getByRole('button')).toHaveCount(0);
+  await page.locator('.topbar').getByRole('button', { name: 'Restore' }).click();
+  await expect(page.getByText('This lead is archived.')).toHaveCount(0);
+  await expect(page.getByLabel('Status', { exact: true })).toBeEnabled();
+});
