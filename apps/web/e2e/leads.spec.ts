@@ -52,8 +52,9 @@ test('sales rep sees unassigned leads and claims one from the list', async ({ pa
   await expect(page.getByRole('row').filter({ hasText: 'LD-1001' })).toContainText('Northwind Logistics');
   await expect(page.getByRole('row').filter({ hasText: 'Orbit Fintech' })).toHaveCount(0);
 
-  await page.getByRole('tab', { name: /Unassigned/ }).click();
-  await expect(page).toHaveURL(/tab=unassigned/);
+  // The Unassigned tile opens the unassigned pool (the prototype has no Unassigned tab).
+  await page.locator('.tiles .tile').filter({ hasText: 'Unassigned' }).click();
+  await expect(page).toHaveURL(/assignedTo=none/);
   const row = page.getByRole('row').filter({ hasText: 'Meridian Textiles' });
   await expect(row).toBeVisible();
   await row.getByRole('checkbox').check();
@@ -65,6 +66,8 @@ test('sales rep sees unassigned leads and claims one from the list', async ({ pa
   await expect(page.getByRole('status').filter({ hasText: 'Leads assigned: 1' })).toBeVisible();
   await expect(row).toHaveCount(0);
 
+  // Filters stay on across tabs (as in the prototype): clear "Assigned: Unassigned" before looking at My leads.
+  await page.getByRole('button', { name: 'Clear' }).click();
   await page.getByRole('tab', { name: /My leads/ }).click();
   const mine = page.getByRole('row').filter({ hasText: 'Meridian Textiles' });
   await expect(mine).toContainText('Arjun Mehta');

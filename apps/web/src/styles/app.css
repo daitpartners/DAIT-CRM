@@ -194,6 +194,8 @@ a:focus-visible,button:focus-visible,[role=combobox]:focus-visible,summary:focus
 .bulkbar{display:flex;align-items:center;gap:10px;padding:10px 18px;background:var(--tint);border-bottom:1px solid var(--line-2);font-size:13px;flex-wrap:wrap}
 tr.clickable{cursor:pointer}
 .row-link{color:var(--text);font-weight:600}
+/* Lead ID in the Leads list: the prototype's purple link, semibold. */
+.id-link{font-weight:600}
 .pager{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .form-sec{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:6px 0 -4px}
 .modal:has(.company-form){width:720px}

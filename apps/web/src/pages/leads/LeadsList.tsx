@@ -22,7 +22,7 @@ import { Topbar } from '../../components/Topbar';
 import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
 import { usePageClamp, useUrlListState } from '../../hooks/useUrlListState';
-import { errorText, leadStatusText, leadTypeText, priorityText } from '../../i18n/labels';
+import { errorText, leadStatusText, leadTypeText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
 import { CsvImportModal } from './CsvImportModal';
 
@@ -217,7 +217,6 @@ export function LeadsList() {
     { id: 'prospects', label: t('Prospects'), count: counts?.prospects },
     { id: 'mine', label: t('My leads'), count: counts?.mine },
     { id: 'overdue', label: t('Overdue follow-ups'), count: counts?.overdue, countClass: 'bad' },
-    { id: 'unassigned', label: t('Unassigned'), count: counts?.unassigned },
   ];
   const tiles = data?.tiles;
 
@@ -260,7 +259,7 @@ export function LeadsList() {
             label={t('Unassigned')}
             value={tiles?.unassigned ?? '—'}
             meta={t('mostly CSV + Google Places prospects')}
-            to="/leads?tab=unassigned"
+            to="/leads?assignedTo=none"
           />
         </div>
         <section className="card flush l2" aria-label={t('Leads')}>
@@ -351,17 +350,6 @@ export function LeadsList() {
                   </label>
                 </span>
               ) : null}
-              <label className="sr" htmlFor="flt-priority">
-                {t('Priority')}
-              </label>
-              <select id="flt-priority" className="chip" value={query.priority ?? ''} onChange={(e) => update({ priority: e.target.value })}>
-                <option value="">{t('Priority: Any')}</option>
-                {PRIORITIES.map((p) => (
-                  <option key={p} value={p}>
-                    {priorityText(t, p)}
-                  </option>
-                ))}
-              </select>
               {filtered ? (
                 <button type="button" className="btn sm" onClick={() => reset()}>
                   {t('Clear')}
@@ -420,7 +408,7 @@ export function LeadsList() {
                       ) : null}
                       <td>
                         {/* The link makes the row reachable by keyboard; mouse users can click anywhere on the row. */}
-                        <Link to={`/leads/${l.id}`} className="row-link" onClick={(e) => e.stopPropagation()}>
+                        <Link to={`/leads/${l.id}`} className="id-link" onClick={(e) => e.stopPropagation()}>
                           {l.number}
                         </Link>
                       </td>

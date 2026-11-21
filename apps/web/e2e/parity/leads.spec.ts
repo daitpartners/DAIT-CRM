@@ -2,11 +2,11 @@ import { expect, test } from '@playwright/test';
 import { MAYA, signInAs } from '../fixtures';
 import { captureParity } from './_shared';
 
-/** Prototype views-leads2.js list, in page order. "Unassigned" is a sixth tab kept from 1C (claim flow). */
+/** Prototype views-leads2.js list, in page order. */
 const TILES = ['New this week', 'Follow-ups due today', 'Unassigned'];
-const TABS = ['All leads', 'Leads', 'Prospects', 'My leads', 'Overdue follow-ups', 'Unassigned'];
-/** The selects' empty options, in order (the country combobox sits between Source and Assigned). Priority is kept from 1C. */
-const FILTERS = ['Status: Any', 'Source: Any', 'Assigned: Any', 'Lead type: Any', 'Created: Any time', 'Priority: Any'];
+const TABS = ['All leads', 'Leads', 'Prospects', 'My leads', 'Overdue follow-ups'];
+/** The selects' empty options, in order (the country combobox sits between Source and Assigned). */
+const FILTERS = ['Status: Any', 'Source: Any', 'Assigned: Any', 'Lead type: Any', 'Created: Any time'];
 const COLUMNS = ['Lead ID', 'Company name', 'Contact person', 'Country', 'Type', 'Source', 'Status', 'Priority', 'Assigned to', 'Next follow-up', 'Created'];
 
 test('leads list: prototype topbar, tiles, tabs, filters, columns and pager', async ({ page }) => {
@@ -22,6 +22,8 @@ test('leads list: prototype topbar, tiles, tabs, filters, columns and pager', as
 
   expect(await page.locator('.tiles .tile .l').allTextContents()).toEqual(TILES);
   await expect(page.locator('.tiles .tile').nth(2).locator('.m')).toHaveText('mostly CSV + Google Places prospects');
+  // The Unassigned tile opens the list filtered to unassigned leads (the prototype has no Unassigned tab).
+  await expect(page.locator('.tiles .tile').nth(2)).toHaveAttribute('href', '/leads?assignedTo=none');
 
   const tabs = await page.getByRole('tab').evaluateAll((els) => els.map((el) => (el.textContent ?? '').replace(/\s*\d+$/, '').trim()));
   expect(tabs).toEqual(TABS);
@@ -37,6 +39,10 @@ test('leads list: prototype topbar, tiles, tabs, filters, columns and pager', as
     els.map((el) => (el.textContent ?? '').replace(/[↑↓\s]+/g, ' ').trim()).filter((x) => x !== ''),
   );
   expect(heads).toEqual(COLUMNS);
+  // Lead IDs are purple links in semibold, as in the prototype.
+  const firstId = page.locator('tbody tr').first().getByRole('link').first();
+  await expect(firstId).toHaveCSS('color', 'rgb(104, 17, 207)');
+  await expect(firstId).toHaveCSS('font-weight', '600');
 
   // Pager: "1–n of m", Rows 25/50/100 (50 by default), First / Prev / Page input / Next / Last.
   const pager = page.getByRole('navigation', { name: 'Pagination' });
