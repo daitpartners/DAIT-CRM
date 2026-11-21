@@ -933,5 +933,7 @@
   "{range} employees": "{range} empleados",
   "{range} staff": "{range} empleados",
   "{total} options · type to filter": "{total} opciones · escribe para filtrar",
-  "— none yet —": "— ninguno todavía —"
+  "— none yet —": "— ninguno todavía —",
+  "No emails yet": "Aún no hay correos",
+  "Owner": "Responsable"
 }

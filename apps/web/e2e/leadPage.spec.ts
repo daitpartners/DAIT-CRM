@@ -32,7 +32,16 @@ async function choose(field: Locator, label: string) {
   }
 }
 
-const stepper = (page: Page) => page.getByRole('list', { name: 'Lead status' });
+/** The lead's status, as the Follow-up tab's Status select shows it. */
+const status = async (page: Page) => {
+  await page.getByRole('tab', { name: /^Follow-up/ }).click();
+  return page.getByLabel('Status', { exact: true });
+};
+/** The Owner row of the Follow-up tab. */
+const owner = async (page: Page) => {
+  await page.getByRole('tab', { name: /^Follow-up/ }).click();
+  return page.getByRole('group', { name: 'Owner' });
+};
 /** The activity history sits under the Calls tab of the Follow-up / Emails / Calls card. */
 const timeline = async (page: Page) => {
   await page.getByRole('tab', { name: /^Calls/ }).click();
@@ -43,16 +52,11 @@ const followUp = async (page: Page) => {
   await page.getByRole('tab', { name: /^Follow-up/ }).click();
   return page.getByRole('group', { name: 'Next follow-up' }).getByLabel('Next follow-up');
 };
-/** An item of the header's "More" menu. */
-const more = async (page: Page, item: string) => {
-  await page.getByRole('button', { name: 'More' }).click();
-  await page.getByRole('menuitem', { name: item }).click();
-};
 
 test('log call sets status and creates a follow-up task', async ({ page }) => {
   await signInAs(page, ARJUN);
   await openLead(page, 'Northwind Logistics');
-  await expect(stepper(page).getByRole('button', { name: 'New', exact: true })).toHaveAttribute('aria-current', 'step');
+  await expect(await status(page)).toHaveValue('New');
 
   await page.getByRole('tab', { name: 'Call note' }).click();
   const dialog = page.getByRole('form', { name: 'Call note' });
@@ -67,7 +71,7 @@ test('log call sets status and creates a follow-up task', async ({ page }) => {
   await expect(page.getByRole('status').filter({ hasText: 'Call logged' })).toBeVisible();
   await expect(dialog.getByLabel('Note')).toHaveValue('');
 
-  await expect(stepper(page).getByRole('button', { name: 'Contacted', exact: true })).toHaveAttribute('aria-current', 'step');
+  await expect(await status(page)).toHaveValue('Contacted');
   await expect((await timeline(page)).getByRole('listitem').filter({ hasText: 'Call · Connected' })).toContainText('5 min · Spoke to the operations head');
   await expect((await timeline(page)).getByRole('listitem').filter({ hasText: 'New → Contacted' })).toBeVisible();
 
@@ -85,7 +89,7 @@ test('transfer requires a note and notifies the receiver', async ({ page }) => {
   expect(created.status()).toBe(201);
   await openLead(page, company);
 
-  await more(page, 'Transfer');
+  await (await owner(page)).getByRole('button', { name: 'Transfer' }).click();
   const dialog = page.getByRole('dialog', { name: 'Transfer lead' });
   await choose(dialog.getByRole('combobox', { name: 'Transfer to' }), 'Arjun Mehta');
   await dialog.getByRole('button', { name: 'Transfer' }).click();
@@ -95,7 +99,7 @@ test('transfer requires a note and notifies the receiver', async ({ page }) => {
   await dialog.getByLabel('Note').fill('Arjun covers India this quarter');
   await dialog.getByRole('button', { name: 'Transfer' }).click();
   await expect(dialog).toBeHidden();
-  await expect(page.locator('.topbar .sub')).toContainText('Arjun Mehta');
+  await expect(await owner(page)).toContainText('Arjun Mehta');
   await expect(await timeline(page)).toContainText('Arjun covers India this quarter');
 
   await signInAs(page, ARJUN);
@@ -109,16 +113,17 @@ test('closing as Lost needs a reason and clears follow-up', async ({ page }) => 
   await openLead(page, 'Northwind Logistics');
   await expect(await followUp(page)).not.toHaveValue('');
 
-  await more(page, 'Close lead');
+  // Picking Lost in the Follow-up tab's Status opens Close lead with Lost chosen; the reason is still required.
+  await (await status(page)).selectOption('Lost');
   const dialog = page.getByRole('dialog', { name: 'Close lead' });
-  await dialog.getByRole('radio', { name: 'Lost' }).check();
+  await expect(dialog.getByRole('radio', { name: 'Lost' })).toBeChecked();
   await dialog.getByRole('button', { name: 'Close lead' }).click();
   await expect(dialog.getByText('Enter a reason')).toBeVisible();
   await dialog.getByLabel('Reason').fill('Chose a local vendor');
   await dialog.getByRole('button', { name: 'Close lead' }).click();
   await expect(dialog).toBeHidden();
 
-  await expect(stepper(page).getByRole('button', { name: 'Lost' })).toHaveAttribute('aria-current', 'step');
+  await expect(await status(page)).toHaveValue('Lost');
   await expect(await followUp(page)).toHaveValue('');
   await expect(page.getByRole('region', { name: 'Open tasks' })).toContainText('No open tasks');
   await expect((await timeline(page)).getByRole('listitem').filter({ hasText: 'Contacted → Lost' })).toContainText('Chose a local vendor');
@@ -128,4 +133,39 @@ test('closing as Lost needs a reason and clears follow-up', async ({ page }) => 
   // The closed follow-up is no longer open (it may be listed under Completed).
   await expect(page.getByRole('region', { name: 'Upcoming' })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Upcoming' }).getByRole('listitem').filter({ hasText: 'Follow up · Northwind Logistics' })).toHaveCount(0);
+});
+
+test('a closed lead reopens from the Status select', async ({ page }) => {
+  // Runs after the Lost test above: Arjun's Northwind lead is closed as Lost.
+  await signInAs(page, ARJUN);
+  await openLead(page, 'Northwind Logistics');
+  await expect(await status(page)).toHaveValue('Lost');
+  await (await status(page)).selectOption('Contacted');
+  await expect(page.getByRole('status').filter({ hasText: 'Status changed to Contacted' })).toBeVisible();
+  await expect(await status(page)).toHaveValue('Contacted');
+});
+
+test('a sales representative claims an unassigned lead from the Owner row', async ({ page }) => {
+  const company = `Claimco ${Date.now()}`;
+  await signInAs(page, MAYA);
+  const created = await page.request.post('/api/leads', { data: { companyName: company, country: 'India', leadSource: 'Referral' } });
+  expect(created.status()).toBe(201);
+  const { id } = (await created.json()) as { id: number };
+
+  await signInAs(page, ARJUN);
+  await page.goto(`/leads/${id}`);
+  const row = await owner(page);
+  await expect(row).toContainText('Unassigned');
+  await expect(row.getByRole('button', { name: 'Transfer' })).toHaveCount(0);
+  await row.getByRole('button', { name: 'Claim' }).click();
+  await expect(row).toContainText('Arjun Mehta');
+});
+
+test('the Follow-up tab has no quick date buttons', async ({ page }) => {
+  await signInAs(page, ARJUN);
+  await openLead(page, 'Northwind Logistics');
+  await page.getByRole('tab', { name: /^Follow-up/ }).click();
+  for (const name of ['Tomorrow', '+4 days', 'Next week', 'Clear']) {
+    await expect(page.getByRole('region', { name: 'Follow-up and history' }).getByRole('button', { name, exact: true })).toHaveCount(0);
+  }
 });

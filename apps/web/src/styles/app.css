@@ -385,6 +385,12 @@ a.tile{display:block;text-decoration:none}a.tile:hover{border-color:var(--purple
 #composer.is-closed .tab.on{border-bottom-color:transparent}
 @media (prefers-reduced-motion:reduce){.l2fold,.chev,.l2sum{transition:none}}
 .card.flush.l2tl{overflow:visible}.l2fu{padding:4px 0 14px}.l2fu[hidden]{display:none}
+/* Follow-up tab: date, priority and type on the first row (prototype); Owner and Status each on their own row. */
+.l2fu .fu-date{min-width:260px;max-width:300px}
+.l2fu .fu-owner,.l2fu .fu-status{flex:0 0 100%}
+.l2fu .fu-owner .fu-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-height:34px}
+.l2fu .fu-owner-name{font-weight:600;color:var(--text)}
+.l2fu .fu-status select.in{width:200px}
 @media (max-width:640px){.l2facts{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .l2 th.ck,.l2 td.ck{width:34px;padding-right:0;cursor:default}.l2 td.ck input,.l2 th.ck input{width:16px;height:16px;accent-color:var(--purple);cursor:pointer;vertical-align:middle}
 /* Notifications */

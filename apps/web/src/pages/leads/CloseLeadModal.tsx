@@ -10,14 +10,15 @@ import { useActionError } from './staleToast';
 
 /**
  * Close a lead as Won (confirm: the company becomes a client), Lost or Not Relevant (reason
- * required). Closing clears the follow-up and closes the lead's open tasks.
+ * required). Closing clears the follow-up and closes the lead's open tasks. `initialStatus` preselects the
+ * status picked in the Follow-up tab's Status select.
  */
-export function CloseLeadModal({ lead, onClose }: { lead: LeadFull; onClose: () => void }) {
+export function CloseLeadModal({ lead, onClose, initialStatus }: { lead: LeadFull; onClose: () => void; initialStatus?: ClosedStatus }) {
   const t = useT();
   const toast = useToast();
   const onFail = useActionError();
   const action = useLeadAction();
-  const [status, setStatus] = useState<ClosedStatus | null>(null);
+  const [status, setStatus] = useState<ClosedStatus | null>(initialStatus ?? null);
   const [reason, setReason] = useState('');
   const [statusError, setStatusError] = useState(false);
   const [reasonError, setReasonError] = useState<string | null>(null);

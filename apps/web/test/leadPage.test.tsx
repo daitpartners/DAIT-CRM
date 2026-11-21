@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -118,10 +118,10 @@ describe('lead page conflicts', () => {
         </ToastProvider>
       </QueryClientProvider>,
     );
-    await u.click(await screen.findByRole('button', { name: 'Claim' }));
+    await u.click(within(await screen.findByRole('group', { name: 'Owner' })).getByRole('button', { name: 'Claim' }));
     expect(await screen.findByText('Someone has already taken this lead')).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Claim' })).not.toBeInTheDocument());
-    expect(screen.getByText(/Owner:/)).toHaveTextContent('Owner: Arjun Mehta');
+    await waitFor(() => expect(within(screen.getByRole('group', { name: 'Owner' })).queryByRole('button', { name: 'Claim' })).not.toBeInTheDocument());
+    expect(screen.getByRole('group', { name: 'Owner' })).toHaveTextContent('Arjun Mehta');
   });
 
   it('composer: a draft survives switching tabs and folding the box', async () => {

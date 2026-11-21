@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FollowUpPanel } from '../src/pages/leads/FollowUpPanel';
-import { STATUSES, Wrap, inDays, makeClient, makeLead } from './leadFixture';
+import { STATUSES, Wrap, inDays, makeClient, makeLead, rep } from './leadFixture';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -14,31 +14,24 @@ function stubPatch() {
       bodies.push(body);
       return Response.json({ ...makeLead(), ...body, updatedAt: '2026-11-21T10:00:00.000Z' });
     }
+    // A save refetches the signed-in user; answer like the API does.
+    if (url === '/api/me') return Response.json(rep);
     return Response.json({});
   }));
   return bodies;
 }
 
 describe('FollowUpPanel', () => {
-  it.each([
-    ['Tomorrow', 1],
-    ['+4 days', 4],
-    ['Next week', 7],
-  ])('quick button %s sets the follow-up date and saves it', async (label, days) => {
-    const u = userEvent.setup();
-    const bodies = stubPatch();
+  it('has no quick date or Clear buttons (prototype Follow-up tab)', () => {
     render(
       <Wrap qc={makeClient()}>
-        <FollowUpPanel lead={makeLead()} statuses={STATUSES} live />
+        <FollowUpPanel lead={makeLead({ nextFollowUp: inDays(3) })} statuses={STATUSES} live />
       </Wrap>,
     );
-    await u.click(screen.getByRole('button', { name: label }));
-    await waitFor(() => expect(bodies).toHaveLength(1));
-    expect(bodies[0]).toEqual({ nextFollowUp: inDays(days), updatedAt: '2026-11-20T10:00:00.000Z' });
-    expect(screen.getByLabelText('Next follow-up', { selector: 'input' })).toHaveValue(inDays(days));
+    for (const name of ['Tomorrow', '+4 days', 'Next week', 'Clear']) expect(screen.queryByRole('button', { name })).toBeNull();
   });
 
-  it('a cleared or half-typed date is not saved on blur or Enter', async () => {
+  it('a half-typed date is not saved on Enter', async () => {
     const bodies = stubPatch();
     render(
       <Wrap qc={makeClient()}>
@@ -48,14 +41,11 @@ describe('FollowUpPanel', () => {
     const input = screen.getByLabelText('Next follow-up', { selector: 'input' });
     fireEvent.change(input, { target: { value: '' } });
     fireEvent.keyDown(input, { key: 'Enter' });
-    fireEvent.blur(input);
     await new Promise((r) => setTimeout(r, 50));
     expect(bodies).toHaveLength(0);
-    // The stored date comes back.
-    expect(input).toHaveValue(inDays(3));
   });
 
-  it('Clear asks first, then clears the follow-up', async () => {
+  it('emptying the date asks first, then clears the follow-up', async () => {
     const u = userEvent.setup();
     const bodies = stubPatch();
     render(
@@ -63,20 +53,30 @@ describe('FollowUpPanel', () => {
         <FollowUpPanel lead={makeLead({ nextFollowUp: inDays(3) })} statuses={STATUSES} live />
       </Wrap>,
     );
-    await u.click(screen.getByRole('button', { name: 'Clear' }));
+    const input = screen.getByLabelText('Next follow-up', { selector: 'input' });
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.blur(input);
     const dialog = await screen.findByRole('dialog', { name: 'Clear follow-up?' });
     await u.click(within(dialog).getByRole('button', { name: 'Clear' }));
     await waitFor(() => expect(bodies).toHaveLength(1));
     expect(bodies[0]).toEqual({ nextFollowUp: null, updatedAt: '2026-11-20T10:00:00.000Z' });
   });
 
-  it('no Clear button without a follow-up date', () => {
+  it('cancelling the clear puts the stored date back', async () => {
+    const u = userEvent.setup();
+    const bodies = stubPatch();
     render(
       <Wrap qc={makeClient()}>
-        <FollowUpPanel lead={makeLead()} statuses={STATUSES} live />
+        <FollowUpPanel lead={makeLead({ nextFollowUp: inDays(3) })} statuses={STATUSES} live />
       </Wrap>,
     );
-    expect(screen.queryByRole('button', { name: 'Clear' })).toBeNull();
+    const input = screen.getByLabelText('Next follow-up', { selector: 'input' });
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.blur(input);
+    const dialog = await screen.findByRole('dialog', { name: 'Clear follow-up?' });
+    await u.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(input).toHaveValue(inDays(3));
+    expect(bodies).toHaveLength(0);
   });
 
   it('shows Scheduled for a future follow-up, Today for today and Overdue when late; none without a date', () => {
@@ -108,19 +108,24 @@ describe('FollowUpPanel', () => {
     expect(within(panel()).queryByText(/Scheduled|Today|Overdue/)).toBeNull();
   });
 
-  it('offers closed statuses only as disabled options (they go through Close lead)', () => {
+  it('picking Lost in Status opens Close lead with Lost chosen', async () => {
+    const u = userEvent.setup();
+    stubPatch();
     render(
       <Wrap qc={makeClient()}>
         <FollowUpPanel lead={makeLead()} statuses={STATUSES} live />
       </Wrap>,
     );
     const status = screen.getByLabelText('Status');
-    expect(within(status).getByRole('option', { name: 'Contacted' })).toBeEnabled();
-    expect(within(status).getByRole('option', { name: 'Lost' })).toBeDisabled();
-    expect(within(status).getByRole('option', { name: 'Won' })).toBeDisabled();
+    expect(within(status).getByRole('option', { name: 'Won' })).toBeEnabled();
+    await u.selectOptions(status, 'Lost');
+    const dialog = await screen.findByRole('dialog', { name: 'Close lead' });
+    expect(within(dialog).getByRole('radio', { name: /^Lost/ })).toBeChecked();
+    // Nothing is saved until the dialog is confirmed: the select still shows the stored status.
+    expect(status).toHaveValue('New');
   });
 
-  it('Emails tab is a placeholder with no controls', async () => {
+  it('Emails tab shows the prototype empty state', async () => {
     const u = userEvent.setup();
     render(
       <Wrap qc={makeClient()}>
@@ -129,7 +134,7 @@ describe('FollowUpPanel', () => {
     );
     await u.click(screen.getByRole('tab', { name: /Emails/ }));
     const panel = screen.getByRole('tabpanel');
-    expect(within(panel).getByText('Available in release 2')).toBeInTheDocument();
+    expect(within(panel).getByText('No emails yet')).toBeInTheDocument();
     expect(within(panel).queryAllByRole('button')).toHaveLength(0);
   });
 });

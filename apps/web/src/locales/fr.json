@@ -933,5 +933,7 @@
   "{range} employees": "{range} salariés",
   "{range} staff": "{range} salariés",
   "{total} options · type to filter": "{total} options · tapez pour filtrer",
-  "— none yet —": "— aucun pour l'instant —"
+  "— none yet —": "— aucun pour l'instant —",
+  "No emails yet": "Aucun e-mail pour l’instant",
+  "Owner": "Responsable"
 }

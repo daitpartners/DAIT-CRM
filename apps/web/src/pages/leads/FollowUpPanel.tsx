@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { LEAD_TYPES, PRIORITIES, isClosedStatus, type LeadType, type Priority } from '@dait-crm/shared';
+import { LEAD_TYPES, PRIORITIES, isClosedStatus, type ClosedStatus, type LeadType, type Priority } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
 import { useLeadAction, useRefreshWhenOutOfDate, useSaveLead, type LeadFull } from '../../api/leads';
 import type { LookupValue } from '../../api/queries';
 import { useSaveTask, type TaskRow } from '../../api/tasks';
-import { PlaceholderCard } from '../../components/PlaceholderCard';
+import { useCurrentUser } from '../../api/useCurrentUser';
 import { Tabs } from '../../components/Tabs';
 import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
@@ -13,7 +13,9 @@ import { errorText, leadStatusText, leadTypeText, priorityText } from '../../i18
 import { useT, type TFn } from '../../i18n/useT';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { TaskModal } from '../tasks/TaskModal';
+import { CloseLeadModal } from './CloseLeadModal';
 import { Timeline } from './Timeline';
+import { TransferModal, UnassignModal } from './TransferModal';
 import { useActionError } from './staleToast';
 
 /** YYYY-MM-DD `days` from today (browser local date, as the date input shows it). */
@@ -23,19 +25,13 @@ export function localDayPlus(days: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-const QUICK_DAYS = [1, 4, 7] as const;
-/** Literal phrases so the i18n checker sees them. */
-function quickLabel(t: TFn, days: (typeof QUICK_DAYS)[number]): string {
-  return days === 1 ? t('Tomorrow') : days === 4 ? t('+4 days') : t('Next week');
-}
-
 const SHOWN_TASKS = 2;
 
 type Props = { lead: LeadFull; statuses: LookupValue[]; live: boolean };
 
 /**
  * The prototype's bottom card on the lead page: tabs Follow-up / Emails (release 2) / Calls. Follow-up holds the
- * lead controls: next follow-up (date, quick buttons, badge), priority, type, status and the open tasks.
+ * lead controls: next follow-up (date, badge), priority, type; Owner (transfer / unassign / claim); status; open tasks.
  * Calls shows the lead's activity history (calls, status changes, transfers, notes).
  */
 export function FollowUpPanel({ lead, statuses, live }: Props) {
@@ -55,7 +51,7 @@ export function FollowUpPanel({ lead, statuses, live }: Props) {
         panelClassName="l2tlb"
       >
         {tab === 'followup' ? <FollowUpControls lead={lead} statuses={statuses} live={live} /> : null}
-        {tab === 'email' ? <PlaceholderCard title={t('Emails')} release="2" hint={t('Emails sent to and received from this contact appear here.')} /> : null}
+        {tab === 'email' ? <div className="empty">{t('No emails yet')}</div> : null}
         {tab === 'call' ? <Timeline lead={lead} framed={false} /> : null}
       </Tabs>
     </section>
@@ -74,6 +70,9 @@ function FollowUpControls({ lead, statuses, live }: Props) {
   const { day } = useFormatDate();
   const [date, setDate] = useState(lead.nextFollowUp ?? '');
   const [addTask, setAddTask] = useState(false);
+  const me = useCurrentUser();
+  const [closing, setClosing] = useState<ClosedStatus | null>(null);
+  const [dialog, setDialog] = useState<'transfer' | 'unassign' | null>(null);
   // The date last sent: a blur right after a quick button must not send it again (with a stale stamp).
   const sent = useRef<string | null>(null);
   useEffect(() => {
@@ -118,7 +117,10 @@ function FollowUpControls({ lead, statuses, live }: Props) {
       body: t('{number} will have no next follow-up date.', { number: lead.number }),
       confirmLabel: t('Clear'),
     });
-    if (!ok) return;
+    if (!ok) {
+      setDate(lead.nextFollowUp ?? '');
+      return;
+    }
     sent.current = '';
     patch({ nextFollowUp: null }, t('Follow-up cleared'));
   }
@@ -157,36 +159,16 @@ function FollowUpControls({ lead, statuses, live }: Props) {
             title={closed ? t('A closed lead has no follow-up') : undefined}
             onChange={(e) => setDate(e.target.value)}
             onBlur={() => {
-              // A cleared or half-typed date is not saved; show the stored date again.
-              if (!date) setDate(lead.nextFollowUp ?? '');
-              else commitDate(date);
+              // An emptied date clears the follow-up after a confirm; a half-typed one is never sent.
+              if (!date) {
+                if (lead.nextFollowUp) void clearDate();
+              } else commitDate(date);
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') commitDate(date);
             }}
           />
           {badge}
-          {lead.nextFollowUp ? (
-            <button type="button" className="btn xs" disabled={dateOff} onClick={() => void clearDate()}>
-              {t('Clear')}
-            </button>
-          ) : null}
-        </div>
-        <div className="quick">
-          {QUICK_DAYS.map((days) => (
-            <button
-              key={days}
-              type="button"
-              disabled={dateOff}
-              onClick={() => {
-                const next = localDayPlus(days);
-                setDate(next);
-                commitDate(next);
-              }}
-            >
-              {quickLabel(t, days)}
-            </button>
-          ))}
         </div>
       </div>
       <div>
@@ -225,7 +207,40 @@ function FollowUpControls({ lead, statuses, live }: Props) {
           ))}
         </select>
       </div>
-      <div>
+      <div role="group" aria-labelledby="fu-owner-l" className="fu-owner">
+        <span className="l" id="fu-owner-l">
+          {t('Owner')}
+        </span>
+        <div className="fu-row">
+          <span className="fu-owner-name">{lead.assignedTo?.name ?? t('Unassigned')}</span>
+          {live && me.can('transfer_leads') ? (
+            <button type="button" className="btn xs" onClick={() => setDialog('transfer')}>
+              {t('Transfer')}
+            </button>
+          ) : null}
+          {live && me.can('view_all_leads') && lead.assignedTo ? (
+            <button type="button" className="btn xs" onClick={() => setDialog('unassign')}>
+              {t('Unassign')}
+            </button>
+          ) : null}
+          {live && me.can('claim_leads') && !lead.assignedTo ? (
+            <button
+              type="button"
+              className="btn xs primary"
+              disabled={busy}
+              onClick={() =>
+                action.mutate(
+                  { lead, action: 'claim', body: {} },
+                  { onSuccess: () => toast(t('{number} is now yours', { number: lead.number })), onError: (err) => onFail(err, true) },
+                )
+              }
+            >
+              {t('Claim')}
+            </button>
+          ) : null}
+        </div>
+      </div>
+      <div className="fu-status">
         <label className="l" htmlFor="fu-status">
           {t('Status')}
         </label>
@@ -234,24 +249,28 @@ function FollowUpControls({ lead, statuses, live }: Props) {
           className="in"
           value={lead.status}
           disabled={!live || busy}
-          title={t('Closed statuses: use Close lead in the More menu')}
-          onChange={(e) =>
+          onChange={(e) => {
+            const next = e.target.value;
+            // Closing statuses go through Close lead (Won confirms the client flag; Lost / Not Relevant need a reason).
+            if (isClosedStatus(next)) {
+              setClosing(next as ClosedStatus);
+              return;
+            }
             action.mutate(
-              { lead, action: 'status', body: { status: e.target.value } },
+              { lead, action: 'status', body: { status: next } },
               {
-                onSuccess: () => toast(t('Status changed to {status}', { status: leadStatusText(t, e.target.value) })),
+                onSuccess: () => toast(t('Status changed to {status}', { status: leadStatusText(t, next) })),
                 onError: (err) => onFail(err, true),
               },
-            )
-          }
+            );
+          }}
         >
           {statusOptions.map((s) => (
-            <option key={s.value} value={s.value} disabled={isClosedStatus(s.value)}>
+            <option key={s.value} value={s.value}>
               {leadStatusText(t, s.value)}
             </option>
           ))}
         </select>
-        {closed ? <span className="fu-closed">{t('Closed as {status}', { status: leadStatusText(t, lead.status) })}</span> : null}
       </div>
       <section className="fu-tasks" aria-labelledby="fu-tasks-l">
         <span className="l" id="fu-tasks-l">
@@ -279,6 +298,9 @@ function FollowUpControls({ lead, statuses, live }: Props) {
         </div>
       </section>
       {addTask ? <TaskModal lead={lead} onClose={() => setAddTask(false)} /> : null}
+      {closing ? <CloseLeadModal lead={lead} initialStatus={closing} onClose={() => setClosing(null)} /> : null}
+      {dialog === 'transfer' ? <TransferModal lead={lead} onClose={() => setDialog(null)} /> : null}
+      {dialog === 'unassign' ? <UnassignModal lead={lead} onClose={() => setDialog(null)} /> : null}
     </div>
   );
 }
