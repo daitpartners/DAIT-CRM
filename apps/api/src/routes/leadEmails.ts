@@ -1,21 +1,12 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { EmailMessage } from '@prisma/client';
-import { LeadEmailSend, isClosedStatus } from '@dait-crm/shared';
+import { LeadEmailSend } from '@dait-crm/shared';
 import { prisma } from '../db.js';
-import { audit } from '../audit.js';
 import { requireRight } from '../plugins/auth.js';
 import { parseBody } from '../validate.js';
-import { enqueue } from '../jobs/queue.js';
 import { assertLeadVisible } from '../leads/visibility.js';
-import { dateOnly, todayIn } from '../leads/dates.js';
-import { applyStatusChange, syncFollowUpTask } from '../leads/service.js';
+import { queueOutgoing } from '../mail/outgoing.js';
 import { guard, lockFresh } from './leads.js';
-
-/** Retries for a user's email: about half an hour of backoff (2, 4, 8, 16 minutes) before it is marked failed. */
-const SEND_ATTEMPTS = 5;
-const DAY_MS = 86_400_000;
-/** Statuses an email moves to Contacted. */
-const CONTACTED_ON_EMAIL = new Set(['New', 'Not Contacted']);
 
 /** An email as its owner sees it (only ever returned to its owner). */
 export function emailView(m: EmailMessage) {
@@ -40,34 +31,9 @@ export const leadEmailRoutes: FastifyPluginAsync = async (app) => {
       if (!account) return reply.code(409).send({ error: 'no_mailbox' });
       const created = await prisma.$transaction(async (tx) => {
         const { lead } = await lockFresh(tx, user, id, body.updatedAt);
-        const msg = await tx.emailMessage.create({
-          data: {
-            userId: user.id, accountId: account.id, leadId: lead.id, contactId: lead.contactId, companyId: lead.companyId,
-            folder: 'sent', status: 'queued', fromAddress: account.address, toAddresses: [body.to], ccAddresses: body.cc,
-            subject: body.subject, bodyText: body.body,
-          },
+        return queueOutgoing(tx, user, account, {
+          lead, to: [body.to], cc: body.cc, subject: body.subject, body: body.body, followUpDays: body.followUpDays,
         });
-        await enqueue(tx, 'send_user_email', { emailMessageId: msg.id }, { maxAttempts: SEND_ATTEMPTS });
-        await tx.leadActivity.create({
-          data: {
-            leadId: lead.id, activityType: 'email', title: `Email sent · ${body.subject}`, relatedType: 'email_message',
-            relatedId: msg.id, byUserId: user.id,
-          },
-        });
-        // Emailing a lead not yet contacted moves it to Contacted (prototype; owner, 22 Nov 2026).
-        let current = lead;
-        if (CONTACTED_ON_EMAIL.has(current.status)) {
-          current = await applyStatusChange(tx, current, 'Contacted', { userId: user.id }, { sourceTitle: 'Email sent' });
-        }
-        // "Set follow-up in N days" (prototype): an open lead only; a closed lead keeps no follow-up.
-        if (body.followUpDays && !isClosedStatus(current.status)) {
-          const due = new Date(dateOnly(todayIn(user.timezone)).getTime() + body.followUpDays * DAY_MS);
-          const updated = await tx.lead.update({ where: { id: current.id }, data: { nextFollowUp: due } });
-          await syncFollowUpTask(tx, updated);
-        }
-        // Audit without the content: the mail is private to its sender.
-        await audit(tx, { entityType: 'lead', entityId: lead.id, action: 'update', userId: user.id, after: { emailMessageId: msg.id } });
-        return msg;
       });
       return reply.code(201).send(emailView(created));
     });

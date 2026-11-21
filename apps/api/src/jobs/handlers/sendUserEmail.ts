@@ -43,15 +43,21 @@ export async function sendUserEmailHandler(job: Job, ctx: JobContext): Promise<v
   if (claimed.count === 0) return; // another run took it
 
   const lastAttempt = job.attempts + 1 >= job.maxAttempts;
+  // A reply goes through Graph reply on the original, so it stays in the conversation in Outlook too.
+  const original = msg.replyToId ? await prisma.emailMessage.findUnique({ where: { id: msg.replyToId } }) : null;
   try {
     const cc = msg.ccAddresses as string[];
-    await ctx.graph.sendMail(account, {
-      to: msg.toAddresses as string[],
-      ...(cc.length ? { cc } : {}),
-      subject: msg.subject,
-      html: textToHtml(msg.bodyText),
-      text: msg.bodyText,
-    });
+    if (original?.graphId && original.userId === msg.userId) {
+      await ctx.graph.reply(account, original.graphId, { to: msg.toAddresses as string[], ...(cc.length ? { cc } : {}), html: textToHtml(msg.bodyText) });
+    } else {
+      await ctx.graph.sendMail(account, {
+        to: msg.toAddresses as string[],
+        ...(cc.length ? { cc } : {}),
+        subject: msg.subject,
+        html: textToHtml(msg.bodyText),
+        text: msg.bodyText,
+      });
+    }
   } catch (err) {
     const lastError = errorMessage(err);
     if (isAuthFailure(err)) {

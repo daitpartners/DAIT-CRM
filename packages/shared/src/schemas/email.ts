@@ -43,3 +43,28 @@ export const LeadEmailSend = z.object({
   updatedAt: z.string().datetime(),
 });
 export type LeadEmailSend = z.infer<typeof LeadEmailSend>;
+
+const mailAddress = z.string().trim().toLowerCase().email();
+const mailCc = z.array(mailAddress).max(20).default([]);
+const mailBody = z.string().trim().min(1).max(20000);
+
+/** `POST /mail` (release 2B-2, Email screen Compose): optionally on a lead or for a client. */
+export const MailCompose = z.object({
+  to: mailAddress,
+  cc: mailCc,
+  subject: z.string().trim().min(1).max(500),
+  body: mailBody,
+  leadId: z.number().int().positive().nullish(),
+  companyId: z.number().int().positive().nullish(),
+});
+export type MailCompose = z.infer<typeof MailCompose>;
+
+/** `POST /mail/:id/reply` (release 2B-2): to the sender (or the original recipients of your own message). */
+export const MailReply = z.object({ cc: mailCc, body: mailBody });
+export type MailReply = z.infer<typeof MailReply>;
+
+/** `POST /mail/:id/read`. */
+export const MailRead = z.object({ isRead: z.boolean() });
+
+/** `POST /mail/:id/link`. */
+export const MailLink = z.object({ leadId: z.number().int().positive() });

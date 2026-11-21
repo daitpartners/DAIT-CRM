@@ -4,6 +4,7 @@ import { runForever } from './jobs/runner.js';
 import { sendUserEmailHandler } from './jobs/handlers/sendUserEmail.js';
 import { sendEmailHandler } from './jobs/handlers/sendEmail.js';
 import { syncMailboxHandler } from './jobs/handlers/syncMailbox.js';
+import { mailActionHandler } from './jobs/handlers/mailAction.js';
 import { scheduleMailSync } from './mail/schedule.js';
 
 export { runOnce, runForever } from './jobs/runner.js';
@@ -42,8 +43,8 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<void> 
   console.log('worker: started');
   try {
     await runForever({
-      types: ['send_email', 'send_user_email', 'sync_mailbox'],
-      handlers: { send_email: sendEmailHandler, send_user_email: sendUserEmailHandler, sync_mailbox: syncMailboxHandler },
+      types: ['send_email', 'send_user_email', 'sync_mailbox', 'mail_action'],
+      handlers: { send_email: sendEmailHandler, send_user_email: sendUserEmailHandler, sync_mailbox: syncMailboxHandler, mail_action: mailActionHandler },
       graph: opts.graph ?? createGraphClient(process.env),
       pollMs: opts.pollMs,
       signal: controller.signal,
