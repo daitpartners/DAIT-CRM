@@ -34,6 +34,14 @@ try {
       status: 'connected',
     },
   });
+  // Release 2B-1: Neha (Manager) has a connected mailbox for the lead-email specs (Maya's is disconnected by connections.spec).
+  const neha = await prisma.user.findUniqueOrThrow({ where: { email: 'neha.kapoor@daitpartners.com' } });
+  await prisma.emailAccount.create({
+    data: {
+      address: 'neha.kapoor@daitpartners.com', provider: 'microsoft', kind: 'personal', userId: neha.id,
+      refreshTokenEnc: encrypt('fake-personal-token-neha'), status: 'connected',
+    },
+  });
   // Release 2A: Maya has connected her own mailbox; Arjun has not.
   await prisma.emailAccount.create({
     data: {

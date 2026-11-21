@@ -576,3 +576,11 @@ fieldset.bare>legend{padding:0}
 .tpl-upload{cursor:pointer}
 .tpl-help{font-size:12px}
 td.nowrap{white-space:nowrap}
+
+/* Lead page → Emails tab (release 2B-1): your own emails with the lead. */
+.mail-list{list-style:none;margin:0;padding:0 18px 14px;display:flex;flex-direction:column;gap:8px}
+.mail-item{border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.mail-item summary{cursor:pointer;display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
+.mail-subject{font-weight:600;color:var(--text)}
+.mail-meta{flex-basis:100%;font-size:12.5px;color:var(--muted)}
+.mail-body{white-space:pre-wrap;font:inherit;font-size:13px;color:var(--body);margin:10px 0 0}

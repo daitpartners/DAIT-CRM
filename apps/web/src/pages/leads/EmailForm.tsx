@@ -1,11 +1,16 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { Link } from 'react-router-dom';
+import { ApiError } from '../../api/client';
+import { useSendLeadEmail } from '../../api/leadEmails';
 import type { LeadFull } from '../../api/leads';
+import { useMailboxes } from '../../api/mailboxes';
 import { useContacts } from '../../api/contacts';
 import { useUsers } from '../../api/queries';
 import { useTemplates } from '../../api/templates';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Icons } from '../../components/Icons';
 import { useToast } from '../../components/Toast';
+import { errorText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
 import { fillTemplate } from '../../lib/mergeFields';
 
@@ -50,6 +55,11 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
   const [subject, setSubject] = useState(opening.subject);
   const [body, setBody] = useState(opening.body);
   const [follow, setFollow] = useState(true);
+  const [cc, setCc] = useState<string[]>([]);
+  const send = useSendLeadEmail(lead.id);
+  const { data: mailboxes } = useMailboxes();
+  // Release 2B-1: sending goes through your own connected mailbox.
+  const noMailbox = mailboxes !== undefined && mailboxes.mine?.status !== 'connected';
   const { data: allTemplates } = useTemplates();
   // Templates in the lead's language first (stable otherwise: the API already orders by the user's language).
   const templates = useMemo(
@@ -81,7 +91,23 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
       noValidate
       onSubmit={(e) => {
         e.preventDefault();
-        toast(t('Sending email arrives in release 2'), 'warn');
+        if (noMailbox || send.isPending) return;
+        if (!to.trim()) return toast(t('Enter who the email goes to'), 'warn');
+        send.mutate(
+          { to: to.trim(), cc, subject, body, followUpDays: follow ? (days as 2 | 3 | 7) : null, updatedAt: lead.updatedAt },
+          {
+            onSuccess: (sent) => {
+              toast(t('Email queued — it is sent from {address}', { address: sent.fromAddress }));
+              // Back to an empty draft: no recipient, the intro text again.
+              setTo('');
+              setCc([]);
+              setTemplateId('');
+              setSubject(intro.subject);
+              setBody(intro.body);
+            },
+            onError: (err) => toast(errorText(t, err instanceof ApiError ? err.code : 'unknown'), 'warn'),
+          },
+        );
       }}
     >
       <div className="grid2">
@@ -99,7 +125,7 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
             onChange={(e) => setTo(e.target.value)}
           />
         </div>
-        <CcField lead={lead} to={to} disabled={disabled} />
+        <CcField lead={lead} to={to} disabled={disabled} picked={cc} setPicked={setCc} />
         <div>
           <label className="lbl" htmlFor="em-project">
             {t('Project')}
@@ -136,6 +162,12 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
           <textarea id="em-body" className="in" rows={7} value={body} disabled={disabled} onChange={(e) => setBody(e.target.value)} />
         </div>
       </div>
+      {noMailbox ? (
+        <div className="note warn">
+          {t('Connect your Microsoft 365 mailbox in Settings to send email from the CRM.')}{' '}
+          <Link to="/settings/connections">{t('Open Settings')}</Link>
+        </div>
+      ) : null}
       <div className="email-foot">
         <label className="sw">
           <input type="checkbox" checked={follow} disabled={disabled} onChange={(e) => setFollow(e.target.checked)} />
@@ -149,7 +181,7 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
           ))}
         </select>
         <div className="grow" />
-        <button type="submit" className="btn primary" disabled={disabled}>
+        <button type="submit" className="btn primary" disabled={disabled || noMailbox || send.isPending}>
           {Icons.send}
           {t('Send email')}
         </button>
@@ -162,14 +194,15 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
  * Cc stakeholders (prototype `.ccbox`): a pick-list of the company's contacts with an email and the DAIT users,
  * plus any typed full address; chosen addresses show as removable chips.
  */
-function CcField({ lead, to, disabled }: { lead: LeadFull; to: string; disabled?: boolean }) {
+function CcField({ lead, to, disabled, picked, setPicked }: {
+  lead: LeadFull; to: string; disabled?: boolean; picked: string[]; setPicked: (v: string[]) => void;
+}) {
   const t = useT();
   const toast = useToast();
   const me = useCurrentUser();
   const listId = useId();
   const contacts = useContacts({ companyId: lead.companyId ?? undefined, page: 1, pageSize: 100, sort: 'lastName' }, lead.companyId !== null);
   const { data: users } = useUsers();
-  const [picked, setPicked] = useState<string[]>([]);
   const [text, setText] = useState('');
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);

@@ -6,6 +6,7 @@ import { useLeadAction, useRefreshWhenOutOfDate, useSaveLead, type LeadFull } fr
 import type { LookupValue } from '../../api/queries';
 import { useSaveTask, type TaskRow } from '../../api/tasks';
 import { useCurrentUser } from '../../api/useCurrentUser';
+import { useLeadEmails, type LeadEmail } from '../../api/leadEmails';
 import { Tabs } from '../../components/Tabs';
 import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
@@ -37,6 +38,9 @@ type Props = { lead: LeadFull; statuses: LookupValue[]; live: boolean };
 export function FollowUpPanel({ lead, statuses, live }: Props) {
   const t = useT();
   const [tab, setTab] = useState('followup');
+  const me = useCurrentUser();
+  // Your own emails with this lead only (owner, 22 Nov 2026: mail is private to its mailbox owner).
+  const { data: emails } = useLeadEmails(lead.id, me.can('use_email'));
   return (
     <section className="card flush l2tl" aria-label={t('Follow-up and history')}>
       <Tabs
@@ -45,13 +49,13 @@ export function FollowUpPanel({ lead, statuses, live }: Props) {
         onChange={setTab}
         tabs={[
           { id: 'followup', label: t('Follow-up'), count: lead.tasks.length },
-          { id: 'email', label: t('Emails'), count: 0 },
+          { id: 'email', label: t('Emails'), count: emails?.length ?? 0 },
           { id: 'call', label: t('Calls'), count: lead.callCount ?? 0 },
         ]}
         panelClassName="l2tlb"
       >
         {tab === 'followup' ? <FollowUpControls lead={lead} statuses={statuses} live={live} /> : null}
-        {tab === 'email' ? <div className="empty">{t('No emails yet')}</div> : null}
+        {tab === 'email' ? <EmailList emails={emails ?? []} /> : null}
         {tab === 'call' ? <Timeline lead={lead} framed={false} /> : null}
       </Tabs>
     </section>
@@ -304,4 +308,47 @@ function FollowUpControls({ lead, statuses, live }: Props) {
       {dialog === 'unassign' ? <UnassignModal lead={lead} onClose={() => setDialog(null)} /> : null}
     </div>
   );
+}
+
+/** Your emails with this lead, newest first; open one to read it. */
+function EmailList({ emails }: { emails: LeadEmail[] }) {
+  const t = useT();
+  const { date } = useFormatDate();
+  if (emails.length === 0) return <div className="empty">{t('No emails yet')}</div>;
+  const status = (m: LeadEmail) =>
+    m.status === 'sent' ? (
+      <span className="badge b-ok">{t('Sent')}</span>
+    ) : m.status === 'failed' ? (
+      <span className="badge b-bad" title={m.lastError ?? undefined}>
+        {t('Failed')}
+      </span>
+    ) : (
+      <span className="badge b-purple">{t('Sending')}</span>
+    );
+  return (
+    <ul className="mail-list" aria-label={t('Emails')}>
+      {emails.map((m) => (
+        <li key={m.id} className="mail-item">
+          <details>
+            <summary>
+              <span className="mail-subject">{m.subject}</span>
+              {status(m)}
+              <span className="mail-meta">
+                {t('To {to}', { to: m.toAddresses.join(', ') })}
+                {m.ccAddresses.length ? ` · ${t('cc {cc}', { cc: m.ccAddresses.join(', ') })}` : ''} · {date(m.occurredAt)}
+              </span>
+            </summary>
+            <pre className="mail-body">{m.bodyText}</pre>
+            {m.status === 'failed' && m.lastError ? <div className="note warn">{failureText(t, m.lastError)}</div> : null}
+          </details>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function failureText(t: TFn, code: string): string {
+  if (code === 'mailbox_needs_reconnect') return t('Your mailbox needs reconnecting in Settings → Email & calendar connections, then send again.');
+  if (code === 'mailbox_not_connected') return t('Your mailbox was not connected when this was sent. Connect it in Settings and send again.');
+  return t('Microsoft 365 did not accept this email: {reason}', { reason: code });
 }

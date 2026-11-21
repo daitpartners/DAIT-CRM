@@ -1044,5 +1044,16 @@
   "Language: Any": "Langue : toutes",
   "Language: {language}": "Langue : {language}",
   "Any language": "Toutes les langues",
-  "New leads go to the first active rule (lowest priority number) that matches their country and outreach language.": "Les nouveaux leads vont à la première règle active (numéro de priorité le plus bas) correspondant à leur pays et à leur langue de prospection."
+  "New leads go to the first active rule (lowest priority number) that matches their country and outreach language.": "Les nouveaux leads vont à la première règle active (numéro de priorité le plus bas) correspondant à leur pays et à leur langue de prospection.",
+  "Enter who the email goes to": "Indiquez le destinataire",
+  "Email queued — it is sent from {address}": "E-mail en file d’attente — envoyé depuis {address}",
+  "Connect your Microsoft 365 mailbox in Settings to send email from the CRM.": "Connectez votre boîte Microsoft 365 dans Paramètres pour envoyer des e-mails depuis le CRM.",
+  "Open Settings": "Ouvrir les paramètres",
+  "Sent": "Envoyé",
+  "Sending": "Envoi en cours",
+  "To {to}": "À {to}",
+  "cc {cc}": "cc {cc}",
+  "Your mailbox needs reconnecting in Settings → Email & calendar connections, then send again.": "Votre boîte doit être reconnectée dans Paramètres → Connexions e-mail et calendrier, puis renvoyez.",
+  "Your mailbox was not connected when this was sent. Connect it in Settings and send again.": "Votre boîte n’était pas connectée lors de l’envoi. Connectez-la dans Paramètres et renvoyez.",
+  "Microsoft 365 did not accept this email: {reason}": "Microsoft 365 n’a pas accepté cet e-mail : {reason}"
 }

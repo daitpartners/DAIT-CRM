@@ -111,8 +111,8 @@ test('lead page: prototype sections in order, a contact without a profile, then 
   await email.getByRole('combobox', { name: 'Cc stakeholders' }).fill('ops@northwindlogistics.in');
   await email.getByRole('combobox', { name: 'Cc stakeholders' }).press('Enter');
   await expect(email.getByRole('button', { name: 'Remove ops@northwindlogistics.in' })).toBeVisible();
-  await email.getByRole('button', { name: 'Send email' }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Sending email arrives in release 2' })).toBeVisible();
+  // Sending is covered by leadEmail.spec.ts (release 2B-1); here only that the button is in place.
+  await expect(email.getByRole('button', { name: 'Send email' })).toBeVisible();
   await expect(email.getByLabel('Subject')).toHaveValue('Intro call this week?');
   // The topbar Email button opens the Email tab.
   await compose.getByRole('tab', { name: 'Meeting' }).click();
@@ -182,8 +182,8 @@ test('lead page: a prospect without a contact person', async ({ page }) => {
   await expect(email.getByLabel('To', { exact: true })).toHaveValue('');
   await expect(email.getByLabel('To', { exact: true })).toHaveAttribute('placeholder', 'No email on file – add a contact');
   await expect(email.getByLabel('Message')).toHaveValue(new RegExp(`^Hi ${helix.name},`));
-  await email.getByRole('button', { name: 'Send email' }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Sending email arrives in release 2' })).toBeVisible();
+  // Sending is covered by leadEmail.spec.ts (release 2B-1); here only that the button is in place.
+  await expect(email.getByRole('button', { name: 'Send email' })).toBeVisible();
 
   // Owner, 22 Nov: the Experience column shows on every lead; with nothing recorded, "—", the company, "—".
   const xp = page.getByRole('region', { name: 'Profile' }).getByRole('list', { name: 'Experience' });
