@@ -41,6 +41,14 @@ model User {
 
   createdCompanies Company[]
 
+  assignedLeads   Lead[]           @relation("LeadAssignee")
+  createdLeads    Lead[]           @relation("LeadCreator")
+  leadActivities  LeadActivity[]
+  assignmentsFrom LeadAssignment[] @relation("AssignmentFrom")
+  assignmentsTo   LeadAssignment[] @relation("AssignmentTo")
+  assignmentsBy   LeadAssignment[] @relation("AssignmentBy")
+  tasks           Task[]
+
   @@map("users")
 }
 
@@ -79,6 +87,8 @@ model AllocationRule {
   roundRobinPos  Int     @default(0) @map("round_robin_pos")
   priority       Int
   isActive       Boolean @default(true) @map("is_active")
+
+  assignments LeadAssignment[]
 
   @@map("allocation_rules")
 }
@@ -223,6 +233,7 @@ model Company {
   createdBy User?             @relation(fields: [createdById], references: [id], onDelete: SetNull)
   contacts  Contact[]
   locations CompanyLocation[]
+  leads     Lead[]
 
   @@index([name])
   @@index([nameNormalised, country])
@@ -248,10 +259,12 @@ model Contact {
   contactType      String   @default("Other") @map("contact_type")
   /// At most one per company: partial unique index contacts_one_primary_per_company (migration SQL).
   isPrimary        Boolean  @default(false) @map("is_primary")
+  isActive         Boolean  @default(true) @map("is_active")
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  leads   Lead[]
 
   @@index([businessEmail])
   @@index([phoneNormalised])
@@ -284,4 +297,125 @@ model CompanyLocation {
 
   @@index([companyId])
   @@map("company_locations")
+}
+
+model Lead {
+  id               Int       @id @default(autoincrement())
+  /// LD-1001 upward; next_lead_number() over lead_number_seq, defined in the migration SQL.
+  number           String    @unique @default(dbgenerated("next_lead_number()"))
+  /// LEAD_TYPES: Lead | Prospect.
+  leadType         String    @default("Lead") @map("lead_type")
+  companyName      String    @map("company_name")
+  companyId        Int?      @map("company_id")
+  contactId        Int?      @map("contact_id")
+  website          String?
+  businessEmail    String?   @map("business_email")
+  phone            String?
+  country          String
+  city             String?
+  /// Lookup `lead_source`.
+  leadSource       String    @map("lead_source")
+  sourceUrl        String?   @map("source_url")
+  importBatch      String?   @map("import_batch")
+  assignedToId     Int?      @map("assigned_to_id")
+  /// PRIORITIES: High | Medium | Low.
+  priority         String    @default("Medium")
+  /// Lookup `lead_status`.
+  status           String    @default("New")
+  nextFollowUp     DateTime? @map("next_follow_up") @db.Date
+  notes            String?
+  /// contact_enquiries does not exist yet; plain column until the Contact Us module adds the relation.
+  enquiryId        Int?      @map("enquiry_id")
+  enrichmentStatus String    @default("Pending") @map("enrichment_status")
+  convertedTo      String?   @map("converted_to")
+  archivedAt       DateTime? @map("archived_at")
+  createdById      Int?      @map("created_by_id")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  company     Company?         @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  contact     Contact?         @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  assignedTo  User?            @relation("LeadAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  createdBy   User?            @relation("LeadCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  activities  LeadActivity[]
+  assignments LeadAssignment[]
+  tasks       Task[]
+
+  @@index([status])
+  @@index([assignedToId])
+  @@index([companyId])
+  @@index([leadType])
+  @@index([nextFollowUp])
+  @@index([createdAt])
+  @@index([country])
+  @@map("leads")
+}
+
+model LeadActivity {
+  id           Int      @id @default(autoincrement())
+  leadId       Int      @map("lead_id")
+  /// ACTIVITY_TYPES.
+  activityType String   @map("activity_type")
+  title        String
+  body         String?
+  url          String?
+  statusFrom   String?  @map("status_from")
+  statusTo     String?  @map("status_to")
+  relatedType  String?  @map("related_type")
+  relatedId    Int?     @map("related_id")
+  /// null = system.
+  byUserId     Int?     @map("by_user_id")
+  occurredAt   DateTime @default(now()) @map("occurred_at")
+
+  lead   Lead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  byUser User? @relation(fields: [byUserId], references: [id], onDelete: SetNull)
+
+  @@index([leadId, occurredAt])
+  @@map("lead_activities")
+}
+
+model LeadAssignment {
+  id         Int      @id @default(autoincrement())
+  leadId     Int      @map("lead_id")
+  fromUserId Int?     @map("from_user_id")
+  /// null = unassigned.
+  toUserId   Int?     @map("to_user_id")
+  /// null = allocation rule.
+  byUserId   Int?     @map("by_user_id")
+  ruleId     Int?     @map("rule_id")
+  note       String?
+  assignedAt DateTime @default(now()) @map("assigned_at")
+
+  lead     Lead            @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  fromUser User?           @relation("AssignmentFrom", fields: [fromUserId], references: [id], onDelete: SetNull)
+  toUser   User?           @relation("AssignmentTo", fields: [toUserId], references: [id], onDelete: SetNull)
+  byUser   User?           @relation("AssignmentBy", fields: [byUserId], references: [id], onDelete: SetNull)
+  rule     AllocationRule? @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+
+  @@index([leadId, assignedAt])
+  @@map("lead_assignments")
+}
+
+model Task {
+  id           Int       @id @default(autoincrement())
+  leadId       Int?      @map("lead_id")
+  /// quotations does not exist yet; plain column until the Quotations module adds the relation.
+  quotationId  Int?      @map("quotation_id")
+  title        String
+  dueDate      DateTime  @map("due_date") @db.Date
+  assignedToId Int       @map("assigned_to_id")
+  isDone       Boolean   @default(false) @map("is_done")
+  doneAt       DateTime? @map("done_at")
+  /// TASK_ORIGINS.
+  origin       String
+  closedReason String?   @map("closed_reason")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  lead       Lead? @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  assignedTo User  @relation(fields: [assignedToId], references: [id], onDelete: Restrict)
+
+  @@index([assignedToId, isDone, dueDate])
+  @@index([leadId, origin, isDone])
+  @@map("tasks")
 }

@@ -12,3 +12,6 @@ export * from './schemas/company.js';
 export * from './schemas/contact.js';
 export * from './schemas/location.js';
 export * from './schemas/paging.js';
+export * from './leads.js';
+export * from './schemas/lead.js';
+export * from './schemas/task.js';

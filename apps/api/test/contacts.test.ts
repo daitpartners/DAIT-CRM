@@ -179,4 +179,10 @@ describe('contacts API', () => {
     const log = await prisma.auditLog.findFirstOrThrow({ where: { entityType: 'contact', action: 'update' } });
     expect(log.entityId).toBe(String(contact.id));
   });
+
+  it('partial unique index still present after 1C migration', async () => {
+    const rows = await prisma.$queryRaw<{ indexname: string }[]>`
+      SELECT indexname FROM pg_indexes WHERE indexname = 'contacts_one_primary_per_company'`;
+    expect(rows).toHaveLength(1);
+  });
 });
