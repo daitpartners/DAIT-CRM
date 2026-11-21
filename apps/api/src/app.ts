@@ -19,6 +19,7 @@ import { notificationRoutes } from './routes/notifications.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { importRoutes } from './routes/imports.js';
 import { navCountRoutes } from './routes/navCounts.js';
+import { reportRoutes } from './routes/reports.js';
 import { NotFoundError, ValidationError } from './validate.js';
 import { registerAuth } from './plugins/auth.js';
 import { createMsalClient, type MicrosoftClient } from './auth/microsoft.js';
@@ -139,6 +140,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(taskRoutes, { prefix: '/api' });
   await app.register(notificationRoutes, { prefix: '/api' });
   await app.register(navCountRoutes, { prefix: '/api' });
+  await app.register(reportRoutes, { prefix: '/api' });
   await app.register(dashboardRoutes, { prefix: '/api' });
   await app.register(importRoutes, { prefix: '/api' });
   return app;
