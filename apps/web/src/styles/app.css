@@ -424,3 +424,42 @@ a.tile{display:block;text-decoration:none}a.tile:hover{border-color:var(--purple
 .card.ph-card h2{color:var(--muted)}
 .card.ph-card p{margin:0;font-size:12.5px;line-height:1.5}
 .card.ph-card .ph-note{font-weight:600;color:var(--faint)}
+/* Lead page (prototype parity, task 4) */
+.btn:disabled{opacity:.55;cursor:not-allowed}.btn.primary:disabled:hover{filter:none}
+.pname{font-size:19px;margin:0}
+.l2col .dim,.side-card .dim,.l2fu .dim,.composer .dim{color:var(--muted);font-size:12.5px}
+ul.xp{list-style:none;margin:0;padding:0}
+.xp-span{font-size:12px}
+.pcontacts small{color:var(--muted);font-size:11px}
+.l2facts dd.dim{color:var(--faint)}
+.composer-head{display:flex;flex-wrap:wrap;align-items:center;gap:0 22px;padding:0 10px 0 18px}
+.composer-head>.tabs{border-bottom:0;padding:0;flex:0 1 auto}
+.composer-head>.l2ctog{order:2}
+.composer-head>[role=tabpanel]{order:3;flex:1 1 100%;margin:0 -10px 0 -18px;border-top:1px solid var(--line)}
+#composer.is-closed [role=tabpanel]{display:none}
+.composer-head .ctab-ph{cursor:not-allowed;opacity:.55}
+.composer .body form{display:flex;flex-direction:column;gap:12px}
+fieldset.bare{border:0;margin:0;padding:0;min-width:0}
+fieldset.bare>legend{padding:0}
+.form-end{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}.form-end .dim{margin-right:auto}
+.l2tl .l2tlb{padding:14px 20px 6px}
+.l2fu.ctrl{display:flex;gap:18px 22px}
+.fu-date{min-width:260px;max-width:320px}
+.fu-row{display:flex;gap:8px;align-items:center}.fu-row .in{width:170px}
+.fu-closed{font-size:11.5px;color:var(--bad-fg)}
+.fu-tasks{flex:1 1 100%;display:flex;flex-direction:column;gap:6px}
+.fu-list{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.fu-task{display:flex;gap:8px;align-items:center;font-size:12.5px;max-width:100%}
+.fu-task input{accent-color:var(--purple)}
+.fu-t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fu-due{color:var(--muted);font-size:11.5px;white-space:nowrap}.fu-due.overdue{color:var(--bad-fg)}
+.fu-more{font-size:12px}
+.side-card{gap:10px}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.co-name{font-size:14px;margin:0}.co-name a{color:var(--text)}
+.co-line{font-size:12.5px;color:var(--muted)}
+.co-links{display:flex;gap:8px 14px;font-size:12.5px;color:var(--muted);flex-wrap:wrap;align-items:center}
+.ph-inline .ph-note{font-weight:600;color:var(--faint)}
+.up-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.xprow.edu{grid-template-columns:minmax(0,1.3fr) minmax(0,1.3fr) 76px 76px 30px}
+.xprow .xp-desc{grid-column:1/-2}

@@ -100,7 +100,7 @@ test('leads and activities tabs list the company\'s leads', async ({ page }) => 
 
   await row.getByRole('link', { name: 'LD-1001' }).click();
   await expect(page).toHaveURL(/\/leads\/\d+$/);
-  await expect(page.getByRole('heading', { name: 'Northwind Logistics', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'LD-1001', level: 1 })).toBeVisible();
 });
 
 test('overview edit opens the company form at the chosen section', async ({ page }) => {

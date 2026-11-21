@@ -4,6 +4,7 @@ import type {
   Priority,
 } from '@dait-crm/shared';
 import { ApiError, api } from './client';
+import type { ContactProfileView } from './contacts';
 import { keys } from './queries';
 import type { TaskRow } from './tasks';
 
@@ -47,11 +48,10 @@ export type LeadDetail = Omit<LeadSummary, 'company' | 'contact'> & {
   company: {
     id: number; number: string; name: string; industry: string | null; city: string | null; country: string;
     employeeRange: string | null; isClient: boolean; verificationStatus: string | null; contactCount: number; openLeadCount: number;
+    legalName: string | null; website: string | null; domain: string | null; businessCategory: string | null; timezone: string | null;
   } | null;
-  contact: {
-    id: number; name: string; firstName: string; lastName: string; designation: string | null; email: string | null;
-    phone: string | null; mobile: string | null; linkedinUrl: string | null; isActive: boolean;
-  } | null;
+  /** The contact's full profile (`contactProfile`) plus `name` / `email` kept for the older screens. */
+  contact: (ContactProfileView & { name: string; email: string | null }) | null;
   createdBy: Ref | null;
 };
 
@@ -144,6 +144,10 @@ export type AssignmentRow = {
 export type LeadFull = LeadDetail & {
   activities: ActivityRow[];
   activityTotal: number;
+  /** All `call` activities on the lead (the "Calls" tab count). */
+  callCount: number;
+  /** The newest call, email or meeting, for "Last contact: {type · when}". */
+  lastContact: { type: string; at: string } | null;
   assignments: AssignmentRow[];
   tasks: TaskRow[];
 };
@@ -286,6 +290,29 @@ export function useLeadAction() {
       qc.setQueryData<LeadFull>(keys.lead(saved.id), (old) => (old ? { ...old, ...saved } : old));
       return refresh();
     },
+    onError: useRefreshWhenOutOfDate(),
+  });
+}
+
+/** Bodies of the compose panel's notes (`POST /api/leads/:id/research|meeting`); `updatedAt` is added from the lead. */
+export type LeadNoteInput =
+  | { lead: Pick<LeadDetail, 'id' | 'updatedAt'>; kind: 'research'; body: { title: string; url?: string; body?: string } }
+  | { lead: Pick<LeadDetail, 'id' | 'updatedAt'>; kind: 'meeting'; body: { title: string; occurredAt: string; body?: string } };
+
+/**
+ * A research or meeting note: one activity on the timeline. The API answers with the activity (201), and the
+ * lead's `updatedAt` has moved, so the lead and every lead list are refetched.
+ */
+export function useLeadNote() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ lead, kind, body }: LeadNoteInput) =>
+      api<ActivityRow>(`/api/leads/${lead.id}/${kind}`, { method: 'POST', body: { ...body, updatedAt: lead.updatedAt } }),
+    onSuccess: (_row, { lead }) =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: keys.lead(lead.id) }),
+        qc.invalidateQueries({ queryKey: keys.leadsAll }),
+      ]),
     onError: useRefreshWhenOutOfDate(),
   });
 }

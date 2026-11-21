@@ -1,8 +1,10 @@
 import { useMemo } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { CONTACT_SORTS, ContactCreate, ContactMatchHow, ContactUpdate } from '@dait-crm/shared';
+import type {
+  CONTACT_SORTS, ContactCreate, ContactMatchHow, ContactProfile, ContactUpdate, EducationEntry, ExperienceEntry,
+} from '@dait-crm/shared';
 import { useDebounce } from '../hooks/useDebounce';
-import { api } from './client';
+import { ApiError, api } from './client';
 import { keys } from './queries';
 
 export type ContactSort = (typeof CONTACT_SORTS)[number];
@@ -23,7 +25,19 @@ export type ContactSummary = {
   contactType: string;
   isPrimary: boolean;
   isActive: boolean;
+  /** Profile header fields (null when not entered). */
+  headline: string | null;
+  location: string | null;
   updatedAt: string;
+};
+
+/** `GET /api/contacts/:id` and the lead page's contact (`contactProfile`): the summary plus the whole profile. */
+export type ContactProfileView = ContactSummary & {
+  about: string | null;
+  experience: ExperienceEntry[];
+  education: EducationEntry[];
+  skills: string[];
+  languages: string[];
 };
 
 /** A contact's display name. */
@@ -140,6 +154,29 @@ export function useMoveContact() {
         qc.invalidateQueries({ queryKey: keys.companiesAll }),
         qc.invalidateQueries({ queryKey: keys.leadsAll }),
       ]);
+    },
+  });
+}
+
+/**
+ * Saves profile fields of a contact (`PATCH /contacts/:id` with any of headline, location, about, experience,
+ * education, skills, languages). The lead page embeds the contact, so leads are refetched too; a stale refusal
+ * refetches them as well, so a retry carries the contact's fresh `updatedAt`.
+ */
+export function useUpdateContactProfile() {
+  const qc = useQueryClient();
+  const refresh = () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: keys.leadsAll }),
+      qc.invalidateQueries({ queryKey: keys.contactsAll }),
+      qc.invalidateQueries({ queryKey: keys.companiesAll }),
+    ]);
+  return useMutation({
+    mutationFn: (v: { id: number; updatedAt: string; profile: ContactProfile }) =>
+      api<ContactProfileView>(`/api/contacts/${v.id}`, { method: 'PATCH', body: { ...v.profile, updatedAt: v.updatedAt } }),
+    onSuccess: refresh,
+    onError: (err) => {
+      if (err instanceof ApiError && err.code === 'stale') void refresh();
     },
   });
 }

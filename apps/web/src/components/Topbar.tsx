@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 
 type TopbarProps = {
   title: string;
-  sub?: string;
+  sub?: ReactNode;
   crumb?: ReactNode;
   /** Shown beside the title (e.g. status badges). */
   badges?: ReactNode;

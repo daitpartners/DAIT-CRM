@@ -471,6 +471,32 @@ describe('leads API', () => {
       headline: 'Head of Ops', location: 'Pune', about: 'Ops lead', experience: [], education: [], skills: ['Lean'], languages: ['Hindi'],
     });
   });
+
+  it('lead detail carries the company card fields, call count and last contact', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const co = await makeCompany({ createdById: rep.user.id });
+    await prisma.company.update({
+      where: { id: co.id },
+      data: { legalName: 'Acme Private Limited', website: 'https://acme-card.test', businessCategory: '3PL', timezone: 'Asia/Kolkata' },
+    });
+    const lead = await makeLead({ companyId: co.id, assignedToId: rep.user.id });
+    const empty = (await req('GET', `/api/leads/${lead.id}`, rep.cookie)).json();
+    expect(empty).toMatchObject({ callCount: 0, lastContact: null });
+    expect(empty.company).toMatchObject({
+      legalName: 'Acme Private Limited', website: 'https://acme-card.test', businessCategory: '3PL', timezone: 'Asia/Kolkata',
+    });
+    const at = new Date(Date.now() - 3_600_000);
+    await prisma.leadActivity.createMany({
+      data: [
+        { leadId: lead.id, activityType: 'call', title: 'Call', occurredAt: new Date(Date.now() - 7_200_000) },
+        { leadId: lead.id, activityType: 'meeting', title: 'Meeting', occurredAt: at },
+        { leadId: lead.id, activityType: 'research', title: 'Research', occurredAt: new Date() },
+      ],
+    });
+    const res = (await req('GET', `/api/leads/${lead.id}`, rep.cookie)).json();
+    expect(res.callCount).toBe(1);
+    expect(res.lastContact).toEqual({ type: 'meeting', at: at.toISOString() });
+  });
   it('research note writes a research activity with url', async () => {
     const rep = await as('SALES_REPRESENTATIVE');
     const lead = await makeLead({ assignedToId: rep.user.id });

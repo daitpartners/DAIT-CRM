@@ -25,9 +25,10 @@ const baseLead: LeadFull = {
   website: null, businessEmail: null, phone: null, sourceUrl: null, importBatch: null, notes: 'Mine', contactId: null,
   company: {
     id: 4, number: 'CO-0245', name: 'Meridian Textiles', industry: null, city: null, country: 'India', employeeRange: null,
-    isClient: false, verificationStatus: null, contactCount: 0, openLeadCount: 1,
+    isClient: false, verificationStatus: null, contactCount: 0, openLeadCount: 1, legalName: null, website: null, domain: null,
+    businessCategory: null, timezone: null,
   },
-  contact: null, createdBy: null, activities: [], activityTotal: 0, assignments: [], tasks: [],
+  contact: null, createdBy: null, activities: [], activityTotal: 0, callCount: 0, lastContact: null, assignments: [], tasks: [],
 };
 
 function setup(me: Me = rep) {
@@ -120,6 +121,6 @@ describe('lead page conflicts', () => {
     await u.click(await screen.findByRole('button', { name: 'Claim' }));
     expect(await screen.findByText('Someone has already taken this lead')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Claim' })).not.toBeInTheDocument());
-    expect(screen.getByText(/LD-1005 · New · Arjun Mehta/)).toBeInTheDocument();
+    expect(screen.getByText(/Owner:/)).toHaveTextContent('Owner: Arjun Mehta');
   });
 });

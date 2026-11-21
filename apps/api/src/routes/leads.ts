@@ -255,9 +255,15 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
       }
       const { id } = await assertLeadVisible(prisma, user, leadId(request.params.id), { includeArchived: true });
       const today = todayIn(user.timezone);
-      const [row, activityTotal, activities, assignments, tasks] = await Promise.all([
+      const [row, activityTotal, callCount, lastContact, activities, assignments, tasks] = await Promise.all([
         prisma.lead.findUnique({ where: { id }, include: leadDetailInclude }),
         prisma.leadActivity.count({ where: { leadId: id } }),
+        // The lead page's "Calls {n}" tab and "Last contact: {type · when}" line.
+        prisma.leadActivity.count({ where: { leadId: id, activityType: 'call' } }),
+        prisma.leadActivity.findFirst({
+          where: { leadId: id, activityType: { in: ['call', 'email', 'meeting'] }, occurredAt: { lte: new Date() } },
+          orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], select: { activityType: true, occurredAt: true },
+        }),
         prisma.leadActivity.findMany({
           where: { leadId: id }, include: activityInclude, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
           skip: (page - 1) * ACTIVITY_PAGE_SIZE, take: ACTIVITY_PAGE_SIZE,
@@ -270,6 +276,8 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
         ...leadDetail(row, today),
         activities: activities.map(activityRow),
         activityTotal,
+        callCount,
+        lastContact: lastContact ? { type: lastContact.activityType, at: lastContact.occurredAt } : null,
         assignments: assignments.map(assignmentRow),
         tasks: tasks.map((t) => taskRow(t, today)),
       };

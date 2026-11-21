@@ -1,10 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { CALL_OUTCOMES, isClosedStatus, type CallOutcome } from '@dait-crm/shared';
 import { useLeadAction, type LeadFull } from '../../api/leads';
 import type { LookupValue } from '../../api/queries';
 import { FormField } from '../../components/FormField';
-import { Modal } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
 import { applyServerIssues } from '../../forms/applyServerIssues';
 import { leadStatusText } from '../../i18n/labels';
@@ -39,19 +38,23 @@ function fieldMessage(t: TFn, f: Field): string {
 }
 
 /**
- * Log call: outcome, minutes, note, an optional status after the call and the next follow-up, in
- * one POST. Closed statuses are not offered (Lost / Not Relevant need a reason: use Close lead).
+ * The compose panel's "Call note" tab (formerly the Log call dialog): outcome, minutes, note, an optional status
+ * after the call and the next follow-up, in one POST to `/log-call`. Closed statuses are not offered (Lost /
+ * Not Relevant need a reason: use Close lead). After a save the form clears for the next call.
  */
-export function LogCallModal({ lead, statuses, onClose }: { lead: LeadFull; statuses: LookupValue[]; onClose: () => void }) {
+export function CallNoteForm({ lead, statuses, disabled }: { lead: LeadFull; statuses: LookupValue[]; disabled?: boolean }) {
   const t = useT();
   const toast = useToast();
   const action = useLeadAction();
   const onFail = useActionError();
   const [formError, setFormError] = useState<string | null>(null);
-  const { register, handleSubmit, setError, watch, formState } = useForm<Values>({
-    defaultValues: { outcome: 'Connected', minutes: '', body: '', statusAfter: '', nextFollowUp: lead.nextFollowUp ?? '' },
-  });
-  const { errors } = formState;
+  const defaults = (): Values => ({ outcome: 'Connected', minutes: '', body: '', statusAfter: '', nextFollowUp: lead.nextFollowUp ?? '' });
+  const { register, handleSubmit, setError, watch, reset, resetField, formState } = useForm<Values>({ defaultValues: defaults() });
+  const { errors, dirtyFields } = formState;
+  // The follow-up can change elsewhere on the page (Follow-up tab): an untouched field follows it.
+  useEffect(() => {
+    if (!dirtyFields.nextFollowUp) resetField('nextFollowUp', { defaultValue: lead.nextFollowUp ?? '' });
+  }, [lead.nextFollowUp, dirtyFields.nextFollowUp, resetField]);
   const options = statuses
     .filter((s) => s.isActive && !isClosedStatus(s.value) && s.value !== lead.status)
     .sort((a, b) => a.sortOrder - b.sortOrder);
@@ -65,8 +68,8 @@ export function LogCallModal({ lead, statuses, onClose }: { lead: LeadFull; stat
       setError('minutes', { type: 'server', message: fieldMessage(t, 'minutes') });
       return;
     }
-    // Send the follow-up only when it changed: an untouched field must not clear it.
-    const changed = followUpAllowed && v.nextFollowUp !== (lead.nextFollowUp ?? '');
+    // Send the follow-up only when the user changed it: an untouched field must not clear or move it.
+    const changed = followUpAllowed && Boolean(dirtyFields.nextFollowUp) && v.nextFollowUp !== (lead.nextFollowUp ?? '');
     action.mutate(
       {
         lead,
@@ -80,9 +83,9 @@ export function LogCallModal({ lead, statuses, onClose }: { lead: LeadFull; stat
         },
       },
       {
-        onSuccess: () => {
+        onSuccess: (saved) => {
           toast(t('Call logged'));
-          onClose();
+          reset({ ...defaults(), nextFollowUp: saved.nextFollowUp ?? '' });
         },
         onError: (err) => {
           onFail(err);
@@ -96,21 +99,8 @@ export function LogCallModal({ lead, statuses, onClose }: { lead: LeadFull; stat
   const aria = (f: Field) => ({ 'aria-invalid': Boolean(errors[f]), 'aria-describedby': errors[f] ? `lc-${f}-err` : undefined });
 
   return (
-    <Modal
-      title={t('Log call')}
-      onClose={onClose}
-      actions={
-        <>
-          <button type="button" className="btn" onClick={onClose}>
-            {t('Cancel')}
-          </button>
-          <button type="submit" form="log-call-form" className="btn primary" disabled={action.isPending}>
-            {t('Save')}
-          </button>
-        </>
-      }
-    >
-      <form id="log-call-form" noValidate className="grid2" onSubmit={(e) => void handleSubmit(submit)(e)}>
+    <form noValidate className="cnote" aria-label={t('Call note')} onSubmit={(e) => void handleSubmit(submit)(e)}>
+      <fieldset className="grid3 bare" disabled={disabled}>
         <FormField id="lc-outcome" label={t('Outcome')} required error={err('outcome')}>
           <select id="lc-outcome" className="in" {...aria('outcome')} {...register('outcome')}>
             {CALL_OUTCOMES.map((o) => (
@@ -123,9 +113,6 @@ export function LogCallModal({ lead, statuses, onClose }: { lead: LeadFull; stat
         <FormField id="lc-minutes" label={t('Minutes')} error={err('minutes')}>
           <input id="lc-minutes" type="number" min={0} max={600} step={1} className={errors.minutes ? 'in err' : 'in'} {...aria('minutes')} {...register('minutes')} />
         </FormField>
-        <FormField id="lc-body" label={t('Note')} error={err('body')} className="span2">
-          <textarea id="lc-body" className="in" rows={3} {...aria('body')} {...register('body')} />
-        </FormField>
         <FormField id="lc-statusAfter" label={t('Status after call')} error={err('statusAfter')}>
           <select id="lc-statusAfter" className="in" {...aria('statusAfter')} {...register('statusAfter')}>
             <option value="">{t('Keep {status}', { status: leadStatusText(t, lead.status) })}</option>
@@ -135,6 +122,9 @@ export function LogCallModal({ lead, statuses, onClose }: { lead: LeadFull; stat
               </option>
             ))}
           </select>
+        </FormField>
+        <FormField id="lc-body" label={t('Note')} error={err('body')} className="span3">
+          <textarea id="lc-body" className="in" rows={4} placeholder={t('Key points, objections, next step agreed…')} {...aria('body')} {...register('body')} />
         </FormField>
         <FormField id="lc-nextFollowUp" label={t('Next follow-up')} error={err('nextFollowUp')}>
           <input
@@ -146,12 +136,17 @@ export function LogCallModal({ lead, statuses, onClose }: { lead: LeadFull; stat
             {...register('nextFollowUp')}
           />
         </FormField>
-        {formError ? (
-          <div className="span2 note warn" role="alert">
-            {formError}
-          </div>
-        ) : null}
-      </form>
-    </Modal>
+      </fieldset>
+      {formError ? (
+        <div className="note warn" role="alert">
+          {formError}
+        </div>
+      ) : null}
+      <div className="form-end">
+        <button type="submit" className="btn primary" disabled={disabled || action.isPending}>
+          {t('Save call')}
+        </button>
+      </div>
+    </form>
   );
 }

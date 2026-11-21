@@ -14,11 +14,13 @@ function inDays(days: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/** Opens a lead from the leads list by company name. */
+/** Opens a lead from the leads list by company name (the page's title is the lead number). */
 async function openLead(page: Page, company: string) {
   await page.goto('/leads');
-  await page.getByRole('row').filter({ hasText: company }).getByRole('link').first().click();
-  await expect(page.getByRole('heading', { name: company, level: 1 })).toBeVisible();
+  const row = page.getByRole('row').filter({ hasText: company }).first();
+  const number = (await row.getByRole('link', { name: /^LD-\d+$/ }).first().textContent())!.trim();
+  await row.getByRole('link').first().click();
+  await expect(page.getByRole('heading', { name: number, level: 1 })).toBeVisible();
 }
 
 /** Picks an option of a Combobox: a plain <select> for short lists, a search box for long ones. */
@@ -31,18 +33,29 @@ async function choose(field: Locator, label: string) {
 }
 
 const stepper = (page: Page) => page.getByRole('list', { name: 'Lead status' });
-const timeline = (page: Page) => page.getByRole('list', { name: 'Activity timeline' });
-/** The value next to a label in a facts list (`<dt>` / `<dd>`). */
-const fact = (scope: Page | Locator, label: string) =>
-  scope.locator('dt', { hasText: new RegExp(`^${label}$`) }).locator('xpath=following-sibling::dd[1]');
+/** The activity history sits under the Calls tab of the Follow-up / Emails / Calls card. */
+const timeline = async (page: Page) => {
+  await page.getByRole('tab', { name: /^Calls/ }).click();
+  return page.getByRole('list', { name: 'Activity timeline' });
+};
+/** The Follow-up tab's next follow-up date. */
+const followUp = async (page: Page) => {
+  await page.getByRole('tab', { name: /^Follow-up/ }).click();
+  return page.getByRole('group', { name: 'Next follow-up' }).getByLabel('Next follow-up');
+};
+/** An item of the header's "More" menu. */
+const more = async (page: Page, item: string) => {
+  await page.getByRole('button', { name: 'More' }).click();
+  await page.getByRole('menuitem', { name: item }).click();
+};
 
 test('log call sets status and creates a follow-up task', async ({ page }) => {
   await signInAs(page, ARJUN);
   await openLead(page, 'Northwind Logistics');
   await expect(stepper(page).getByRole('button', { name: 'New', exact: true })).toHaveAttribute('aria-current', 'step');
 
-  await page.getByRole('button', { name: 'Log call' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Log call' });
+  await page.getByRole('tab', { name: 'Call note' }).click();
+  const dialog = page.getByRole('form', { name: 'Call note' });
   await dialog.getByLabel('Outcome').selectOption('Connected');
   await dialog.getByLabel('Minutes').fill('5');
   await dialog.getByLabel('Note').fill('Spoke to the operations head');
@@ -50,13 +63,13 @@ test('log call sets status and creates a follow-up task', async ({ page }) => {
   await expect(dialog.getByLabel('Status after call').locator('option', { hasText: 'Lost' })).toHaveCount(0);
   await dialog.getByLabel('Status after call').selectOption({ label: 'Contacted' });
   await dialog.getByLabel('Next follow-up').fill(inDays(2));
-  await dialog.getByRole('button', { name: 'Save' }).click();
-  await expect(dialog).toBeHidden();
+  await dialog.getByRole('button', { name: 'Save call' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Call logged' })).toBeVisible();
+  await expect(dialog.getByLabel('Note')).toHaveValue('');
 
   await expect(stepper(page).getByRole('button', { name: 'Contacted', exact: true })).toHaveAttribute('aria-current', 'step');
-  await expect(timeline(page).getByRole('listitem').filter({ hasText: 'Call · Connected' })).toContainText('5 min · Spoke to the operations head');
-  await expect(timeline(page).getByRole('listitem').filter({ hasText: 'New → Contacted' })).toBeVisible();
+  await expect((await timeline(page)).getByRole('listitem').filter({ hasText: 'Call · Connected' })).toContainText('5 min · Spoke to the operations head');
+  await expect((await timeline(page)).getByRole('listitem').filter({ hasText: 'New → Contacted' })).toBeVisible();
 
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Tasks' }).click();
   await page.getByRole('tab', { name: /Upcoming/ }).click();
@@ -73,7 +86,7 @@ test('transfer requires a note and notifies the receiver', async ({ page }) => {
   expect(created.status()).toBe(201);
   await openLead(page, company);
 
-  await page.getByRole('button', { name: 'Transfer' }).click();
+  await more(page, 'Transfer');
   const dialog = page.getByRole('dialog', { name: 'Transfer lead' });
   await choose(dialog.getByRole('combobox', { name: 'Transfer to' }), 'Arjun Mehta');
   await dialog.getByRole('button', { name: 'Transfer' }).click();
@@ -84,7 +97,7 @@ test('transfer requires a note and notifies the receiver', async ({ page }) => {
   await dialog.getByRole('button', { name: 'Transfer' }).click();
   await expect(dialog).toBeHidden();
   await expect(page.locator('.topbar .sub')).toContainText('Arjun Mehta');
-  await expect(timeline(page)).toContainText('Arjun covers India this quarter');
+  await expect(await timeline(page)).toContainText('Arjun covers India this quarter');
 
   await signInAs(page, ARJUN);
   await expect(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: /Notifications/ })).toContainText('1');
@@ -95,9 +108,9 @@ test('transfer requires a note and notifies the receiver', async ({ page }) => {
 test('closing as Lost needs a reason and clears follow-up', async ({ page }) => {
   await signInAs(page, ARJUN);
   await openLead(page, 'Northwind Logistics');
-  await expect(fact(page, 'Next follow-up')).not.toHaveText('—');
+  await expect(await followUp(page)).not.toHaveValue('');
 
-  await page.getByRole('button', { name: 'Close lead' }).click();
+  await more(page, 'Close lead');
   const dialog = page.getByRole('dialog', { name: 'Close lead' });
   await dialog.getByRole('radio', { name: 'Lost' }).check();
   await dialog.getByRole('button', { name: 'Close lead' }).click();
@@ -107,9 +120,9 @@ test('closing as Lost needs a reason and clears follow-up', async ({ page }) => 
   await expect(dialog).toBeHidden();
 
   await expect(stepper(page).getByRole('button', { name: 'Lost' })).toHaveAttribute('aria-current', 'step');
-  await expect(fact(page, 'Next follow-up')).toHaveText('—');
+  await expect(await followUp(page)).toHaveValue('');
   await expect(page.getByRole('region', { name: 'Open tasks' })).toContainText('No open tasks');
-  await expect(timeline(page).getByRole('listitem').filter({ hasText: 'Contacted → Lost' })).toContainText('Chose a local vendor');
+  await expect((await timeline(page)).getByRole('listitem').filter({ hasText: 'Contacted → Lost' })).toContainText('Chose a local vendor');
 
   await page.goto('/tasks?tab=upcoming');
   await expect(page.getByRole('heading', { name: 'Tasks', level: 1 })).toBeVisible();

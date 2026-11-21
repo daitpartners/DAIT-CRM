@@ -39,8 +39,11 @@ function today(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/** Add a manual task (optionally on a lead), or edit a task's title, due date and assignee. */
-export function TaskModal({ task, onClose }: { task?: TaskRow; onClose: () => void }) {
+/**
+ * Add a manual task (optionally on a lead; `lead` fixes it, as from the lead page's "+ Task"), or edit a task's
+ * title, due date and assignee.
+ */
+export function TaskModal({ task, lead, onClose }: { task?: TaskRow; lead?: Pick<TaskRow, 'lead'>['lead']; onClose: () => void }) {
   const t = useT();
   const me = useCurrentUser();
   const toast = useToast();
@@ -49,6 +52,7 @@ export function TaskModal({ task, onClose }: { task?: TaskRow; onClose: () => vo
   const save = useSaveTask();
   const [formError, setFormError] = useState<string | null>(null);
   const editing = Boolean(task);
+  const fixedLead = task ? task.lead : lead;
 
   const resolver = useMemo<Resolver<Values>>(() => {
     const zod = (editing ? zodResolver(TaskUpdate) : zodResolver(TaskCreate)) as unknown as Resolver<Values>;
@@ -70,7 +74,7 @@ export function TaskModal({ task, onClose }: { task?: TaskRow; onClose: () => vo
       title: task?.title ?? '',
       dueDate: task?.dueDate ?? today(),
       assignedToId: String(task?.assignedTo.id ?? me.id),
-      leadId: task?.leadId ? String(task.leadId) : '',
+      leadId: task?.leadId ? String(task.leadId) : lead ? String(lead.id) : '',
       ...(task ? { updatedAt: task.updatedAt } : {}),
     },
   });
@@ -149,9 +153,9 @@ export function TaskModal({ task, onClose }: { task?: TaskRow; onClose: () => vo
           </select>
         </FormField>
         <div className="span2">
-          {task ? (
+          {task || lead ? (
             <FormField id="tk-lead" label={t('Lead')}>
-              <input id="tk-lead" className="in" readOnly value={task.lead ? `${task.lead.number} ${task.lead.companyName}` : t('No lead')} />
+              <input id="tk-lead" className="in" readOnly value={fixedLead ? `${fixedLead.number} ${fixedLead.companyName}` : t('No lead')} />
             </FormField>
           ) : (
             <LeadPicker value={leadId} onChange={(v) => setValue('leadId', v)} />

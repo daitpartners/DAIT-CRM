@@ -47,8 +47,11 @@ export function TimelineEntry({ activity: a, last, extra }: { activity: Activity
   );
 }
 
-/** The lead's activities, newest first: page 1 comes with the lead, "Show earlier" adds 15 at a time. */
-export function Timeline({ lead }: { lead: LeadFull }) {
+/**
+ * The lead's activities, newest first: page 1 comes with the lead, "Show earlier" adds 15 at a time.
+ * `framed={false}` drops the card and heading (inside the lead page's Calls tab).
+ */
+export function Timeline({ lead, framed = true }: { lead: LeadFull; framed?: boolean }) {
   const t = useT();
   const [pages, setPages] = useState(1);
   const earlier = useEarlierActivities(lead.id, pages);
@@ -66,11 +69,8 @@ export function Timeline({ lead }: { lead: LeadFull }) {
   }, [lead.activities, earlier]);
   const more = pages * LEAD_ACTIVITY_PAGE_SIZE < lead.activityTotal;
 
-  return (
-    <section className="card" aria-labelledby="lead-tl-title">
-      <h2 id="lead-tl-title" className="card-title">
-        {t('Timeline')}
-      </h2>
+  const body = (
+    <>
       {rows.length === 0 ? (
         <div className="empty">{t('No activity yet')}</div>
       ) : (
@@ -87,6 +87,15 @@ export function Timeline({ lead }: { lead: LeadFull }) {
           </button>
         </div>
       ) : null}
+    </>
+  );
+  if (!framed) return <div className="tl-bare">{body}</div>;
+  return (
+    <section className="card" aria-labelledby="lead-tl-title">
+      <h2 id="lead-tl-title" className="card-title">
+        {t('Timeline')}
+      </h2>
+      {body}
     </section>
   );
 }

@@ -20,7 +20,7 @@ export const leadDetailInclude = {
   company: {
     select: {
       id: true, number: true, name: true, industry: true, city: true, country: true, employeeRange: true,
-      isClient: true, verificationStatus: true,
+      isClient: true, verificationStatus: true, legalName: true, website: true, domain: true, businessCategory: true, timezone: true,
       _count: {
         select: {
           contacts: true,
@@ -97,6 +97,9 @@ export function leadDetail(l: LeadDetailRow, today: string) {
           country: company.country, employeeRange: company.employeeRange, isClient: company.isClient,
           verificationStatus: company.verificationStatus, contactCount: company._count.contacts,
           openLeadCount: company._count.leads,
+          // The lead page's company card and facts grid (legal name, website, segment, time zone).
+          legalName: company.legalName, website: company.website, domain: company.domain,
+          businessCategory: company.businessCategory, timezone: company.timezone,
         }
       : null,
     // The full contact profile; `name` and `email` kept for the existing lead screens.
