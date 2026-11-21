@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { CLOSED_STATUSES, isClosedStatus } from '@dait-crm/shared';
 import { ymd } from './dates.js';
+import { contactProfile, contactSummaryInclude } from '../companies/serialize.js';
 
 /*
  * Serializers take `today` (YYYY-MM-DD in the viewer's timezone: `todayIn(user.timezone)`) so
@@ -28,12 +29,7 @@ export const leadDetailInclude = {
       },
     },
   },
-  contact: {
-    select: {
-      id: true, firstName: true, lastName: true, designation: true, businessEmail: true, phone: true, mobile: true,
-      linkedinUrl: true, isActive: true,
-    },
-  },
+  contact: { include: contactSummaryInclude },
   assignedTo: person,
   createdBy: person,
 } satisfies Prisma.LeadInclude;
@@ -103,13 +99,8 @@ export function leadDetail(l: LeadDetailRow, today: string) {
           openLeadCount: company._count.leads,
         }
       : null,
-    contact: contact
-      ? {
-          id: contact.id, name: fullName(contact), firstName: contact.firstName, lastName: contact.lastName,
-          designation: contact.designation, email: contact.businessEmail, phone: contact.phone, mobile: contact.mobile,
-          linkedinUrl: contact.linkedinUrl, isActive: contact.isActive,
-        }
-      : null,
+    // The full contact profile; `name` and `email` kept for the existing lead screens.
+    contact: contact ? { ...contactProfile(contact), name: fullName(contact), email: contact.businessEmail } : null,
     assignedTo: ref(assignedTo),
     createdBy: ref(createdBy),
   };

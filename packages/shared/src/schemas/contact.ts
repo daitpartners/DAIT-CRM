@@ -17,7 +17,42 @@ export const ContactCreate = z.object({
 });
 export type ContactCreate = z.infer<typeof ContactCreate>;
 
+const text = (max: number) => z.string().trim().min(1).max(max);
+/** A period end-point as typed: a year, `YYYY-MM` or a date (≤ 10 chars). */
+const period = z.string().trim().min(1).max(10);
+
+export const ExperienceEntry = z.object({
+  title: text(120),
+  company: text(120),
+  from: period,
+  /** null = present. */
+  to: period.nullable(),
+  description: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), z.string().trim().max(1000).nullable()),
+});
+export type ExperienceEntry = z.infer<typeof ExperienceEntry>;
+
+export const EducationEntry = z.object({
+  school: text(120),
+  degree: text(120),
+  from: period,
+  to: period,
+});
+export type EducationEntry = z.infer<typeof EducationEntry>;
+
+/** The contact's profile (LinkedIn-style); every field optional so PATCH can send any subset. */
+export const ContactProfile = z.object({
+  headline: optionalText(200),
+  location: optionalText(200),
+  about: optionalText(5000),
+  experience: z.array(ExperienceEntry).max(20),
+  education: z.array(EducationEntry).max(10),
+  skills: z.array(text(60)).max(40),
+  languages: z.array(text(60)).max(20),
+}).partial();
+export type ContactProfile = z.infer<typeof ContactProfile>;
+
 export const ContactUpdate = ContactCreate.omit({ companyId: true }).partial()
+  .merge(ContactProfile)
   .extend({ isActive: z.boolean().optional(), updatedAt: z.string().datetime() });
 export type ContactUpdate = z.infer<typeof ContactUpdate>;
 

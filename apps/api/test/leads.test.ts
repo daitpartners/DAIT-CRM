@@ -455,4 +455,20 @@ describe('leads API', () => {
     expect((await req('GET', `/api/companies/${hidden.id}/activities`, rep.cookie)).statusCode).toBe(404);
     expect((await req('GET', `/api/companies/${acme.id}/activities`)).statusCode).toBe(401);
   });
+  it('lead detail includes contact profile', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const co = await makeCompany({ createdById: rep.user.id });
+    const c = await makeContact({ companyId: co.id, firstName: 'Asha', lastName: 'Rao', businessEmail: 'asha@acme.test' });
+    await prisma.contact.update({
+      where: { id: c.id },
+      data: { headline: 'Head of Ops', location: 'Pune', about: 'Ops lead', skills: ['Lean'], languages: ['Hindi'] },
+    });
+    const lead = await makeLead({ companyId: co.id, contactId: c.id, assignedToId: rep.user.id });
+    const res = await req('GET', `/api/leads/${lead.id}`, rep.cookie);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().contact).toMatchObject({
+      id: c.id, name: 'Asha Rao', email: 'asha@acme.test', businessEmail: 'asha@acme.test', company: { id: co.id },
+      headline: 'Head of Ops', location: 'Pune', about: 'Ops lead', experience: [], education: [], skills: ['Lean'], languages: ['Hindi'],
+    });
+  });
 });

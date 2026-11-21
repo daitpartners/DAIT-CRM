@@ -9,7 +9,7 @@ import { audit } from '../audit.js';
 import { NotFoundError, ValidationError, parseBody, parseQuery } from '../validate.js';
 import { requireRight, requireUser } from '../plugins/auth.js';
 import { assertCompanyVisible, companyWhere, visibleCompanyIds } from '../companies/visibility.js';
-import { contactSummary, contactSummaryInclude } from '../companies/serialize.js';
+import { contactProfile, contactSummary, contactSummaryInclude } from '../companies/serialize.js';
 import { findContactMatches } from '../companies/match.js';
 import { assertLookupValue } from '../companies/lookups.js';
 import { StaleError, isNotFound, isUniqueViolation } from '../prismaErrors.js';
@@ -72,6 +72,15 @@ export const contactRoutes: FastifyPluginAsync = async (app) => {
       }),
     ]);
     return { items: rows.map(contactSummary), total, page: query.page, pageSize: query.pageSize };
+  });
+
+  /** One contact with its full profile; 404 unless its company is visible to the user. */
+  app.get<{ Params: { id: string } }>('/contacts/:id', { preHandler: [requireUser] }, async (request) => {
+    const id = Number(request.params.id);
+    if (!Number.isInteger(id)) throw new NotFoundError();
+    const row = await prisma.contact.findFirst({ where: { id, company: companyWhere(request.user!) }, include: contactSummaryInclude });
+    if (!row) throw new NotFoundError();
+    return contactProfile(row);
   });
 
   app.post('/contacts', { preHandler: [requireRight('manage_companies')] }, async (request, reply) => {

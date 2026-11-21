@@ -287,4 +287,61 @@ describe('contacts API', () => {
       SELECT indexname FROM pg_indexes WHERE indexname = 'contacts_one_primary_per_company'`;
     expect(rows).toHaveLength(1);
   });
+  it('profile fields round-trip and default to empty arrays', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const co = await makeCompany({ name: 'Acme' });
+    const c = await makeContact({ companyId: co.id, firstName: 'Asha', lastName: 'Rao' });
+    const fresh = await req('GET', `/api/contacts/${c.id}`, admin.cookie);
+    expect(fresh.statusCode).toBe(200);
+    expect(fresh.json()).toMatchObject({
+      id: c.id, company: { id: co.id, name: 'Acme' }, headline: null, location: null, about: null,
+      experience: [], education: [], skills: [], languages: [],
+    });
+    const profile = {
+      headline: 'Head of Ops', location: 'Pune, India', about: 'Runs operations.',
+      experience: [
+        { title: 'Head of Ops', company: 'Acme', from: '2021-04', to: null, description: 'Plants and logistics' },
+        { title: 'Manager', company: 'Beta', from: '2017-01', to: '2021-03', description: null },
+      ],
+      education: [{ school: 'IIT Bombay', degree: 'B.Tech', from: '2010', to: '2014' }],
+      skills: ['Lean', 'SAP'],
+      languages: ['English', 'Hindi'],
+    };
+    const res = await req('PATCH', `/api/contacts/${c.id}`, admin.cookie, { ...profile, updatedAt: c.updatedAt.toISOString() });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ headline: 'Head of Ops', location: 'Pune, India' });
+    const got = await req('GET', `/api/contacts/${c.id}`, admin.cookie);
+    expect(got.json()).toMatchObject(profile);
+    const list = (await req('GET', `/api/contacts?companyId=${co.id}`, admin.cookie)).json();
+    expect(list.items[0]).toMatchObject({ headline: 'Head of Ops', location: 'Pune, India' });
+    expect(list.items[0].experience).toBeUndefined();
+    const log = await prisma.auditLog.findFirstOrThrow({ where: { entityType: 'contact', entityId: String(c.id), action: 'update' } });
+    expect(log.after).toMatchObject({ headline: 'Head of Ops' });
+  });
+
+  it('GET /contacts/:id is 404 for a hidden company or unknown id', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    const hidden = await makeCompany({ createdById: other.id });
+    await makeLead({ companyId: hidden.id, assignedToId: other.id });
+    const c = await makeContact({ companyId: hidden.id });
+    expect((await req('GET', `/api/contacts/${c.id}`, rep.cookie)).statusCode).toBe(404);
+    expect((await req('GET', '/api/contacts/999999', rep.cookie)).statusCode).toBe(404);
+    expect((await req('GET', '/api/contacts/abc', rep.cookie)).statusCode).toBe(404);
+    expect((await req('GET', `/api/contacts/${c.id}`)).statusCode).toBe(401);
+  });
+
+  it('rejects 21 experience rows', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const c = await makeContact();
+    const row = { title: 'T', company: 'C', from: '2020', to: null, description: null };
+    const res = await req('PATCH', `/api/contacts/${c.id}`, admin.cookie, {
+      experience: Array.from({ length: 21 }, () => row), updatedAt: c.updatedAt.toISOString(),
+    });
+    expect(res.statusCode).toBe(400);
+    const ok = await req('PATCH', `/api/contacts/${c.id}`, admin.cookie, {
+      experience: Array.from({ length: 20 }, () => row), updatedAt: c.updatedAt.toISOString(),
+    });
+    expect(ok.statusCode).toBe(200);
+  });
 });

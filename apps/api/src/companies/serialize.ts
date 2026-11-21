@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import type { EducationEntry, ExperienceEntry } from '@dait-crm/shared';
 
 /** Relations every company response needs: the primary contact and the contact count. */
 export const companySummaryInclude = {
@@ -84,7 +85,23 @@ export function contactSummary(c: ContactRow) {
     contactType: c.contactType,
     isPrimary: c.isPrimary,
     isActive: c.isActive,
+    headline: c.headline,
+    location: c.location,
     updatedAt: c.updatedAt,
+  };
+}
+
+const list = <T>(v: Prisma.JsonValue): T[] => (Array.isArray(v) ? (v as T[]) : []);
+
+/** The contact page: the summary plus the whole profile (about, experience, education, skills, languages). */
+export function contactProfile(c: ContactRow) {
+  return {
+    ...contactSummary(c),
+    about: c.about,
+    experience: list<ExperienceEntry>(c.experience),
+    education: list<EducationEntry>(c.education),
+    skills: list<string>(c.skills),
+    languages: list<string>(c.languages),
   };
 }
 

@@ -260,6 +260,17 @@ model Contact {
   /// At most one per company: partial unique index contacts_one_primary_per_company (migration SQL).
   isPrimary        Boolean  @default(false) @map("is_primary")
   isActive         Boolean  @default(true) @map("is_active")
+  headline         String?
+  location         String?
+  about            String?
+  /// [{ title, company, from, to, description }]; shape enforced by the shared ContactProfile schema.
+  experience       Json     @default("[]")
+  /// [{ school, degree, from, to }]
+  education        Json     @default("[]")
+  /// string[]
+  skills           Json     @default("[]")
+  /// string[]
+  languages        Json     @default("[]")
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
