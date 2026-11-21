@@ -6,6 +6,7 @@ export * from './schemas/allocation.js';
 export * from './rights.js';
 export * from './i18n.js';
 export * from './normalise.js';
+export * from './matching.js';
 export * from './schemas/common.js';
 export * from './schemas/company.js';
 export * from './schemas/contact.js';
