@@ -1,6 +1,7 @@
 import { Navigate, createBrowserRouter, useLocation } from 'react-router-dom';
 import { RequireAuth } from './components/RequireAuth';
 import { Dashboard } from './pages/Dashboard';
+import { EmailPage } from './pages/email/EmailPage';
 import { NotFound } from './pages/NotFound';
 import { CompaniesList } from './pages/companies/CompaniesList';
 import { CompanyProfile } from './pages/companies/CompanyProfile';
@@ -39,6 +40,8 @@ export const router = createBrowserRouter([
       { path: 'companies', element: <CompaniesList /> },
       { path: 'companies/:id', element: <CompanyProfile /> },
       { path: 'contacts', element: <ContactsList /> },
+      { path: 'email', element: <EmailPage /> },
+      { path: 'email/:id', element: <EmailPage /> },
       { path: 'tasks', element: <TasksList /> },
       { path: 'notifications', element: <NotificationsList /> },
       { path: 'reports', element: <ReportsPage /> },

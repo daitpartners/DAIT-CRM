@@ -235,6 +235,14 @@ export function errorText(t: TFn, code: string, vars: Record<string, string | nu
       });
     case 'company_already_linked':
       return t('This lead is already linked to a company');
+    case 'already_logged':
+      return t('This email is already on the lead.');
+    case 'no_lead':
+      return t('Link this email to a lead first.');
+    case 'draft':
+      return t('Drafts are edited in Outlook.');
+    case 'not_connected':
+      return t('Your mailbox needs reconnecting in Settings → Email & calendar connections.');
     case 'task_done':
       return t('This task is already done');
     default:

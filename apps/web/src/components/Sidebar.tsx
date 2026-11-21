@@ -52,6 +52,7 @@ export function Sidebar({ me, open, onNavigate }: SidebarProps) {
       {item('/leads', t('Leads'), 'leads', false, badge(counts?.leads, String(counts?.leads)))}
       {item('/companies', t('Companies'), 'companies')}
       {item('/contacts', t('Contacts'), 'contacts')}
+      {me.rights.includes('use_email') ? item('/email', t('Email'), 'mail', false, badge(counts?.mailUnread, String(counts?.mailUnread))) : null}
       <div className="navsec">{t('Work')}</div>
       {item('/tasks', t('Tasks'), 'tasks', false, badge(counts?.overdueTasks, t('{n} overdue', { n: counts?.overdueTasks ?? 0 })))}
       {item('/notifications', t('Notifications'), 'bell', false, badge(counts?.unread, t('{n} new', { n: counts?.unread ?? 0 }), true))}

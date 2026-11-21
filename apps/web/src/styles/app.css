@@ -584,3 +584,58 @@ td.nowrap{white-space:nowrap}
 .mail-subject{font-weight:600;color:var(--text)}
 .mail-meta{flex-basis:100%;font-size:12.5px;color:var(--muted)}
 .mail-body{white-space:pre-wrap;font:inherit;font-size:13px;color:var(--body);margin:10px 0 0}
+
+/* Email screen (release 2B-2; prototype .mail, .folders, .fold, .msglist, .msg, .reader, .mailside). */
+.mail-filters{background:var(--surface);padding:10px 28px;border-bottom:1px solid var(--line)}
+.mail-for{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-right:4px}
+.mail-pick{width:240px;max-width:100%}
+.mail-search{height:34px;width:300px}
+.mail-search input{border:0;outline:0;background:none;flex:1;min-width:0;font:inherit;font-size:13px}
+.mail{display:flex;flex-wrap:wrap;align-items:stretch;flex-grow:1}
+.folders{flex:0 0 190px;padding:18px 14px;border-right:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;gap:2px}
+.fold{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;font-size:13px;font-weight:500;color:var(--body);border:0;background:none;text-align:left;cursor:pointer;text-decoration:none}
+.fold.on{background:var(--tint);color:#4B0A9A;font-weight:600}
+.fold .cnt{margin-left:auto;font-size:11px;background:#822CDB;color:#fff;border-radius:999px;padding:1px 7px}
+.fold .cnt.hot{background:var(--peach);color:var(--ink)}
+.mail-sec{color:var(--muted)}
+.mail-oft{font-size:10px;color:var(--muted)}
+.mail-manage{color:var(--purple)}
+.msglist{flex:1 1 300px;max-width:400px;min-width:0;border-right:1px solid var(--line);background:var(--surface)}
+.msglist-head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+.msglist-head strong{color:var(--text)}
+.msg{display:flex;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line-2);cursor:pointer;color:var(--text);width:100%;text-align:left;text-decoration:none}
+.msg.on{background:var(--tint)}
+.msg.unread .who{font-weight:800}
+.msg .av{flex:0 0 auto}
+.msg-main{min-width:0;flex-grow:1}
+.msg .who{font-size:13px;font-weight:600;display:flex;justify-content:space-between;gap:8px}
+.msg-who{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.msg .sub{display:block;font-size:12.5px;margin-top:2px}
+.msg .pre{display:block;font-size:12px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.msg .t{font-size:11.5px;color:var(--muted);font-weight:500;white-space:nowrap}
+.msg-tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.reader{flex:999 1 420px;min-width:0;display:flex;flex-direction:column;background:var(--surface)}
+.reader.empty{align-items:center;justify-content:center}
+.reader-head{padding:18px 24px 14px;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start}
+.reader-title{min-width:0;flex-grow:1}
+.reader-title h2{font-size:16px;margin:0}
+.reader-meta{font-size:12.5px;color:var(--muted);margin-top:4px;overflow-wrap:anywhere}
+.reader-actions{display:flex;gap:6px;flex-wrap:wrap}
+.reader .body{padding:20px 24px;font-size:13.5px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
+.reader-attach{padding:0 24px 14px;font-size:12.5px;color:var(--body)}
+.reader-foot{margin-top:auto;padding:14px 24px;border-top:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+.mailside{flex:0 1 250px;min-width:0;padding:18px 16px;border-left:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;gap:12px}
+.mailside .navsec{padding:0 0 4px}
+.mailside .link{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;color:var(--text);text-decoration:none;font-size:13px}
+.mailside .link-sub{display:block;color:var(--muted)}
+.mail-thread{font-size:12.5px;color:var(--body);display:flex;flex-direction:column;gap:6px}
+.mail-loop{display:flex;gap:6px 14px;flex-wrap:wrap}
+.mail-loop .sw{font-size:12.5px}
+.mail-context{font-size:12.5px;color:var(--body);padding-top:9px}
+@media (max-width:760px){
+  .mail-filters{padding:10px 16px}
+  .folders{flex:1 1 100%;flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--line)}
+  .folders .navsec{flex-basis:100%}
+  .msglist{max-width:none;flex-basis:100%;border-right:0}
+  .mailside{flex-basis:100%;border-left:0;border-top:1px solid var(--line)}
+}

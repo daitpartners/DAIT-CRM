@@ -7,7 +7,7 @@ export type LeadEmail = {
   id: number;
   leadId: number | null;
   folder: string;
-  status: 'queued' | 'sending' | 'sent' | 'failed';
+  status: 'queued' | 'sending' | 'sent' | 'failed' | 'received' | 'draft';
   fromAddress: string;
   toAddresses: string[];
   ccAddresses: string[];

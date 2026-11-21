@@ -316,7 +316,9 @@ function EmailList({ emails }: { emails: LeadEmail[] }) {
   const { date } = useFormatDate();
   if (emails.length === 0) return <div className="empty">{t('No emails yet')}</div>;
   const status = (m: LeadEmail) =>
-    m.status === 'sent' ? (
+    m.status === 'received' ? (
+      <span className="badge b-purple">{t('Received')}</span>
+    ) : m.status === 'sent' ? (
       <span className="badge b-ok">{t('Sent')}</span>
     ) : m.status === 'failed' ? (
       <span className="badge b-bad" title={m.lastError ?? undefined}>
@@ -334,7 +336,7 @@ function EmailList({ emails }: { emails: LeadEmail[] }) {
               <span className="mail-subject">{m.subject}</span>
               {status(m)}
               <span className="mail-meta">
-                {t('To {to}', { to: m.toAddresses.join(', ') })}
+                {m.status === 'received' ? t('From {from}', { from: m.fromAddress }) : t('To {to}', { to: m.toAddresses.join(', ') })}
                 {m.ccAddresses.length ? ` · ${t('cc {cc}', { cc: m.ccAddresses.join(', ') })}` : ''} · {date(m.occurredAt)}
               </span>
             </summary>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import { CONNECT_PERSONAL_URL, useDisconnectMailbox, useMailboxes, type Mailbox } from '../../api/mailboxes';
+import { useSyncNow } from '../../api/mail';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { useToast } from '../../components/Toast';
@@ -22,6 +23,7 @@ export function Connections() {
   const t = useT();
   const me = useCurrentUser();
   const toast = useToast();
+  const sync = useSyncNow();
   const confirm = useConfirm();
   const { date } = useFormatDate();
   const { data } = useMailboxes();
@@ -97,13 +99,20 @@ export function Connections() {
                   {m.address} <span className="conn-owner">· {m.userName ?? '—'}</span>
                 </div>
                 <div className="conn-meta">
-                  {t('Microsoft 365')} · <span className="badge b-ok">{t('Connected')}</span> ·{' '}
+                  {t('Microsoft 365')} ·{' '}
+                  {m.status === 'error' ? <span className="badge b-warn">{t('Needs reconnecting')}</span> : <span className="badge b-ok">{t('Connected')}</span>} ·{' '}
                   {m.lastSyncAt ? t('synced {when}', { when: date(m.lastSyncAt) }) : t('synced never')} ·{' '}
                   {m.messageCount === 1 ? t('1 message') : t('{n} messages', { n: m.messageCount.toLocaleString() })}
                 </div>
               </div>
               <div className="conn-acts">
-                <button type="button" className="btn sm" onClick={() => toast(t('Mail sync arrives with the Email screen (part 2B)'))}>
+                <button
+                  type="button"
+                  className="btn sm"
+                  disabled={m.userId !== me.id || m.status !== 'connected' || sync.isPending}
+                  title={m.userId !== me.id ? t('Only the mailbox owner can sync it') : undefined}
+                  onClick={() => sync.mutate(m.id, { onSuccess: () => toast(t('Sync started — new mail appears in a few seconds')), onError: () => toast(t('Sync could not start. Try again.'), 'warn') })}
+                >
                   {t('Sync now')}
                 </button>
                 <button type="button" className="btn sm" onClick={() => setOptions(m)}>
