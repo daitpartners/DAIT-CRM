@@ -297,7 +297,8 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
         orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], ...pageArgs(query),
       }),
       prisma.leadActivity.groupBy({ by: ['activityType'], where, _count: { _all: true } }),
-      prisma.leadActivity.aggregate({ where, _max: { occurredAt: true } }),
+      // A meeting may be dated ahead; the last touch is the latest one that has already happened.
+      prisma.leadActivity.aggregate({ where: { AND: [where, { occurredAt: { lte: new Date() } }] }, _max: { occurredAt: true } }),
     ]);
     const ofType = (type: string) => byType.find((g) => g.activityType === type)?._count._all ?? 0;
     return {

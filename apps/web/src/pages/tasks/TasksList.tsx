@@ -83,7 +83,7 @@ export function TasksList() {
       </section>
     );
   };
-  const error = open.error ?? done.error;
+  const errorOf = (e: unknown) => errorText(t, e instanceof ApiError ? e.code : 'unknown');
 
   return (
     <>
@@ -105,9 +105,9 @@ export function TasksList() {
       </Topbar>
       <div className="page cols">
         <div className="card col-main tasks-main">
-          {error ? (
+          {open.error ? (
             <div className="empty" role="alert">
-              {errorText(t, error instanceof ApiError ? error.code : 'unknown')}
+              {errorOf(open.error)}
             </div>
           ) : open.isPending ? (
             <div className="empty">{t('Loading…')}</div>
@@ -122,7 +122,11 @@ export function TasksList() {
         <aside className="col-side">
           <section className="card" aria-labelledby="tasks-done">
             <h2 id="tasks-done">{t('Completed|tasks')}</h2>
-            {done.isPending ? (
+            {done.error ? (
+              <p className="muted none" role="alert">
+                {errorOf(done.error)}
+              </p>
+            ) : done.isPending ? (
               <p className="muted none">{t('Loading…')}</p>
             ) : done.data?.items.length ? (
               <ul className="task-list flat">{done.data.items.map(row)}</ul>
@@ -143,8 +147,9 @@ export function TasksList() {
             <ul className="how-list">
               <li>{t('Lead assigned or transferred to you')}</li>
               <li>{t('Follow-up date set on a lead')}</li>
-              <li>{t('Added manually on a lead, email or meeting')}</li>
-              <li>{t('Quotation revision requested')}</li>
+              <li>{t('Added manually here, for a lead or on its own')}</li>
+              <li>{t('From an email (release 2) or a meeting (release 3)')}</li>
+              <li>{t('Quotation revision requested (from release 3)')}</li>
             </ul>
           </section>
         </aside>

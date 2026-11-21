@@ -67,4 +67,7 @@ buttons) map to existing hooks.
 - Lead page keeps the status stepper and quick follow-up buttons, and shows the owner in the topbar line.
 - Meeting note has no length/where/invite fields until the calendar (release 3).
 - Notifications have no kind chips (no stored kind); the company Projects tab is omitted until release 3.
-- New lead stays a dialog rather than a separate page.
+- Contacts has a sidebar entry (below Companies); the prototype has none.
+- Tasks page groups (Overdue / Due today / Upcoming) are capped at 100 rows each with "Showing the first n of total."
+- Companies "AI research queue" tile shows "—" and "Available in release 4" until enrichment exists (the API keeps `tiles.aiQueue`).
+- The New lead page (`/leads/new`) does not predict the next lead number (numbers are given on save); Edit lead stays a dialog. The "What happens on save" AI enrichment step reads "Available in release 4".

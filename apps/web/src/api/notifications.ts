@@ -35,11 +35,19 @@ export function useNotificationCount() {
   });
 }
 
+/** Read state shows in the notification lists, the sidebar badge and the Dashboard's bell and recent notifications. */
+function invalidateAfterRead(qc: ReturnType<typeof useQueryClient>) {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: keys.notificationsAll }),
+    qc.invalidateQueries({ queryKey: keys.dashboard }),
+  ]);
+}
+
 export function useMarkNotificationRead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => api<{ unread: number }>(`/api/notifications/${id}/read`, { method: 'POST' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.notificationsAll }),
+    onSuccess: () => invalidateAfterRead(qc),
   });
 }
 
@@ -47,6 +55,6 @@ export function useMarkAllNotificationsRead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => api<{ unread: number }>('/api/notifications/read-all', { method: 'POST' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.notificationsAll }),
+    onSuccess: () => invalidateAfterRead(qc),
   });
 }

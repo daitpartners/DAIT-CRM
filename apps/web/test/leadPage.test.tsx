@@ -123,4 +123,32 @@ describe('lead page conflicts', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Claim' })).not.toBeInTheDocument());
     expect(screen.getByText(/Owner:/)).toHaveTextContent('Owner: Arjun Mehta');
   });
+
+  it('composer: a draft survives switching tabs and folding the box', async () => {
+    const u = userEvent.setup();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/leads/5') return Response.json(baseLead);
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    const qc = setup();
+    render(
+      <QueryClientProvider client={qc}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={['/leads/5']}>
+            <Routes>
+              <Route path="/leads/:id" element={<LeadPage />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    await u.click(await screen.findByRole('tab', { name: 'Meeting' }));
+    await u.clear(screen.getByRole('textbox', { name: /Title/ }));
+    await u.type(screen.getByRole('textbox', { name: /Title/ }), 'Kick-off with ops');
+    await u.click(screen.getByRole('tab', { name: 'Call note' }));
+    expect(screen.queryByRole('textbox', { name: /Title/ })).not.toBeInTheDocument();
+    await u.click(screen.getByRole('button', { name: 'Hide' }));
+    await u.click(screen.getByRole('tab', { name: 'Meeting' }));
+    expect(screen.getByRole('textbox', { name: /Title/ })).toHaveValue('Kick-off with ops');
+  });
 });

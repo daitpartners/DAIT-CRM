@@ -20,6 +20,10 @@ test('companies list: prototype tiles, tabs with counts and columns', async ({ p
   const total = (await page.locator('.tiles .tile').first().locator('.v').textContent())?.trim();
   await expect(page.getByRole('tab', { name: /All companies/ })).toContainText(`All companies ${total}`);
   await expect(page.locator('.tiles .tile').first().locator('.m')).toContainText(/\d+ active · \d+ inactive · \d+ closed/);
+  // AI research is release 4: the queue tile shows no figure until then.
+  const ai = page.locator('.tiles .tile').nth(2);
+  await expect(ai.locator('.v')).toHaveText('—');
+  await expect(ai.locator('.m')).toHaveText('Available in release 4');
 
   const tabs = await page.getByRole('tab').evaluateAll((els) => els.map((el) => (el.textContent ?? '').replace(/\s*\d+$/, '').trim()));
   expect(tabs).toEqual(TABS);

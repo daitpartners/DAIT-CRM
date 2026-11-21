@@ -13,15 +13,16 @@ test('follow-up date creates a task that appears under Upcoming and can be ticke
   await signInAs(page, MAYA);
   await page.goto('/leads');
   await page.getByRole('button', { name: 'New lead' }).click();
-  const modal = page.getByRole('dialog', { name: 'New lead' });
-  await modal.getByLabel('Company name').fill(company);
-  const country = modal.getByRole('combobox', { name: 'Country' });
+  const form = page.getByRole('form', { name: 'Create lead or prospect' });
+  await form.getByLabel('Company name').fill(company);
+  const country = form.getByRole('combobox', { name: 'Country' });
   await country.fill('Spain');
   await country.press('Enter');
-  await modal.getByLabel('Assigned to').selectOption({ label: 'Me' });
-  await modal.getByLabel('Next follow-up').fill(inDays(3));
-  await modal.getByRole('button', { name: 'Save' }).click();
-  await expect(modal).toBeHidden();
+  // The creator is the default owner.
+  await expect(form.getByLabel('Assigned to').locator('option:checked')).toHaveText('Maya Pillai (me)');
+  await form.getByLabel('Next follow-up date').fill(inDays(3));
+  await form.getByRole('button', { name: 'Create lead' }).click();
+  await expect(page).toHaveURL(/\/leads\/\d+$/);
 
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Tasks' }).click();
   await expect(page.getByRole('heading', { name: 'Tasks', level: 1 })).toBeVisible();

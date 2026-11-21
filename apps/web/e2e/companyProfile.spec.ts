@@ -91,12 +91,16 @@ test('leads and activities tabs list the company\'s leads', async ({ page }) => 
   await expect(page.getByRole('tabpanel').getByRole('link', { name: 'LD-1001' }).first()).toBeVisible();
 
   await page.getByRole('tab', { name: 'Leads & Prospects' }).click();
+  const companyUrl = page.url();
   await page.getByRole('tabpanel').getByRole('button', { name: 'New lead' }).click();
-  const modal = page.getByRole('dialog', { name: 'New lead' });
-  await expect(modal.getByRole('combobox', { name: 'Link to existing company' })).toHaveValue('Northwind Logistics');
-  await expect(modal.getByLabel('Company name')).toHaveValue('Northwind Logistics');
-  await modal.getByRole('button', { name: 'Cancel' }).click();
-  await expect(modal).toBeHidden();
+  await expect(page).toHaveURL(/\/leads\/new\?company=\d+$/);
+  const form = page.getByRole('form', { name: 'Create lead or prospect' });
+  await expect(form.getByRole('combobox', { name: 'Company (existing record)' })).toHaveValue(/^CO-0318 · Northwind Logistics/);
+  await expect(form.getByLabel('Company name')).toHaveValue('Northwind Logistics');
+  await form.getByRole('link', { name: 'Cancel' }).click();
+  await expect(page).toHaveURL(/\/leads$/);
+  await page.goto(companyUrl);
+  await page.getByRole('tab', { name: 'Leads & Prospects' }).click();
 
   await row.getByRole('link', { name: 'LD-1001' }).click();
   await expect(page).toHaveURL(/\/leads\/\d+$/);

@@ -1,5 +1,5 @@
 import {
-  LeadBulk, LeadCreate, LeadListQuery, LeadStatusChange, LeadTransfer, LeadUnassign, LeadUpdate, LogCall, SwitchContact,
+  LeadBulk, LeadCreate, LeadListQuery, LeadStatusChange, LeadTransfer, LeadUnassign, LeadUpdate, LogCall, MeetingNote, SwitchContact,
 } from '../src/schemas/lead';
 import { TaskCreate, TaskListQuery, TaskUpdate } from '../src/schemas/task';
 import { CLOSED_STATUSES, isClosedStatus, LEAD_TYPES, PRIORITIES, TASK_ORIGINS, ACTIVITY_TYPES } from '../src/leads';
@@ -112,6 +112,20 @@ describe('LogCall', () => {
   test('bounds minutes', () => {
     expect(LogCall.safeParse({ outcome: 'Connected', minutes: 601, updatedAt }).success).toBe(false);
     expect(LogCall.safeParse({ outcome: 'Connected', minutes: 0, updatedAt }).success).toBe(true);
+  });
+});
+
+describe('MeetingNote', () => {
+  const at = (days: number) => new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+  test('accepts a past or planned meeting up to a year ahead', () => {
+    expect(MeetingNote.safeParse({ title: 'Kick-off', occurredAt: at(-3), updatedAt }).success).toBe(true);
+    expect(MeetingNote.safeParse({ title: 'Kick-off', occurredAt: at(30), updatedAt }).success).toBe(true);
+    expect(MeetingNote.safeParse({ title: 'Kick-off', occurredAt: at(364), updatedAt }).success).toBe(true);
+  });
+  test('rejects a date more than a year ahead or not a date-time', () => {
+    expect(MeetingNote.safeParse({ title: 'Kick-off', occurredAt: at(367), updatedAt }).success).toBe(false);
+    expect(MeetingNote.safeParse({ title: 'Kick-off', occurredAt: '2027-01-01', updatedAt }).success).toBe(false);
+    expect(MeetingNote.safeParse({ title: '', occurredAt: at(0), updatedAt }).success).toBe(false);
   });
 });
 

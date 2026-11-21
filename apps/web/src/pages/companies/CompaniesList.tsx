@@ -191,12 +191,8 @@ export function CompaniesList() {
             value={tiles?.verified ?? '—'}
             meta={tiles ? t('{partial} partially · {unverified} unverified', { partial: tiles.partiallyVerified, unverified: tiles.unverified }) : undefined}
           />
-          <Tile
-            label={t('AI research queue')}
-            value={tiles?.aiQueue ?? '—'}
-            meta={tiles ? t('{pending} pending · {processing} processing · {failed} failed', { pending: tiles.aiPending, processing: tiles.aiProcessing, failed: tiles.aiFailed }) : undefined}
-            metaClass="warn"
-          />
+          {/* AI research arrives in release 4: no queue yet, so no count (the API keeps tiles.aiQueue for then). */}
+          <Tile label={t('AI research queue')} value="—" meta={t('Available in release 4')} />
           <Tile
             label={t('Possible duplicates')}
             value={tiles?.possibleDuplicates ?? '—'}

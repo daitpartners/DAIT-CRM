@@ -17,7 +17,7 @@ test('dashboard: greeting, prototype tiles, tasks, agenda placeholder, notificat
 
   await page.goto('/');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(/^Good (morning|afternoon|evening), Maya$/);
-  await expect(page.locator('.topbar .sub')).toContainText('everything assigned to you across leads, email, calendar and quotations');
+  await expect(page.locator('.topbar .sub')).toContainText('everything assigned to you across leads and tasks; email from release 2, calendar and quotations from release 3');
   await expect(page.getByRole('button', { name: /^Notifications/ })).toBeVisible();
   await expect(page.getByRole('button', { name: 'New lead' })).toBeVisible();
 
@@ -35,7 +35,7 @@ test('dashboard: greeting, prototype tiles, tasks, agenda placeholder, notificat
   const tasks = page.getByRole('region', { name: 'Tasks & follow-ups' });
   await expect(tasks.locator('.dash-badges')).toContainText(/\d+ overdue/);
   await expect(tasks.getByRole('listitem').filter({ hasText: title })).toContainText('Overdue');
-  await expect(tasks.getByRole('link', { name: /^View all \d+ tasks$/ })).toBeVisible();
+  await expect(tasks.getByRole('link', { name: /^View all \d+ tasks?$/ })).toBeVisible();
   const agenda = page.getByRole('region', { name: "Today's agenda" });
   await expect(agenda).toHaveAttribute('aria-disabled', 'true');
   await expect(agenda.getByRole('button')).toHaveCount(0);

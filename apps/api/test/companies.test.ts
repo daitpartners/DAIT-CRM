@@ -303,9 +303,11 @@ describe('companies API', () => {
       { leadId: mine.id, activityType: 'call', title: 'c2', occurredAt: at('03') },
       { leadId: mine.id, activityType: 'meeting', title: 'm', occurredAt: at('02') },
       { leadId: theirs.id, activityType: 'email', title: 'hidden', occurredAt: at('09') },
+      // A planned meeting next week counts as a meeting but is not the last touch yet.
+      { leadId: mine.id, activityType: 'meeting', title: 'planned', occurredAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) },
     ] });
     const res = (await req('GET', `/api/companies/${co.id}/activities`, rep.cookie)).json();
-    expect(res.summary).toEqual({ call: 2, email: 0, meeting: 1, quote: 0, lastAt: at('03').toISOString() });
+    expect(res.summary).toEqual({ call: 2, email: 0, meeting: 2, quote: 0, lastAt: at('03').toISOString() });
   });
   it('company pipeline respects lead visibility', async () => {
     const rep = await as('SALES_REPRESENTATIVE');

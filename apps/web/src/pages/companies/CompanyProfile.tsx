@@ -11,7 +11,6 @@ import { Tabs, type TabDef } from '../../components/Tabs';
 import { Topbar } from '../../components/Topbar';
 import { companyStatusBadge, companyStatusText, errorText, initials, verificationBadge, verificationText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
-import { LeadModal } from '../leads/LeadModal';
 import { CompanyModal, type CompanySection } from './CompanyModal';
 import { ContactModal } from './ContactModal';
 import { ActivitiesTab } from './tabs/ActivitiesTab';
@@ -46,7 +45,7 @@ export function CompanyProfile() {
   const lookupText = useLookupText(lang);
   // undefined = closed; null = whole form (header Edit); a section = that group's Edit button.
   const [editing, setEditing] = useState<CompanySection | null | undefined>(undefined);
-  const [adding, setAdding] = useState<'contact' | 'lead' | null>(null);
+  const [adding, setAdding] = useState<'contact' | null>(null);
 
   const hash = location.hash.replace(/^#/, '');
   const active: TabId = isTab(hash) ? hash : 'overview';
@@ -170,7 +169,7 @@ export function CompanyProfile() {
             </button>
           ) : null}
           {me.can('manage_leads') ? (
-            <button type="button" className="btn" onClick={() => setAdding('lead')} disabled={closed} title={closedTitle}>
+            <button type="button" className="btn" onClick={() => navigate(`/leads/new?company=${company.id}`)} disabled={closed} title={closedTitle}>
               {t('New lead')}
             </button>
           ) : null}
@@ -196,9 +195,6 @@ export function CompanyProfile() {
         <CompanyModal company={company} section={editing ?? undefined} onClose={() => setEditing(undefined)} />
       ) : null}
       {adding === 'contact' ? <ContactModal companyId={company.id} onClose={() => setAdding(null)} /> : null}
-      {adding === 'lead' ? (
-        <LeadModal company={{ id: company.id, name: company.name, country: company.country }} onClose={() => setAdding(null)} />
-      ) : null}
     </>
   );
 }

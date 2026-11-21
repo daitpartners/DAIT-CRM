@@ -20,7 +20,7 @@ function readFold(): boolean {
 /**
  * The prototype's composer (`#composer`): Email (release 2: a disabled button in the tab's place), then the
  * working tabs Call note / Meeting / Research note, and a Hide / Show toggle that folds the box. Picking a
- * tab always opens it. `live` = the user may act on the lead (manage_leads, not archived).
+ * tab always opens it; every form stays mounted so drafts survive switching tabs. `live` = the user may act on the lead (manage_leads, not archived).
  */
 export function ComposePanel({ lead, statuses, live }: { lead: LeadFull; statuses: LookupValue[]; live: boolean }) {
   const t = useT();
@@ -63,13 +63,16 @@ export function ComposePanel({ lead, statuses, live }: { lead: LeadFull; statuse
           ]}
           panelClassName="body"
         >
-          {closed ? null : tab === 'call' ? (
+          {/* All three forms stay mounted (hidden when inactive or folded) so a draft survives a tab switch. */}
+          <div hidden={closed || tab !== 'call'}>
             <CallNoteForm lead={lead} statuses={statuses} disabled={!live} />
-          ) : tab === 'meeting' ? (
+          </div>
+          <div hidden={closed || tab !== 'meeting'}>
             <MeetingForm lead={lead} disabled={!live} />
-          ) : (
+          </div>
+          <div hidden={closed || tab !== 'research'}>
             <ResearchForm lead={lead} disabled={!live} />
-          )}
+          </div>
         </Tabs>
         <button type="button" className="l2ctog" aria-expanded={!closed} aria-controls="composer" onClick={() => setClosed(!closed)} title={t('Show or hide this box')}>
           <span>{closed ? t('Show') : t('Hide')}</span>

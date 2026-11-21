@@ -25,7 +25,6 @@ import { usePageClamp, useUrlListState } from '../../hooks/useUrlListState';
 import { errorText, leadStatusText, leadTypeText, priorityText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
 import { CsvImportModal } from './CsvImportModal';
-import { LeadModal } from './LeadModal';
 
 /** Rows per page offered by the pager (prototype SIZES); 50 by default. */
 const PAGE_SIZES = [25, 50, 100] as const;
@@ -98,7 +97,6 @@ export function LeadsList() {
   const { data: users } = useUsers();
   const bulk = useBulkLeads();
   const claim = useClaimLead();
-  const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [assigning, setAssigning] = useState<PendingAssign | null>(null);
@@ -236,7 +234,7 @@ export function LeadsList() {
             <button type="button" className="btn" onClick={() => setImporting(true)}>
               {t('Import CSV')}
             </button>
-            <button type="button" className="btn primary" onClick={() => setAdding(true)}>
+            <button type="button" className="btn primary" onClick={() => navigate('/leads/new')}>
               {Icons.plus}
               {t('New lead')}
             </button>
@@ -499,7 +497,6 @@ export function LeadsList() {
           </Tabs>
         </section>
       </div>
-      {adding ? <LeadModal onClose={() => setAdding(false)} /> : null}
       {importing ? <CsvImportModal onClose={() => setImporting(false)} /> : null}
       {assigning ? (
         <BulkAssignModal

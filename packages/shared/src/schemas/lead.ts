@@ -88,10 +88,20 @@ export const ResearchNote = z.object({
 });
 export type ResearchNote = z.infer<typeof ResearchNote>;
 
-/** `POST /leads/:id/meeting`: a `meeting` activity dated when the meeting took place. */
+/** A meeting note may be dated ahead (a planned meeting), but no more than a year from now. */
+function withinAYear(iso: string): boolean {
+  const max = new Date();
+  max.setFullYear(max.getFullYear() + 1);
+  return Date.parse(iso) <= max.getTime();
+}
+
+/** `POST /leads/:id/meeting`: a `meeting` activity dated when the meeting took place (at most a year ahead). */
 export const MeetingNote = z.object({
   title: z.string().trim().min(1).max(200),
-  occurredAt: z.string().datetime({ offset: true }),
+  occurredAt: z
+    .string()
+    .datetime({ offset: true })
+    .refine(withinAYear, { message: 'At most one year from now' }),
   body: optionalText(5000),
   updatedAt,
 });

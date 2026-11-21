@@ -11,7 +11,6 @@ import { useFormatDate } from '../../../hooks/useFormatDate';
 import { errorText, leadTypeText } from '../../../i18n/labels';
 import { useLang, useT } from '../../../i18n/useT';
 import { useLookupText } from '../../../api/queries';
-import { LeadModal } from '../../leads/LeadModal';
 
 const PAGE_SIZE = 25;
 
@@ -25,7 +24,6 @@ export function LeadsTab({ company, canManage }: { company: CompanyDetail; canMa
   const { day, date } = useFormatDate();
   const lookup = useLookupText(useLang());
   const [page, setPage] = useState(1);
-  const [adding, setAdding] = useState(false);
   const { data, isPending, error } = useLeads({ companyId: company.id, page, pageSize: PAGE_SIZE });
   const closed = company.status === 'Closed';
 
@@ -51,7 +49,7 @@ export function LeadsTab({ company, canManage }: { company: CompanyDetail; canMa
             <button
               type="button"
               className="btn sm primary"
-              onClick={() => setAdding(true)}
+              onClick={() => navigate(`/leads/new?company=${company.id}`)}
               disabled={closed}
               title={closed ? errorText(t, 'company_inactive') : undefined}
             >
@@ -102,9 +100,6 @@ export function LeadsTab({ company, canManage }: { company: CompanyDetail; canMa
           <div className="foot">
             <Pager page={data.page} pageSize={data.pageSize} total={data.total} onPage={setPage} />
           </div>
-        ) : null}
-        {adding ? (
-          <LeadModal company={{ id: company.id, name: company.name, country: company.country }} onClose={() => setAdding(false)} />
         ) : null}
       </section>
       <aside className="col-side">

@@ -147,6 +147,8 @@ Then sign in and open **Leads**, **Prospects** view: the imported rows are there
 
 No one-off step. Its migration (`20261124100000_contact_profile`) only adds nullable and defaulted columns to contacts and runs with the normal `prisma migrate deploy`.
 
+Rollback: the previous build runs against the new columns (it never reads or writes them), so redeploy the previous release as described under Day to day. There is no down-migration; leave the columns in place.
+
 ## Day to day
 
 - On the server over non-interactive SSH, start every command with `source ~/.nvm/nvm.sh &&` so `node` and `pm2` are found.

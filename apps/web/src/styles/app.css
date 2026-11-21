@@ -295,7 +295,7 @@ a.tile{display:block;text-decoration:none}a.tile:hover{border-color:var(--purple
 /* Prototype parity port (release 1-parity): rules copied verbatim from prototype/css/app.css for the lead page,
    company/contact cards, settings pick-list and notifications. Existing app overrides above are kept: .stepper/.stage,
    .closed-banner, .pager, .seg and .nrow are not re-ported; email, calendar, quotation, mailer and public-form rules are skipped. */
-/* lead page: control strip, composer, contact rows, research notes */
+/* lead page: control strip, composer */
 .ctrl{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start}
 .ctrl>div{display:flex;flex-direction:column;gap:6px;min-width:150px}
 .ctrl .l{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
@@ -306,15 +306,8 @@ a.tile{display:block;text-decoration:none}a.tile:hover{border-color:var(--purple
 .ctab{display:inline-flex;align-items:center;gap:6px}.ctab svg{width:15px;height:15px}
 .composer .body{padding:16px 18px;display:flex;flex-direction:column;gap:12px}
 .composer .body[hidden]{display:none}
-.crow{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line-2);font-size:13px}
-.crow .k{color:var(--muted);width:64px;flex:0 0 auto;font-size:12px}
-.crow .v{min-width:0;overflow-wrap:anywhere;flex-grow:1}
-.crow .act{margin-left:auto}
-.rnote{padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;background:#FFFDF9}
-.rnote strong{display:block}.rnote a{display:block;font-size:12px;margin-top:2px;overflow-wrap:anywhere}
 .tl .ev .b.research{background:#FFFDF9;border:1px dashed #F6D0B2;border-radius:8px;padding:8px 10px}
 .hdr-actions{display:flex;gap:8px;flex-wrap:wrap}
-.hdr-actions .btn svg{width:15px;height:15px}
 /* links, numbers, steps */
 .link{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;color:var(--text)}
 .num{text-align:right;white-space:nowrap}
@@ -335,8 +328,6 @@ a.tile{display:block;text-decoration:none}a.tile:hover{border-color:var(--purple
 .phead{font-size:14px;color:var(--text)}.pmeta{font-size:12.5px;color:var(--muted)}
 .pcontacts{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:13px;margin-top:2px}.pcontacts a{display:inline-flex;align-items:center;gap:6px}.pcontacts svg{width:16px;height:16px}.pcontacts small{color:var(--muted);font-weight:400}
 .pabout{margin:4px 0 0;font-size:13.5px;line-height:1.55;max-width:80ch}
-.pfoot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:4px}
-.pct{display:inline-block;width:56px;height:5px;border-radius:3px;background:var(--tint);overflow:hidden;vertical-align:middle}.pct i{display:block;height:100%;background:linear-gradient(90deg,var(--purple),var(--peach))}
 .xp{display:flex;flex-direction:column;gap:12px}
 .xpi{display:flex;gap:12px;font-size:13px;position:relative}
 .xpi+.xpi::before{content:"";position:absolute;left:5px;top:-12px;height:12px;border-left:2px solid var(--line)}
@@ -345,7 +336,6 @@ a.tile{display:block;text-decoration:none}a.tile:hover{border-color:var(--purple
 .hdr-actions .btn svg{width:16px;height:16px}
 .l2box{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,3fr);gap:0;padding:0}
 .l2box.two{grid-template-columns:1fr}
-.l2full{grid-column:1/-1;padding:14px 20px 0}
 .l2col{padding:18px 20px;display:flex;flex-direction:column;gap:12px;min-width:0}
 .l2col+.l2col{border-left:1px solid var(--line-2)}
 .l2h{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;min-height:26px}
@@ -394,29 +384,15 @@ a.tile{display:block;text-decoration:none}a.tile:hover{border-color:var(--purple
 @media (prefers-reduced-motion:reduce){.l2fold,.chev,.l2sum{transition:none}}
 .card.flush.l2tl{overflow:visible}.l2fu{padding:4px 0 14px}.l2fu[hidden]{display:none}
 @media (max-width:640px){.l2facts{grid-template-columns:repeat(2,minmax(0,1fr))}}
-/* Cc stakeholders pick-list */
-.ccbox{position:relative}
-.ccfield{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-height:40px;padding:5px 8px;border:1px solid var(--field);border-radius:8px;background:var(--surface);cursor:text}
-.ccfield:focus-within{outline:2px solid var(--purple);outline-offset:1px;border-color:var(--purple)}
-.cchips{display:contents}
-.ccfield input:focus,.ccfield input:focus-visible{outline:0!important;box-shadow:none}
-.ccfield input{flex:1;min-width:150px;border:0;outline:0;background:none;font:inherit;font-size:13px;height:28px;color:var(--text)}
-.cchip{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:3px 4px 3px 10px;border-radius:999px;background:var(--tint);color:#4B0A9A;font-size:12.5px;font-weight:600}
-.cchip button{border:0;background:none;color:inherit;font-size:10px;width:18px;height:18px;border-radius:50%;padding:0;line-height:1}
-.cchip button:hover{background:#4B0A9A;color:#fff}
-.ccbox .combo-list{max-height:230px;width:100%}
 .l2 th.ck,.l2 td.ck{width:34px;padding-right:0;cursor:default}.l2 td.ck input,.l2 th.ck input{width:16px;height:16px;accent-color:var(--purple);cursor:pointer;vertical-align:middle}
-.con{font-size:12.5px;color:var(--muted)}
 /* Notifications */
 .natt{display:flex;flex-wrap:wrap;gap:8px}
 .natt a{padding:8px 14px;border-radius:999px;background:var(--tint);color:#4B0A9A;font-size:12.5px;font-weight:600}
 .natt a.bad{background:var(--bad-bg);color:var(--bad-fg)}.natt a.warn{background:var(--warn-bg);color:var(--warn-fg)}
-.nk{padding:5px 12px;border-radius:999px;border:1px solid var(--field);font-size:12.5px;font-weight:600;color:var(--muted);background:var(--surface)}
-.nk.on{background:var(--tint);border-color:var(--purple);color:#4B0A9A}
 .ngh{padding:10px 20px 6px;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:#FBFAFE;border-bottom:1px solid var(--line-2)}
 .ni{flex:0 0 auto;width:36px;height:36px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center}.ni svg{width:18px;height:18px}
 /* Tiles collapse (prototype breakpoints; .tiles.t3 keeps the app rule above) */
-@media (max-width:900px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:899.98px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:640px){.tiles{grid-template-columns:1fr}}
 /* Later-release placeholder panel (PlaceholderCard; the full-page .placeholder above is for NotFound/AccessDenied).
    Muted card in the prototype's .note.info colours with a dashed border; normal card padding, left-aligned. */
@@ -444,7 +420,7 @@ fieldset.bare>legend{padding:0}
 .form-end{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}.form-end .dim{margin-right:auto}
 .l2tl .l2tlb{padding:14px 20px 6px}
 .l2fu.ctrl{display:flex;gap:18px 22px}
-.fu-date{min-width:260px;max-width:320px}
+.fu-date{min-width:min(260px,100%);max-width:320px}
 .fu-row{display:flex;gap:8px;align-items:center}.fu-row .in{width:170px}
 .fu-closed{font-size:11.5px;color:var(--bad-fg)}
 .fu-tasks{flex:1 1 100%;display:flex;flex-direction:column;gap:6px}
@@ -522,3 +498,19 @@ fieldset.bare>legend{padding:0}
 /* Settings (prototype views-settings.js): heading with an inline muted line */
 .card-title-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .card-sub{font-size:12.5px}
+
+/* New lead page (prototype views-leads.js V.leadForm) */
+.nl-idnote{font-size:12.5px;color:var(--muted)}
+.nl-sub{font-size:12.5px;color:var(--muted);margin-top:2px}
+.nl-foot{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.nl-steps{margin:0;padding-left:18px;font-size:13px;color:var(--body);display:flex;flex-direction:column;gap:8px}
+.nl-steps .nl-later{color:var(--muted)}
+.nl-dup{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap}
+.nl-dup-body{min-width:200px}
+.nl-dup-title{font-weight:600;color:var(--warn-fg)}
+.nl-dup-list{margin:2px 0;padding:0;list-style:none}
+.nl-dup-actions{display:flex;gap:8px;flex-wrap:wrap}
+.nl-co{display:flex;gap:12px;align-items:center}
+.nl-co .logo{margin:0;flex:none}
+.nl-co-name{font-weight:600;color:var(--text);overflow-wrap:anywhere}
+.nl-kv{grid-template-columns:110px 1fr}

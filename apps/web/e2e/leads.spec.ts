@@ -8,28 +8,33 @@ test('creates a lead linked to an existing company via duplicate hint', async ({
   await expect(page.getByRole('row').filter({ hasText: 'Orbit Fintech' })).toBeVisible();
 
   await page.getByRole('button', { name: 'New lead' }).click();
-  const modal = page.getByRole('dialog', { name: 'New lead' });
-  await modal.getByLabel('Company name').fill('Northwind Logistics');
-  await modal.getByLabel('Website').fill('https://northwindlogistics.in');
+  await expect(page).toHaveURL(/\/leads\/new$/);
+  const form = page.getByRole('form', { name: 'Create lead or prospect' });
+  await form.getByLabel('Company name').fill('Northwind Logistics');
+  await form.getByLabel('Company website').fill('https://northwindlogistics.in');
 
   // A lead may join an existing company: the match is offered, not blocking.
-  await expect(modal.getByText('This company exists: CO-0318 Northwind Logistics')).toBeVisible();
-  const save = modal.getByRole('button', { name: 'Save' });
+  const dup = form.locator('.note.warn').filter({ hasText: 'Possible duplicate: 1 existing company matches' });
+  await expect(dup).toContainText('Matched on exact website domain · confidence High.');
+  const save = form.getByRole('button', { name: 'Create lead' });
   await expect(save).toBeEnabled();
-  await modal.getByRole('button', { name: 'Link to CO-0318' }).click();
-  await expect(modal.getByRole('combobox', { name: 'Link to existing company' })).toHaveValue('Northwind Logistics');
+  await dup.getByRole('button', { name: 'Use existing company' }).click();
+  await expect(form.getByRole('combobox', { name: 'Company (existing record)' })).toHaveValue(/^CO-0318 · Northwind Logistics/);
+  await expect(form.getByText(/Linked to existing company CO-0318/)).toBeVisible();
 
-  const country = modal.getByRole('combobox', { name: 'Country' });
+  const country = form.getByRole('combobox', { name: 'Country' });
   await country.fill('India');
   await country.press('Enter');
-  await modal.getByLabel('Lead source').selectOption('Referral');
+  await form.getByLabel('Lead source').selectOption('Referral');
   await save.click();
-  await expect(modal).toBeHidden();
 
   const toast = page.getByRole('status').filter({ hasText: /LD-\d+ created/ });
   await expect(toast).toBeVisible();
   const number = (await toast.textContent())!.match(/LD-\d+/)![0];
+  await expect(page).toHaveURL(/\/leads\/\d+$/);
+  await expect(page.getByRole('heading', { name: number, level: 1 })).toBeVisible();
 
+  await page.goto('/leads');
   await page.getByRole('searchbox', { name: 'Search leads' }).fill(number);
   const row = page.getByRole('row').filter({ hasText: number });
   await expect(row).toContainText('Northwind Logistics');

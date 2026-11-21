@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ApiError } from '../api/client';
 import { useDashboard } from '../api/dashboard';
@@ -14,7 +13,6 @@ import { useToast } from '../components/Toast';
 import { useFormatDate } from '../hooks/useFormatDate';
 import { errorText, leadStatusText } from '../i18n/labels';
 import { useT, type TFn } from '../i18n/useT';
-import { LeadModal } from './leads/LeadModal';
 import { TaskItem } from './tasks/TasksList';
 
 /** Calendar, meetings and quotations arrive with release 3 (docs/development-plan.md). */
@@ -53,7 +51,6 @@ export function Dashboard() {
   const save = useSaveTask();
   const markRead = useMarkNotificationRead();
   const refreshIfOutOfDate = useRefreshWhenOutOfDate();
-  const [adding, setAdding] = useState(false);
 
   const fail = (err: unknown) => {
     refreshIfOutOfDate(err);
@@ -68,7 +65,7 @@ export function Dashboard() {
         new Date(`${today}T00:00:00Z`),
       )
     : '';
-  const sub = t('{date} · everything assigned to you across leads, email, calendar and quotations', { date: longDate });
+  const sub = t('{date} · everything assigned to you across leads and tasks; email from release 2, calendar and quotations from release 3', { date: longDate });
   const tiles = data?.tiles;
   const unread = tiles?.unreadNotifications ?? 0;
 
@@ -93,7 +90,7 @@ export function Dashboard() {
           {unread ? <span className="badge b-warn bell-count">{unread}</span> : null}
         </button>
         {me.can('manage_leads') ? (
-          <button type="button" className="btn primary" onClick={() => setAdding(true)}>
+          <button type="button" className="btn primary" onClick={() => navigate('/leads/new')}>
             {Icons.plus}
             {t('New lead')}
           </button>
@@ -157,7 +154,7 @@ export function Dashboard() {
                 <div className="empty">{t('Nothing due. Nice.')}</div>
               )}
               <Link to="/tasks" className="dash-more">
-                {t('View all {n} tasks', { n: tiles?.openTasks ?? 0 })}
+                {tiles?.openTasks === 1 ? t('View all 1 task') : t('View all {n} tasks', { n: tiles?.openTasks ?? 0 })}
               </Link>
             </section>
 
@@ -216,7 +213,6 @@ export function Dashboard() {
           </div>
         )}
       </div>
-      {adding ? <LeadModal onClose={() => setAdding(false)} /> : null}
     </>
   );
 }

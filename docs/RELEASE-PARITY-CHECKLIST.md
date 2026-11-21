@@ -28,11 +28,18 @@ Prototype `#/leads` · CRM `/leads`
 - [ ] Filters in the order Status, Source, Country, Assigned, Lead type, Created (Any time, Last 7/30/90 days, Custom range…), then Priority and Clear; "Showing n of m" on the right.
 - [ ] The columns match. The pager at the bottom offers 25, 50 or 100 rows and First, Prev, Page n of m, Next, Last.
 
-## New lead form
+## New lead
 
-Prototype `#/leads/new` · CRM: **New lead** on the Leads list (or on the Dashboard)
+Prototype `#/leads/new` (and `#/leads/new?company=CO-0318`) · CRM `/leads/new` (**New lead** on the Leads list or the Dashboard) and `/leads/new?company=…` (**New lead** on a company profile or its Leads & Prospects tab)
 
-- [ ] The CRM form opens as a dialog over the list rather than as a page. Compare the fields: lead type, priority, company (with the "This company exists" hint and **Link to CO-…**), contact person, country, lead source, assigned to, status and notes.
+- [ ] Title "Create lead or prospect", "Leads / New" above it and "Lead ID will be generated on save" on the right. The prototype also shows the next number; the CRM gives the number on save.
+- [ ] Main column cards in order: **Lead type** (Lead / Prospect cards with their descriptions), **Company**, **Source**, **Assignment & follow-up**, then **Cancel** and **Create lead**.
+- [ ] **Company**: Company name, the duplicate check under it, Company (existing record) with "Create new company on save" when empty, Contact person ("— none yet —"), Company website, Business email, Phone number, Country, City. Type an existing company's website (for example `https://northwindlogistics.in`): "Possible duplicate: 1 existing company matches" lists name · domain · country · contacts · open leads, "Matched on … · confidence …", with **View** and **Use existing company**. Use it: the note turns green ("Linked to existing company CO-…"), the primary contact is chosen and its email filled in. A new name says "No duplicate found… A new company record will be created on save."
+- [ ] **Source**: Lead source (Manual Entry by default), Source URL, "Import batch: —" with "Set automatically for CSV and Google Places imports."
+- [ ] **Assignment & follow-up**: Assigned to starts with "Leave unassigned · allocation rules decide" and defaults to you; Lead priority (Medium); Lead status (New, greyed); Next follow-up date (two days ahead); Lead notes.
+- [ ] Right column: **What happens on save** (five steps; AI enrichment shows "Available in release 4") and **Linked company preview** (no company: "A new company record will be created on save, unless a duplicate is found above"; with a company: initials, name, industry · city, country · size, Contacts, Open leads, Verification).
+- [ ] From a company profile, **New lead** opens the page with that company, its contact, website, country and city filled in.
+- [ ] **Create lead** shows "LD-… created" and opens the new lead. **Cancel** returns to Leads. Edit lead (lead page, More ▾) is still a dialog.
 
 ## Lead page
 
@@ -49,7 +56,7 @@ Prototype `#/leads/LD-2041` · CRM `/leads/LD-…` (open any lead)
 
 Prototype `#/companies` · CRM `/companies`
 
-- [ ] Title, search and **New company**. Tiles Total companies, Verified profiles, AI research queue, Possible duplicates.
+- [ ] Title, search and **New company**. Tiles Total companies, Verified profiles, AI research queue ("—" and "Available in release 4"), Possible duplicates.
 - [ ] Tabs All companies, Clients, With open leads, Needs verification, Duplicate review (red count). Filters Industry, Country, Company size, Status, Verification with "Showing n of m".
 - [ ] Columns Company name (with Client badge and CO- number), Website, Industry, Country, City, Company size, Contacts, Leads, Verification, Status.
 
@@ -115,4 +122,7 @@ These differ from the prototype on purpose:
 - **Status steps and quick follow-up buttons kept** on the lead page, and **Owner** is shown in the line under the title, so status, follow-up and owner stay one click away.
 - **Meeting note without a calendar.** The Meeting tab saves a note on the timeline (title, date, time, notes); length, place and invitations come with the calendar in release 3.
 - **Notifications have no type chips**, and Projects is not a company tab (release 3).
-- **New lead is a dialog**, not a separate page.
+- **Contacts in the sidebar.** The sidebar has a Contacts entry below Companies; the prototype has no Contacts page, so no entry.
+- **Tasks show the first 100 of each group.** Overdue, Due today and Upcoming each list at most 100 tasks; a longer group ends with "Showing the first n of total." The prototype lists everything.
+- **New lead number on save.** The New lead page says "Lead ID will be generated on save" without predicting the number, and the AI enrichment step reads "Available in release 4". Edit lead stays a dialog on the lead page.
+- **AI research queue tile shows "—"** with "Available in release 4" until AI research exists; the prototype shows a count of queued jobs.

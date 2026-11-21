@@ -7,6 +7,7 @@ import { CompanyProfile } from './pages/companies/CompanyProfile';
 import { ContactsList } from './pages/contacts/ContactsList';
 import { LeadPage } from './pages/leads/LeadPage';
 import { LeadsList } from './pages/leads/LeadsList';
+import { NewLeadPage } from './pages/leads/NewLeadPage';
 import { NotificationsList } from './pages/notifications/NotificationsList';
 import { ReportsPage } from './pages/Placeholder';
 import { SignIn } from './pages/SignIn';
@@ -32,6 +33,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <Dashboard /> },
       { path: 'leads', element: <LeadsList /> },
+      { path: 'leads/new', element: <NewLeadPage /> },
       { path: 'leads/:id', element: <LeadPage /> },
       { path: 'companies', element: <CompaniesList /> },
       { path: 'companies/:id', element: <CompanyProfile /> },
