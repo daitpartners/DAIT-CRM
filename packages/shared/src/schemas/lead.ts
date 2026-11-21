@@ -225,3 +225,7 @@ export const ResolveCompany = z.object({
   updatedAt,
 });
 export type ResolveCompany = z.infer<typeof ResolveCompany>;
+
+/** `POST /leads/:id/do-not-email` (release 2C): opted out or unsubscribed; the Mailer skips the lead. */
+export const LeadDoNotEmail = z.object({ doNotEmail: z.boolean(), updatedAt });
+export type LeadDoNotEmail = z.infer<typeof LeadDoNotEmail>;

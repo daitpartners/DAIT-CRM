@@ -50,6 +50,7 @@ model User {
   assignmentsTo   LeadAssignment[] @relation("AssignmentTo")
   assignmentsBy   LeadAssignment[] @relation("AssignmentBy")
   tasks           Task[]
+  campaigns       EmailCampaign[]  @relation("CampaignSender")
 
   @@map("users")
 }
@@ -120,8 +121,9 @@ model EmailAccount {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  user     User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
-  messages EmailMessage[]
+  user      User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  messages  EmailMessage[]
+  campaigns EmailCampaign[]
 
   /// One system row and at most one personal row per user; the same address may be both (Deepak's).
   @@unique([address, kind])
@@ -146,6 +148,9 @@ model EmailMessage {
   fromName        String?   @map("from_name") @db.VarChar(255)
   toAddresses     Json      @default("[]") @map("to_addresses")
   ccAddresses     Json      @default("[]") @map("cc_addresses")
+  bccAddresses    Json      @default("[]") @map("bcc_addresses")
+  /// The Mailer campaign that sent it (release 2C).
+  campaignId      Int?      @map("campaign_id")
   subject         String    @db.VarChar(500)
   bodyText        String    @default("") @map("body_text")
   /// Graph immutable id (2B-2 sync); unique per user.
@@ -164,13 +169,15 @@ model EmailMessage {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  account EmailAccount?  @relation(fields: [accountId], references: [id], onDelete: SetNull)
-  lead    Lead?          @relation(fields: [leadId], references: [id], onDelete: SetNull)
-  contact Contact?       @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  company Company?       @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  replyTo EmailMessage?  @relation("EmailReplies", fields: [replyToId], references: [id], onDelete: SetNull)
-  replies EmailMessage[] @relation("EmailReplies")
+  user               User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account            EmailAccount?            @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  lead               Lead?                    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  contact            Contact?                 @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  company            Company?                 @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  replyTo            EmailMessage?            @relation("EmailReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  campaign           EmailCampaign?           @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  campaignRecipients EmailCampaignRecipient[]
+  replies            EmailMessage[]           @relation("EmailReplies")
 
   @@unique([userId, graphId])
   @@index([userId, threadId])
@@ -194,7 +201,8 @@ model EmailTemplate {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  campaigns EmailCampaign[]
 
   @@map("email_templates")
 }
@@ -332,40 +340,43 @@ model Company {
 }
 
 model Contact {
-  id               Int      @id @default(autoincrement())
-  companyId        Int      @map("company_id")
-  firstName        String   @map("first_name")
-  lastName         String   @map("last_name")
+  id               Int       @id @default(autoincrement())
+  companyId        Int       @map("company_id")
+  firstName        String    @map("first_name")
+  lastName         String    @map("last_name")
   designation      String?
   department       String?
-  businessEmail    String?  @map("business_email")
+  businessEmail    String?   @map("business_email")
   phone            String?
-  phoneNormalised  String?  @map("phone_normalised")
+  phoneNormalised  String?   @map("phone_normalised")
   mobile           String?
-  mobileNormalised String?  @map("mobile_normalised")
-  linkedinUrl      String?  @map("linkedin_url")
-  contactType      String   @default("Other") @map("contact_type")
+  mobileNormalised String?   @map("mobile_normalised")
+  linkedinUrl      String?   @map("linkedin_url")
+  contactType      String    @default("Other") @map("contact_type")
   /// At most one per company: partial unique index contacts_one_primary_per_company (migration SQL).
-  isPrimary        Boolean  @default(false) @map("is_primary")
-  isActive         Boolean  @default(true) @map("is_active")
+  isPrimary        Boolean   @default(false) @map("is_primary")
+  /// Release 2C: set with the lead's Do not email.
+  unsubscribedAt   DateTime? @map("unsubscribed_at")
+  isActive         Boolean   @default(true) @map("is_active")
   headline         String?
   location         String?
   about            String?
   /// [{ title, company, from, to, description }]; shape enforced by the shared ContactProfile schema.
-  experience       Json     @default("[]")
+  experience       Json      @default("[]")
   /// [{ school, degree, from, to }]
-  education        Json     @default("[]")
+  education        Json      @default("[]")
   /// string[]
-  skills           Json     @default("[]")
+  skills           Json      @default("[]")
   /// string[]
-  languages        Json     @default("[]")
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
+  languages        Json      @default("[]")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
   leads   Lead[]
 
-  emailMessages EmailMessage[]
+  emailMessages      EmailMessage[]
+  campaignRecipients EmailCampaignRecipient[]
 
   @@index([businessEmail])
   @@index([phoneNormalised])
@@ -431,6 +442,8 @@ model Lead {
   enquiryId        Int?      @map("enquiry_id")
   enrichmentStatus String    @default("Pending") @map("enrichment_status")
   convertedTo      String?   @map("converted_to")
+  /// Release 2C: opted out or unsubscribed; the Mailer skips this lead.
+  doNotEmail       Boolean   @default(false) @map("do_not_email")
   archivedAt       DateTime? @map("archived_at")
   createdById      Int?      @map("created_by_id")
   createdAt        DateTime  @default(now()) @map("created_at")
@@ -444,7 +457,8 @@ model Lead {
   assignments LeadAssignment[]
   tasks       Task[]
 
-  emailMessages EmailMessage[]
+  emailMessages      EmailMessage[]
+  campaignRecipients EmailCampaignRecipient[]
 
   @@index([status])
   @@index([assignedToId])
@@ -523,4 +537,76 @@ model Task {
   @@index([assignedToId, isDone, dueDate])
   @@index([leadId, origin, isDone])
   @@map("tasks")
+}
+
+/// Release 2C Mailer: a personalised template sent to selected leads, one by one, from the sender's mailbox.
+model EmailCampaign {
+  id                Int       @id @default(autoincrement())
+  name              String    @db.VarChar(160)
+  templateId        Int?      @map("template_id")
+  templateName      String    @map("template_name") @db.VarChar(150)
+  templateUpdatedAt DateTime? @map("template_updated_at")
+  /// The template as queued, so later edits do not change the record.
+  subject           String    @db.VarChar(500)
+  body              String
+  senderId          Int       @map("sender_id")
+  accountId         Int?      @map("account_id")
+  senderAddress     String    @map("sender_address")
+  cc                String[]  @default([])
+  bcc               String[]  @default([])
+  startAt           DateTime? @map("start_at")
+  intervalMinutes   Int       @map("interval_minutes")
+  workingHoursOnly  Boolean   @default(false) @map("working_hours_only")
+  unsubscribeLine   Boolean   @default(true) @map("unsubscribe_line")
+  lawfulBasis       String    @map("lawful_basis") @db.VarChar(160)
+  /// 'Scheduled' | 'Sending' | 'Paused' | 'Completed' | 'Cancelled'
+  status            String
+  /// While Paused: why ('Paused by …', 'Mailbox disconnected', …).
+  pauseReason       String?   @map("pause_reason")
+  /// While Sending: 'working_hours' | 'daily_limit' when nothing can go now.
+  waitReason        String?   @map("wait_reason")
+  nextSendAt        DateTime? @map("next_send_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  completedAt       DateTime? @map("completed_at")
+  cancelledById     Int?      @map("cancelled_by_id")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  template   EmailTemplate?           @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  sender     User                     @relation("CampaignSender", fields: [senderId], references: [id], onDelete: Cascade)
+  account    EmailAccount?            @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  recipients EmailCampaignRecipient[]
+  messages   EmailMessage[]
+
+  @@index([status, nextSendAt])
+  @@index([senderId, createdAt])
+  @@map("email_campaigns")
+}
+
+/// One lead in a campaign, with its audit trail (status, when, the filed email, the skip / failure reason).
+model EmailCampaignRecipient {
+  id             Int       @id @default(autoincrement())
+  campaignId     Int       @map("campaign_id")
+  leadId         Int?      @map("lead_id")
+  contactId      Int?      @map("contact_id")
+  toAddress      String    @map("to_address")
+  name           String    @default("")
+  company        String    @default("")
+  timezones      String[]  @default([])
+  /// 'company' | 'address' | 'country' | 'sender'
+  timezoneSource String    @map("timezone_source")
+  /// 'Queued' | 'Sending' | 'Sent' | 'Failed' | 'Skipped'
+  status         String
+  position       Int
+  sentAt         DateTime? @map("sent_at")
+  emailMessageId Int?      @map("email_message_id")
+  error          String?
+
+  campaign     EmailCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  lead         Lead?         @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  contact      Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  emailMessage EmailMessage? @relation(fields: [emailMessageId], references: [id], onDelete: SetNull)
+
+  @@index([campaignId, status, position])
+  @@index([leadId])
+  @@map("email_campaign_recipients")
 }

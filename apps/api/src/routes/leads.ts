@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { Prisma, type Lead } from '@prisma/client';
 import {
-  CLOSED_STATUSES, CompanyActivityQuery, DuplicateCheck, LeadBulk, LeadCreate, LeadListQuery, LeadStatusChange, LeadTransfer, LeadUnassign,
+  CLOSED_STATUSES, CompanyActivityQuery, DuplicateCheck, LeadBulk, LeadCreate, LeadDoNotEmail, LeadListQuery, LeadStatusChange, LeadTransfer, LeadUnassign,
   LeadUpdate, LogCall, MeetingNote, ResearchNote, ResolveCompany, SwitchContact, UpdatedAtOnly, can, checkDomain, isClosedStatus, pageArgs, type CompanyCandidate,
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
@@ -346,6 +346,28 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
           entityType: 'lead', entityId: id, action: 'update', userId: user.id,
           before: { status: before.status }, after: { status: after.status, reason: body.reason ?? null },
         });
+      });
+      return detailOf(prisma, id, user);
+    });
+  });
+
+  // Do not email (release 2C, prototype Edit profile): the Mailer skips the lead; the contact is stamped unsubscribed.
+  app.post<{ Params: { id: string } }>('/leads/:id/do-not-email', { preHandler: [requireRight('manage_leads')] }, async (request, reply) => {
+    const body = parseBody(LeadDoNotEmail, request.body);
+    const user = request.user!;
+    const id = leadId(request.params.id);
+    return guard(reply, async () => {
+      await prisma.$transaction(async (tx) => {
+        const { lead } = await lockFresh(tx, user, id, body.updatedAt);
+        if (lead.doNotEmail === body.doNotEmail) return;
+        await tx.lead.update({ where: { id }, data: { doNotEmail: body.doNotEmail } });
+        if (lead.contactId) await tx.contact.update({ where: { id: lead.contactId }, data: { unsubscribedAt: body.doNotEmail ? new Date() : null } });
+        await tx.leadActivity.create({
+          data: body.doNotEmail
+            ? { leadId: id, activityType: 'note', title: 'Marked do not email', body: 'The mailer will skip this lead.', byUserId: user.id }
+            : { leadId: id, activityType: 'note', title: 'Do not email removed', body: 'The mailer may email this lead again.', byUserId: user.id },
+        });
+        await audit(tx, { entityType: 'lead', entityId: id, action: 'update', userId: user.id, before: { doNotEmail: lead.doNotEmail }, after: { doNotEmail: body.doNotEmail } });
       });
       return detailOf(prisma, id, user);
     });
