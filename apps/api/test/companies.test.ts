@@ -3,7 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { prisma } from '../src/db';
 import { buildApp } from '../src/app';
 import { resetDb } from './helpers';
-import { makeCompany, makeUser, signIn } from './factory';
+import { makeCompany, makeLead, makeUser, signIn } from './factory';
 
 let app: FastifyInstance;
 beforeAll(async () => {
@@ -113,6 +113,19 @@ describe('companies API', () => {
     const patch = await req('PATCH', `/api/companies/${other.id}`, rep.cookie, { name: 'Mine', updatedAt: other.updatedAt.toISOString() });
     expect(patch.statusCode).toBe(404);
     expect((await req('GET', '/api/companies/abc', rep.cookie)).statusCode).toBe(404);
+  });
+
+  it('rep sees a company through an assigned lead', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const admin = await as('ADMINISTRATOR');
+    const theirs = await makeCompany({ name: 'Lead Co', createdById: admin.user.id });
+    const hidden = await makeCompany({ name: 'Other Co', createdById: admin.user.id });
+    await makeLead({ companyId: theirs.id, assignedToId: rep.user.id });
+    await makeLead({ companyId: hidden.id, assignedToId: admin.user.id });
+    const list = (await req('GET', '/api/companies', rep.cookie)).json();
+    expect(list.items.map((c: { name: string }) => c.name)).toEqual(['Lead Co']);
+    expect((await req('GET', `/api/companies/${theirs.id}`, rep.cookie)).statusCode).toBe(200);
+    expect((await req('GET', `/api/companies/${hidden.id}`, rep.cookie)).statusCode).toBe(404);
   });
 
   it('data research user sees every company', async () => {

@@ -6,11 +6,14 @@ import { NotFoundError } from '../validate.js';
 type Db = Prisma.TransactionClient | PrismaClient;
 
 /**
- * Companies the user may see: all of them with `view_all_companies`, otherwise the ones they created.
- * (Release 1C adds companies with a lead assigned to the user.)
+ * Companies the user may see: all of them with `view_all_companies`, otherwise the ones they
+ * created and the ones with a lead assigned to them. Returns `{}` or a single `OR`, so callers may
+ * spread it into a where that has no `OR` of its own.
  */
 export function companyWhere(user: AuthUser): Prisma.CompanyWhereInput {
-  return can(user.role, 'view_all_companies') ? {} : { createdById: user.id };
+  return can(user.role, 'view_all_companies')
+    ? {}
+    : { OR: [{ createdById: user.id }, { leads: { some: { assignedToId: user.id } } }] };
 }
 
 /** The company, or NotFoundError (404) when it does not exist or the user may not see it. */

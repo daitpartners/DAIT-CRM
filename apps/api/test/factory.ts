@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { Company, Contact, User } from '@prisma/client';
+import type { Company, Contact, Lead, Prisma, User } from '@prisma/client';
 import { domainOf, isFreeMail, normaliseCompanyName, normalisePhone, type RoleEnum } from '@dait-crm/shared';
 import { prisma } from '../src/db';
 
@@ -66,6 +66,21 @@ export async function makeContact(
       phoneNormalised: normalisePhone(phone) || null,
       mobile,
       mobileNormalised: normalisePhone(mobile) || null,
+    },
+  });
+}
+
+/** A lead (no activities, assignments or tasks); a company is created unless `companyId` is given (null = none). */
+export async function makeLead(overrides: Partial<Prisma.LeadUncheckedCreateInput> = {}): Promise<Lead> {
+  n += 1;
+  const companyId = overrides.companyId !== undefined ? overrides.companyId : (await makeCompany()).id;
+  return prisma.lead.create({
+    data: {
+      companyName: `Lead Co ${n}`,
+      country: 'India',
+      leadSource: 'Manual Entry',
+      ...overrides,
+      companyId,
     },
   });
 }

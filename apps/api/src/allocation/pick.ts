@@ -5,6 +5,13 @@ import type { Prisma } from '@prisma/client';
  * Must run inside the caller's transaction so the round-robin advance commits with the lead.
  */
 export async function pickAssignee(tx: Prisma.TransactionClient, country: string): Promise<number | null> {
+  return (await pickAllocation(tx, country))?.userId ?? null;
+}
+
+/** As `pickAssignee`, also naming the rule that chose the user (for `lead_assignments.rule_id`). */
+export async function pickAllocation(
+  tx: Prisma.TransactionClient, country: string,
+): Promise<{ userId: number; ruleId: number } | null> {
   const rules = await tx.allocationRule.findMany({
     where: { isActive: true },
     orderBy: [{ priority: 'asc' }, { id: 'asc' }],
@@ -20,9 +27,9 @@ export async function pickAssignee(tx: Prisma.TransactionClient, country: string
     SELECT round_robin_pos, assign_to FROM allocation_rules WHERE id = ${match.id} FOR UPDATE`;
   if (!locked) return null;
   const assignTo = locked.assign_to as number | number[];
-  if (!Array.isArray(assignTo)) return assignTo;
+  if (!Array.isArray(assignTo)) return { userId: assignTo, ruleId: match.id };
   if (assignTo.length === 0) return null;
   const chosen = assignTo[locked.round_robin_pos % assignTo.length];
   await tx.allocationRule.update({ where: { id: match.id }, data: { roundRobinPos: locked.round_robin_pos + 1 } });
-  return chosen;
+  return { userId: chosen, ruleId: match.id };
 }
