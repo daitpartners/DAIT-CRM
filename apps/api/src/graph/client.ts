@@ -145,8 +145,25 @@ async function responseError(prefix: string, res: Response): Promise<GraphError>
 }
 
 export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = prisma): GraphClient {
+  /**
+   * Access tokens already obtained, by account, scopes and the stored refresh token (so a disconnected or reconnected
+   * mailbox never reuses one), kept until 5 minutes before they expire. A mail sync makes many calls: one sign-in each
+   * would delay every other job and risk Microsoft throttling.
+   */
+  const tokens = new Map<string, { token: string; until: number }>();
+
   /** An access token for the account (refresh-token grant); a rotated refresh token is stored encrypted. */
   async function accessToken(account: EmailAccount, scopes: string[]): Promise<string> {
+    const key = `${account.id}|${scopes.join(' ')}|${account.refreshTokenEnc}`;
+    const cached = tokens.get(key);
+    if (cached && cached.until > Date.now()) return cached.token;
+    const token = await freshToken(account, scopes);
+    for (const [k, v] of tokens) if (v.until <= Date.now() || k.startsWith(`${account.id}|${scopes.join(' ')}|`)) tokens.delete(k);
+    tokens.set(key, token);
+    return token.token;
+  }
+
+  async function freshToken(account: EmailAccount, scopes: string[]): Promise<{ token: string; until: number }> {
     const { MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET } = env;
     if (!MS_TENANT_ID || !MS_CLIENT_ID || !MS_CLIENT_SECRET) throw new Error('microsoft_not_configured');
 
@@ -158,7 +175,7 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
       throw new GraphError('token_unreadable', 401);
     }
 
-    // A fresh client per call keeps tokens out of any shared in-memory cache.
+    // A fresh MSAL client per sign-in: refresh tokens never sit in a shared MSAL cache.
     const msal = new ConfidentialClientApplication({
       auth: {
         clientId: MS_CLIENT_ID,
@@ -176,7 +193,8 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
         data: { refreshTokenEnc: encrypt(rotated), tokenExpiresAt: result.expiresOn ?? null },
       });
     }
-    return result.accessToken;
+    const expires = result.expiresOn ? result.expiresOn.getTime() : Date.now() + 30 * 60_000;
+    return { token: result.accessToken, until: expires - 5 * 60_000 };
   }
 
   /** One Graph request; a hung request is treated like a 5xx (retried later, the mailbox stays connected). */

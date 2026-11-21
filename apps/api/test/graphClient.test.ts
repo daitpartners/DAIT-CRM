@@ -230,3 +230,17 @@ describe('graph client — mail sync and actions (2B-2)', () => {
     for (let i = 0; i < 4; i++) expect(headers(call(fetchMock, i)[1]).Prefer).toContain('IdType="ImmutableId"');
   });
 });
+
+describe('graph client — access token reuse (2B-2 review)', () => {
+  test('one sign-in per mailbox while the token is valid; a reconnected mailbox signs in again', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ value: [] }), { status: 200 })));
+    const g = createGraphClient(env);
+    const acc = await account();
+    await g.deltaPage(acc, 'https://graph.microsoft.com/v1.0/a');
+    await g.deltaPage(acc, 'https://graph.microsoft.com/v1.0/b');
+    await g.markRead(acc, 'x', true);
+    expect(msalState.refreshTokensSeen).toHaveLength(1);
+    await g.deltaPage({ ...acc, refreshTokenEnc: encrypt('reconnected-rt') }, 'https://graph.microsoft.com/v1.0/c');
+    expect(msalState.refreshTokensSeen).toEqual(['original-rt', 'reconnected-rt']);
+  });
+});
