@@ -290,7 +290,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // Create lead from this email (prototype): the lead form's duplicate check on the sender's domain, source Other,
-  // the email as notes, a follow-up in 2 days, the allocation rules; the message is linked to it.
+  // a neutral note (the email itself stays private), a follow-up in 2 days, the allocation rules; the message is linked to it.
   app.post<{ Params: { id: string } }>('/mail/:id/create-lead', pre, async (request, reply) => {
     const user = request.user!;
     return guard(reply, async () => {
@@ -307,7 +307,8 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
         country: match?.country || 'United States',
         leadSource: 'Other',
         nextFollowUp: due,
-        notes: `${m.subject}\n\n${m.bodyText}`.trim().slice(0, 5000),
+        // Not the email's subject or text: the lead (and its audit trail) is shared, the mail is not.
+        notes: 'Created from an email',
       });
       try {
         const leadId = await prisma.$transaction(async (tx) => {
@@ -328,7 +329,8 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
     });
   });
 
-  // Add follow-up task (prototype): due tomorrow, assigned to you, on the message's lead.
+  // Add follow-up task (prototype): due tomorrow, assigned to you, on the message's lead. Tasks are seen by everyone who
+  // sees the lead, so the title names no sender or subject (owner: nobody else sees anyone's mail).
   app.post<{ Params: { id: string } }>('/mail/:id/task', pre, async (request, reply) => {
     const user = request.user!;
     return guard(reply, async () => {
@@ -337,7 +339,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
       const dueDate = new Date(dateOnly(todayIn(user.timezone)).getTime() + DAY_MS);
       const task = await prisma.$transaction(async (tx) => {
         const t = await tx.task.create({
-          data: { leadId: m.leadId, title: `Reply to ${counterpart(m)} · ${m.subject}`.slice(0, 200), dueDate, assignedToId: user.id, origin: 'manual' },
+          data: { leadId: m.leadId, title: 'Reply to email', dueDate, assignedToId: user.id, origin: 'manual' },
         });
         await audit(tx, { entityType: 'task', entityId: t.id, action: 'create', userId: user.id, after: { id: t.id, leadId: t.leadId, dueDate: t.dueDate } });
         return t;

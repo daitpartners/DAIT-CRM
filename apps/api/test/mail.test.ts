@@ -272,7 +272,11 @@ describe('reading mail on the Email screen (2B-2)', () => {
     const res = await call('POST', `/api/mail/${m.id}/create-lead`, await signIn(app, rep));
     expect(res.statusCode).toBe(201);
     const lead = await prisma.lead.findUniqueOrThrow({ where: { id: res.json().leadId } });
-    expect(lead).toMatchObject({ companyId: company.id, companyName: 'Acme', businessEmail: 'luis@acme.com', leadSource: 'Other', notes: 'Need a quote\n\nPlease call' });
+    expect(lead).toMatchObject({ companyId: company.id, companyName: 'Acme', businessEmail: 'luis@acme.com', leadSource: 'Other', notes: 'Created from an email' });
+    // The email's subject and text stay private: not in the lead, its history or the audit log.
+    const audits = JSON.stringify(await prisma.auditLog.findMany());
+    expect(audits).not.toContain('Need a quote');
+    expect(audits).not.toContain('Please call');
     expect(lead.nextFollowUp).toBeInstanceOf(Date);
     expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: m.id } })).leadId).toBe(lead.id);
   });
@@ -287,13 +291,13 @@ describe('reading mail on the Email screen (2B-2)', () => {
     expect(lead.company?.domain).toBe('blue-river.io');
   });
 
-  it('Add follow-up task: "Reply to {sender} · {subject}", due tomorrow, yours, on the lead', async () => {
+  it('Add follow-up task: a neutral "Reply to email" (the mail stays private), due tomorrow, yours, on the lead', async () => {
     const { rep, box, lead } = await setup();
     const m = await synced(rep.id, box.id, { leadId: lead.id });
     const res = await call('POST', `/api/mail/${m.id}/task`, await signIn(app, rep));
     expect(res.statusCode).toBe(201);
     const task = await prisma.task.findFirstOrThrow({ where: { leadId: lead.id, origin: 'manual' } });
-    expect(task).toMatchObject({ title: 'Reply to Ana Ruiz · Proposal', assignedToId: rep.id });
+    expect(task).toMatchObject({ title: 'Reply to email', assignedToId: rep.id });
     expect(task.dueDate.getTime() - Date.parse(`${todayIn(rep.timezone)}T00:00:00Z`)).toBe(86_400_000);
   });
 

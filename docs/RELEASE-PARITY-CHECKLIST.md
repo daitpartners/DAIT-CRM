@@ -138,7 +138,7 @@ Prototype `#/settings` (cards "Email & calendar connections" and "Email template
 - [ ] Settings → Email & calendar connections → **Sync now** on your mailbox → "Sync started…"; within a minute the row shows "synced {when} · n messages" (first sync reads the last 90 days; later every 5 minutes).
 - [ ] Sidebar **Email** shows your unread inbox count; the Email screen header shows your address, Microsoft 365, Connected and when it last synced.
 - [ ] A reply from a lead's contact appears in Inbox with the lead number badge; mail from an unknown sender shows "Unlinked · create lead?". Opening a message marks it read (also in Outlook).
-- [ ] **Reply** → the reply arrives in the same Outlook conversation; **Log as activity** puts "Email received · {subject}" on the lead (a colleague sees only "Email received"); **Add follow-up task** creates "Reply to {sender} · {subject}" due tomorrow.
+- [ ] **Reply** → the reply arrives in the same Outlook conversation; **Log as activity** puts "Email received · {subject}" on the lead (a colleague sees only "Email received"); **Add follow-up task** creates "Reply to email" due tomorrow (no sender or subject: tasks are seen by everyone on the lead).
 - [ ] **Link to lead / create lead**: linking puts the message on the chosen lead; creating makes a new lead (company matched by the sender's domain) and opens it.
 - [ ] **Archive** moves it to Archive here and in Outlook. Drafts are view-only. Show mail for Client / Lead, search and the smart views (Unlinked, Awaiting reply, My leads) filter the list.
 - [ ] Sign in as a colleague (administrator too): none of your mail is on their Email screen or their lead Emails tab.
