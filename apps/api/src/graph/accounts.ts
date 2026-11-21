@@ -50,3 +50,43 @@ export async function connectSystemMailbox(args: {
     return account;
   });
 }
+
+/**
+ * Stores a user's own mailbox (release 2A): one `kind='personal'` row per user. Reconnecting with the same
+ * address refreshes the token; with another address the old row is replaced. The token is stored encrypted.
+ */
+export async function connectPersonalMailbox(args: {
+  userId: number;
+  address: string;
+  refreshToken: string;
+  tokenExpiresAt?: Date;
+}): Promise<EmailAccount> {
+  const address = args.address.trim().toLowerCase();
+  const data = {
+    userId: args.userId,
+    provider: 'microsoft',
+    refreshTokenEnc: encrypt(args.refreshToken),
+    tokenExpiresAt: args.tokenExpiresAt ?? null,
+    status: 'connected',
+    lastError: null,
+  } satisfies Prisma.EmailAccountUncheckedUpdateInput;
+  return prisma.$transaction(async (tx) => {
+    const previous = await tx.emailAccount.findMany({ where: { kind: 'personal', userId: args.userId, NOT: { address } } });
+    for (const p of previous) {
+      await tx.emailAccount.delete({ where: { id: p.id } });
+      await audit(tx, { entityType: 'email_account', entityId: p.id, action: 'delete', userId: args.userId, before: accountSummary(p) });
+    }
+    const key = { address_kind: { address, kind: 'personal' } };
+    const before = await tx.emailAccount.findUnique({ where: key });
+    const account = await tx.emailAccount.upsert({ where: key, create: { address, kind: 'personal', ...data }, update: data });
+    await audit(tx, {
+      entityType: 'email_account',
+      entityId: account.id,
+      action: before ? 'update' : 'create',
+      userId: args.userId,
+      before: before ? accountSummary(before) : undefined,
+      after: accountSummary(account),
+    });
+    return account;
+  });
+}

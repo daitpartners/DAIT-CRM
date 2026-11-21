@@ -3,10 +3,10 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { prisma } from '../db.js';
 import { can } from '@dait-crm/shared';
 import { CONNECT_SCOPES, type MicrosoftClient } from '../auth/microsoft.js';
-import { connectSystemMailbox } from '../graph/accounts.js';
+import { connectPersonalMailbox, connectSystemMailbox } from '../graph/accounts.js';
 import { verifyLocalAdmin } from '../auth/local.js';
 import { SESSION_COOKIE, createSession, deleteSession } from '../auth/session.js';
-import { requireRight, sessionCookieOptions } from '../plugins/auth.js';
+import { requireUser, sessionCookieOptions } from '../plugins/auth.js';
 
 export interface AuthRoutesOptions {
   microsoft: MicrosoftClient | null;
@@ -20,6 +20,8 @@ const MS_STATE_MAX_AGE_S = 10 * 60;
 const NOT_REGISTERED = '/sign-in?error=not-registered';
 const MAILBOX_CONNECTED = '/settings/mailbox?connected=1';
 const MAILBOX_FAILED = '/settings/mailbox?error=connect-failed';
+const PERSONAL_CONNECTED = '/settings/connections?connected=1';
+const PERSONAL_FAILED = '/settings/connections?error=connect-failed';
 
 interface SavedState {
   state?: unknown;
@@ -95,6 +97,28 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
     return reply.redirect(MAILBOX_CONNECTED);
   }
 
+  /** Callback leg of `GET /auth/microsoft/connect?mode=personal`: the user who started it, in the same session. */
+  async function finishPersonalConnect(
+    request: FastifyRequest<{ Querystring: { code?: string; error?: string } }>,
+    reply: FastifyReply,
+    verifier: string,
+    saved: SavedState,
+  ) {
+    const actor = request.user;
+    const { code } = request.query;
+    if (!microsoft || !actor || actor.id !== saved.userId || !can(actor.role, 'use_email')) return reply.redirect(PERSONAL_FAILED);
+    if (request.query.error || !code) return reply.redirect(PERSONAL_FAILED);
+    try {
+      const identity = await microsoft.redeemCode({ code, codeVerifier: verifier, scopes: CONNECT_SCOPES });
+      if (!identity.refreshToken || !identity.email) throw new Error('missing_refresh_token');
+      await connectPersonalMailbox({ userId: actor.id, address: identity.email, refreshToken: identity.refreshToken, tokenExpiresAt: identity.expiresOn });
+    } catch (err) {
+      request.log.warn({ errName: (err as Error)?.name }, 'personal mailbox connect failed');
+      return reply.redirect(PERSONAL_FAILED);
+    }
+    return reply.redirect(PERSONAL_CONNECTED);
+  }
+
   app.get('/auth/options', async () => ({ localLogin: opts.localLogin, testLogin: opts.testLogin }));
 
   function pkce() {
@@ -125,9 +149,19 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
 
   app.get<{ Querystring: { mode?: string; sendAs?: string } }>(
     '/auth/microsoft/connect',
-    { preHandler: [requireRight('manage_users')] },
+    { preHandler: [requireUser] },
     async (request, reply) => {
-      if (request.query.mode !== 'system') return reply.code(400).send({ error: 'unsupported_mode' });
+      const mode = request.query.mode;
+      if (mode !== 'system' && mode !== 'personal') return reply.code(400).send({ error: 'unsupported_mode' });
+      // The system mailbox is an administrator's job; a personal mailbox needs the email right (not Data Research).
+      if (!can(request.user!.role, mode === 'system' ? 'manage_users' : 'use_email')) return reply.code(403).send({ error: 'forbidden' });
+      if (mode === 'personal') {
+        if (!microsoft) return reply.code(503).send({ error: 'microsoft_not_configured' });
+        const p = pkce();
+        const url = await microsoft.getConnectUrl({ state: p.state, codeVerifier: p.verifier, codeChallenge: p.challenge, mode: 'personal' });
+        setStateCookie(reply, { state: p.state, verifier: p.verifier, mode: 'personal', userId: request.user!.id });
+        return reply.redirect(url);
+      }
       const sendAs = parseSendAs(request.query.sendAs);
       if (sendAs === null) return reply.code(400).send({ error: 'invalid_send_as' });
       if (!microsoft) return reply.code(503).send({ error: 'microsoft_not_configured' });
@@ -153,13 +187,15 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, opt
       }
       const { code, state } = request.query;
       const system = saved.mode === 'system';
+      const personal = saved.mode === 'personal';
       if (
         typeof saved.state !== 'string' || typeof saved.verifier !== 'string' ||
         !state || !safeEqual(saved.state, state)
       ) {
-        return reply.redirect(system ? MAILBOX_FAILED : '/sign-in?error=state');
+        return reply.redirect(system ? MAILBOX_FAILED : personal ? PERSONAL_FAILED : '/sign-in?error=state');
       }
       if (system) return finishSystemConnect(request, reply, saved.verifier, saved);
+      if (personal) return finishPersonalConnect(request, reply, saved.verifier, saved);
       if (request.query.error || !code) return reply.redirect('/sign-in?error=microsoft');
 
       let identity;

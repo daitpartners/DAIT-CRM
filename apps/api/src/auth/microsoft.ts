@@ -11,7 +11,7 @@ export interface MicrosoftIdentity {
 export interface MicrosoftClient {
   getAuthUrl(args: { state: string; codeVerifier: string; codeChallenge: string }): Promise<string>;
   /** Consent URL for connecting a mailbox (requests the mail and calendar scopes). */
-  getConnectUrl(args: { state: string; codeVerifier: string; codeChallenge: string; mode: 'user' | 'system' }): Promise<string>;
+  getConnectUrl(args: { state: string; codeVerifier: string; codeChallenge: string; mode: 'user' | 'system' | 'personal' }): Promise<string>;
   redeemCode(args: { code: string; codeVerifier: string; scopes?: string[] }): Promise<MicrosoftIdentity>;
 }
 
