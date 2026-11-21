@@ -56,6 +56,10 @@ buttons) map to existing hooks.
 
 ## Deviations recorded during build
 
+> 21 Nov 2026: the Leads list and lead page deviations below (Unassigned tab, Priority filter, status stepper, quick
+> follow-up buttons, Owner line, More ▾, greyed lead-page placeholders) are superseded by
+> `2026-11-21-leads-exact-match-design.md`.
+
 - Contacts page kept (the prototype has none), restyled like the other lists.
 - Leads list keeps the "Unassigned" tab (rep claim flow) and the Priority filter.
 - Clone lead omitted (ruled in 1C).

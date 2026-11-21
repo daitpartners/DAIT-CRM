@@ -28,8 +28,9 @@ Prototype `#/leads` · CRM `/leads`
 
 - [ ] Title "Leads" with "Inbound leads and researched prospects, one module"; search, **Import CSV** and **New lead** on the right.
 - [ ] Tiles New this week, Follow-ups due today, Unassigned.
-- [ ] Tabs All leads, Leads, Prospects, My leads, Overdue follow-ups (red count), and **Unassigned** (CRM only, see below).
-- [ ] Filters in the order Status, Source, Country, Assigned, Lead type, Created (Any time, Last 7/30/90 days, Custom range…), then Priority and Clear; "Showing n of m" on the right.
+- [ ] Tabs All leads, Leads, Prospects, My leads, Overdue follow-ups (red count). The **Unassigned** tile opens the list filtered to unassigned leads (also "Assigned: Unassigned").
+- [ ] Filters in the order Status, Source, Country, Assigned, Lead type, Created (Any time, Last 7/30/90 days, Custom range…), then Clear; "Showing n of m" on the right.
+- [ ] Lead IDs are purple links.
 - [ ] The columns match. The pager at the bottom offers 25, 50 or 100 rows and First, Prev, Page n of m, Next, Last.
 
 ## New lead
@@ -43,18 +44,18 @@ Prototype `#/leads/new` (and `#/leads/new?company=CO-0318`) · CRM `/leads/new` 
 - [ ] **Assignment & follow-up**: Assigned to starts with "Leave unassigned · allocation rules decide" and defaults to you; Lead priority (Medium); Lead status (New, greyed); Next follow-up date (two days ahead); Lead notes.
 - [ ] Right column: **What happens on save** (five steps; AI enrichment shows "Available in release 4") and **Linked company preview** (no company: "A new company record will be created on save, unless a duplicate is found above"; with a company: initials, name, industry · city, country · size, Contacts, Open leads, Verification).
 - [ ] From a company profile, **New lead** opens the page with that company, its contact, website, country and city filled in.
-- [ ] **Create lead** shows "LD-… created" and opens the new lead. **Cancel** returns to Leads. Edit lead (lead page, More ▾) is still a dialog.
+- [ ] **Create lead** shows "LD-… created" and opens the new lead. **Cancel** returns to Leads. Edit lead details (lead page, inside Edit profile) is still a dialog.
 
 ## Lead page
 
-Prototype `#/leads/LD-2041` · CRM `/leads/LD-…` (open any lead)
+Prototype `#/leads/LD-2041` (with a contact) and `#/leads/LD-2040` (a prospect without one) · CRM `/leads/LD-…`. Since 21 Nov 2026 the lead page copies the prototype exactly (`docs/superpowers/specs/2026-11-21-leads-exact-match-design.md`).
 
-- [ ] Title is the lead number; the line under it reads "Lead created: … | Last contact: … | Owner: …". Buttons **Email** (greyed out, release 2), **Edit profile** and **More ▾** (Edit lead, Transfer, Close lead, Switch contact, Unassign, Archive).
-- [ ] PROFILE card: collapses with the chevron and shows a one-line summary when closed; contact name and badges, headline, company · department · location, LinkedIn / mobile / email / office, the completeness ring, the eight facts (Lead source … Time zone), the status steps, About, and the EXPERIENCE column. **Focus on email** is greyed out (release 2).
-- [ ] Compose panel: Email (greyed out, release 2), Call note, Meeting, Research note, and Hide/Show. Save a call note, a meeting and a research note: each appears in the timeline.
-- [ ] Tabs Follow-up, Emails (placeholder, release 2), Calls. Follow-up has the date with **Tomorrow / +4 days / Next week**, Clear, priority, type, status and open tasks with **+ Task**. Calls shows the timeline.
-- [ ] Right column: company card (AI summary placeholder, release 4; verification badge; website; other open leads; Full profile →), Skills & languages with **Edit**, Projects (placeholder, release 3), Coming up, Original enquiry (placeholder, release 1D).
-- [ ] **Edit profile**: change the headline, location, about, an experience row, an education row, skills and languages. Save: the profile card shows them.
+- [ ] Title is the lead number; the line under it reads "Lead created: … | Last contact: …". Buttons **Email** (opens the Email tab) and **Edit profile**; nothing else (Restore appears on an archived lead).
+- [ ] PROFILE card: collapses with the chevron and shows a one-line summary when closed; contact name and badges, headline, company · department · location, LinkedIn / mobile / email / office, the completeness ring, the eight facts (Lead source … Time zone), About, and the EXPERIENCE column. No status steps. Without a contact: the company name and "No contact person on this lead yet. Add one from the Contact card on the right…". **Focus on email** folds the profile and puts the cursor in the email Subject.
+- [ ] Compose panel: tabs **Email** (first and open), Call note, Meeting, Research note, and Hide/Show. Email has To, Cc stakeholders, Project ("available once the lead is Won"), Template, Subject, Message (the prototype's intro text), "Set follow-up in 3 days" and **Send email**, which says "Sending email arrives in release 2" and keeps the draft. Save a call note, a meeting and a research note: each appears in the timeline.
+- [ ] Tabs Follow-up, Emails 0, Calls. Follow-up: Next follow-up (date and badge), Priority, Type; **Owner** with Transfer / Unassign (managers) or Claim (sales representatives, unassigned leads); **Status** on its own row, where Won, Lost and Not Relevant open Close lead with that choice (Lost and Not Relevant need a reason) and an open status reopens a closed lead; open tasks with **+ Task**. Emptying the date asks "Clear follow-up?". Calls shows the timeline.
+- [ ] Right column: without a contact, **No contact yet · Add contact** (the new contact becomes this lead's contact); company card ("No AI research yet. Run research" → "Coming in release 4"; verification badge; website; other open leads; Full profile →); with a contact, Skills & languages with **Edit**; **Projects 0**; Coming up only when something is scheduled; Original enquiry only for leads from a website enquiry (1D).
+- [ ] **Edit profile**: change the headline, location, about, an experience row, an education row, skills and languages. Save: the profile card shows them. Under the form: **Edit lead details**, **Switch contact** and **Archive** (without a contact the dialog shows only these).
 
 ## Companies list
 
@@ -114,16 +115,15 @@ Prototype `#/settings` (one long page) · CRM `/settings` and its tabs
 
 These differ from the prototype on purpose:
 
+- **Owner row on the lead page's Follow-up tab** (Transfer, Unassign, Claim) and **lead actions inside Edit profile** (Edit lead details, Switch contact, Archive): the prototype has no place for them; agreed with the owner on 21 Nov 2026.
+
 - **Contacts page kept.** The prototype has no Contacts page; the CRM keeps the 1B page, styled like the other lists.
-- **Unassigned tab kept** on the Leads list. Sales representatives claim leads from it.
-- **Priority filter kept** after Created on the Leads list (a 1C filter).
 - **Clone lead omitted.** Ruled out in release 1C.
 - **Later modules are not in the sidebar.** Email, Mailer, Calendar, Quotations, Projects and Enquiries stay out of the sidebar until their release ships. Where a page in the prototype shows them, the CRM shows a greyed placeholder card or button with "Available in release …" and no controls.
 - **Release numbers on placeholders:** email, mailer and email templates release 2; calendar, quotations and projects release 3; AI research and research sources release 4; enquiries release 1D.
 - **Greeting by your time zone.** The Dashboard says good morning, afternoon or evening by the hour in the time zone chosen in your Preferences, not the computer's clock.
 - **Preferences preview line omitted.** The prototype's "Preview · a call logged at 14:05…" line under the time zone is not shown; settings save with an explicit **Save** button.
 - **Tabbed Settings.** The prototype stacks every card on one page; the CRM keeps one tab per card so each has its own address and access rights. Users sits where the prototype shows its static Roles table; the prototype's "Prototype data" and "Hosting" cards are left out.
-- **Status steps and quick follow-up buttons kept** on the lead page, and **Owner** is shown in the line under the title, so status, follow-up and owner stay one click away.
 - **Meeting note without a calendar.** The Meeting tab saves a note on the timeline (title, date, time, notes); length, place and invitations come with the calendar in release 3.
 - **Notifications have no type chips**, and Projects is not a company tab (release 3).
 - **Contacts in the sidebar.** The sidebar has a Contacts entry below Companies; the prototype has no Contacts page, so no entry.
