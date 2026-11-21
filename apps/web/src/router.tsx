@@ -3,6 +3,7 @@ import { RequireAuth } from './components/RequireAuth';
 import { Dashboard } from './pages/Dashboard';
 import { NotFound } from './pages/NotFound';
 import { CompaniesList } from './pages/companies/CompaniesList';
+import { CompanyProfile } from './pages/companies/CompanyProfile';
 import { LeadsPage, NotificationsPage, ReportsPage, TasksPage } from './pages/Placeholder';
 import { SignIn } from './pages/SignIn';
 import { AllocationRules } from './pages/settings/AllocationRules';
@@ -21,6 +22,7 @@ export const router = createBrowserRouter([
       { index: true, element: <Dashboard /> },
       { path: 'leads', element: <LeadsPage /> },
       { path: 'companies', element: <CompaniesList /> },
+      { path: 'companies/:id', element: <CompanyProfile /> },
       { path: 'tasks', element: <TasksPage /> },
       { path: 'notifications', element: <NotificationsPage /> },
       { path: 'reports', element: <ReportsPage /> },

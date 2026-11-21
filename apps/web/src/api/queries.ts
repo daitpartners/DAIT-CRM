@@ -1,7 +1,10 @@
+import { useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { lookupLabel } from '@dait-crm/shared';
 import type { Action, LookupGroup, Role } from '@dait-crm/shared';
 import { api } from './client';
 import type { CompanyListQuery, DuplicateInput } from './companies';
+import type { ContactDuplicateInput, ContactListQuery } from './contacts';
 
 export type Lang = 'en' | 'es' | 'fr';
 
@@ -87,6 +90,12 @@ export const keys = {
   companies: (query: CompanyListQuery) => ['companies', 'list', query] as const,
   company: (id: number) => ['companies', 'detail', id] as const,
   companyDuplicates: (input: DuplicateInput) => ['companies', 'duplicates', input] as const,
+  /** Under the companies prefix: a company write may change its locations' context. */
+  locations: (companyId: number) => ['companies', 'locations', companyId] as const,
+  /** Prefix of every contact query: invalidate this after any contact write. */
+  contactsAll: ['contacts'] as const,
+  contacts: (query: ContactListQuery) => ['contacts', 'list', query] as const,
+  contactDuplicates: (input: ContactDuplicateInput) => ['contacts', 'duplicates', input] as const,
 };
 
 export function useMe() {
@@ -109,6 +118,19 @@ export function useLookups() {
     queryKey: keys.lookups,
     queryFn: async () => (await api<{ groups: Record<LookupGroup, LookupValue[]> }>('/api/lookups')).groups,
   });
+}
+
+/** `(group, value) => label` in the user's language; an unknown (retired or free-text) value shows as stored. */
+export function useLookupText(lang: Lang) {
+  const { data: lookups } = useLookups();
+  return useCallback(
+    (group: LookupGroup, value: string | null | undefined): string | null => {
+      if (!value) return null;
+      const row = lookups?.[group]?.find((x) => x.value === value);
+      return row ? lookupLabel(row, lang) : value;
+    },
+    [lookups, lang],
+  );
 }
 
 export function useLookupGroup(group: LookupGroup) {

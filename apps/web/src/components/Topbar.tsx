@@ -1,13 +1,27 @@
 import type { ReactNode } from 'react';
 
-type TopbarProps = { title: string; sub?: string; crumb?: ReactNode; children?: ReactNode };
+type TopbarProps = {
+  title: string;
+  sub?: string;
+  crumb?: ReactNode;
+  /** Shown beside the title (e.g. status badges). */
+  badges?: ReactNode;
+  children?: ReactNode;
+};
 
-export function Topbar({ title, sub, crumb, children }: TopbarProps) {
+export function Topbar({ title, sub, crumb, badges, children }: TopbarProps) {
   return (
     <header className="topbar">
       <div style={{ minWidth: 0 }}>
         {crumb ? <div className="crumb">{crumb}</div> : null}
-        <h1>{title}</h1>
+        {badges ? (
+          <div className="title-row">
+            <h1>{title}</h1>
+            {badges}
+          </div>
+        ) : (
+          <h1>{title}</h1>
+        )}
         {sub ? <div className="sub">{sub}</div> : null}
       </div>
       <div className="grow" />

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm, useWatch, type Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -15,7 +15,24 @@ import { useLang, useT, type TFn } from '../../i18n/useT';
 import { timezoneOptions } from '../settings/timezones';
 import { DuplicateHint } from './DuplicateHint';
 
-type Props = { company?: CompanyDetail; onClose: () => void };
+/** Field groups of the company form: A Overview, B Address, C Size & financial, D Products & services, E Digital presence. */
+export type CompanySection = 'overview' | 'address' | 'size' | 'products' | 'digital';
+
+type Props = {
+  company?: CompanyDetail;
+  onClose: () => void;
+  /** Editing only: focus (and scroll to) the first field of this group when the form opens. */
+  section?: CompanySection;
+};
+
+/** The first field of each group; `section` focuses it. */
+const SECTION_FIRST: Record<CompanySection, string> = {
+  overview: 'co-name',
+  address: 'co-country',
+  size: 'co-employeeCount',
+  products: 'co-mainProducts',
+  digital: 'co-socialFacebook',
+};
 
 /** Form state: text inputs hold strings ('' = empty); the shared schema trims them and turns '' into null. */
 type Values = {
@@ -36,13 +53,46 @@ type Values = {
   street: string;
   zip: string;
   timezone: string;
+  employeeCount: number | null;
+  employeeRange: string;
+  annualRevenue: number | null;
+  revenueCurrency: string;
+  revenueRange: string;
+  ownershipType: string;
+  registrationNumber: string;
+  stockExchange: string;
+  stockSymbol: string;
+  mainProducts: string;
+  mainServices: string;
+  /** Comma-separated in the form; sent as a list. */
+  businessVerticals: string;
+  targetMarkets: string;
+  geographicMarkets: string;
+  keyBrands: string;
+  specialisation: string;
+  socialFacebook: string;
+  socialInstagram: string;
+  socialX: string;
+  socialYoutube: string;
+  socialOther: string;
   updatedAt?: string;
 };
 type Field = Exclude<keyof Values, 'updatedAt'>;
 const FIELDS: Field[] = [
   'name', 'legalName', 'website', 'businessEmail', 'industry', 'businessCategory', 'businessType', 'yearEstablished',
   'description', 'linkedinUrl', 'status', 'country', 'state', 'city', 'street', 'zip', 'timezone',
+  'employeeCount', 'employeeRange', 'annualRevenue', 'revenueCurrency', 'revenueRange', 'ownershipType',
+  'registrationNumber', 'stockExchange', 'stockSymbol', 'mainProducts', 'mainServices', 'businessVerticals',
+  'targetMarkets', 'geographicMarkets', 'keyBrands', 'specialisation', 'socialFacebook', 'socialInstagram',
+  'socialX', 'socialYoutube', 'socialOther',
 ];
+type ListField = 'businessVerticals' | 'targetMarkets' | 'geographicMarkets';
+const LIST_FIELDS: ListField[] = ['businessVerticals', 'targetMarkets', 'geographicMarkets'];
+type LookupField = 'industry' | 'businessCategory' | 'businessType' | 'employeeRange' | 'revenueCurrency' | 'revenueRange' | 'ownershipType';
+
+/** "a, b ,, c" → ['a', 'b', 'c'] */
+const splitList = (v: string) => v.split(',').map((x) => x.trim()).filter(Boolean);
+const numberOrNull = (v: unknown) => (v === '' || v == null ? null : Number(v));
 
 const text = (v: string | null | undefined) => v ?? '';
 
@@ -54,7 +104,21 @@ function fieldMessage(t: TFn, field: Field): string {
       return t('Choose a country');
     case 'website':
     case 'linkedinUrl':
+    case 'socialFacebook':
+    case 'socialInstagram':
+    case 'socialX':
+    case 'socialYoutube':
+    case 'socialOther':
       return t('Enter a valid web address, for example https://example.com');
+    case 'employeeCount':
+    case 'annualRevenue':
+      return t('Enter a number of 0 or more');
+    case 'revenueCurrency':
+      return t('Choose a currency');
+    case 'businessVerticals':
+    case 'targetMarkets':
+    case 'geographicMarkets':
+      return t('Up to 50 entries of 100 characters each, separated by commas');
     case 'businessEmail':
       return t('Enter a valid email address');
     case 'yearEstablished':
@@ -70,7 +134,7 @@ function fieldMessage(t: TFn, field: Field): string {
  * Add (no `company`) or edit a company's Overview (A) and Address (B) sections.
  * Validation uses the shared CompanyCreate / CompanyUpdate schemas; a live duplicate check runs as the user types.
  */
-export function CompanyModal({ company, onClose }: Props) {
+export function CompanyModal({ company, onClose, section }: Props) {
   const t = useT();
   const lang = useLang();
   const qc = useQueryClient();
@@ -79,9 +143,19 @@ export function CompanyModal({ company, onClose }: Props) {
   const [formError, setFormError] = useState<string | null>(null);
   const editing = Boolean(company);
 
-  const { register, handleSubmit, control, setError, formState } = useForm<Values>({
+  const resolver = useMemo<Resolver<Values>>(() => {
     // The shared schemas also normalise (trim, '' → null, bare host → https://); their types differ from Values.
-    resolver: (editing ? zodResolver(CompanyUpdate) : zodResolver(CompanyCreate)) as unknown as Resolver<Values>,
+    const zod = (editing ? zodResolver(CompanyUpdate) : zodResolver(CompanyCreate)) as unknown as Resolver<Values>;
+    // Comma-separated list inputs become arrays before validation.
+    return (values, ctx, opts) => {
+      const out: Record<string, unknown> = { ...values };
+      for (const f of LIST_FIELDS) out[f] = splitList(values[f] ?? '');
+      return zod(out as unknown as Values, ctx, opts);
+    };
+  }, [editing]);
+
+  const { register, handleSubmit, control, setError, formState } = useForm<Values>({
+    resolver,
     defaultValues: {
       name: text(company?.name),
       legalName: text(company?.legalName),
@@ -100,10 +174,39 @@ export function CompanyModal({ company, onClose }: Props) {
       street: text(company?.street),
       zip: text(company?.zip),
       timezone: text(company?.timezone),
+      employeeCount: company?.employeeCount ?? null,
+      employeeRange: text(company?.employeeRange),
+      annualRevenue: company?.annualRevenue ?? null,
+      revenueCurrency: text(company?.revenueCurrency),
+      revenueRange: text(company?.revenueRange),
+      ownershipType: text(company?.ownershipType),
+      registrationNumber: text(company?.registrationNumber),
+      stockExchange: text(company?.stockExchange),
+      stockSymbol: text(company?.stockSymbol),
+      mainProducts: text(company?.mainProducts),
+      mainServices: text(company?.mainServices),
+      businessVerticals: (company?.businessVerticals ?? []).join(', '),
+      targetMarkets: (company?.targetMarkets ?? []).join(', '),
+      geographicMarkets: (company?.geographicMarkets ?? []).join(', '),
+      keyBrands: text(company?.keyBrands),
+      specialisation: text(company?.specialisation),
+      socialFacebook: text(company?.socialFacebook),
+      socialInstagram: text(company?.socialInstagram),
+      socialX: text(company?.socialX),
+      socialYoutube: text(company?.socialYoutube),
+      socialOther: text(company?.socialOther),
       ...(company ? { updatedAt: company.updatedAt } : {}),
     },
   });
   const { errors } = formState;
+
+  // Runs after the dialog's own initial focus (child effects first), so the chosen group wins.
+  useEffect(() => {
+    if (!section || !editing) return;
+    const el = document.getElementById(SECTION_FIRST[section]);
+    el?.scrollIntoView?.({ block: 'center' });
+    el?.focus();
+  }, [section, editing]);
 
   const [name, website, businessEmail, legalName, country] = useWatch({
     control,
@@ -142,7 +245,7 @@ export function CompanyModal({ company, onClose }: Props) {
   });
 
   const err = (f: Field) => (errors[f] ? (errors[f]?.type === 'server' ? errors[f]?.message : fieldMessage(t, f)) : undefined);
-  const input = (f: Field, label: string, opts: { required?: boolean; type?: string; span?: boolean; placeholder?: string } = {}) => (
+  const input = (f: Field, label: string, opts: { required?: boolean; type?: string; span?: boolean; placeholder?: string; hint?: string } = {}) => (
     <FormField id={`co-${f}`} label={label} required={opts.required} error={err(f)} className={opts.span ? 'span2' : undefined}>
       <input
         id={`co-${f}`}
@@ -150,9 +253,14 @@ export function CompanyModal({ company, onClose }: Props) {
         className={errors[f] ? 'in err' : 'in'}
         placeholder={opts.placeholder}
         aria-invalid={Boolean(errors[f])}
-        aria-describedby={errors[f] ? `co-${f}-err` : undefined}
+        aria-describedby={[errors[f] ? `co-${f}-err` : '', opts.hint ? `co-${f}-hint` : ''].filter(Boolean).join(' ') || undefined}
         {...register(f)}
       />
+      {opts.hint ? (
+        <div id={`co-${f}-hint`} className="hint-text">
+          {opts.hint}
+        </div>
+      ) : null}
     </FormField>
   );
 
@@ -166,7 +274,7 @@ export function CompanyModal({ company, onClose }: Props) {
   };
 
   /** An optional lookup field: a native select for short lists, otherwise a searchable combobox with a "None" option. */
-  const lookupField = (f: 'industry' | 'businessCategory' | 'businessType', group: LookupGroup, label: string) => (
+  const lookupField = (f: LookupField, group: LookupGroup, label: string) => (
     <Controller
       control={control}
       name={f}
@@ -196,12 +304,40 @@ export function CompanyModal({ company, onClose }: Props) {
         }
         return (
           <div>
-            <Combobox id={`co-${f}`} label={label} options={[{ value: '', label: t('None') }, ...opts]} value={field.value} onChange={field.onChange} />
+            <Combobox id={`co-${f}`} label={label} options={[{ value: '', label: t('None') }, ...opts]} value={field.value ?? ''} onChange={field.onChange} />
             {errors[f] ? <div id={`co-${f}-err`} className="err-msg" role="alert">{err(f)}</div> : null}
           </div>
         );
       }}
     />
+  );
+
+  const numberInput = (f: 'employeeCount' | 'annualRevenue', label: string) => (
+    <FormField id={`co-${f}`} label={label} error={err(f)}>
+      <input
+        id={`co-${f}`}
+        type="number"
+        min={0}
+        inputMode="decimal"
+        className={errors[f] ? 'in err' : 'in'}
+        aria-invalid={Boolean(errors[f])}
+        aria-describedby={errors[f] ? `co-${f}-err` : undefined}
+        {...register(f, { setValueAs: numberOrNull })}
+      />
+    </FormField>
+  );
+
+  const textArea = (f: 'mainProducts' | 'mainServices' | 'specialisation', label: string) => (
+    <FormField id={`co-${f}`} label={label} error={err(f)} className="span2">
+      <textarea
+        id={`co-${f}`}
+        className={errors[f] ? 'in err' : 'in'}
+        rows={3}
+        aria-invalid={Boolean(errors[f])}
+        aria-describedby={errors[f] ? `co-${f}-err` : undefined}
+        {...register(f)}
+      />
+    </FormField>
   );
 
   const tzOptions = useMemo(() => timezoneOptions(company?.timezone ?? undefined), [company?.timezone]);
@@ -254,7 +390,7 @@ export function CompanyModal({ company, onClose }: Props) {
             className={errors.yearEstablished ? 'in err' : 'in'}
             aria-invalid={Boolean(errors.yearEstablished)}
             aria-describedby={errors.yearEstablished ? 'co-yearEstablished-err' : undefined}
-            {...register('yearEstablished', { setValueAs: (v: unknown) => (v === '' || v == null ? null : Number(v)) })}
+            {...register('yearEstablished', { setValueAs: numberOrNull })}
           />
         </FormField>
         <FormField id="co-status" label={t('Status')} required error={err('status')}>
@@ -295,6 +431,36 @@ export function CompanyModal({ company, onClose }: Props) {
           />
           {errors.timezone ? <div className="err-msg" role="alert">{err('timezone')}</div> : null}
         </div>
+        {editing ? (
+          <>
+            <h3 className="span2 form-sec">{t('Size & financial')}</h3>
+            {numberInput('employeeCount', t('Employee count'))}
+            {lookupField('employeeRange', 'employee_range', t('Employee range'))}
+            {numberInput('annualRevenue', t('Annual revenue'))}
+            {lookupField('revenueCurrency', 'currency', t('Revenue currency'))}
+            {lookupField('revenueRange', 'revenue_range', t('Revenue range'))}
+            {lookupField('ownershipType', 'ownership_type', t('Ownership type'))}
+            {input('registrationNumber', t('Registration number'))}
+            {input('stockExchange', t('Stock exchange'))}
+            {input('stockSymbol', t('Stock symbol'))}
+
+            <h3 className="span2 form-sec">{t('Products & services')}</h3>
+            {textArea('mainProducts', t('Main products'))}
+            {textArea('mainServices', t('Main services'))}
+            {input('businessVerticals', t('Business verticals'), { span: true, hint: t('Separate entries with commas') })}
+            {input('targetMarkets', t('Target markets'), { span: true, hint: t('Separate entries with commas') })}
+            {input('geographicMarkets', t('Geographic markets'), { span: true, hint: t('Separate entries with commas') })}
+            {input('keyBrands', t('Key brands'), { span: true })}
+            {textArea('specialisation', t('Specialisation'))}
+
+            <h3 className="span2 form-sec">{t('Digital presence')}</h3>
+            {input('socialFacebook', t('Facebook'), { type: 'url', placeholder: 'https://' })}
+            {input('socialInstagram', t('Instagram'), { type: 'url', placeholder: 'https://' })}
+            {input('socialX', t('X / Twitter'), { type: 'url', placeholder: 'https://' })}
+            {input('socialYoutube', t('YouTube'), { type: 'url', placeholder: 'https://' })}
+            {input('socialOther', t('Other social profile'), { type: 'url', placeholder: 'https://', span: true })}
+          </>
+        ) : null}
         {formError ? (
           <div className="span2 note warn" role="alert">
             {formError}
