@@ -50,6 +50,7 @@ try {
     },
   });
   await seedLeads(maya.id);
+  await seedMail(neha.id);
   console.log('e2e seed complete');
 } finally {
   await prisma.$disconnect();
@@ -82,4 +83,34 @@ async function seedLeads(mayaId: number): Promise<void> {
     const input = LeadCreate.parse({ ...lead, createCompany: false });
     await prisma.$transaction((tx) => createLeadWithCompany(tx, input, actor, { quiet: true }));
   }
+}
+
+/**
+ * Release 2B-2: Neha's synced mail — her message to Orbit, Orbit's unread reply (linked to the Orbit lead) and an
+ * unread enquiry from an unknown sender (unlinked). Nobody else may see any of it.
+ */
+async function seedMail(nehaId: number): Promise<void> {
+  const box = await prisma.emailAccount.findFirstOrThrow({ where: { userId: nehaId, kind: 'personal' } });
+  const orbit = await prisma.lead.findFirstOrThrow({ where: { companyName: 'Orbit Fintech' } });
+  const base = { userId: nehaId, accountId: box.id, source: 'sync' };
+  const day = (n: number) => new Date(Date.now() - n * 86_400_000);
+  await prisma.emailMessage.createMany({
+    data: [
+      {
+        ...base, graphId: 'e2e-1', folder: 'sent', status: 'sent', fromAddress: box.address, fromName: 'Neha Kapoor',
+        toAddresses: ['finance@orbit.example'], subject: 'Orbit proposal', bodyText: 'Hi,\n\nPlease find our proposal.', threadId: 'e2e-conv-1',
+        leadId: orbit.id, companyId: orbit.companyId, occurredAt: day(3),
+      },
+      {
+        ...base, graphId: 'e2e-2', folder: 'inbox', status: 'received', fromAddress: 'finance@orbit.example', fromName: 'Lena Vogel',
+        toAddresses: [box.address], subject: 'Re: Orbit proposal', bodyText: 'Thanks Neha, can we talk on Thursday?', threadId: 'e2e-conv-1',
+        leadId: orbit.id, companyId: orbit.companyId, isRead: false, occurredAt: day(1), attachmentNames: ['orbit-notes.pdf'],
+      },
+      {
+        ...base, graphId: 'e2e-3', folder: 'inbox', status: 'received', fromAddress: 'sara@blue-river.example', fromName: 'Sara Lind',
+        toAddresses: [box.address], subject: 'Website enquiry', bodyText: 'We need a new website. Can you help?', threadId: 'e2e-conv-2',
+        isRead: false, occurredAt: day(0.5),
+      },
+    ],
+  });
 }

@@ -35,7 +35,7 @@ function stub(items: MailItem[], details: Record<number, MailDetail>, meta: Mail
     }
     if (url.startsWith('/api/mail?')) return Response.json({ items });
     if (url === '/api/mail/meta') return Response.json(meta);
-    const m = /^\/api\/mail\/(\d+)$/.exec(url);
+    const m = /^\/api\/mail\/(\d+)(\?peek=1)?$/.exec(url);
     if (m) return Response.json(details[Number(m[1])]);
     if (url.startsWith('/api/email-templates')) {
       return Response.json({ items: [{ id: 3, name: 'Intro', language: 'en', subject: 'Hello from {me}', body: 'Hi,\n{me}', sourceType: 'manual', fileName: null, fileSize: null, createdBy: null, createdAt: '', updatedAt: '' }] });
@@ -128,7 +128,8 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     stub([], {}, { ...META, mailbox: null, unread: 0, unlinked: 0 });
     show();
     expect(await screen.findByText('Mailbox not connected')).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'Connect Microsoft 365' }).getAttribute('href')).toBe('/settings/connections');
+    expect(await screen.findByText('Connect your mailbox to send and receive from the CRM.')).toBeTruthy();
+    for (const link of screen.getAllByRole('link', { name: 'Connect Microsoft 365' })) expect(link.getAttribute('href')).toBe('/settings/connections');
     expect(await screen.findByText('Nothing here.')).toBeTruthy();
   });
 

@@ -13,18 +13,20 @@ import { LinkLeadModal } from './LinkLeadModal';
 
 type Props = {
   id: number;
+  /** Shown automatically (first message on arrival), not opened by the user: it stays unread. */
+  peek?: boolean;
   connected: boolean;
   onReply: (start: ComposeStart) => void;
   onArchived: () => void;
 };
 
 /** Reading pane + side panel (prototype `.reader` and `.mailside`). */
-export function Reader({ id, connected, onReply, onArchived }: Props) {
+export function Reader({ id, peek = false, connected, onReply, onArchived }: Props) {
   const t = useT();
   const toast = useToast();
   const navigate = useNavigate();
   const { date, day } = useFormatDate();
-  const { data: m, isError } = useMailMessage(id);
+  const { data: m, isError } = useMailMessage(id, peek);
   const action = useMailAction();
   const [linking, setLinking] = useState(false);
 

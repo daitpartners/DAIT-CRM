@@ -83,7 +83,7 @@ export function EmailPage() {
   const leadOptions = (meta?.leads ?? []).filter((l) => !filter.company || l.companyId === filter.company);
   const leadNumber = meta?.leads.find((l) => l.id === filter.lead)?.number;
 
-  const sub = mailbox ? (
+  const sub = !meta ? null : mailbox ? (
     <>
       {t('{address} · Microsoft 365', { address: mailbox.address })}{' '}
       {connected ? <span className="badge b-ok">{t('Connected')}</span> : <span className="badge b-warn">{t('Needs reconnecting')}</span>} ·{' '}
@@ -117,6 +117,19 @@ export function EmailPage() {
           {t('+ Compose')}
         </button>
       </Topbar>
+
+      {meta && !mailbox ? (
+        <div className="mail-connect">
+          <span>
+            <strong>{t('Connect your mailbox to send and receive from the CRM.')}</strong>{' '}
+            {t('Your Microsoft 365 Business Basic account works out of the box; sign in once and the CRM syncs mail and calendar through Microsoft Graph.')}
+          </span>
+          <div className="grow" />
+          <Link className="btn primary" to="/settings/connections">
+            {t('Connect Microsoft 365')}
+          </Link>
+        </div>
+      ) : null}
 
       <div className="filters mail-filters">
         <span className="mail-for">{t('Show mail for')}</span>
@@ -225,6 +238,7 @@ export function EmailPage() {
         {selectedId !== null ? (
           <Reader
             id={selectedId}
+            peek={num(id ?? null) === undefined}
             connected={connected}
             onReply={(start) => setCompose(start)}
             onArchived={() => navigate(href({}, false))}

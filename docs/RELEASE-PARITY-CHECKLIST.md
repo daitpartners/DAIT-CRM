@@ -133,6 +133,16 @@ Prototype `#/settings` (cards "Email & calendar connections" and "Email template
 - [ ] History (Calls tab): you see "Email sent · {subject}"; a colleague, administrators included, sees only "Email sent", and their Emails tab does not show your email.
 - [ ] Without a connected mailbox the Email tab says "Connect your Microsoft 365 mailbox in Settings to send email from the CRM." and Send is greyed out.
 
+## Email screen and mail sync (release 2B-2)
+
+- [ ] Settings → Email & calendar connections → **Sync now** on your mailbox → "Sync started…"; within a minute the row shows "synced {when} · n messages" (first sync reads the last 90 days; later every 5 minutes).
+- [ ] Sidebar **Email** shows your unread inbox count; the Email screen header shows your address, Microsoft 365, Connected and when it last synced.
+- [ ] A reply from a lead's contact appears in Inbox with the lead number badge; mail from an unknown sender shows "Unlinked · create lead?". Opening a message marks it read (also in Outlook).
+- [ ] **Reply** → the reply arrives in the same Outlook conversation; **Log as activity** puts "Email received · {subject}" on the lead (a colleague sees only "Email received"); **Add follow-up task** creates "Reply to {sender} · {subject}" due tomorrow.
+- [ ] **Link to lead / create lead**: linking puts the message on the chosen lead; creating makes a new lead (company matched by the sender's domain) and opens it.
+- [ ] **Archive** moves it to Archive here and in Outlook. Drafts are view-only. Show mail for Client / Lead, search and the smart views (Unlinked, Awaiting reply, My leads) filter the list.
+- [ ] Sign in as a colleague (administrator too): none of your mail is on their Email screen or their lead Emails tab.
+
 ## Spanish and French labels
 
 - [ ] In Settings, Preferences, switch to Español and save. Walk the Dashboard, Leads, a lead page and Settings: no English words left on buttons, tabs or headings. Repeat with Français, then switch back to English.
@@ -155,6 +165,7 @@ These differ from the prototype on purpose:
 - **Contacts in the sidebar.** The sidebar has a Contacts entry below Companies; the prototype has no Contacts page, so no entry.
 - **Tasks show the first 100 of each group.** Overdue, Due today and Upcoming each list at most 100 tasks; a longer group ends with "Showing the first n of total." The prototype lists everything.
 - **New lead number on save.** The New lead page says "Lead ID will be generated on save" without predicting the number, and the AI enrichment step reads "Available in release 4". Edit lead stays a dialog on the lead page.
+- **Email screen extras (release 2B-2).** The reader has an **Archive** button and lists attachment names; the Project filter, Compose's Project field and "Create meeting" are greyed until release 3; drafts are view-only; a message is marked read when you open it, not when it is shown first on arrival.
 - **AI research queue tile shows "—"** with "Available in release 4" until AI research exists; the prototype shows a count of queued jobs.
 
 ## Verification against the approved design, 21 Nov 2026

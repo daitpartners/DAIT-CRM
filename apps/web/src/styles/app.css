@@ -639,3 +639,5 @@ td.nowrap{white-space:nowrap}
   .msglist{max-width:none;flex-basis:100%;border-right:0}
   .mailside{flex-basis:100%;border-left:0;border-top:1px solid var(--line)}
 }
+.mail-connect{margin:16px 28px 0;padding:12px 16px;border:1px solid #F0C98A;background:#FFF8EC;border-radius:10px;font-size:13px;color:var(--body);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+@media (max-width:760px){.mail-connect{margin:12px 16px 0}}

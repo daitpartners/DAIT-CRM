@@ -71,12 +71,13 @@ export function useMailMeta() {
   return useQuery({ queryKey: [...ROOT, 'meta'], queryFn: () => api<MailMeta>('/api/mail/meta'), refetchInterval: 60_000 });
 }
 
-export function useMailMessage(id: number | null) {
+/** `peek`: shown without the user opening it (the first message on arrival), so it stays unread. */
+export function useMailMessage(id: number | null, peek = false) {
   const qc = useQueryClient();
   return useQuery({
-    queryKey: [...ROOT, 'message', id],
+    queryKey: [...ROOT, 'message', id, peek],
     queryFn: async () => {
-      const m = await api<MailDetail>(`/api/mail/${id}`);
+      const m = await api<MailDetail>(`/api/mail/${id}${peek ? '?peek=1' : ''}`);
       // Opening marks it read: the counts and the list change.
       void qc.invalidateQueries({ queryKey: [...ROOT, 'meta'] });
       void qc.invalidateQueries({ queryKey: keys.navCounts });

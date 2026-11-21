@@ -1141,5 +1141,7 @@
   "Unlinked": "Sin vincular",
   "This email is already on the lead.": "Este correo ya está en el lead.",
   "Link this email to a lead first.": "Vincule primero este correo a un lead.",
-  "Your mailbox needs reconnecting in Settings → Email & calendar connections.": "Debe volver a conectar su buzón en Configuración → Conexiones de correo y calendario."
+  "Your mailbox needs reconnecting in Settings → Email & calendar connections.": "Debe volver a conectar su buzón en Configuración → Conexiones de correo y calendario.",
+  "Connect your mailbox to send and receive from the CRM.": "Conecte su buzón para enviar y recibir desde el CRM.",
+  "Your Microsoft 365 Business Basic account works out of the box; sign in once and the CRM syncs mail and calendar through Microsoft Graph.": "Su cuenta de Microsoft 365 Business Basic funciona de inmediato: inicie sesión una vez y el CRM sincroniza el correo y el calendario mediante Microsoft Graph."
 }

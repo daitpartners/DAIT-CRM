@@ -180,7 +180,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
   app.get('/mail/meta', pre, async (request) => {
     const user = request.user!;
     const [mailbox, unread, unlinked, companyIds, leadIds] = await Promise.all([
-      prisma.emailAccount.findFirst({ where: { kind: 'personal', userId: user.id, status: { not: 'disconnected' } }, select: { address: true, status: true, lastSyncAt: true } }),
+      prisma.emailAccount.findFirst({ where: { kind: 'personal', userId: user.id, status: { not: 'disconnected' } }, select: { id: true, address: true, status: true, lastSyncAt: true } }),
       prisma.emailMessage.count({ where: { userId: user.id, folder: 'inbox', isRead: false } }),
       prisma.emailMessage.count({ where: { userId: user.id, leadId: null, folder: { not: 'drafts' } } }),
       prisma.emailMessage.findMany({ where: { userId: user.id, companyId: { not: null } }, distinct: ['companyId'], select: { companyId: true } }),
@@ -196,11 +196,12 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
     return { mailbox, unread, unlinked, companies, leads };
   });
 
-  app.get<{ Params: { id: string } }>('/mail/:id', pre, async (request, reply) => {
+  // `peek=1`: the first message shown on arrival, which the user has not opened yet, stays unread.
+  app.get<{ Params: { id: string }; Querystring: { peek?: string } }>('/mail/:id', pre, async (request, reply) => {
     const user = request.user!;
     return guard(reply, async () => {
       let m = await ownMessage(prisma, user, request.params.id);
-      if (!m.isRead) {
+      if (!m.isRead && request.query.peek !== '1') {
         m = await prisma.emailMessage.update({ where: { id: m.id }, data: { isRead: true } });
         await tellMailbox(prisma, m, 'read');
       }

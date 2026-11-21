@@ -215,6 +215,16 @@ describe('reading mail on the Email screen (2B-2)', () => {
     expect((await call('GET', `/api/mail/${m.id}`, await signIn(app, admin))).statusCode).toBe(404);
   });
 
+  it('a preview (the first message shown on arrival) does not mark it read', async () => {
+    const { rep, box } = await setup();
+    const m = await synced(rep.id, box.id, { graphId: 'g-peek' });
+    const res = await call('GET', `/api/mail/${m.id}?peek=1`, await signIn(app, rep));
+    expect(res.statusCode).toBe(200);
+    expect(res.json().isRead).toBe(false);
+    expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: m.id } })).isRead).toBe(false);
+    expect(await prisma.job.count({ where: { type: 'mail_action' } })).toBe(0);
+  });
+
   it('read and archive change your message at once and queue the mailbox change; others get 404', async () => {
     const { rep, admin, box } = await setup();
     const m = await synced(rep.id, box.id, { isRead: true });
