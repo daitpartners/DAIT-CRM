@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import type { LeadFull } from '../src/api/leads';
 import { keys, type LookupValue, type Me } from '../src/api/queries';
+import { ConfirmProvider } from '../src/components/ConfirmDialog';
 import { ToastProvider } from '../src/components/Toast';
 
 export const rep: Me = {
@@ -58,7 +59,9 @@ export function Wrap({ qc, children }: { qc: QueryClient; children: ReactNode })
   return (
     <QueryClientProvider client={qc}>
       <ToastProvider>
-        <MemoryRouter>{children}</MemoryRouter>
+        <ConfirmProvider>
+          <MemoryRouter>{children}</MemoryRouter>
+        </ConfirmProvider>
       </ToastProvider>
     </QueryClientProvider>
   );

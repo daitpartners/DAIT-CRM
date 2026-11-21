@@ -67,6 +67,19 @@ describe('ProfileCard', () => {
     expect(within(card).queryByText('Experience')).toBeNull();
   });
 
+  it('renders with neither company nor contact (CSV review row): no-contact state, dashes in the facts', () => {
+    const { container } = render(
+      <Wrap qc={makeClient()}>
+        <ProfileCard lead={makeLead({ company: null, companyId: null, contact: null, contactId: null, companyName: 'Unlinked Co' })} />
+      </Wrap>,
+    );
+    const card = screen.getByRole('region', { name: 'Profile' });
+    expect(within(card).getByRole('heading', { name: 'Unlinked Co' })).toBeInTheDocument();
+    expect(within(card).getByText(/No contact person on this lead yet/)).toBeInTheDocument();
+    expect(within(card).getByText('Industry', { selector: 'dt' }).nextElementSibling).toHaveTextContent('—');
+    expect(container.textContent).not.toMatch(/undefined|null|NaN/);
+  });
+
   it('the profile collapses and "Focus on email" is a disabled placeholder', async () => {
     const u = userEvent.setup();
     render(

@@ -425,7 +425,7 @@ a.tile{display:block;text-decoration:none}a.tile:hover{border-color:var(--purple
 .card.ph-card p{margin:0;font-size:12.5px;line-height:1.5}
 .card.ph-card .ph-note{font-weight:600;color:var(--faint)}
 /* Lead page (prototype parity, task 4) */
-.btn:disabled{opacity:.55;cursor:not-allowed}.btn.primary:disabled:hover{filter:none}
+.btn:disabled{opacity:.55;cursor:not-allowed}.btn:disabled:hover{background:var(--surface);color:var(--text)}.btn.primary:disabled:hover{background:var(--grad);color:#fff}.btn.primary:disabled:hover{filter:none}
 .pname{font-size:19px;margin:0}
 .l2col .dim,.side-card .dim,.l2fu .dim,.composer .dim{color:var(--muted);font-size:12.5px}
 ul.xp{list-style:none;margin:0;padding:0}

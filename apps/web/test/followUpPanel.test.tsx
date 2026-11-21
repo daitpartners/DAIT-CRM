@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FollowUpPanel } from '../src/pages/leads/FollowUpPanel';
 import { STATUSES, Wrap, inDays, makeClient, makeLead } from './leadFixture';
@@ -36,6 +36,47 @@ describe('FollowUpPanel', () => {
     await waitFor(() => expect(bodies).toHaveLength(1));
     expect(bodies[0]).toEqual({ nextFollowUp: inDays(days), updatedAt: '2026-11-20T10:00:00.000Z' });
     expect(screen.getByLabelText('Next follow-up', { selector: 'input' })).toHaveValue(inDays(days));
+  });
+
+  it('a cleared or half-typed date is not saved on blur or Enter', async () => {
+    const bodies = stubPatch();
+    render(
+      <Wrap qc={makeClient()}>
+        <FollowUpPanel lead={makeLead({ nextFollowUp: inDays(3) })} statuses={STATUSES} live />
+      </Wrap>,
+    );
+    const input = screen.getByLabelText('Next follow-up', { selector: 'input' });
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.blur(input);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(bodies).toHaveLength(0);
+    // The stored date comes back.
+    expect(input).toHaveValue(inDays(3));
+  });
+
+  it('Clear asks first, then clears the follow-up', async () => {
+    const u = userEvent.setup();
+    const bodies = stubPatch();
+    render(
+      <Wrap qc={makeClient()}>
+        <FollowUpPanel lead={makeLead({ nextFollowUp: inDays(3) })} statuses={STATUSES} live />
+      </Wrap>,
+    );
+    await u.click(screen.getByRole('button', { name: 'Clear' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Clear follow-up?' });
+    await u.click(within(dialog).getByRole('button', { name: 'Clear' }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]).toEqual({ nextFollowUp: null, updatedAt: '2026-11-20T10:00:00.000Z' });
+  });
+
+  it('no Clear button without a follow-up date', () => {
+    render(
+      <Wrap qc={makeClient()}>
+        <FollowUpPanel lead={makeLead()} statuses={STATUSES} live />
+      </Wrap>,
+    );
+    expect(screen.queryByRole('button', { name: 'Clear' })).toBeNull();
   });
 
   it('shows Scheduled for a future follow-up, Today for today and Overdue when late; none without a date', () => {

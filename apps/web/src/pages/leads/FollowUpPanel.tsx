@@ -10,7 +10,8 @@ import { Tabs } from '../../components/Tabs';
 import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
 import { errorText, leadStatusText, leadTypeText, priorityText } from '../../i18n/labels';
-import { useT } from '../../i18n/useT';
+import { useT, type TFn } from '../../i18n/useT';
+import { useConfirm } from '../../components/ConfirmDialog';
 import { TaskModal } from '../tasks/TaskModal';
 import { Timeline } from './Timeline';
 import { useActionError } from './staleToast';
@@ -22,11 +23,12 @@ export function localDayPlus(days: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-const QUICK: { days: number; label: 'Tomorrow' | '+4 days' | 'Next week' }[] = [
-  { days: 1, label: 'Tomorrow' },
-  { days: 4, label: '+4 days' },
-  { days: 7, label: 'Next week' },
-];
+const QUICK_DAYS = [1, 4, 7] as const;
+/** Literal phrases so the i18n checker sees them. */
+function quickLabel(t: TFn, days: (typeof QUICK_DAYS)[number]): string {
+  return days === 1 ? t('Tomorrow') : days === 4 ? t('+4 days') : t('Next week');
+}
+
 const SHOWN_TASKS = 2;
 
 type Props = { lead: LeadFull; statuses: LookupValue[]; live: boolean };
@@ -68,6 +70,7 @@ function FollowUpControls({ lead, statuses, live }: Props) {
   const action = useLeadAction();
   const saveTask = useSaveTask();
   const refreshIfOutOfDate = useRefreshWhenOutOfDate();
+  const confirm = useConfirm();
   const { day } = useFormatDate();
   const [date, setDate] = useState(lead.nextFollowUp ?? '');
   const [addTask, setAddTask] = useState(false);
@@ -102,10 +105,22 @@ function FollowUpControls({ lead, statuses, live }: Props) {
     );
   }
 
+  /** Saves a typed or picked date. An empty value (a half-edited input) is never sent: Clear is the only way to clear. */
   function commitDate(value: string) {
-    if (value === (lead.nextFollowUp ?? '') || value === sent.current) return;
+    if (!value || value === (lead.nextFollowUp ?? '') || value === sent.current) return;
     sent.current = value;
-    patch({ nextFollowUp: value || null }, value ? t('Follow-up set') : t('Follow-up cleared'));
+    patch({ nextFollowUp: value }, t('Follow-up set'));
+  }
+
+  async function clearDate() {
+    const ok = await confirm({
+      title: t('Clear follow-up?'),
+      body: t('{number} will have no next follow-up date.', { number: lead.number }),
+      confirmLabel: t('Clear'),
+    });
+    if (!ok) return;
+    sent.current = '';
+    patch({ nextFollowUp: null }, t('Follow-up cleared'));
   }
 
   function tick(task: TaskRow) {
@@ -141,26 +156,35 @@ function FollowUpControls({ lead, statuses, live }: Props) {
             disabled={dateOff}
             title={closed ? t('A closed lead has no follow-up') : undefined}
             onChange={(e) => setDate(e.target.value)}
-            onBlur={() => commitDate(date)}
+            onBlur={() => {
+              // A cleared or half-typed date is not saved; show the stored date again.
+              if (!date) setDate(lead.nextFollowUp ?? '');
+              else commitDate(date);
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') commitDate(date);
             }}
           />
           {badge}
+          {lead.nextFollowUp ? (
+            <button type="button" className="btn xs" disabled={dateOff} onClick={() => void clearDate()}>
+              {t('Clear')}
+            </button>
+          ) : null}
         </div>
         <div className="quick">
-          {QUICK.map((q) => (
+          {QUICK_DAYS.map((days) => (
             <button
-              key={q.days}
+              key={days}
               type="button"
               disabled={dateOff}
               onClick={() => {
-                const next = localDayPlus(q.days);
+                const next = localDayPlus(days);
                 setDate(next);
                 commitDate(next);
               }}
             >
-              {t(q.label)}
+              {quickLabel(t, days)}
             </button>
           ))}
         </div>
