@@ -154,10 +154,11 @@ export function TasksList() {
   );
 }
 
-type TaskItemProps = { task: TaskRow; busy: boolean; onTick: () => void; onEdit: () => void; onSnooze: () => void };
+/** Without `onEdit` / `onSnooze` the row is the prototype's plain checkbox row (dashboard). */
+export type TaskItemProps = { task: TaskRow; busy: boolean; onTick: () => void; onEdit?: () => void; onSnooze?: () => void };
 
 /** The prototype's checkbox row: title, "when · lead · origin · assignee", a state badge, and Edit / Snooze. */
-function TaskItem({ task, busy, onTick, onEdit, onSnooze }: TaskItemProps) {
+export function TaskItem({ task, busy, onTick, onEdit, onSnooze }: TaskItemProps) {
   const t = useT();
   const { day } = useFormatDate();
   return (
@@ -203,7 +204,7 @@ function TaskItem({ task, busy, onTick, onEdit, onSnooze }: TaskItemProps) {
       ) : (
         <span className="badge b-grey">{t('Upcoming')}</span>
       )}
-      {!task.isDone ? (
+      {!task.isDone && onEdit && onSnooze ? (
         <span className="task-actions">
           <button type="button" className="btn xs" onClick={onEdit}>
             {t('Edit')}

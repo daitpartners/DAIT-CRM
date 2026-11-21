@@ -49,7 +49,10 @@ export function MySettings() {
 
   return (
     <section className="card" aria-labelledby="prefs-title">
-      <h2 id="prefs-title">{t('My settings')}</h2>
+      <div className="card-title-row">
+        <h2 id="prefs-title">{t('Preferences')}</h2>
+        <span className="muted card-sub">{t('Saved per user. Language, date format and time zone apply immediately across the CRM.')}</span>
+      </div>
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div className="grid3">
           <FormField id="pref-language" label={t('Language')}>
@@ -61,7 +64,6 @@ export function MySettings() {
               ))}
             </select>
           </FormField>
-          <Combobox id="pref-timezone" label={t('Time zone')} options={timezoneOptions(timezone)} value={timezone} onChange={setTimezone} required />
           <FormField id="pref-date" label={t('Date format')}>
             <select id="pref-date" className="in" value={dateFormat} onChange={(e) => setDateFormat(e.target.value)}>
               {DATE_FORMATS.map((f) => (
@@ -71,6 +73,7 @@ export function MySettings() {
               ))}
             </select>
           </FormField>
+          <Combobox id="pref-timezone" label={t('Time zone')} options={timezoneOptions(timezone)} value={timezone} onChange={setTimezone} required />
         </div>
         <div>
           <button type="submit" className="btn primary" disabled={save.isPending}>

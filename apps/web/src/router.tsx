@@ -1,4 +1,4 @@
-import { createBrowserRouter } from 'react-router-dom';
+import { Navigate, createBrowserRouter, useLocation } from 'react-router-dom';
 import { RequireAuth } from './components/RequireAuth';
 import { Dashboard } from './pages/Dashboard';
 import { NotFound } from './pages/NotFound';
@@ -12,11 +12,17 @@ import { ReportsPage } from './pages/Placeholder';
 import { SignIn } from './pages/SignIn';
 import { TasksList } from './pages/tasks/TasksList';
 import { AllocationRules } from './pages/settings/AllocationRules';
+import { Connections, EmailTemplates } from './pages/settings/Connections';
 import { Lookups } from './pages/settings/Lookups';
 import { MySettings } from './pages/settings/MySettings';
 import { SettingsLayout } from './pages/settings/SettingsLayout';
-import { SystemMailbox } from './pages/settings/SystemMailbox';
 import { Users } from './pages/settings/Users';
+
+/** The 1A path of the system mailbox (also the Microsoft connect callback's target): kept, query string and all. */
+function MailboxRedirect() {
+  const { search } = useLocation();
+  return <Navigate to={`/settings/connections${search}`} replace />;
+}
 
 export const router = createBrowserRouter([
   { path: '/sign-in', element: <SignIn /> },
@@ -38,10 +44,12 @@ export const router = createBrowserRouter([
         element: <SettingsLayout />,
         children: [
           { index: true, element: <MySettings /> },
-          { path: 'users', element: <Users /> },
+          { path: 'connections', element: <Connections /> },
+          { path: 'templates', element: <EmailTemplates /> },
           { path: 'lookups', element: <Lookups /> },
           { path: 'allocation', element: <AllocationRules /> },
-          { path: 'mailbox', element: <SystemMailbox /> },
+          { path: 'users', element: <Users /> },
+          { path: 'mailbox', element: <MailboxRedirect /> },
         ],
       },
       { path: '*', element: <NotFound /> },

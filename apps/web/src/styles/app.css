@@ -498,3 +498,27 @@ fieldset.bare>legend{padding:0}
 .card .none{margin:0;font-size:13px}
 .how-list{margin:0;padding-left:18px;font-size:13px;color:var(--body);display:flex;flex-direction:column;gap:6px}
 .task .badge{flex:0 0 auto}
+
+/* Dashboard (prototype V.dashboard) */
+.bell-btn{position:relative}.bell-btn svg{width:16px;height:16px}
+.bell-count{position:absolute;top:-6px;right:-6px;font-size:10px;padding:1px 6px;line-height:14px}
+.dash-tasks{flex:1 1 380px;min-width:0}
+.dash-mid{flex:1 1 340px;min-width:0;display:flex;flex-direction:column;gap:16px}
+.dash-pipe{flex:1 1 280px;min-width:0;max-width:360px}
+.dash-tasks .card-head{flex-wrap:wrap}.dash-tasks h2{white-space:nowrap}
+.dash-badges{display:flex;gap:6px;flex-wrap:wrap}
+.dash-more{font-size:13px;font-weight:600}
+.dnotes{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;font-size:13px}
+.dnote{display:flex;gap:10px;width:100%;text-align:left;font:inherit;padding:0;border:0;background:none;color:var(--text);cursor:pointer}
+.dnote:hover strong{color:var(--purple)}
+.dnote .dot{width:8px;height:8px;border-radius:50%;background:var(--field);flex:0 0 auto;margin-top:6px}
+.dnote.unread .dot{background:var(--peach)}
+.dnote .m{display:block;color:var(--muted);font-size:12px}
+.pipe-bars{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px;font-size:12.5px}
+.pipe-row{display:flex;justify-content:space-between;gap:8px}
+.pipe-foot{font-size:12px}
+@media (max-width:899.98px){.dash-pipe{max-width:none}}
+
+/* Settings (prototype views-settings.js): heading with an inline muted line */
+.card-title-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.card-sub{font-size:12.5px}

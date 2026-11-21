@@ -17,7 +17,7 @@ type Tx = Prisma.TransactionClient;
 const DAY_MS = 86_400_000;
 
 /** Tasks the user may see: those on a lead they can see (live leads), and their own tasks with no lead. */
-const taskWhere = (user: AuthUser): Prisma.TaskWhereInput => ({
+export const taskWhere = (user: AuthUser): Prisma.TaskWhereInput => ({
   OR: [{ lead: { AND: [leadWhere(user)] } }, { leadId: null, assignedToId: user.id }],
 });
 

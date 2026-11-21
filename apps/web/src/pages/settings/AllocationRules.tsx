@@ -72,7 +72,7 @@ function RulesTable({ canEdit }: { canEdit: boolean }) {
     <section className="card flush" aria-labelledby="alloc-title">
       <div className="head">
         <div>
-          <h2 id="alloc-title">{t('Allocation rules')}</h2>
+          <h2 id="alloc-title">{t('Lead allocation rules')}</h2>
           <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 2 }}>{t('New leads go to the first active rule (lowest priority number) that matches their country.')}</div>
         </div>
         <div className="grow" />

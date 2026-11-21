@@ -1,51 +1,40 @@
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet } from 'react-router-dom';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Topbar } from '../../components/Topbar';
 import { useT } from '../../i18n/useT';
 
-/** Settings tabs: "My settings" for everyone, "Administration" with view_admin_settings. */
+/**
+ * Settings (prototype app.js settings() + views-settings.js), one tab per prototype card in the prototype's order:
+ * Preferences, Email & calendar connections, Email templates (everyone), then Dropdown configuration, Lead allocation
+ * rules and Users, each shown only with view_admin_settings and the right the page needs (as in 1A).
+ */
 export function SettingsLayout() {
   const t = useT();
   const me = useCurrentUser();
-  const { pathname } = useLocation();
-  const inAdmin = pathname !== '/settings' && pathname !== '/settings/';
-  const showAdmin = me.can('view_admin_settings');
+  const admin = me.can('view_admin_settings');
 
-  // Administration sub-pages, each shown only with the right it needs.
-  const adminLinks = [
-    { to: '/settings/users', label: t('Users'), right: me.can('manage_users') },
-    { to: '/settings/lookups', label: t('Dropdown values'), right: me.can('manage_lookups') },
-    { to: '/settings/allocation', label: t('Allocation rules'), right: me.can('view_admin_settings') },
-    { to: '/settings/mailbox', label: t('System mailbox'), right: me.can('view_admin_settings') },
-  ].filter((l) => l.right);
-  const adminHome = adminLinks[0]?.to ?? '/settings/allocation';
+  const links = [
+    { to: '/settings', label: t('Preferences'), show: true, end: true },
+    { to: '/settings/connections', label: t('Email & calendar connections'), show: true },
+    { to: '/settings/templates', label: t('Email templates'), show: true },
+    { to: '/settings/lookups', label: t('Dropdown configuration'), show: admin && me.can('manage_lookups') },
+    { to: '/settings/allocation', label: t('Lead allocation rules'), show: admin },
+    { to: '/settings/users', label: t('Users'), show: admin && me.can('manage_users') },
+  ].filter((l) => l.show);
 
-  const tab = ({ isActive }: { isActive: boolean }) => (isActive ? 'tab on' : 'tab');
   return (
     <>
-      <Topbar title={t('Settings')} sub={t('Your preferences and, for administrators, how the CRM is configured')} />
+      <Topbar title={t('Settings')} sub={t('Configuration the CRM reads at runtime; nothing here is hard-coded in forms')} />
       <div className="page">
         <nav className="card flush" aria-label={t('Settings sections')}>
           <div className="tabs" style={{ borderBottom: 0 }}>
-            <NavLink to="/settings" end className={tab}>
-              {t('My settings')}
-            </NavLink>
-            {showAdmin ? (
-              <NavLink to={adminHome} className={() => tab({ isActive: inAdmin })} aria-current={inAdmin ? 'page' : undefined}>
-                {t('Administration')}
-              </NavLink>
-            ) : null}
-          </div>
-        </nav>
-        {inAdmin && showAdmin ? (
-          <nav className="subnav" aria-label={t('Administration')}>
-            {adminLinks.map((l) => (
-              <NavLink key={l.to} to={l.to} className={({ isActive }) => (isActive ? 'on' : undefined)}>
+            {links.map((l) => (
+              <NavLink key={l.to} to={l.to} end={l.end} className={({ isActive }) => (isActive ? 'tab on' : 'tab')}>
                 {l.label}
               </NavLink>
             ))}
-          </nav>
-        ) : null}
+          </div>
+        </nav>
         <Outlet />
       </div>
     </>

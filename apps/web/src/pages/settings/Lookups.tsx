@@ -90,7 +90,7 @@ function LookupsEditor() {
   return (
     <section className="card flush" aria-labelledby="lookups-title">
       <div className="head">
-        <h2 id="lookups-title">{t('Dropdown values')}</h2>
+        <h2 id="lookups-title">{t('Dropdown configuration')}</h2>
         <div className="grow" />
         <div style={{ width: 260, maxWidth: '100%' }}>
           <Combobox id="lookup-group" label={t('List')} hideLabel options={groupOptions} value={group} onChange={(g) => setGroup(g as LookupGroup)} required />
