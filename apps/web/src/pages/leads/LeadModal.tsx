@@ -4,13 +4,15 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
 import { LEAD_TYPES, LeadUpdate } from '@dait-crm/shared';
 import { ApiError, api } from '../../api/client';
-import { useSaveLead, type LeadDetail, type LeadFull } from '../../api/leads';
+import { useSaveContact, useUpdateContactProfile } from '../../api/contacts';
+import { useLeadAction, useSaveLead, type LeadDetail, type LeadFull } from '../../api/leads';
 import { keys } from '../../api/queries';
 import { FormField } from '../../components/FormField';
 import { Modal } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
 import { errorText, leadTypeText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
+import { ExperienceEditor, toExperience, toXpRows, type XpRow } from './ExperienceEditor';
 import { leadSaveError, useLeadFormFields, type LeadFormValues } from './LeadFormFields';
 
 type Props = {
@@ -57,6 +59,15 @@ export function LeadModal({ lead, onClose }: Props) {
   const save = useSaveLead();
   const qc = useQueryClient();
   const [formError, setFormError] = useState<string | null>(null);
+  const saveContact = useSaveContact();
+  const saveProfile = useUpdateContactProfile();
+  const linkContact = useLeadAction();
+  // Experience (owner, 22 Nov 2026): the contact's roles, or a new person's name + roles on a lead without a contact.
+  const startRows = useMemo(() => toXpRows(lead.contact?.experience ?? []), [lead.contact]);
+  const [xpRows, setXpRows] = useState<XpRow[]>(startRows);
+  const [first, setFirst] = useState('');
+  const [last, setLast] = useState('');
+  const busy = save.isPending || saveContact.isPending || saveProfile.isPending || linkContact.isPending;
 
   const resolver = useMemo<Resolver<LeadFormValues>>(() => {
     const zod = zodResolver(LeadUpdate) as unknown as Resolver<LeadFormValues>;
@@ -71,25 +82,55 @@ export function LeadModal({ lead, onClose }: Props) {
   const { register, handleSubmit, reset } = form;
   const f = useLeadFormFields(form, { currentSource: lead.leadSource });
 
-  function submit(v: LeadFormValues) {
-    save.mutate(
+  /** Checks the Experience section; returns the roles to save, or null after showing what is missing. */
+  function experienceToSave(): { experience: ReturnType<typeof toExperience>; newPerson: boolean } | null {
+    const experience = toExperience(xpRows);
+    if (experience === null) {
+      setFormError(t('Each role needs a job title, a company and a start'));
+      return null;
+    }
+    const newPerson = lead.contact === null && lead.companyId !== null && (first.trim() !== '' || last.trim() !== '' || experience.length > 0);
+    if (newPerson && (!first.trim() || !last.trim())) {
+      setFormError(t('Enter the first and last name of the person these roles belong to'));
+      return null;
+    }
+    return { experience, newPerson };
+  }
+
+  async function submit(v: LeadFormValues) {
+    setFormError(null);
+    const xp = experienceToSave();
+    if (!xp) return;
+    let saved: LeadDetail;
+    try {
       // Sends the updatedAt the form was opened (or last reset) with, never the live one.
-      { id: lead.id, body: v as unknown as LeadUpdate },
-      {
-        onSuccess: () => {
-          toast(t('Lead updated'));
-          onClose();
-        },
-        onError: (err) => {
-          if (err instanceof ApiError && err.code === 'stale') {
-            toast(errorText(t, err.code), 'warn');
-            void reloadAfterStale(lead.id);
-            return;
-          }
-          setFormError(leadSaveError(err, form, t));
-        },
-      },
-    );
+      saved = await save.mutateAsync({ id: lead.id, body: v as unknown as LeadUpdate });
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'stale') {
+        toast(errorText(t, err.code), 'warn');
+        void reloadAfterStale(lead.id);
+        return;
+      }
+      setFormError(leadSaveError(err, form, t));
+      return;
+    }
+    try {
+      const experience = xp.experience ?? [];
+      if (lead.contact && JSON.stringify(experience) !== JSON.stringify(toExperience(startRows))) {
+        await saveProfile.mutateAsync({ id: lead.contact.id, updatedAt: lead.contact.updatedAt, profile: { experience } });
+      } else if (xp.newPerson && lead.companyId !== null) {
+        const person = await saveContact.mutateAsync({
+          body: { companyId: lead.companyId, firstName: first.trim(), lastName: last.trim(), contactType: 'Other', isPrimary: false },
+        });
+        if (experience.length) await saveProfile.mutateAsync({ id: person.id, updatedAt: person.updatedAt, profile: { experience } });
+        await linkContact.mutateAsync({ lead: saved, action: 'contact', body: { contactId: person.id } });
+      }
+      toast(t('Lead updated'));
+    } catch (err) {
+      // The lead itself is saved; say which part did not go through.
+      toast(t('The lead was saved, but the experience was not: {reason}', { reason: errorText(t, err instanceof ApiError ? err.code : 'unknown') }), 'warn');
+    }
+    onClose();
   }
 
   /**
@@ -119,7 +160,7 @@ export function LeadModal({ lead, onClose }: Props) {
           <button type="button" className="btn" onClick={onClose}>
             {t('Cancel')}
           </button>
-          <button type="submit" form="lead-form" className="btn primary" disabled={save.isPending}>
+          <button type="submit" form="lead-form" className="btn primary" disabled={busy}>
             {t('Save')}
           </button>
         </>
@@ -154,6 +195,12 @@ export function LeadModal({ lead, onClose }: Props) {
         {f.input('sourceUrl', t('Source URL'), { type: 'url', placeholder: 'https://' })}
         {f.input('nextFollowUp', t('Next follow-up'), { type: 'date' })}
         {f.notes()}
+        <ExperienceEditor
+          rows={xpRows}
+          onRows={setXpRows}
+          name={lead.contact === null ? { first, last, onFirst: setFirst, onLast: setLast } : undefined}
+          note={lead.companyId === null ? t('Choose the company for this lead first (the Choose company card on the lead page); then add experience here.') : undefined}
+        />
         {formError ? (
           <div className="span2 note warn" role="alert">
             {formError}

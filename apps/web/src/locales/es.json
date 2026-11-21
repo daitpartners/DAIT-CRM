@@ -972,5 +972,9 @@
   "Run research": "Ejecutar investigación",
   "No contact person on this lead yet. Add one from the Contact card on the right and the profile will appear here.": "Este lead aún no tiene persona de contacto. Añada una desde la tarjeta de contacto de la derecha y el perfil aparecerá aquí.",
   "Contact linked to {number}": "Contacto vinculado a {number}",
-  "{name} was added to the company but not linked to this lead. Use Switch contact in Edit profile.": "{name} se añadió a la empresa pero no se vinculó a este lead. Use Cambiar contacto en Editar perfil."
+  "{name} was added to the company but not linked to this lead. Use Switch contact in Edit profile.": "{name} se añadió a la empresa pero no se vinculó a este lead. Use Cambiar contacto en Editar perfil.",
+  "This lead has no contact person yet. Name the person these roles belong to; they are added to the company and linked to this lead.": "Este lead aún no tiene persona de contacto. Indique a quién pertenecen estos puestos; se añadirá a la empresa y se vinculará a este lead.",
+  "Enter the first and last name of the person these roles belong to": "Introduzca el nombre y el apellido de la persona a la que pertenecen estos puestos",
+  "The lead was saved, but the experience was not: {reason}": "El lead se guardó, pero la experiencia no: {reason}",
+  "Choose the company for this lead first (the Choose company card on the lead page); then add experience here.": "Primero elija la empresa de este lead (tarjeta Elegir empresa en la página del lead); después añada aquí la experiencia."
 }

@@ -123,7 +123,7 @@ export function ProfileCard({ lead, children }: { lead: LeadFull; children?: Rea
       </div>
       <div className="l2fold" id={foldId}>
         <div className="l2foldin">
-          <div className={p ? 'l2box' : 'l2box two'}>
+          <div className="l2box">
             <div className="l2col">
               {/* As in the prototype, the facts grid, the closed banner and About sit inside the person block. */}
               {p ? (
@@ -139,7 +139,7 @@ export function ProfileCard({ lead, children }: { lead: LeadFull; children?: Rea
                 </NoContact>
               )}
             </div>
-            {p ? <ExperienceColumn experience={p.experience ?? []} /> : null}
+            <ExperienceColumn experience={p?.experience ?? []} companyName={c?.name ?? lead.companyName} />
           </div>
         </div>
       </div>

@@ -9,9 +9,10 @@ function span(from: string, to: string | null, present: string): string {
 /**
  * Right column of the PROFILE card (prototype `xpCol`): the contact's experience as a timeline, the current
  * role (no end) marked with a dot in brand purple and a "Current" badge. Like the prototype, it lists experience
- * only; education is edited in Edit profile and counts towards the completeness ring.
+ * only; education is edited in Edit profile and counts towards the completeness ring. Shown on every lead (owner,
+ * 22 Nov 2026): with no roles recorded, one row with "—", the lead's company as the most recent one, and "—".
  */
-export function ExperienceColumn({ experience }: { experience: ExperienceEntry[] }) {
+export function ExperienceColumn({ experience, companyName }: { experience: ExperienceEntry[]; companyName: string }) {
   const t = useT();
   return (
     <div className="l2col">
@@ -19,7 +20,16 @@ export function ExperienceColumn({ experience }: { experience: ExperienceEntry[]
         <span>{t('Experience')}</span>
       </div>
       {experience.length === 0 ? (
-        <div className="dim xp-none">{t('No experience recorded yet. Add it from Edit profile.')}</div>
+        <ul className="xp" aria-labelledby="lead-xp-title">
+          <li className="xpi now">
+            <div className="xpdot" aria-hidden="true" />
+            <div>
+              <strong>—</strong>
+              <div>{companyName}</div>
+              <div className="dim xp-span">—</div>
+            </div>
+          </li>
+        </ul>
       ) : (
         <ul className="xp" aria-labelledby="lead-xp-title">
           {experience.map((e, i) => (

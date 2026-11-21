@@ -196,3 +196,48 @@ test('Edit profile holds Edit lead details, Switch contact and Archive; an archi
   await expect(page.getByText('This lead is archived.')).toHaveCount(0);
   await expect(page.getByLabel('Status', { exact: true })).toBeEnabled();
 });
+
+test('Edit lead details: experience on a lead without a contact creates and links the person', async ({ page }) => {
+  const company = `Xpco ${Date.now()}`;
+  await signInAs(page, MAYA);
+  const me = (await (await page.request.get('/api/me')).json()) as { id: number };
+  const created = await page.request.post('/api/leads', { data: { companyName: company, country: 'India', leadSource: 'Referral', assignedToId: me.id } });
+  expect(created.status()).toBe(201);
+  const { id } = (await created.json()) as { id: number };
+  await page.goto(`/leads/${id}`);
+
+  await page.locator('.topbar').getByRole('button', { name: 'Edit profile' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Edit lead details' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit lead' });
+  const xp = dialog.getByRole('group', { name: 'Experience' });
+  await xp.getByLabel('First name').fill('Rohan');
+  await xp.getByLabel('Last name').fill('Mehra');
+  await xp.getByRole('button', { name: '+ Add role' }).click();
+  await xp.getByLabel('Job title').fill('Founder');
+  await xp.getByLabel('Company', { exact: true }).fill(company);
+  await xp.getByLabel('From year').fill('2019');
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(dialog).toBeHidden();
+
+  const profile = page.getByRole('region', { name: 'Profile' });
+  await expect(profile.getByRole('heading', { name: 'Rohan Mehra' })).toBeVisible();
+  const list = profile.getByRole('list', { name: 'Experience' });
+  await expect(list).toContainText('Founder');
+  await expect(list).toContainText('2019 – Present');
+});
+
+test('Edit lead details: a lead with a contact edits that person\'s experience', async ({ page }) => {
+  // Runs after the test above: Rohan Mehra is the contact of the newest Xpco lead.
+  await signInAs(page, MAYA);
+  await openLead(page, 'Xpco');
+  await page.locator('.topbar').getByRole('button', { name: 'Edit profile' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Edit lead details' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit lead' });
+  const xp = dialog.getByRole('group', { name: 'Experience' });
+  await expect(xp.getByLabel('First name')).toHaveCount(0);
+  await expect(xp.getByLabel('Job title')).toHaveValue('Founder');
+  await xp.getByLabel('Job title').fill('Founder & CEO');
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('region', { name: 'Profile' }).getByRole('list', { name: 'Experience' })).toContainText('Founder & CEO');
+});

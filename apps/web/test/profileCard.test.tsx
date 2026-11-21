@@ -18,7 +18,8 @@ describe('ProfileCard', () => {
     expect(container.querySelectorAll('.sk, .badge:empty, .phead:empty, .pmeta:empty')).toHaveLength(0);
     expect(container.querySelector('.pabout')).toBeNull();
     expect(within(card).queryByText('Current')).toBeNull();
-    expect(within(card).getByText('No experience recorded yet. Add it from Edit profile.')).toBeInTheDocument();
+    // No roles yet: one "—" row with the lead's company (owner, 22 Nov 2026).
+    expect(within(card).getByRole('list', { name: 'Experience' }).querySelectorAll('li')).toHaveLength(1);
     expect(within(card).getByText('No LinkedIn yet')).toBeInTheDocument();
     // Facts grid: empty values show a dash, never a blank.
     const facts = within(card).getByText('Industry', { selector: 'dt' }).nextElementSibling;
@@ -65,7 +66,8 @@ describe('ProfileCard', () => {
     expect(within(card).getByRole('heading', { name: 'Meridian Textiles' })).toBeInTheDocument();
     expect(within(card).getByText(/No contact person on this lead yet/)).toBeInTheDocument();
     expect(within(card).getByText('Lead source', { selector: 'dt' })).toBeInTheDocument();
-    expect(within(card).queryByText('Experience')).toBeNull();
+    // The Experience column shows on every lead: "—", the company, "—".
+    expect(within(card).getByRole('list', { name: 'Experience' })).toHaveTextContent(/^—\s*Meridian Textiles\s*—$/);
   });
 
   it('renders with neither company nor contact (CSV review row): no-contact state, dashes in the facts', () => {

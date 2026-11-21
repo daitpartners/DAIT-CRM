@@ -53,7 +53,8 @@ test('lead page: prototype sections in order, a contact without a profile, then 
   // No profile yet: no "undefined", no empty pills, the empty states read as text.
   const profile = page.getByRole('region', { name: 'Profile' });
   await expect(profile.getByRole('heading', { name: 'Priya Raman' })).toBeVisible();
-  await expect(profile.getByText('No experience recorded yet. Add it from Edit profile.')).toBeVisible();
+  // No roles yet: one "—" row with the lead's company as the most recent (owner, 22 Nov).
+  await expect(profile.getByRole('list', { name: 'Experience' }).getByRole('listitem')).toHaveText(/^—\s*Northwind Logistics\s*—$/);
   await expect(page.locator('main')).not.toContainText(/undefined|NaN/);
   await expect(page.locator('.sk')).toHaveCount(0);
   await expect(page.getByText('No skills yet')).toBeVisible();
@@ -162,6 +163,11 @@ test('lead page: a prospect without a contact person', async ({ page }) => {
   await expect(email.getByLabel('Message')).toHaveValue(new RegExp(`^Hi ${helix.name},`));
   await email.getByRole('button', { name: 'Send email' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Sending email arrives in release 2' })).toBeVisible();
+
+  // Owner, 22 Nov: the Experience column shows on every lead; with nothing recorded, "—", the company, "—".
+  const xp = page.getByRole('region', { name: 'Profile' }).getByRole('list', { name: 'Experience' });
+  await expect(xp.getByRole('listitem')).toHaveCount(1);
+  await expect(xp.getByRole('listitem').first()).toHaveText(new RegExp(`^—\\s*${helix.name}\\s*—$`));
 
   // Right column as in the prototype (LD-2040): No contact yet, the company card, Projects; nothing else.
   const side = page.getByRole('complementary', { name: 'Company and contact' });
