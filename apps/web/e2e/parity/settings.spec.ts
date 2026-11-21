@@ -32,9 +32,9 @@ test('settings: prototype cards as tabs, in prototype order', async ({ page }) =
   await expect(page.getByRole('heading', { name: 'System mailbox' })).toBeVisible();
 
   await nav.getByRole('link', { name: 'Email templates' }).click();
+  // Release 2A card (templates.spec.ts covers writing, uploading, editing and deleting).
   const tpl = page.getByRole('region', { name: 'Email templates' });
-  await expect(tpl).toContainText('Available in release 2');
-  await expect(tpl.getByRole('button')).toHaveCount(0);
+  await expect(tpl.getByRole('button', { name: 'Write a template' })).toBeVisible();
 
   await nav.getByRole('link', { name: 'Dropdown configuration' }).click();
   await expect(page.getByRole('heading', { name: 'Dropdown configuration', level: 2 })).toBeVisible();

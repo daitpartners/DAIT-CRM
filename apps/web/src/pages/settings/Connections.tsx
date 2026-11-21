@@ -4,7 +4,6 @@ import { ApiError } from '../../api/client';
 import { CONNECT_PERSONAL_URL, useDisconnectMailbox, useMailboxes, type Mailbox } from '../../api/mailboxes';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { useConfirm } from '../../components/ConfirmDialog';
-import { PlaceholderCard } from '../../components/PlaceholderCard';
 import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
 import { errorText } from '../../i18n/labels';
@@ -129,17 +128,5 @@ export function Connections() {
       {options ? <MailboxOptionsModal mailbox={options} onClose={() => setOptions(null)} /> : null}
       {providers ? <ConnectProviderModal onClose={() => setProviders(false)} /> : null}
     </>
-  );
-}
-
-/** Settings → Email templates (prototype V.templatesCard): release 2. */
-export function EmailTemplates() {
-  const t = useT();
-  return (
-    <PlaceholderCard
-      title={t('Email templates')}
-      release="2"
-      hint={t('Available in every compose box. Write templates here or upload Outlook .oft files.')}
-    />
   );
 }
