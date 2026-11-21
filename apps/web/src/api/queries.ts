@@ -107,6 +107,8 @@ export const keys = {
   leadActivities: (id: number, page: number) => ['leads', 'detail', id, 'activities', page] as const,
   /** Activities across a company's leads: under the leads prefix so any lead write refreshes it. */
   companyActivities: (companyId: number, page: number) => ['leads', 'company-activities', companyId, page] as const,
+  /** A company's lead counts by status: under the leads prefix so any lead write refreshes it. */
+  companyPipeline: (companyId: number) => ['leads', 'company-pipeline', companyId] as const,
   /** Prefix of every task query: a lead write can create, move or close tasks. */
   tasksAll: ['tasks'] as const,
   tasks: (query: TaskListQuery) => ['tasks', 'list', query] as const,

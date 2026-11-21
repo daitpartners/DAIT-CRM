@@ -103,7 +103,7 @@ export function ContactsTab({ company, canManage }: Props) {
     <section className="card flush" aria-labelledby="contacts-title">
       <div className="head">
         <h2 id="contacts-title">{t('Contacts at {company}', { company: company.name })}</h2>
-        <span className="head-note">{t('Separate records in the contacts table, linked by Company ID')}</span>
+        <span className="head-note">{t('Separate contact records linked to this company')}</span>
         <div className="grow" />
         <label className="check">
           <input

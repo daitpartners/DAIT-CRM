@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ApiError } from '../../../api/client';
-import type { CompanyDetail } from '../../../api/companies';
+import { useCompanyPipeline, type CompanyDetail } from '../../../api/companies';
 import { useLeads } from '../../../api/leads';
 import { Icons } from '../../../components/Icons';
 import { Pager } from '../../../components/Pager';
@@ -108,7 +108,7 @@ export function LeadsTab({ company, canManage }: { company: CompanyDetail; canMa
         ) : null}
       </section>
       <aside className="col-side">
-        <PipelineCard companyId={company.id} total={data?.total} />
+        <PipelineCard companyId={company.id} />
         <section className="card side-card" aria-labelledby="co-rules-title">
           <h2 id="co-rules-title">{t('Rules enforced here')}</h2>
           <ul className="rules">
@@ -129,26 +129,23 @@ export function LeadsTab({ company, canManage }: { company: CompanyDetail; canMa
 }
 
 /**
- * Prototype "Pipeline at this company": open leads and Won / Lost among the leads the user may see (one-row
- * list requests per closed status). Quotation value and projects arrive in release 3.
+ * Prototype "Pipeline at this company": open leads and Won / Lost among the leads the user may see, from one
+ * company-scoped request. Quotation value and projects arrive in release 3.
  */
-function PipelineCard({ companyId, total }: { companyId: number; total: number | undefined }) {
+function PipelineCard({ companyId }: { companyId: number }) {
   const t = useT();
-  const won = useLeads({ companyId, status: 'Won', page: 1, pageSize: 1 }).data?.total;
-  const lost = useLeads({ companyId, status: 'Lost', page: 1, pageSize: 1 }).data?.total;
-  const notRelevant = useLeads({ companyId, status: 'Not Relevant', page: 1, pageSize: 1 }).data?.total;
-  const ready = total !== undefined && won !== undefined && lost !== undefined && notRelevant !== undefined;
+  const { data } = useCompanyPipeline(companyId);
   const dim = <span className="dim">—</span>;
   return (
     <section className="card side-card" aria-labelledby="co-pipeline-title">
       <h2 id="co-pipeline-title">{t('Pipeline at this company')}</h2>
       <dl className="kv kv-narrow">
         <dt>{t('Open leads')}</dt>
-        <dd>{ready ? total - won - lost - notRelevant : dim}</dd>
+        <dd>{data ? data.open : dim}</dd>
         <dt>{t('Open quotation value')}</dt>
         <dd className="null">—</dd>
         <dt>{t('Won / Lost')}</dt>
-        <dd>{won !== undefined && lost !== undefined ? `${won} / ${lost}` : dim}</dd>
+        <dd>{data ? `${data.won} / ${data.lost}` : dim}</dd>
         <dt>{t('Projects')}</dt>
         <dd className="null">—</dd>
       </dl>

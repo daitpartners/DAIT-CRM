@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { Prisma } from '@prisma/client';
 import {
   CLOSED_STATUSES, CompanyBulkStatus, CompanyCreate, CompanyListQuery, CompanyUpdate, DuplicateCheck,
-  can, checkDomain, normaliseCompanyName, pageArgs, type CompanyCandidate, type CompanyTab,
+  can, checkDomain, isClosedStatus, normaliseCompanyName, pageArgs, type CompanyCandidate, type CompanyTab,
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { audit } from '../audit.js';
@@ -35,17 +35,18 @@ async function domainTaken(domain: string | null, exceptId?: number) {
 }
 
 /**
- * Normalised names shared by two or more companies the user may see (the "Duplicate review" tab).
- * '' is no key (a name made only of legal suffixes), so it never groups.
+ * Normalised names shared by two or more companies the user may see (the "Duplicate review" tab), with the
+ * number of companies under each. '' is no key (a name made only of legal suffixes), so it never groups.
  */
-async function duplicateNameKeys(visible: Prisma.CompanyWhereInput): Promise<string[]> {
+async function duplicateNameGroups(visible: Prisma.CompanyWhereInput): Promise<{ key: string; n: number }[]> {
   const groups = await prisma.company.groupBy({
     by: ['nameNormalised'],
     where: { AND: [visible, { nameNormalised: { not: '' } }] },
     having: { nameNormalised: { _count: { gt: 1 } } },
+    _count: { _all: true },
     orderBy: { nameNormalised: 'asc' },
   });
-  return groups.map((g) => g.nameNormalised);
+  return groups.map((g) => ({ key: g.nameNormalised, n: g._count._all }));
 }
 
 export const companyRoutes: FastifyPluginAsync = async (app) => {
@@ -54,15 +55,17 @@ export const companyRoutes: FastifyPluginAsync = async (app) => {
     const query = parseQuery(CompanyListQuery, request.query);
     const visible = companyWhere(user);
     const leadsSeen = leadWhere(user);
-    const dupKeys = await duplicateNameKeys(visible);
-    const tabWhere: Record<CompanyTab, Prisma.CompanyWhereInput> = {
+    // Runs alongside the other queries; only the rows of the dups tab wait for it.
+    const dupGroups = duplicateNameGroups(visible);
+    const tabWhere: Record<Exclude<CompanyTab, 'dups'>, Prisma.CompanyWhereInput> = {
       all: {},
       clients: { isClient: true },
       open: { leads: { some: { AND: [leadsSeen, { status: { notIn: [...CLOSED_STATUSES] } }] } } },
       verify: { verificationStatus: { not: 'Verified' } },
-      dups: { nameNormalised: { in: dupKeys } },
     };
-    const and: Prisma.CompanyWhereInput[] = [visible, tabWhere[query.tab ?? 'all']];
+    const tab = query.tab ?? 'all';
+    const and: Prisma.CompanyWhereInput[] = [visible];
+    if (tab !== 'dups') and.push(tabWhere[tab]);
     if (query.status) and.push({ status: query.status });
     if (query.country) and.push({ country: { equals: query.country, mode: 'insensitive' } });
     if (query.industry) and.push({ industry: { equals: query.industry, mode: 'insensitive' } });
@@ -73,12 +76,11 @@ export const companyRoutes: FastifyPluginAsync = async (app) => {
       const contains = { contains: query.q, mode: 'insensitive' as const };
       and.push({ OR: [{ name: contains }, { legalName: contains }, { domain: contains }, { number: contains }] });
     }
-    const where: Prisma.CompanyWhereInput = { AND: and };
     const sort = query.sort ?? 'name';
-    // Tiles and tab counts cover every company the user may see (not the filters), like the prototype.
-    const within = (extra: Prisma.CompanyWhereInput): Prisma.CompanyWhereInput => ({ AND: [visible, extra] });
-    const [[total, rows], byStatus, byVerification, byResearch, clients, open, verify, dups] = await Promise.all([
-      prisma.$transaction([
+    const page = async () => {
+      if (tab === 'dups') and.push({ nameNormalised: { in: (await dupGroups).map((g) => g.key) } });
+      const where: Prisma.CompanyWhereInput = { AND: and };
+      return prisma.$transaction([
         prisma.company.count({ where }),
         prisma.company.findMany({
           where,
@@ -86,20 +88,27 @@ export const companyRoutes: FastifyPluginAsync = async (app) => {
           orderBy: [{ [sort]: query.dir }, { id: query.dir }],
           ...pageArgs(query),
         }),
-      ]),
+      ]);
+    };
+    // Tiles and tab counts cover every company the user may see (not the filters), like the prototype.
+    // 8 queries: count + rows, three groupBys, clients, open, and the duplicate-name groups.
+    const within = (extra: Prisma.CompanyWhereInput): Prisma.CompanyWhereInput => ({ AND: [visible, extra] });
+    const [[total, rows], byStatus, byVerification, byResearch, clients, open, dupNames] = await Promise.all([
+      page(),
       prisma.company.groupBy({ by: ['status'], where: visible, _count: { _all: true } }),
       prisma.company.groupBy({ by: ['verificationStatus'], where: visible, _count: { _all: true } }),
       prisma.company.groupBy({ by: ['aiResearchStatus'], where: visible, _count: { _all: true } }),
       prisma.company.count({ where: within(tabWhere.clients) }),
       prisma.company.count({ where: within(tabWhere.open) }),
-      prisma.company.count({ where: within(tabWhere.verify) }),
-      prisma.company.count({ where: within(tabWhere.dups) }),
+      dupGroups,
     ]);
+    const dups = dupNames.reduce((n, g) => n + g.n, 0);
     const tally = (pairs: [string, number][]) => (v: string) => pairs.find(([k]) => k === v)?.[1] ?? 0;
     const status = tally(byStatus.map((g) => [g.status, g._count._all]));
     const verification = tally(byVerification.map((g) => [g.verificationStatus, g._count._all]));
     const research = tally(byResearch.map((g) => [g.aiResearchStatus, g._count._all]));
     const all = byStatus.reduce((n, g) => n + g._count._all, 0);
+    const verify = all - verification('Verified');
     return {
       items: rows.map(companyListRow),
       total,
@@ -150,6 +159,25 @@ export const companyRoutes: FastifyPluginAsync = async (app) => {
     const row = await prisma.company.findUnique({ where: { id }, include: companyDetailInclude });
     if (!row) throw new NotFoundError();
     return companyDetail(row);
+  });
+
+  app.get<{ Params: { id: string } }>('/companies/:id/pipeline', { preHandler: [requireUser] }, async (request) => {
+    const user = request.user!;
+    const { id } = await assertCompanyVisible(prisma, user, Number(request.params.id));
+    const groups = await prisma.lead.groupBy({
+      by: ['status'],
+      where: { AND: [{ companyId: id }, leadWhere(user)] },
+      _count: { _all: true },
+      orderBy: { status: 'asc' },
+    });
+    const byStatus = groups.map((g) => ({ status: g.status, count: g._count._all }));
+    const of = (status: string) => byStatus.find((g) => g.status === status)?.count ?? 0;
+    return {
+      byStatus,
+      open: byStatus.filter((g) => !isClosedStatus(g.status)).reduce((n, g) => n + g.count, 0),
+      won: of('Won'),
+      lost: of('Lost'),
+    };
   });
 
   app.patch<{ Params: { id: string } }>('/companies/:id', { preHandler: [requireRight('manage_companies')] }, async (request, reply) => {

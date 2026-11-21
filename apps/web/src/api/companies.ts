@@ -175,6 +175,17 @@ export function useCompany(id: number) {
   });
 }
 
+/** `GET /api/companies/:id/pipeline`: the company's leads the user may see, counted by status. */
+export type CompanyPipeline = { byStatus: { status: string; count: number }[]; open: number; won: number; lost: number };
+
+export function useCompanyPipeline(id: number) {
+  return useQuery({
+    queryKey: keys.companyPipeline(id),
+    queryFn: () => api<CompanyPipeline>(`/api/companies/${id}/pipeline`),
+    enabled: Number.isInteger(id),
+  });
+}
+
 /** Drops blank values so `{ name: '' }` and `{}` share a cache entry and send the same body. */
 function compact(input: DuplicateInput): DuplicateInput {
   const out: Record<string, string | number> = {};

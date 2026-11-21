@@ -307,4 +307,29 @@ describe('companies API', () => {
     const res = (await req('GET', `/api/companies/${co.id}/activities`, rep.cookie)).json();
     expect(res.summary).toEqual({ call: 2, email: 0, meeting: 1, quote: 0, lastAt: at('03').toISOString() });
   });
+  it('company pipeline respects lead visibility', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const admin = await as('ADMINISTRATOR');
+    const co = await makeCompany({ createdById: rep.user.id });
+    await makeLead({ companyId: co.id, assignedToId: rep.user.id, status: 'New' });
+    await makeLead({ companyId: co.id, assignedToId: rep.user.id, status: 'Contacted' });
+    await makeLead({ companyId: co.id, assignedToId: rep.user.id, status: 'Won' });
+    await makeLead({ companyId: co.id, assignedToId: null, status: 'Lost' });
+    await makeLead({ companyId: co.id, assignedToId: rep.user.id, status: 'New', archivedAt: new Date() });
+    // Someone else's leads: hidden from the rep, counted for the administrator.
+    await makeLead({ companyId: co.id, assignedToId: admin.user.id, status: 'New' });
+    await makeLead({ companyId: co.id, assignedToId: admin.user.id, status: 'Won' });
+
+    const mine = (await req('GET', `/api/companies/${co.id}/pipeline`, rep.cookie)).json();
+    expect(mine).toEqual({
+      byStatus: [{ status: 'Contacted', count: 1 }, { status: 'Lost', count: 1 }, { status: 'New', count: 1 }, { status: 'Won', count: 1 }],
+      open: 2, won: 1, lost: 1,
+    });
+    const all = (await req('GET', `/api/companies/${co.id}/pipeline`, admin.cookie)).json();
+    expect(all).toMatchObject({ open: 3, won: 2, lost: 1 });
+
+    const hidden = await makeCompany({ createdById: admin.user.id });
+    expect((await req('GET', `/api/companies/${hidden.id}/pipeline`, rep.cookie)).statusCode).toBe(404);
+    expect((await req('GET', `/api/companies/${co.id}/pipeline`)).statusCode).toBe(401);
+  });
 });

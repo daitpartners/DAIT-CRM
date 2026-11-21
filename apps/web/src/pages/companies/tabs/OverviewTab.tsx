@@ -16,8 +16,8 @@ type Props = { company: CompanyDetail; canManage: boolean; onEdit: (section: Com
 
 type Row = [label: string, value: ReactNode];
 
-/** Leads in the Overview side card; the profile header asks for the same page, so its lead count shares the request. */
-export const OVERVIEW_LEADS = 4;
+/** Leads in the Overview side card. */
+const OVERVIEW_LEADS = 4;
 
 const isEmpty = (v: ReactNode) => v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0);
 

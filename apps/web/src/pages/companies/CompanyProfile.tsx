@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { safeUrl } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
-import { useCompany } from '../../api/companies';
-import { useCompanyActivities, useLeads } from '../../api/leads';
+import { useCompany, useCompanyPipeline } from '../../api/companies';
+import { useCompanyActivities } from '../../api/leads';
 import { useLocations } from '../../api/locations';
 import { useLookupText } from '../../api/queries';
 import { useCurrentUser } from '../../api/useCurrentUser';
@@ -19,7 +19,7 @@ import { AiTab, SourcesTab } from './tabs/AiTabs';
 import { ContactsTab } from './tabs/ContactsTab';
 import { LeadsTab } from './tabs/LeadsTab';
 import { LocationsTab } from './tabs/LocationsTab';
-import { OVERVIEW_LEADS, OverviewTab } from './tabs/OverviewTab';
+import { OverviewTab } from './tabs/OverviewTab';
 
 const TAB_IDS = ['overview', 'contacts', 'locations', 'leads', 'activities', 'ai', 'sources'] as const;
 type TabId = (typeof TAB_IDS)[number];
@@ -39,7 +39,9 @@ export function CompanyProfile() {
   const navigate = useNavigate();
   const { data: company, error, isPending } = useCompany(id);
   const { data: locations } = useLocations(id);
-  const { data: leads } = useLeads({ companyId: id, page: 1, pageSize: OVERVIEW_LEADS });
+  // One company-scoped groupBy, shared with the Leads tab's Pipeline card.
+  const { data: pipeline } = useCompanyPipeline(id);
+  const leadTotal = pipeline?.byStatus.reduce((n, g) => n + g.count, 0);
   const { data: activities } = useCompanyActivities(id, 1);
   const lookupText = useLookupText(lang);
   // undefined = closed; null = whole form (header Edit); a section = that group's Edit button.
@@ -75,7 +77,7 @@ export function CompanyProfile() {
     { id: 'overview', label: t('Overview') },
     { id: 'contacts', label: t('Contacts'), count: company.contactCount },
     { id: 'locations', label: t('Locations'), ...count(locations?.length) },
-    { id: 'leads', label: t('Leads & Prospects'), ...count(leads?.total) },
+    { id: 'leads', label: t('Leads & Prospects'), ...count(leadTotal) },
     { id: 'activities', label: t('Activities'), ...count(activities?.total) },
     { id: 'ai', label: t('AI Intelligence') },
     { id: 'sources', label: t('Research Sources') },
@@ -114,7 +116,7 @@ export function CompanyProfile() {
     place || t('Location unknown'),
     ...(company.employeeRange ? [t('{range} employees', { range: lookupText('employee_range', company.employeeRange) ?? company.employeeRange })] : []),
     t('{n} contacts', { n: company.contactCount }),
-    ...(leads ? [t('{n} leads', { n: leads.total })] : []),
+    ...(leadTotal !== undefined ? [t('{n} leads', { n: leadTotal })] : []),
     ...(locations ? [t('{n} locations', { n: locations.length })] : []),
   ];
   const later = (release: string) => t('Available in release {release}', { release });
