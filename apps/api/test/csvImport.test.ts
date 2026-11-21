@@ -177,6 +177,45 @@ describe('CSV lead import', () => {
     expect(refused.statusCode).toBe(404);
   });
 
+  it('malformed csv returns csv_invalid', async () => {
+    const admin = await as('ADMINISTRATOR');
+    for (const csv of [`${HEADER}\n"Unclosed,https://x.com,,India,,,,,\n`, `${HEADER}\n`, '\n\n ']) {
+      const preview = await req('POST', '/api/imports/leads/preview', admin.cookie, { csv });
+      expect(preview.statusCode).toBe(400);
+      expect(preview.json()).toMatchObject({ error: 'csv_invalid', message: expect.any(String) });
+      const imported = await req('POST', '/api/imports/leads', admin.cookie, { csv, mapping });
+      expect(imported.statusCode).toBe(400);
+      expect(imported.json()).toMatchObject({ error: 'csv_invalid', message: expect.any(String) });
+    }
+    expect(await prisma.lead.count()).toBe(0);
+  });
+
+  it('mapping with unknown header is rejected', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const csv = `${HEADER}\nAcme,https://acme.com,,India,,,,,\n`;
+    for (const [field, header] of [['companyName', 'Business'], ['notes', '__proto__'], ['phone', 'constructor']] as const) {
+      const bad = { columns: { ...mapping.columns, [field]: header } };
+      const res = await req('POST', '/api/imports/leads', admin.cookie, { csv, mapping: bad });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ error: 'validation', issues: [{ path: ['mapping', 'columns', field] }] });
+    }
+    expect(await prisma.lead.count()).toBe(0);
+  });
+
+  it('review row keeps the CSV contact in its notes', async () => {
+    const admin = await as('ADMINISTRATOR');
+    await makeCompany({ name: 'Zenith Traders', country: 'India' });
+    const withPhone = { columns: { ...mapping.columns, phone: 'Phone', contactEmail: 'Contact Email' } };
+    const csv = 'Company,Website,Email,Country,City,First Name,Last Name,Priority,Notes,Phone,Contact Email\n'
+      + 'Zenith Traders,https://zenith-new.com,info@zenith-new.com,India,,Ravi,Kumar,,Met at expo,+91 98765 43210,ravi@zenith-new.com\n'
+      + 'Zenith Traders,https://zenith-two.com,,India,,Mina,,,,,\n';
+    const body = (await req('POST', '/api/imports/leads', admin.cookie, { csv, mapping: withPhone })).json();
+    expect(body.review).toHaveLength(2);
+    const [first, second] = await prisma.lead.findMany({ orderBy: { id: 'asc' } });
+    expect(first.notes).toBe('Met at expo\nCSV contact: Ravi Kumar <ravi@zenith-new.com> +91 98765 43210');
+    expect(second.notes).toBe('CSV contact: Mina');
+  });
+
   it('import refuses an unassignable assignee and a caller without manage_leads', async () => {
     const rep = await as('SALES_REPRESENTATIVE');
     const other = await makeUser();

@@ -12,21 +12,52 @@ import { RuleError, auditCreatedLead, createLeadWithCompany } from './service.js
 
 export type ParsedCsv = { headers: string[]; rows: Record<string, string>[] };
 
-/** Parses CSV text with a header row (BOM, blank lines and ragged rows tolerated). Malformed CSV is a 400 on `csv`. */
+/** The CSV cannot be used: parser error, no header row or no data rows. Routes answer 400 `csv_invalid`. */
+export class CsvInvalidError extends Error {}
+
+/** Parses CSV text with a header row (BOM, blank lines and ragged rows tolerated); throws CsvInvalidError. */
 export function parseCsv(text: string): ParsedCsv {
   let headers: string[] = [];
+  let rows: Record<string, string>[];
   try {
-    const rows = parse<Record<string, string>>(text, {
+    rows = parse<Record<string, string>>(text, {
       columns: (h: string[]) => (headers = h),
       bom: true,
       skip_empty_lines: true,
       trim: true,
       relax_column_count: true,
     });
-    return { headers, rows };
   } catch (e) {
-    throw new ValidationError([{ path: ['csv'], message: e instanceof Error ? e.message : 'Invalid CSV' }]);
+    throw new CsvInvalidError(e instanceof Error ? e.message : 'The file could not be read as CSV');
   }
+  if (headers.length === 0 || headers.every((h) => !h)) throw new CsvInvalidError('The file has no header row');
+  if (rows.length === 0) throw new CsvInvalidError('The file has no data rows');
+  return { headers, rows };
+}
+
+/** A cell by header: own string properties only, so headers such as `__proto__` read as ''. */
+export function cell(record: Record<string, string>, header: string): string {
+  const v = Object.hasOwn(record, header) ? record[header] : undefined;
+  return typeof v === 'string' ? v : '';
+}
+
+/** 400 `validation` unless every mapped header (companyName and country included) is a header of the file. */
+export function assertMappingHeaders(columns: CsvImport['mapping']['columns'], headers: string[]): void {
+  const known = new Set(headers);
+  const issues = CSV_FIELDS.flatMap((field) => {
+    const header = columns[field];
+    return header !== null && !known.has(header)
+      ? [{ path: ['mapping', 'columns', field], message: `Column "${header}" is not in the file` }]
+      : [];
+  });
+  if (issues.length > 0) throw new ValidationError(issues);
+}
+
+/** `CSV contact: First Last <email> phone` from the parts present, or null when there are none. */
+export function contactNote(parts: { firstName?: string | null; lastName?: string | null; email?: string | null; phone?: string | null }): string | null {
+  const name = [parts.firstName, parts.lastName].filter(Boolean).join(' ');
+  const text = [name, parts.email ? `<${parts.email}>` : '', parts.phone ?? ''].filter(Boolean).join(' ');
+  return text ? `CSV contact: ${text}` : null;
 }
 
 const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -63,7 +94,7 @@ export function suggestMapping(headers: string[]): CsvSuggestedMapping {
 
 /** First five data rows, in header order. */
 export function sampleRows(parsed: ParsedCsv, n = 5): string[][] {
-  return parsed.rows.slice(0, n).map((r) => parsed.headers.map((h) => r[h] ?? ''));
+  return parsed.rows.slice(0, n).map((r) => parsed.headers.map((h) => cell(r, h)));
 }
 
 /** `CSV-YYYYMMDD-HHMM` in UTC. */
@@ -110,15 +141,16 @@ function rowMessage(e: unknown): string | null {
 export async function importCsvLeads(
   db: PrismaClient, user: AuthUser, body: CsvImport, onUnexpected: (e: unknown, row: number) => void,
 ): Promise<CsvImportResult> {
-  const { rows } = parseCsv(body.csv);
+  const { headers, rows } = parseCsv(body.csv);
   const { columns } = body.mapping;
+  assertMappingHeaders(columns, headers);
   const result: CsvImportResult = { batch: csvBatch(), created: 0, linked: 0, review: [], errors: [] };
 
   for (const [i, record] of rows.entries()) {
     const row = i + 1;
     const get = (field: CsvField): string => {
       const header = columns[field];
-      return header ? (record[header] ?? '').trim() : '';
+      return header ? cell(record, header).trim() : '';
     };
     try {
       const outcome = await db.$transaction(async (tx) => {
@@ -152,7 +184,18 @@ export async function importCsvLeads(
           name: input.companyName, website: input.website ?? undefined, businessEmail: input.businessEmail ?? undefined, country,
         });
         const review = matches.auto ? [] : matches.review;
-        const created = await createLeadWithCompany(tx, { ...input, createCompany: review.length === 0, importBatch: result.batch }, user);
+        // An unlinked lead keeps no contact: carry the contact columns in its notes for resolve-company.
+        let notes = input.notes ?? null;
+        const contact = review.length > 0
+          ? contactNote({
+            firstName: input.contactFirstName, lastName: input.contactLastName,
+            email: input.contactEmail ?? input.businessEmail, phone: input.phone,
+          })
+          : null;
+        if (contact) notes = notes ? `${notes}\n${contact}` : contact;
+        const created = await createLeadWithCompany(
+          tx, { ...input, notes, createCompany: review.length === 0, importBatch: result.batch }, user,
+        );
         await auditCreatedLead(tx, user.id, created);
         return { created, review };
       });
