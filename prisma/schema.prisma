@@ -39,6 +39,8 @@ model User {
   notifications Notification[]
   auditLogs     AuditLog[]
 
+  createdCompanies Company[]
+
   @@map("users")
 }
 
@@ -147,4 +149,139 @@ model AuditLog {
 
   @@index([entityType, entityId])
   @@map("audit_logs")
+}
+
+model Company {
+  id                  Int       @id @default(autoincrement())
+  /// CO-0001; default from company_number_seq, set in the migration SQL.
+  number              String    @unique @default(dbgenerated("('CO-'::text || lpad((nextval('company_number_seq'::regclass))::text, 4, '0'::text))"))
+  name                String
+  /// normaliseCompanyName(name); set by the routes on every write, used for duplicate matching.
+  nameNormalised      String    @map("name_normalised")
+  legalName           String?   @map("legal_name")
+  website             String?
+  /// domainOf(website ?? businessEmail); first duplicate-check key.
+  domain              String?   @unique
+  businessEmail       String?   @map("business_email")
+  industry            String?
+  businessCategory    String?   @map("business_category")
+  businessType        String?   @map("business_type")
+  yearEstablished     Int?      @map("year_established") @db.SmallInt
+  description         String?
+  logoPath            String?   @map("logo_path")
+  linkedinUrl         String?   @map("linkedin_url")
+  status              String    @default("Active")
+  isClient            Boolean   @default(false) @map("is_client")
+  country             String
+  state               String?
+  city                String?
+  street              String?
+  zip                 String?
+  timezone            String?
+  lat                 Decimal?  @db.Decimal(9, 6)
+  lng                 Decimal?  @db.Decimal(9, 6)
+  mapsUrl             String?   @map("maps_url")
+  employeeCount       Int?      @map("employee_count")
+  employeeRange       String?   @map("employee_range")
+  annualRevenue       Decimal?  @map("annual_revenue") @db.Decimal(18, 2)
+  revenueCurrency     String?   @map("revenue_currency") @db.Char(3)
+  revenueRange        String?   @map("revenue_range")
+  ownershipType       String?   @map("ownership_type")
+  registrationNumber  String?   @map("registration_number")
+  stockExchange       String?   @map("stock_exchange")
+  stockSymbol         String?   @map("stock_symbol")
+  mainProducts        String?   @map("main_products")
+  mainServices        String?   @map("main_services")
+  businessVerticals   Json      @default("[]") @map("business_verticals")
+  targetMarkets       Json      @default("[]") @map("target_markets")
+  geographicMarkets   Json      @default("[]") @map("geographic_markets")
+  keyBrands           String?   @map("key_brands")
+  specialisation      String?
+  socialFacebook      String?   @map("social_facebook")
+  socialInstagram     String?   @map("social_instagram")
+  socialX             String?   @map("social_x")
+  socialYoutube       String?   @map("social_youtube")
+  socialOther         String?   @map("social_other")
+  websiteTechnology   String?   @map("website_technology")
+  websiteAssessment   String?   @map("website_assessment")
+  digitalSummary      String?   @map("digital_summary")
+  aiSummary           String?   @map("ai_summary")
+  aiIndustry          String?   @map("ai_industry")
+  aiBusinessCategory  String?   @map("ai_business_category")
+  aiPotentialServices Json      @default("[]") @map("ai_potential_services")
+  aiOpportunityScore  Int?      @map("ai_opportunity_score") @db.SmallInt
+  aiConfidence        String?   @map("ai_confidence")
+  aiResearchStatus    String    @default("Pending") @map("ai_research_status")
+  aiLastResearchAt    DateTime? @map("ai_last_research_at")
+  verificationStatus  String    @default("Unverified") @map("verification_status")
+  verifiedFields      Json      @default("{}") @map("verified_fields")
+  aiFields            Json      @default("{}") @map("ai_fields")
+  createdById         Int?      @map("created_by_id")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  createdBy User?             @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  contacts  Contact[]
+  locations CompanyLocation[]
+
+  @@index([name])
+  @@index([nameNormalised, country])
+  @@index([country])
+  @@index([status])
+  @@index([registrationNumber])
+  @@map("companies")
+}
+
+model Contact {
+  id               Int      @id @default(autoincrement())
+  companyId        Int      @map("company_id")
+  firstName        String   @map("first_name")
+  lastName         String   @map("last_name")
+  designation      String?
+  department       String?
+  businessEmail    String?  @map("business_email")
+  phone            String?
+  phoneNormalised  String?  @map("phone_normalised")
+  mobile           String?
+  mobileNormalised String?  @map("mobile_normalised")
+  linkedinUrl      String?  @map("linkedin_url")
+  contactType      String   @default("Other") @map("contact_type")
+  /// At most one per company: partial unique index contacts_one_primary_per_company (migration SQL).
+  isPrimary        Boolean  @default(false) @map("is_primary")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@index([businessEmail])
+  @@index([phoneNormalised])
+  @@index([mobileNormalised])
+  @@index([companyId, lastName])
+  @@map("contacts")
+}
+
+model CompanyLocation {
+  id           Int      @id @default(autoincrement())
+  companyId    Int      @map("company_id")
+  name         String
+  locationType String   @map("location_type")
+  country      String
+  state        String?
+  city         String?
+  street       String?
+  zip          String?
+  timezone     String?
+  lat          Decimal? @db.Decimal(9, 6)
+  lng          Decimal? @db.Decimal(9, 6)
+  mapsUrl      String?  @map("maps_url")
+  phone        String?
+  isVerified   Boolean  @default(false) @map("is_verified")
+  source       String   @default("Manual")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@map("company_locations")
 }

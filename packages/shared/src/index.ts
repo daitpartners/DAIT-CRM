@@ -5,3 +5,8 @@ export * from './schemas/lookup.js';
 export * from './schemas/allocation.js';
 export * from './rights.js';
 export * from './i18n.js';
+export * from './normalise.js';
+export * from './schemas/company.js';
+export * from './schemas/contact.js';
+export * from './schemas/location.js';
+export * from './schemas/paging.js';
