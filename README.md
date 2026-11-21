@@ -26,10 +26,13 @@ Deployment (test and live servers, GitHub Actions, backups): see [docs/DEPLOYMEN
 ## Modules
 
 - **Settings** (release 1A): my settings, users, lookups, allocation rules, system mailbox.
-- **Companies** (release 1B): list with search, filters, sorting and bulk status; live duplicate check; profile with Overview, Contacts and Locations tabs. Sales representatives see only the companies they created.
-- **Contacts** (release 1B): every visible contact across companies, with search, type filter and an Add contact form that picks the company.
+- **Companies** (release 1B): list with search, filters, sorting and bulk status; live duplicate check; profile with Overview, Contacts and Locations tabs (release 1C adds the Leads & Prospects and Activities tabs, and the Client flag, editable by administrators, managers and data research users). Sales representatives see only the companies they created.
+- **Contacts** (release 1B): every visible contact across companies, with search, type filter and an Add contact form that picks the company. Release 1C adds deactivate / reactivate (inactive contacts are left out of pickers) and moving a contact to another company.
+- **Leads** (release 1C): inbound leads and researched prospects in one list with tiles, views, filters and bulk assign/archive; live duplicate check that links to an existing company; lead page with status steps, log call, follow-up, transfer, claim, close (Won marks the company a client, Lost needs a reason) and a timeline; CSV import with a review step for possible company matches. Sales representatives see their own and unassigned leads.
+- **Tasks** (release 1C): follow-up tasks kept in step with each lead's next follow-up, plus your own tasks; Today, Overdue, Upcoming and Done tabs, tick to complete, snooze to tomorrow.
+- **Notifications** (release 1C): new assignments and transferred leads, with an unread count on the bell and Mark all read.
 
-Owner walkthroughs: [docs/PHASE-1A-CHECKLIST.md](docs/PHASE-1A-CHECKLIST.md), [docs/RELEASE-1B-CHECKLIST.md](docs/RELEASE-1B-CHECKLIST.md).
+Owner walkthroughs: [docs/PHASE-1A-CHECKLIST.md](docs/PHASE-1A-CHECKLIST.md), [docs/RELEASE-1B-CHECKLIST.md](docs/RELEASE-1B-CHECKLIST.md), [docs/RELEASE-1C-CHECKLIST.md](docs/RELEASE-1C-CHECKLIST.md).
 
 ## Prototype (reference)
 

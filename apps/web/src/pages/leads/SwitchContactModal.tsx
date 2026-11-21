@@ -8,7 +8,7 @@ import { errorText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
 import { useActionError } from './staleToast';
 
-/** Choose the lead's contact person among the company's contacts (or none). */
+/** Choose the lead's contact person among the company's active contacts (or none). */
 export function SwitchContactModal({ lead, onClose }: { lead: LeadFull; onClose: () => void }) {
   const t = useT();
   const toast = useToast();
@@ -63,6 +63,12 @@ export function SwitchContactModal({ lead, onClose }: { lead: LeadFull; onClose:
               {c.isPrimary ? ` (${t('Primary')})` : ''}
             </option>
           ))}
+          {/* A deactivated current contact is not offered by the list: show it so the select does not misreport. */}
+          {lead.contact && !lead.contact.isActive ? (
+            <option value={String(lead.contact.id)} disabled>
+              {lead.contact.name} ({t('Inactive')})
+            </option>
+          ) : null}
         </select>
       </FormField>
       {problem ? (

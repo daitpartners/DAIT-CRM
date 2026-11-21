@@ -3,7 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { prisma } from '../src/db';
 import { buildApp } from '../src/app';
 import { resetDb, seedLookups } from './helpers';
-import { makeCompany, makeContact, makeUser, signIn } from './factory';
+import { makeCompany, makeContact, makeLead, makeUser, signIn } from './factory';
 
 let app: FastifyInstance;
 beforeAll(async () => {
@@ -178,6 +178,108 @@ describe('contacts API', () => {
     expect(ok.json().firstName).toBe('New');
     const log = await prisma.auditLog.findFirstOrThrow({ where: { entityType: 'contact', action: 'update' } });
     expect(log.entityId).toBe(String(contact.id));
+  });
+
+  it('deactivated contact is hidden from pickers and cannot be primary', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const co = await makeCompany();
+    const a = (await req('POST', '/api/contacts', admin.cookie, { companyId: co.id, firstName: 'Asha', lastName: 'Rao' })).json();
+    const b = (await req('POST', '/api/contacts', admin.cookie, { companyId: co.id, firstName: 'Ben', lastName: 'Ng' })).json();
+    // The primary cannot be deactivated while another active contact could take over.
+    const primaryOff = await req('PATCH', `/api/contacts/${a.id}`, admin.cookie, { isActive: false, updatedAt: a.updatedAt });
+    expect(primaryOff.statusCode).toBe(400);
+    expect(primaryOff.json()).toEqual({ error: 'last_primary_contact' });
+
+    const off = await req('PATCH', `/api/contacts/${b.id}`, admin.cookie, { isActive: false, updatedAt: b.updatedAt });
+    expect(off.statusCode).toBe(200);
+    expect(off.json()).toMatchObject({ isActive: false, isPrimary: false });
+    const log = await prisma.auditLog.findFirstOrThrow({ where: { entityType: 'contact', action: 'update', entityId: String(b.id) } });
+    expect(log.after).toMatchObject({ isActive: false });
+
+    // Pickers (GET /contacts) leave it out unless asked for inactive contacts.
+    const list = (await req('GET', `/api/contacts?companyId=${co.id}`, admin.cookie)).json();
+    expect(list.items.map((c: { id: number }) => c.id)).toEqual([a.id]);
+    const withInactive = (await req('GET', `/api/contacts?companyId=${co.id}&inactive=1`, admin.cookie)).json();
+    expect(withInactive.total).toBe(2);
+
+    // An inactive contact cannot become primary.
+    const promote = await req('PATCH', `/api/contacts/${b.id}`, admin.cookie, { isPrimary: true, updatedAt: off.json().updatedAt });
+    expect(promote.statusCode).toBe(400);
+    expect(promote.json()).toEqual({ error: 'contact_inactive' });
+    expect(await primaries(co.id)).toEqual([{ id: a.id }]);
+
+    // A lead on the company takes the primary, never the inactive contact; an explicit inactive contact is refused.
+    const leadBody = { companyName: co.name, country: 'India', leadSource: 'Manual Entry', linkCompanyId: co.id };
+    expect((await req('POST', '/api/leads', admin.cookie, { ...leadBody, contactId: b.id })).statusCode).toBe(400);
+    const lead = await req('POST', '/api/leads', admin.cookie, leadBody);
+    expect(lead.statusCode).toBe(201);
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.json().id } })).contactId).toBe(a.id);
+
+    // The last active contact may be deactivated: the company is left without a primary,
+    // and reactivating a contact on a company without a primary makes it primary again.
+    const lastOff = await req('PATCH', `/api/contacts/${a.id}`, admin.cookie, { isActive: false, updatedAt: a.updatedAt });
+    expect(lastOff.statusCode).toBe(200);
+    expect(lastOff.json()).toMatchObject({ isActive: false, isPrimary: false });
+    expect(await primaries(co.id)).toEqual([]);
+    const back = await req('PATCH', `/api/contacts/${b.id}`, admin.cookie, { isActive: true, updatedAt: off.json().updatedAt });
+    expect(back.statusCode).toBe(200);
+    expect(back.json()).toMatchObject({ isActive: true, isPrimary: true });
+  });
+
+  it('move contact clears primary when target has one', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const from = await makeCompany({ name: 'From Co' });
+    const to = await makeCompany({ name: 'To Co' });
+    const a = (await req('POST', '/api/contacts', admin.cookie, { companyId: from.id, firstName: 'Asha', lastName: 'Rao' })).json();
+    const t = (await req('POST', '/api/contacts', admin.cookie, { companyId: to.id, firstName: 'Tara', lastName: 'Lee' })).json();
+    const stayLead = await makeLead({ companyId: to.id, contactId: a.id });
+    const oldLead = await makeLead({ companyId: from.id, contactId: a.id });
+
+    const stale = await req('POST', `/api/contacts/${a.id}/move`, admin.cookie, { companyId: to.id, updatedAt: '2020-01-01T00:00:00.000Z' });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json()).toEqual({ error: 'stale' });
+
+    const res = await req('POST', `/api/contacts/${a.id}/move`, admin.cookie, { companyId: to.id, updatedAt: a.updatedAt });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ companyId: to.id, company: { name: 'To Co' }, isPrimary: false });
+    expect(await primaries(to.id)).toEqual([{ id: t.id }]);
+    expect(await primaries(from.id)).toEqual([]);
+
+    // A lead of the new company keeps the contact; a lead of another company loses it, with a note.
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: stayLead.id } })).contactId).toBe(a.id);
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: oldLead.id } })).contactId).toBeNull();
+    const note = await prisma.leadActivity.findFirstOrThrow({ where: { leadId: oldLead.id } });
+    expect(note).toMatchObject({ activityType: 'note', title: 'Contact moved to To Co', byUserId: admin.user.id });
+    expect(await prisma.leadActivity.count({ where: { leadId: stayLead.id } })).toBe(0);
+
+    const log = await prisma.auditLog.findFirstOrThrow({
+      where: { entityType: 'contact', action: 'update', entityId: String(a.id) }, orderBy: { id: 'desc' },
+    });
+    expect(log.before).toMatchObject({ companyId: from.id });
+    expect(log.after).toMatchObject({ companyId: to.id });
+
+    // Moving to a company without a primary makes it the primary there.
+    const empty = await makeCompany({ name: 'Empty Co' });
+    const again = await req('POST', `/api/contacts/${a.id}/move`, admin.cookie, { companyId: empty.id, updatedAt: res.json().updatedAt });
+    expect(again.statusCode).toBe(200);
+    expect(again.json().isPrimary).toBe(true);
+  });
+
+  it('move refuses a closed or hidden target company', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const admin = await as('ADMINISTRATOR');
+    const mine = await makeCompany({ createdById: rep.user.id });
+    const closed = await makeCompany({ createdById: rep.user.id });
+    await prisma.company.update({ where: { id: closed.id }, data: { status: 'Closed' } });
+    const hidden = await makeCompany({ createdById: admin.user.id });
+    const c = await makeContact({ companyId: mine.id });
+    const body = (companyId: number) => ({ companyId, updatedAt: c.updatedAt.toISOString() });
+    const toClosed = await req('POST', `/api/contacts/${c.id}/move`, rep.cookie, body(closed.id));
+    expect(toClosed.statusCode).toBe(409);
+    expect(toClosed.json()).toEqual({ error: 'company_inactive' });
+    const toHidden = await req('POST', `/api/contacts/${c.id}/move`, rep.cookie, body(hidden.id));
+    expect(toHidden.statusCode).toBe(404);
+    expect((await prisma.contact.findUniqueOrThrow({ where: { id: c.id } })).companyId).toBe(mine.id);
   });
 
   it('partial unique index still present after 1C migration', async () => {

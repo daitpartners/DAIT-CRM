@@ -117,6 +117,26 @@ Alternatively set the password in the `LOCAL_ADMIN_PASSWORD` environment variabl
 
 Use `~/live/...` for live. Running it again for the same email resets that user's password. The password only works while `LOCAL_ADMIN_LOGIN=1` is in that environment's `.env`: keep it on test until Microsoft sign-in works, and leave it unset on live unless you need a break-glass sign-in (then add it, `pm2 reload crm-live --update-env`, sign in, remove it and reload again).
 
+## Release 1C one-off: import the 21 Nov prospects
+
+Once, after release 1C is deployed to live and its health check passes, import the prospects list of 21 Nov 2026 (`leads_pending_1C.csv`). Copy the CSV to the server first (for example `scp leads_pending_1C.csv daitcrm@88.222.213.73:~/`). Both owners must already exist as active users (Settings, Users); the script stops with "no active user with email …" otherwise. Each row becomes a Prospect linked to an existing company (found by name and country) and its primary contact; rows whose company is not found are listed as unknown and not imported, rows whose owner is not in `--owners` are skipped, and running it again skips rows already imported.
+
+Take a backup first (`deploy/backup.sh dait_crm`, see Backups below).
+
+First a dry run, which writes nothing and prints what it would create:
+
+```
+source ~/.nvm/nvm.sh && cd ~/live/current/apps/api && node --env-file=$HOME/live/shared/.env dist/cli/import-prospects-2026-11-21.js --file <csv> --owners "Deepak=deepak.singh@daitpartners.com,Carlos=carlos.torres@daitpartners.com" --dry-run
+```
+
+Check the totals (rows, would create, already imported, skipped owner, unknown companies, errors), then run the same command without `--dry-run`:
+
+```
+source ~/.nvm/nvm.sh && cd ~/live/current/apps/api && node --env-file=$HOME/live/shared/.env dist/cli/import-prospects-2026-11-21.js --file <csv> --owners "Deepak=deepak.singh@daitpartners.com,Carlos=carlos.torres@daitpartners.com"
+```
+
+Then sign in and open **Leads**, **Prospects** view: the imported rows are there, assigned to Deepak and Carlos.
+
 ## Day to day
 
 - On the server over non-interactive SSH, start every command with `source ~/.nvm/nvm.sh &&` so `node` and `pm2` are found.

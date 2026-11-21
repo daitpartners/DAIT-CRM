@@ -83,6 +83,7 @@ export function contactSummary(c: ContactRow) {
     linkedinUrl: c.linkedinUrl,
     contactType: c.contactType,
     isPrimary: c.isPrimary,
+    isActive: c.isActive,
     updatedAt: c.updatedAt,
   };
 }

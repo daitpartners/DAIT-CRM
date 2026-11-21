@@ -244,7 +244,7 @@ export type CreatedLead = { lead: Lead; createdCompanyId: number | null; created
 
 /**
  * Creates a lead: resolves its company (link → automatic match → new company with a primary
- * contact), picks the contact (given, else the company's primary), assigns it (given assignee,
+ * contact), picks the contact (given, else the company's primary; inactive contacts never), assigns it (given assignee,
  * else the allocation rule for its country), and writes the "Lead created" activity and the
  * follow-up task. With `createCompany: false` and no link or automatic match the lead has no
  * company (`companyId` null) until resolved. Runs inside the caller's transaction.
@@ -257,11 +257,11 @@ export async function createLeadWithCompany(
 
   let contactId: number | null = null;
   if (input.contactId !== undefined) {
-    const ok = companyId !== null && (await tx.contact.count({ where: { id: input.contactId, companyId } })) > 0;
-    if (!ok) throw new ValidationError([{ path: ['contactId'], message: 'Contact does not belong to the company' }]);
+    const ok = companyId !== null && (await tx.contact.count({ where: { id: input.contactId, companyId, isActive: true } })) > 0;
+    if (!ok) throw new ValidationError([{ path: ['contactId'], message: 'Contact must be an active contact of the company' }]);
     contactId = input.contactId;
   } else if (companyId !== null) {
-    contactId = (await tx.contact.findFirst({ where: { companyId, isPrimary: true }, select: { id: true } }))?.id ?? null;
+    contactId = (await tx.contact.findFirst({ where: { companyId, isPrimary: true, isActive: true }, select: { id: true } }))?.id ?? null;
   }
 
   const lead = await tx.lead.create({

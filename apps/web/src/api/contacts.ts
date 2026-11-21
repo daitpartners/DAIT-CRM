@@ -22,6 +22,7 @@ export type ContactSummary = {
   linkedinUrl: string | null;
   contactType: string;
   isPrimary: boolean;
+  isActive: boolean;
   updatedAt: string;
 };
 
@@ -37,6 +38,8 @@ export type ContactListQuery = {
   dir?: 'asc' | 'desc';
   q?: string;
   contactType?: string;
+  /** '1' = include deactivated contacts (pickers leave this out: active contacts only). */
+  inactive?: '1';
 };
 
 export type ContactPage = { items: ContactSummary[]; total: number; page: number; pageSize: number };
@@ -120,6 +123,22 @@ export function useSaveContact() {
       await Promise.all([
         qc.invalidateQueries({ queryKey: keys.contactsAll }),
         qc.invalidateQueries({ queryKey: keys.companiesAll }),
+      ]);
+    },
+  });
+}
+
+/** Move a contact to another company; refreshes contacts, companies and leads (a lead may lose the contact). */
+export function useMoveContact() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: number; companyId: number; updatedAt: string }) =>
+      api<ContactSummary>(`/api/contacts/${v.id}/move`, { method: 'POST', body: { companyId: v.companyId, updatedAt: v.updatedAt } }),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: keys.contactsAll }),
+        qc.invalidateQueries({ queryKey: keys.companiesAll }),
+        qc.invalidateQueries({ queryKey: keys.leadsAll }),
       ]);
     },
   });

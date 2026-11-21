@@ -192,4 +192,23 @@ describe('companies API', () => {
     const logs = await prisma.auditLog.findMany({ where: { entityType: 'company', action: 'update' } });
     expect(logs.map((l) => l.entityId)).toEqual([String(mine.id)]);
   });
+  it('sales rep cannot change isClient', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const co = await makeCompany({ createdById: rep.user.id });
+    const res = await req('PATCH', `/api/companies/${co.id}`, rep.cookie, { isClient: true, updatedAt: co.updatedAt.toISOString() });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ error: 'forbidden' });
+    expect((await prisma.company.findUniqueOrThrow({ where: { id: co.id } })).isClient).toBe(false);
+    // Other fields still save for the rep.
+    const ok = await req('PATCH', `/api/companies/${co.id}`, rep.cookie, { city: 'Pune', updatedAt: co.updatedAt.toISOString() });
+    expect(ok.statusCode).toBe(200);
+
+    for (const role of ['MANAGER', 'DATA_RESEARCH_USER'] as const) {
+      const who = await as(role);
+      const fresh = await prisma.company.findUniqueOrThrow({ where: { id: co.id } });
+      const flip = await req('PATCH', `/api/companies/${co.id}`, who.cookie, { isClient: !fresh.isClient, updatedAt: fresh.updatedAt.toISOString() });
+      expect(flip.statusCode).toBe(200);
+      expect(flip.json().isClient).toBe(!fresh.isClient);
+    }
+  });
 });

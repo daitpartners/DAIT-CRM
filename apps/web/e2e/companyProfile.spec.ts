@@ -117,3 +117,36 @@ test('overview edit opens the company form at the chosen section', async ({ page
   const facebook = page.getByRole('region', { name: 'Digital presence' }).getByRole('link', { name: /facebook\.com\/northwind-test/ });
   await expect(facebook).toHaveAttribute('href', 'https://facebook.com/northwind-test');
 });
+
+test('deactivate a contact', async ({ page }) => {
+  const stamp = Date.now();
+  await openNorthwind(page);
+  await page.getByRole('tab', { name: /Contacts/ }).click();
+
+  await page.getByRole('button', { name: 'Add contact' }).click();
+  const modal = page.getByRole('dialog', { name: 'Add contact' });
+  await modal.getByLabel('First name').fill('Gone');
+  await modal.getByLabel('Last name').fill(`Away${stamp}`);
+  await modal.getByLabel('Business email').fill(`gone.${stamp}@northwindlogistics.in`);
+  await modal.getByRole('button', { name: 'Save' }).click();
+  await expect(modal).toBeHidden();
+
+  const row = page.getByRole('row').filter({ hasText: `Gone Away${stamp}` });
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: `Deactivate Gone Away${stamp}` }).click();
+  const confirm = page.getByRole('dialog', { name: 'Deactivate contact?' });
+  await confirm.getByRole('button', { name: 'Deactivate' }).click();
+  await expect(confirm).toBeHidden();
+  await expect(row).toBeHidden();
+
+  // Listed again, with a grey badge, under "Show inactive"; reactivating brings it back for good.
+  await page.getByLabel('Show inactive').check();
+  await expect(row).toBeVisible();
+  await expect(row.getByText('Inactive', { exact: true })).toBeVisible();
+  await expect(row.getByRole('button', { name: `Make Gone Away${stamp} primary` })).toHaveCount(0);
+  await row.getByRole('button', { name: `Reactivate Gone Away${stamp}` }).click();
+  await page.getByRole('dialog', { name: 'Reactivate contact?' }).getByRole('button', { name: 'Reactivate' }).click();
+  await expect(row.getByText('Inactive', { exact: true })).toHaveCount(0);
+  await page.getByLabel('Show inactive').uncheck();
+  await expect(row).toBeVisible();
+});

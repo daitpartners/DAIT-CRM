@@ -173,6 +173,8 @@ export function errorText(t: TFn, code: string): string {
       return t('This company is closed');
     case 'last_primary_contact':
       return t('A company must keep one primary contact');
+    case 'contact_inactive':
+      return t('This contact is inactive. Reactivate it first.');
     case 'lead_closed':
       return t('This lead is closed');
     case 'lead_archived':

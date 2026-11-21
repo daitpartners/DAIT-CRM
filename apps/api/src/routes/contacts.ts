@@ -1,12 +1,12 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { Prisma } from '@prisma/client';
 import {
-  ContactCreate, ContactDuplicateCheck, ContactListQuery, ContactUpdate,
+  ContactCreate, ContactDuplicateCheck, ContactListQuery, ContactMove, ContactUpdate,
   normalisePhone, pageArgs, type ContactCandidate,
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { audit } from '../audit.js';
-import { NotFoundError, parseBody, parseQuery } from '../validate.js';
+import { NotFoundError, ValidationError, parseBody, parseQuery } from '../validate.js';
 import { requireRight, requireUser } from '../plugins/auth.js';
 import { assertCompanyVisible, companyWhere, visibleCompanyIds } from '../companies/visibility.js';
 import { contactSummary, contactSummaryInclude } from '../companies/serialize.js';
@@ -19,6 +19,7 @@ type Tx = Prisma.TransactionClient;
 
 class CompanyInactiveError extends Error {}
 class LastPrimaryError extends Error {}
+class ContactInactiveError extends Error {}
 
 /** Stored matching key for a phone or mobile: '' (under 8 digits) is stored as null. */
 const phoneKey = (v: string | null | undefined) => normalisePhone(v) || null;
@@ -47,6 +48,8 @@ export const contactRoutes: FastifyPluginAsync = async (app) => {
   app.get('/contacts', { preHandler: [requireUser] }, async (request) => {
     const query = parseQuery(ContactListQuery, request.query);
     const and: Prisma.ContactWhereInput[] = [{ company: companyWhere(request.user!) }];
+    // Pickers and lists show active contacts; `inactive=1` adds the deactivated ones.
+    if (!query.inactive) and.push({ isActive: true });
     if (query.companyId !== undefined) and.push({ companyId: query.companyId });
     if (query.contactType) and.push({ contactType: query.contactType });
     if (query.q) {
@@ -79,10 +82,10 @@ export const contactRoutes: FastifyPluginAsync = async (app) => {
         const company = await assertCompanyVisible(tx, user, body.companyId);
         if (company.status === 'Closed') throw new CompanyInactiveError();
         await assertLookupValue(tx, 'contact_type', body.contactType, 'contactType');
-        const existing = await tx.contact.count({ where: { companyId: company.id } });
-        // The first contact of a company is always its primary.
-        const isPrimary = existing === 0 || body.isPrimary;
-        if (isPrimary && existing > 0) await clearPrimary(tx, company.id, user.id);
+        const hasPrimary = (await tx.contact.count({ where: { companyId: company.id, isPrimary: true } })) > 0;
+        // The first (active) contact of a company is always its primary.
+        const isPrimary = !hasPrimary || body.isPrimary;
+        if (isPrimary && hasPrimary) await clearPrimary(tx, company.id, user.id);
         const row = await tx.contact.create({
           data: { ...body, isPrimary, phoneNormalised: phoneKey(body.phone), mobileNormalised: phoneKey(body.mobile) },
           include: contactSummaryInclude,
@@ -110,10 +113,26 @@ export const contactRoutes: FastifyPluginAsync = async (app) => {
         if (!before) throw new NotFoundError();
         if (new Date(updatedAt).getTime() !== before.updatedAt.getTime()) throw new StaleError();
         if (body.contactType !== undefined) await assertLookupValue(tx, 'contact_type', body.contactType, 'contactType');
-        // A company with contacts always has exactly one primary: change it by promoting another contact.
-        if (body.isPrimary === false && before.isPrimary) throw new LastPrimaryError();
-        if (body.isPrimary === true && !before.isPrimary) await clearPrimary(tx, before.companyId, user.id);
         const data: Prisma.ContactUpdateInput = { ...body };
+        const deactivating = before.isActive && body.isActive === false;
+        const reactivating = !before.isActive && body.isActive === true;
+        // Only an active contact can be primary.
+        if (body.isPrimary === true && !(body.isActive ?? before.isActive)) throw new ContactInactiveError();
+        if (deactivating && before.isPrimary) {
+          // A company with active contacts always has exactly one primary: promote another contact first.
+          // The last active contact may go, leaving the company without a primary.
+          const others = await tx.contact.count({ where: { companyId: before.companyId, isActive: true, id: { not: id } } });
+          if (others > 0) throw new LastPrimaryError();
+          data.isPrimary = false;
+        } else if (body.isPrimary === false && before.isPrimary) {
+          throw new LastPrimaryError();
+        }
+        if (body.isPrimary === true && !before.isPrimary) {
+          await clearPrimary(tx, before.companyId, user.id);
+        } else if (reactivating && (await tx.contact.count({ where: { companyId: before.companyId, isPrimary: true } })) === 0) {
+          // Reactivating a contact of a company left without a primary makes it the primary again.
+          data.isPrimary = true;
+        }
         if (body.phone !== undefined) data.phoneNormalised = phoneKey(body.phone);
         if (body.mobile !== undefined) data.mobileNormalised = phoneKey(body.mobile);
         // Matching updatedAt in the where makes a concurrent write since `before` a P2025 (stale).
@@ -124,6 +143,66 @@ export const contactRoutes: FastifyPluginAsync = async (app) => {
       return contactSummary(updated);
     } catch (e) {
       if (e instanceof LastPrimaryError) return reply.code(400).send({ error: 'last_primary_contact' });
+      if (e instanceof ContactInactiveError) return reply.code(400).send({ error: 'contact_inactive' });
+      if (e instanceof StaleError || isNotFound(e) || isUniqueViolation(e)) return reply.code(409).send({ error: 'stale' });
+      throw e;
+    }
+  });
+
+  /**
+   * Moves a contact to another visible, not-Closed company. A primary contact stops being primary
+   * at its old company (which may be left without one); at the new company it becomes primary only
+   * if that company has none. Leads of other companies that pointed at the contact lose it, each
+   * with a note on its timeline.
+   */
+  app.post<{ Params: { id: string } }>('/contacts/:id/move', { preHandler: [requireRight('manage_companies')] }, async (request, reply) => {
+    const body = parseBody(ContactMove, request.body);
+    const id = Number(request.params.id);
+    if (!Number.isInteger(id)) return reply.code(404).send({ error: 'not_found' });
+    const user = request.user!;
+    try {
+      const moved = await prisma.$transaction(async (tx) => {
+        const before = await tx.contact.findFirst({ where: { id, company: companyWhere(user) } });
+        if (!before) throw new NotFoundError();
+        if (new Date(body.updatedAt).getTime() !== before.updatedAt.getTime()) throw new StaleError();
+        const target = await assertCompanyVisible(tx, user, body.companyId);
+        if (target.status === 'Closed') throw new CompanyInactiveError();
+        if (target.id === before.companyId) {
+          throw new ValidationError([{ path: ['companyId'], message: 'The contact is already at this company' }]);
+        }
+        const targetHasPrimary = (await tx.contact.count({ where: { companyId: target.id, isPrimary: true } })) > 0;
+        const isPrimary = before.isActive && !targetHasPrimary;
+        // Matching updatedAt in the where makes a concurrent write since `before` a P2025 (stale).
+        const after = await tx.contact.update({
+          where: { id, updatedAt: before.updatedAt }, data: { companyId: target.id, isPrimary }, include: contactSummaryInclude,
+        });
+        await audit(tx, {
+          entityType: 'contact', entityId: id, action: 'update', userId: user.id,
+          before: { companyId: before.companyId, isPrimary: before.isPrimary },
+          after: { companyId: target.id, isPrimary },
+        });
+        const leads = await tx.lead.findMany({
+          where: { contactId: id, OR: [{ companyId: null }, { companyId: { not: target.id } }] },
+          select: { id: true },
+        });
+        if (leads.length > 0) {
+          const ids = leads.map((l) => l.id);
+          await tx.lead.updateMany({ where: { id: { in: ids } }, data: { contactId: null } });
+          await tx.leadActivity.createMany({
+            data: ids.map((leadId) => ({ leadId, activityType: 'note', title: `Contact moved to ${target.name}`, byUserId: user.id })),
+          });
+          for (const leadId of ids) {
+            await audit(tx, {
+              entityType: 'lead', entityId: leadId, action: 'update', userId: user.id,
+              before: { contactId: id }, after: { contactId: null },
+            });
+          }
+        }
+        return after;
+      });
+      return contactSummary(moved);
+    } catch (e) {
+      if (e instanceof CompanyInactiveError) return reply.code(409).send({ error: 'company_inactive' });
       if (e instanceof StaleError || isNotFound(e) || isUniqueViolation(e)) return reply.code(409).send({ error: 'stale' });
       throw e;
     }

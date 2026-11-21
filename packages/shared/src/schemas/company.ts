@@ -51,7 +51,8 @@ export const CompanyCreate = z.object({
 });
 export type CompanyCreate = z.infer<typeof CompanyCreate>;
 
-export const CompanyUpdate = CompanyCreate.partial().extend({ updatedAt: z.string().datetime() });
+/** `isClient` is editable only by roles with `view_all_companies` (the route refuses it for others). */
+export const CompanyUpdate = CompanyCreate.partial().extend({ isClient: z.boolean().optional(), updatedAt: z.string().datetime() });
 export type CompanyUpdate = z.infer<typeof CompanyUpdate>;
 
 export const DuplicateCheck = z.object({

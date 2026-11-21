@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { Prisma } from '@prisma/client';
 import {
   CompanyBulkStatus, CompanyCreate, CompanyListQuery, CompanyUpdate, DuplicateCheck,
-  checkDomain, normaliseCompanyName, pageArgs, type CompanyCandidate,
+  can, checkDomain, normaliseCompanyName, pageArgs, type CompanyCandidate,
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { audit } from '../audit.js';
@@ -92,6 +92,8 @@ export const companyRoutes: FastifyPluginAsync = async (app) => {
     const { updatedAt, ...body } = parseBody(CompanyUpdate, request.body);
     const id = Number(request.params.id);
     const user = request.user!;
+    // The Client flag is a management decision: only roles that see every company may set it.
+    if (body.isClient !== undefined && !can(user.role, 'view_all_companies')) return reply.code(403).send({ error: 'forbidden' });
     let domain: string | null = null;
     try {
       const updated = await prisma.$transaction(async (tx) => {

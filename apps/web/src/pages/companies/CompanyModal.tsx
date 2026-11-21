@@ -6,6 +6,7 @@ import { CompanyCreate, CompanyStatus, CompanyUpdate, lookupLabel, type LookupGr
 import { ApiError, api } from '../../api/client';
 import { keys, useDuplicateCheck, type CompanyDetail } from '../../api/companies';
 import { useLookups } from '../../api/queries';
+import { useCurrentUser } from '../../api/useCurrentUser';
 import { COMBO_MIN, Combobox, type ComboOption } from '../../components/Combobox';
 import { FormField } from '../../components/FormField';
 import { Modal } from '../../components/Modal';
@@ -76,6 +77,8 @@ type Values = {
   socialX: string;
   socialYoutube: string;
   socialOther: string;
+  /** Editing only, and only for roles that may set the Client flag (view_all_companies). */
+  isClient?: boolean;
   updatedAt?: string;
 };
 type Field = Exclude<keyof Values, 'updatedAt'>;
@@ -143,6 +146,9 @@ export function CompanyModal({ company, onClose, section }: Props) {
   const { data: lookups } = useLookups();
   const [formError, setFormError] = useState<string | null>(null);
   const editing = Boolean(company);
+  const me = useCurrentUser();
+  // The API refuses isClient from other roles, so it is neither shown nor sent for them.
+  const canSetClient = editing && me.can('view_all_companies');
 
   const resolver = useMemo<Resolver<Values>>(() => {
     // The shared schemas also normalise (trim, '' → null, bare host → https://); their types differ from Values.
@@ -197,6 +203,7 @@ export function CompanyModal({ company, onClose, section }: Props) {
       socialYoutube: text(company?.socialYoutube),
       socialOther: text(company?.socialOther),
       ...(company ? { updatedAt: company.updatedAt } : {}),
+      ...(company && canSetClient ? { isClient: company.isClient } : {}),
     },
   });
   const { errors } = formState;
@@ -402,6 +409,14 @@ export function CompanyModal({ company, onClose, section }: Props) {
             ))}
           </select>
         </FormField>
+        {canSetClient ? (
+          <div className="span2">
+            <label className="check">
+              <input type="checkbox" id="co-isClient" {...register('isClient')} />
+              {t('Client (an existing customer)')}
+            </label>
+          </div>
+        ) : null}
         <FormField id="co-description" label={t('Description')} error={err('description')} className="span2">
           <textarea id="co-description" className="in" rows={3} {...register('description')} />
         </FormField>

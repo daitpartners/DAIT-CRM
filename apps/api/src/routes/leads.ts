@@ -423,7 +423,7 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
               company = await assertCompanyVisible(tx, user, body.companyId);
             }
             const contactId = (await tx.contact.findFirst({
-              where: { companyId: company.id, isPrimary: true }, select: { id: true },
+              where: { companyId: company.id, isPrimary: true, isActive: true }, select: { id: true },
             }))?.id ?? null;
             await tx.lead.update({ where: { id }, data: { companyId: company.id, contactId } });
             await tx.leadActivity.create({
