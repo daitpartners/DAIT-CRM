@@ -27,3 +27,9 @@ export const TaskListQuery = PagingQuery.extend({
   assignedTo: z.union([z.literal('all'), z.coerce.number().int().positive()]).optional(),
 });
 export type TaskListQuery = z.infer<typeof TaskListQuery>;
+
+/** `GET /notifications` query: `unread=1` lists only unread rows. */
+export const NotificationListQuery = PagingQuery.pick({ page: true, pageSize: true }).extend({
+  unread: z.enum(['0', '1']).optional(),
+});
+export type NotificationListQuery = z.infer<typeof NotificationListQuery>;

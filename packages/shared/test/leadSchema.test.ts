@@ -1,5 +1,5 @@
 import {
-  LeadBulk, LeadCreate, LeadListQuery, LeadStatusChange, LeadTransfer, LeadUpdate, LogCall, SwitchContact,
+  LeadBulk, LeadCreate, LeadListQuery, LeadStatusChange, LeadTransfer, LeadUnassign, LeadUpdate, LogCall, SwitchContact,
 } from '../src/schemas/lead';
 import { TaskCreate, TaskListQuery, TaskUpdate } from '../src/schemas/task';
 import { CLOSED_STATUSES, isClosedStatus, LEAD_TYPES, PRIORITIES, TASK_ORIGINS, ACTIVITY_TYPES } from '../src/leads';
@@ -80,14 +80,26 @@ describe('LeadStatusChange', () => {
 
 describe('LeadTransfer', () => {
   test('rejects an empty note when toUserId is set', () => {
-    expect(LeadTransfer.safeParse({ toUserId: 5, note: '' }).success).toBe(false);
-    expect(LeadTransfer.safeParse({ toUserId: 5, note: '   ' }).success).toBe(false);
+    expect(LeadTransfer.safeParse({ toUserId: 5, note: '', updatedAt }).success).toBe(false);
+    expect(LeadTransfer.safeParse({ toUserId: 5, note: '   ', updatedAt }).success).toBe(false);
   });
-  test('accepts a note; note may be omitted (claim — enforced by the route)', () => {
-    expect(LeadTransfer.safeParse({ toUserId: 5, note: 'Over to you' }).success).toBe(true);
-    expect(LeadTransfer.safeParse({ toUserId: 5 }).success).toBe(true);
-    expect(LeadTransfer.safeParse({ toUserId: null, note: 'Unassign' }).success).toBe(true);
-    expect(LeadTransfer.safeParse({ toUserId: 5, note: 'x'.repeat(1001) }).success).toBe(false);
+  test('accepts a note; note may be omitted (taking it yourself — enforced by the route)', () => {
+    expect(LeadTransfer.safeParse({ toUserId: 5, note: 'Over to you', updatedAt }).success).toBe(true);
+    expect(LeadTransfer.safeParse({ toUserId: 5, updatedAt }).success).toBe(true);
+    expect(LeadTransfer.safeParse({ toUserId: 5, note: 'x'.repeat(1001), updatedAt }).success).toBe(false);
+  });
+  test('requires a receiver and updatedAt (unassign has its own schema)', () => {
+    expect(LeadTransfer.safeParse({ toUserId: null, note: 'Unassign', updatedAt }).success).toBe(false);
+    expect(LeadTransfer.safeParse({ toUserId: 5, note: 'Over to you' }).success).toBe(false);
+  });
+});
+
+describe('LeadUnassign', () => {
+  test('requires a note and updatedAt', () => {
+    expect(LeadUnassign.safeParse({ note: 'Back to pool', updatedAt }).success).toBe(true);
+    expect(LeadUnassign.safeParse({ note: '  ', updatedAt }).success).toBe(false);
+    expect(LeadUnassign.safeParse({ updatedAt }).success).toBe(false);
+    expect(LeadUnassign.safeParse({ note: 'Back to pool' }).success).toBe(false);
   });
 });
 

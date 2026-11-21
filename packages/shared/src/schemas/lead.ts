@@ -49,14 +49,22 @@ export const LeadStatusChange = z.object({
 export type LeadStatusChange = z.infer<typeof LeadStatusChange>;
 
 /**
- * Transfer, claim or unassign. `toUserId: null` unassigns. The note is required by the route
- * (`transfer_note_required`) unless the actor is claiming an unassigned lead for themselves.
+ * `POST /leads/:id/transfer`. The note is required by the route (`transfer_note_required`) unless
+ * the actor is taking the lead themselves. Unassigning is `POST /leads/:id/unassign`.
  */
 export const LeadTransfer = z.object({
-  toUserId: z.number().int().positive().nullable(),
+  toUserId: z.number().int().positive(),
   note: z.string().trim().min(1).max(1000).optional(),
+  updatedAt,
 });
 export type LeadTransfer = z.infer<typeof LeadTransfer>;
+
+/** `POST /leads/:id/unassign` (Administrator / Manager): the lead goes back to the unassigned pool. */
+export const LeadUnassign = z.object({
+  note: z.string().trim().min(1).max(1000),
+  updatedAt,
+});
+export type LeadUnassign = z.infer<typeof LeadUnassign>;
 
 export const CALL_OUTCOMES = ['Connected', 'No answer', 'Voicemail', 'Wrong number', 'Callback requested'] as const;
 export type CallOutcome = (typeof CALL_OUTCOMES)[number];

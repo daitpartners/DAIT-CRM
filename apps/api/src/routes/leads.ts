@@ -1,8 +1,8 @@
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { Prisma, type Lead } from '@prisma/client';
 import {
-  CLOSED_STATUSES, DuplicateCheck, LeadBulk, LeadCreate, LeadListQuery, LeadStatusChange, LeadUpdate, LogCall,
-  SwitchContact, UpdatedAtOnly, can, checkDomain, isClosedStatus, pageArgs, type CompanyCandidate,
+  CLOSED_STATUSES, DuplicateCheck, LeadBulk, LeadCreate, LeadListQuery, LeadStatusChange, LeadTransfer, LeadUnassign,
+  LeadUpdate, LogCall, SwitchContact, UpdatedAtOnly, can, checkDomain, isClosedStatus, pageArgs, type CompanyCandidate,
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { audit } from '../audit.js';
@@ -28,10 +28,10 @@ const DAY_MS = 86_400_000;
 /* ------------------------------------------------------------------ errors */
 
 /** RuleError codes answered with 409; every other rule refusal is a 400. */
-const CONFLICT_CODES = new Set(['stale', 'company_inactive']);
+const CONFLICT_CODES = new Set(['stale', 'company_inactive', 'already_assigned']);
 
 /** Maps a business-rule / concurrency error to its HTTP reply; anything else is rethrown. */
-async function guard<T>(reply: FastifyReply, fn: () => Promise<T>): Promise<T | FastifyReply> {
+export async function guard<T>(reply: FastifyReply, fn: () => Promise<T>): Promise<T | FastifyReply> {
   try {
     return await fn();
   } catch (e) {
@@ -398,7 +398,62 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
       });
     });
   }
+
+  /* ---------------------------------------------------------------- transfer, claim, unassign */
+
+  app.post<{ Params: { id: string } }>('/leads/:id/transfer', { preHandler: [requireRight('transfer_leads')] }, async (request, reply) => {
+    const body = parseBody(LeadTransfer, request.body);
+    const user = request.user!;
+    const id = leadId(request.params.id);
+    return guard(reply, async () => {
+      await prisma.$transaction(async (tx) => {
+        const { lead } = await lockFresh(tx, user, id, body.updatedAt);
+        if (body.toUserId !== user.id && !body.note) throw new RuleError('transfer_note_required');
+        if ((await tx.user.count({ where: { id: body.toUserId, isActive: true } })) === 0) throw new RuleError('unknown_user');
+        await assertAssignable(tx, user, body.toUserId);
+        await assignAndAudit(tx, user, lead, body.toUserId, body.note);
+      });
+      return detailOf(prisma, id, user);
+    });
+  });
+
+  app.post<{ Params: { id: string } }>('/leads/:id/claim', { preHandler: [requireRight('claim_leads')] }, async (request, reply) => {
+    const body = parseBody(UpdatedAtOnly, request.body);
+    const user = request.user!;
+    const id = leadId(request.params.id);
+    return guard(reply, async () => {
+      await prisma.$transaction(async (tx) => {
+        const { lead } = await lockFresh(tx, user, id, body.updatedAt);
+        if (lead.assignedToId !== null) throw new RuleError('already_assigned');
+        await assignAndAudit(tx, user, lead, user.id);
+      });
+      return detailOf(prisma, id, user);
+    });
+  });
+
+  app.post<{ Params: { id: string } }>('/leads/:id/unassign', { preHandler: [requireRight('view_all_leads')] }, async (request, reply) => {
+    const body = parseBody(LeadUnassign, request.body);
+    const user = request.user!;
+    const id = leadId(request.params.id);
+    return guard(reply, async () => {
+      await prisma.$transaction(async (tx) => {
+        const { lead } = await lockFresh(tx, user, id, body.updatedAt);
+        await assignAndAudit(tx, user, lead, null, body.note);
+      });
+      return detailOf(prisma, id, user);
+    });
+  });
 };
+
+/** Hands the (locked) lead to `toUserId` (null = unassign) and audits it; no-op when unchanged. */
+async function assignAndAudit(tx: Tx, user: AuthUser, lead: Lead, toUserId: number | null, note?: string): Promise<void> {
+  if (lead.assignedToId === toUserId) return;
+  await recordAssignment(tx, lead, toUserId, { userId: user.id, note });
+  await audit(tx, {
+    entityType: 'lead', entityId: lead.id, action: 'update', userId: user.id,
+    before: { assignedToId: lead.assignedToId }, after: { assignedToId: toUserId, note: note ?? null },
+  });
+}
 
 /* ------------------------------------------------------------------ bulk */
 
@@ -421,13 +476,7 @@ async function bulkAssign(tx: Tx, user: AuthUser, ids: number[], toUserId: numbe
   const rows = await tx.lead.findMany({ where: { AND: [{ id: { in: ids } }, leadWhere(user)] }, orderBy: { id: 'asc' } });
   const moving = rows.filter((r) => r.assignedToId !== toUserId);
   if (!note?.trim() && moving.some((r) => r.assignedToId !== null)) throw new RuleError('transfer_note_required');
-  for (const lead of moving) {
-    await recordAssignment(tx, lead, toUserId, { userId: user.id, note });
-    await audit(tx, {
-      entityType: 'lead', entityId: lead.id, action: 'update', userId: user.id,
-      before: { assignedToId: lead.assignedToId }, after: { assignedToId: toUserId, note: note?.trim() || null },
-    });
-  }
+  for (const lead of moving) await assignAndAudit(tx, user, lead, toUserId, note?.trim() || undefined);
   return moving.length;
 }
 

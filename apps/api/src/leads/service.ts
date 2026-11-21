@@ -149,9 +149,13 @@ export async function recordAssignment(
       });
     }
     if (receiver.id !== by.userId) {
-      const text = isTransfer ? `Lead ${lead.number} transferred to you` : `Lead ${lead.number} assigned to you`;
-      const detail = note ? `${lead.companyName} · ${note}` : lead.companyName;
-      await notifyUser(tx, receiver.id, text, detail, `/leads/${lead.id}`);
+      if (isTransfer && fromUserId !== null) {
+        const from = await tx.user.findUniqueOrThrow({ where: { id: fromUserId }, select: { name: true } });
+        await notifyUser(tx, receiver.id, `Lead transferred to you · ${lead.companyName} from ${from.name}`, note, `/leads/${lead.id}`);
+      } else {
+        const detail = note ? `${lead.companyName} · ${note}` : lead.companyName;
+        await notifyUser(tx, receiver.id, `Lead ${lead.number} assigned to you`, detail, `/leads/${lead.id}`);
+      }
     }
   }
   return updated;

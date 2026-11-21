@@ -1,5 +1,5 @@
 import type { Lead, Prisma, PrismaClient } from '@prisma/client';
-import { can } from '@dait-crm/shared';
+import { can, roleLabel } from '@dait-crm/shared';
 import type { AuthUser } from '../plugins/auth.js';
 import { NotFoundError } from '../validate.js';
 
@@ -32,4 +32,18 @@ export async function assertLeadVisible(
 export async function canSeeLead(db: Db, user: AuthUser, leadId: number): Promise<boolean> {
   if (!Number.isInteger(leadId)) return false;
   return (await db.lead.count({ where: { AND: [{ id: leadId }, leadWhere(user, { includeArchived: true })] } })) > 0;
+}
+
+/**
+ * Whether user `userId` (another user, e.g. a task's new assignee) may see the lead. False for an
+ * unknown or inactive user.
+ */
+export async function canUserSeeLead(db: Db, userId: number, leadId: number): Promise<boolean> {
+  const u = await db.user.findFirst({ where: { id: userId, isActive: true } });
+  if (!u) return false;
+  const asUser: AuthUser = {
+    id: u.id, email: u.email, name: u.name, role: roleLabel(u.role), language: u.language, timezone: u.timezone,
+    dateFormat: u.dateFormat,
+  };
+  return canSeeLead(db, asUser, leadId);
 }
