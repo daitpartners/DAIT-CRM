@@ -290,18 +290,26 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
     const query = parseQuery(CompanyActivityQuery, request.query);
     const company = await assertCompanyVisible(prisma, user, Number(request.params.id));
     const where: Prisma.LeadActivityWhereInput = { lead: { AND: [{ companyId: company.id }, leadWhere(user)] } };
-    const [total, rows] = await Promise.all([
+    const [total, rows, byType, last] = await Promise.all([
       prisma.leadActivity.count({ where }),
       prisma.leadActivity.findMany({
         where, include: { ...activityInclude, lead: { select: { id: true, number: true } } },
         orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], ...pageArgs(query),
       }),
+      prisma.leadActivity.groupBy({ by: ['activityType'], where, _count: { _all: true } }),
+      prisma.leadActivity.aggregate({ where, _max: { occurredAt: true } }),
     ]);
+    const ofType = (type: string) => byType.find((g) => g.activityType === type)?._count._all ?? 0;
     return {
       items: rows.map((r) => ({ ...activityRow(r), lead: { id: r.lead.id, number: r.lead.number } })),
       total,
       page: query.page,
       pageSize: query.pageSize,
+      // The prototype's "Activity summary" card: counts across every page, and the last touch.
+      summary: {
+        call: ofType('call'), email: ofType('email'), meeting: ofType('meeting'), quote: ofType('quote'),
+        lastAt: last._max.occurredAt?.toISOString() ?? null,
+      },
     };
   });
 

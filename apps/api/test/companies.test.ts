@@ -77,6 +77,7 @@ describe('companies API', () => {
     expect(page1.items[0]).toEqual({
       id: zenith.id, number: zenith.number, name: 'Zenith Works', domain: null, industry: null, country: 'India',
       city: null, status: 'Active', isClient: false, primaryContact: null, contactCount: 0,
+      employeeRange: null, verificationStatus: 'Unverified', leadCount: 0,
       updatedAt: zenith.updatedAt.toISOString(),
     });
     const found = (await req('GET', '/api/companies?q=zen', admin.cookie)).json();
@@ -220,5 +221,90 @@ describe('companies API', () => {
     expect((await prisma.company.findUniqueOrThrow({ where: { id: co.id } })).isClient).toBe(false);
     const ok = await req('PATCH', `/api/companies/${co.id}`, dru.cookie, { city: 'Lyon', updatedAt: co.updatedAt.toISOString() });
     expect(ok.statusCode).toBe(200);
+  });
+  it('tiles and tab counts respect visibility', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const admin = await as('ADMINISTRATOR');
+    // The rep sees three companies: two they created and one through an assigned lead.
+    const a = await makeCompany({ name: 'Rep Alpha', createdById: rep.user.id });
+    const b = await makeCompany({ name: 'Rep Beta', createdById: rep.user.id });
+    const viaLead = await makeCompany({ name: 'Via Lead', createdById: admin.user.id });
+    await makeLead({ companyId: viaLead.id, assignedToId: rep.user.id, status: 'New' });
+    await prisma.company.update({ where: { id: a.id }, data: { verificationStatus: 'Verified', aiResearchStatus: 'Completed', isClient: true } });
+    await prisma.company.update({ where: { id: b.id }, data: { verificationStatus: 'Partially Verified', aiResearchStatus: 'Processing', status: 'Inactive' } });
+    await prisma.company.update({ where: { id: viaLead.id }, data: { aiResearchStatus: 'Failed' } });
+    await makeLead({ companyId: b.id, assignedToId: rep.user.id, status: 'Won' });
+    // Hidden from the rep: must not change any of their numbers.
+    const hidden = await makeCompany({ name: 'Hidden One', createdById: admin.user.id });
+    await prisma.company.update({ where: { id: hidden.id }, data: { verificationStatus: 'Verified', isClient: true } });
+    await makeLead({ companyId: hidden.id, assignedToId: admin.user.id });
+
+    const list = (await req('GET', '/api/companies', rep.cookie)).json();
+    expect(list.total).toBe(3);
+    expect(list.tiles).toEqual({
+      total: 3, active: 2, inactive: 1, closed: 0,
+      verified: 1, partiallyVerified: 1, unverified: 1,
+      aiQueue: 1, aiPending: 0, aiProcessing: 1, aiFailed: 1,
+      possibleDuplicates: 0,
+    });
+    expect(list.counts).toEqual({ all: 3, clients: 1, open: 1, verify: 2, dups: 0 });
+    expect(list.tiles.total).toBe(list.total);
+
+    const names = async (tab: string) =>
+      ((await req('GET', `/api/companies?tab=${tab}`, rep.cookie)).json().items as { name: string }[]).map((c) => c.name);
+    expect(await names('clients')).toEqual(['Rep Alpha']);
+    expect(await names('open')).toEqual(['Via Lead']);
+    expect(await names('verify')).toEqual(['Rep Beta', 'Via Lead']);
+    expect((await req('GET', '/api/companies?tab=nope', rep.cookie)).statusCode).toBe(400);
+
+    // Rows carry the prototype columns; the lead count only counts leads the user may see.
+    const row = list.items.find((c: { name: string }) => c.name === 'Via Lead');
+    expect(row).toMatchObject({ verificationStatus: 'Unverified', employeeRange: null, leadCount: 1, contactCount: 0 });
+
+    const all = (await req('GET', '/api/companies', admin.cookie)).json();
+    expect(all.tiles.total).toBe(4);
+    expect(all.counts).toMatchObject({ all: 4, clients: 2, open: 2 });
+  });
+
+  it('dups tab lists companies sharing a normalised name', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const admin = await as('ADMINISTRATOR');
+    await makeCompany({ name: 'Acme Ltd', createdById: rep.user.id, country: 'India' });
+    await makeCompany({ name: 'ACME Limited', createdById: rep.user.id, country: 'Germany' });
+    await makeCompany({ name: 'Solo Co', createdById: rep.user.id });
+    // Shares the name but is invisible to the rep: the rep's own pair still counts, this one does not.
+    await makeCompany({ name: 'Acme', createdById: admin.user.id });
+    await makeCompany({ name: 'Beta Corp', createdById: rep.user.id });
+    await makeCompany({ name: 'Beta Corporation', createdById: admin.user.id });
+
+    const repList = (await req('GET', '/api/companies?tab=dups', rep.cookie)).json();
+    expect(repList.items.map((c: { name: string }) => c.name).sort()).toEqual(['ACME Limited', 'Acme Ltd']);
+    expect(repList.total).toBe(2);
+    expect(repList.counts.dups).toBe(2);
+    expect(repList.tiles.possibleDuplicates).toBe(2);
+    expect(repList.counts.all).toBe(4);
+
+    const adminList = (await req('GET', '/api/companies?tab=dups', admin.cookie)).json();
+    expect(adminList.counts.dups).toBe(adminList.total);
+    expect(adminList.items.map((c: { name: string }) => c.name).sort()).toEqual(
+      ['ACME Limited', 'Acme', 'Acme Ltd', 'Beta Corp', 'Beta Corporation'].sort(),
+    );
+  });
+
+  it('company activities carry a per-type summary of the leads the user may see', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const admin = await as('ADMINISTRATOR');
+    const co = await makeCompany({ createdById: rep.user.id });
+    const mine = await makeLead({ companyId: co.id, assignedToId: rep.user.id });
+    const theirs = await makeLead({ companyId: co.id, assignedToId: admin.user.id });
+    const at = (d: string) => new Date(`2026-11-${d}T10:00:00Z`);
+    await prisma.leadActivity.createMany({ data: [
+      { leadId: mine.id, activityType: 'call', title: 'c1', occurredAt: at('01') },
+      { leadId: mine.id, activityType: 'call', title: 'c2', occurredAt: at('03') },
+      { leadId: mine.id, activityType: 'meeting', title: 'm', occurredAt: at('02') },
+      { leadId: theirs.id, activityType: 'email', title: 'hidden', occurredAt: at('09') },
+    ] });
+    const res = (await req('GET', `/api/companies/${co.id}/activities`, rep.cookie)).json();
+    expect(res.summary).toEqual({ call: 2, email: 0, meeting: 1, quote: 0, lastAt: at('03').toISOString() });
   });
 });

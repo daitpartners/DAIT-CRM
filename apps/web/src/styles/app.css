@@ -463,3 +463,32 @@ fieldset.bare>legend{padding:0}
 .up-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
 .xprow.edu{grid-template-columns:minmax(0,1.3fr) minmax(0,1.3fr) 76px 76px 30px}
 .xprow .xp-desc{grid-column:1/-2}
+
+/* Companies list (prototype views-companies.js) */
+.co-cell{display:flex;align-items:center;gap:0;min-width:0}
+.co-cell .logo{flex:none}
+.dup-note{margin:14px 18px 0}
+.filters-count{font-size:12.5px}
+
+/* Company profile (prototype views-companies.js) */
+.sec-head .sec-note{font-size:12px;font-weight:500;color:var(--muted)}
+.digital-notes{display:flex;flex-direction:column;gap:10px;font-size:13px}
+@media (max-width:899.98px){.sec-split{grid-template-columns:minmax(0,1fr)}}
+.digital-notes .note.ai div{margin-top:4px}
+.legend .dim{color:var(--faint)}
+.side-card .muted{color:var(--muted)}
+.side-card .small{font-size:13px}
+.side-card h2 .n{font-weight:500}
+.head .head-note{font-size:12.5px;color:var(--muted)}
+.sec-title-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.sec-title-row h2{margin:0}
+.side-card .kv.kv-narrow{grid-template-columns:150px 1fr}
+.rules{margin:0;padding-left:18px;font-size:13px;color:var(--body);display:flex;flex-direction:column;gap:8px}
+.info-text{margin:0;font-size:13px;color:var(--body);line-height:1.5}
+.loc-card .kv-cols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 24px}
+@media (max-width:899.98px){.loc-card .kv-cols{grid-template-columns:minmax(0,1fr)}}
+.loc-card .card-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.loc-card .card-head h2{margin:0}
+.loc-card .card-head .row-actions{margin-left:auto}
+.activity-body{padding:18px 20px 6px}
+.search svg{width:16px;height:16px;flex:none;color:var(--muted)}

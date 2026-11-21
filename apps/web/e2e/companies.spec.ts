@@ -8,8 +8,8 @@ test('an administrator adds a company and sees a duplicate warning', async ({ pa
   await expect(page.getByRole('heading', { name: 'Companies', level: 1 })).toBeVisible();
   await expect(page.getByRole('row').filter({ hasText: 'Northwind Logistics' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Add company' }).click();
-  const modal = page.getByRole('dialog', { name: 'Add company' });
+  await page.getByRole('button', { name: 'New company' }).click();
+  const modal = page.getByRole('dialog', { name: 'New company' });
   await modal.getByLabel('Company name').fill('Northwind Logistics');
   const country = modal.getByRole('combobox', { name: 'Country' });
   await country.fill('India');
@@ -48,8 +48,8 @@ test('a sales representative sees only their own companies', async ({ page }) =>
   await expect(rows).toHaveCount(1);
   await expect(rows.first()).toContainText('Northwind Logistics');
 
-  await page.getByRole('button', { name: 'Add company' }).click();
-  const modal = page.getByRole('dialog', { name: 'Add company' });
+  await page.getByRole('button', { name: 'New company' }).click();
+  const modal = page.getByRole('dialog', { name: 'New company' });
   await modal.getByLabel('Company name').fill(`Arjun Prospect ${stamp}`);
   const country = modal.getByRole('combobox', { name: 'Country' });
   await country.fill('Germany');

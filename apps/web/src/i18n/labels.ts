@@ -62,6 +62,41 @@ export function companyStatusBadge(status: CompanyStatus): string {
   return status === 'Active' ? 'badge b-ok' : status === 'Closed' ? 'badge b-warn' : 'badge b-grey';
 }
 
+/** A company's verification status (`|company`: Spanish and French agree with the feminine company). */
+export function verificationText(t: TFn, status: string): string {
+  switch (status) {
+    case 'Verified':
+      return t('Verified|company');
+    case 'Partially Verified':
+      return t('Partially verified');
+    case 'Unverified':
+      return t('Unverified|company');
+    default:
+      return status;
+  }
+}
+
+/** Badge class for a verification status: Verified green, Partially Verified amber, Unverified grey. */
+export function verificationBadge(status: string): string {
+  return status === 'Verified' ? 'badge b-ok' : status === 'Partially Verified' ? 'badge b-warn' : 'badge b-grey';
+}
+
+/** A company's AI research status (the research itself arrives in release 4). */
+export function researchStatusText(t: TFn, status: string): string {
+  switch (status) {
+    case 'Pending':
+      return t('Pending|research');
+    case 'Processing':
+      return t('Processing|research');
+    case 'Completed':
+      return t('Completed|research');
+    case 'Failed':
+      return t('Failed|research');
+    default:
+      return status;
+  }
+}
+
 /**
  * A lead status. Statuses are a lookup group (administrators may add more): the seeded ones are
  * translated here (`|lead`: Spanish and French agree with the masculine "el lead" / "le lead");

@@ -93,13 +93,17 @@ export function ContactsTab({ company, canManage }: Props) {
   }
 
   const dim = <span className="dim">—</span>;
-  const head = [t('Name'), t('Designation'), t('Email'), t('Phone'), t('Type'), t('Primary'), ...(canManage ? [<span className="sr">{t('Actions')}</span>] : [])];
+  const head = [
+    t('Contact'), t('Designation'), t('Department'), t('Business email'), t('Phone'), t('Mobile'), t('Contact type'), t('Primary'),
+    ...(canManage ? [<span className="sr">{t('Actions')}</span>] : []),
+  ];
   const rows = data?.items;
 
   return (
     <section className="card flush" aria-labelledby="contacts-title">
       <div className="head">
         <h2 id="contacts-title">{t('Contacts at {company}', { company: company.name })}</h2>
+        <span className="head-note">{t('Separate records in the contacts table, linked by Company ID')}</span>
         <div className="grow" />
         <label className="check">
           <input
@@ -144,24 +148,19 @@ export function ContactsTab({ company, canManage }: Props) {
                       <span className="badge b-grey">{t('Inactive')}</span>
                     </>
                   ) : null}
-                  {c.department || linkedin ? (
+                  {linkedin ? (
                     <span className="cell-sub">
-                      {c.department}
-                      {c.department && linkedin ? ' · ' : null}
-                      {linkedin ? (
-                        <a href={linkedin} target="_blank" rel="noopener noreferrer">
-                          LinkedIn
-                        </a>
-                      ) : null}
+                      <a href={linkedin} target="_blank" rel="noopener noreferrer">
+                        LinkedIn
+                      </a>
                     </span>
                   ) : null}
                 </td>
                 <td>{c.designation ?? dim}</td>
+                <td>{c.department ?? dim}</td>
                 <td>{c.businessEmail ? mail ? <a href={mail}>{c.businessEmail}</a> : c.businessEmail : dim}</td>
-                <td>
-                  {c.phone ?? c.mobile ?? dim}
-                  {c.phone && c.mobile ? <span className="cell-sub">{t('Mobile: {number}', { number: c.mobile })}</span> : null}
-                </td>
+                <td>{c.phone ?? dim}</td>
+                <td>{c.mobile ?? dim}</td>
                 <td>{lookup('contact_type', c.contactType)}</td>
                 <td>{c.isPrimary ? <span className="badge b-ok">{t('Primary')}</span> : dim}</td>
                 {canManage ? (

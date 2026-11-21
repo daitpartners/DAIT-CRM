@@ -26,7 +26,29 @@ function primaryContact(c: SummaryRow) {
   return p ? { id: p.id, name: `${p.firstName} ${p.lastName}`.trim(), businessEmail: p.businessEmail } : null;
 }
 
-/** A row in the company list. */
+/**
+ * List rows also count the company's leads, limited to the leads the user may see (`leadWhere`), so a
+ * Sales Representative's numbers never include other people's leads.
+ */
+export const companyListInclude = (leadsSeen: Prisma.LeadWhereInput) =>
+  ({
+    contacts: companySummaryInclude.contacts,
+    _count: { select: { contacts: true, leads: { where: leadsSeen } } },
+  }) satisfies Prisma.CompanyInclude;
+
+type ListRow = Prisma.CompanyGetPayload<{ include: ReturnType<typeof companyListInclude> }>;
+
+/** A row in the company list: the summary plus the prototype's columns (size, verification, lead count). */
+export function companyListRow(c: ListRow) {
+  return {
+    ...companySummary(c),
+    employeeRange: c.employeeRange,
+    verificationStatus: c.verificationStatus,
+    leadCount: c._count.leads,
+  };
+}
+
+/** A company summary (list row core). */
 export function companySummary(c: SummaryRow) {
   return {
     id: c.id,

@@ -6,12 +6,15 @@ type TopbarProps = {
   crumb?: ReactNode;
   /** Shown beside the title (e.g. status badges). */
   badges?: ReactNode;
+  /** Shown left of the title block (e.g. a company's initials logo). */
+  logo?: ReactNode;
   children?: ReactNode;
 };
 
-export function Topbar({ title, sub, crumb, badges, children }: TopbarProps) {
+export function Topbar({ title, sub, crumb, badges, logo, children }: TopbarProps) {
   return (
     <header className="topbar">
+      {logo}
       <div style={{ minWidth: 0 }}>
         {crumb ? <div className="crumb">{crumb}</div> : null}
         {badges ? (

@@ -175,7 +175,15 @@ export function useEarlierActivities(id: number, pages: number) {
 }
 
 export type CompanyActivity = ActivityRow & { lead: { id: number; number: string } };
-export type CompanyActivityPage = { items: CompanyActivity[]; total: number; page: number; pageSize: number };
+/** Counts across every page of the company's activities, and the last touch (the prototype's "Activity summary"). */
+export type CompanyActivitySummary = { call: number; email: number; meeting: number; quote: number; lastAt: string | null };
+export type CompanyActivityPage = {
+  items: CompanyActivity[];
+  total: number;
+  page: number;
+  pageSize: number;
+  summary: CompanyActivitySummary;
+};
 export const COMPANY_ACTIVITY_PAGE_SIZE = 20;
 
 /** Activities across the company's leads the user may see, newest first. */

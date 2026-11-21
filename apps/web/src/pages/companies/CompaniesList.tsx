@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { COMPANY_SORTS, CompanyStatus, formatDate, lookupLabel } from '@dait-crm/shared';
+import { COMPANY_SORTS, COMPANY_TABS, CompanyStatus, VERIFICATION_STATUSES, lookupLabel, safeUrl, type CompanyTab } from '@dait-crm/shared';
 import { ApiError, api } from '../../api/client';
-import { useCompanies, type CompanyListQuery, type CompanySort, type CompanySummary } from '../../api/companies';
+import { useCompanies, type CompanyListQuery, type CompanyListRow, type CompanySort, type VerificationStatus } from '../../api/companies';
 import { keys, useLookups, type LookupValue } from '../../api/queries';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Combobox, type ComboOption } from '../../components/Combobox';
@@ -12,10 +12,12 @@ import { Icons } from '../../components/Icons';
 import { Pager } from '../../components/Pager';
 import { SortHeader } from '../../components/SortHeader';
 import { Table } from '../../components/Table';
+import { Tabs } from '../../components/Tabs';
+import { Tile } from '../../components/Tile';
 import { Topbar } from '../../components/Topbar';
 import { useToast } from '../../components/Toast';
 import { usePageClamp, useUrlListState } from '../../hooks/useUrlListState';
-import { companyStatusBadge, companyStatusText, errorText } from '../../i18n/labels';
+import { companyStatusBadge, companyStatusText, errorText, initials, verificationBadge, verificationText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
 import { CompanyModal } from './CompanyModal';
 
@@ -32,8 +34,16 @@ export function CompaniesList() {
   const qc = useQueryClient();
   const toast = useToast();
   const confirm = useConfirm();
-  const { params, set: update, reset, search } = useUrlListState({ sorts: COMPANY_SORTS, defaultSort: 'name', extra: ['status', 'country', 'industry'] });
+  const { params, set: update, reset, search } = useUrlListState({
+    sorts: COMPANY_SORTS,
+    defaultSort: 'name',
+    extra: ['tab', 'status', 'country', 'industry', 'employeeRange', 'verification'],
+  });
   const status = CompanyStatus.safeParse(params.status);
+  const tab: CompanyTab = (COMPANY_TABS as readonly string[]).includes(params.tab ?? '') ? (params.tab as CompanyTab) : 'all';
+  const verification = (VERIFICATION_STATUSES as readonly string[]).includes(params.verification ?? '')
+    ? (params.verification as VerificationStatus)
+    : undefined;
   const query: CompanyListQuery & Pick<typeof params, 'page' | 'sort' | 'dir'> = {
     page: params.page,
     pageSize: PAGE_SIZE,
@@ -43,6 +53,9 @@ export function CompaniesList() {
     status: status.success ? status.data : undefined,
     country: params.country,
     industry: params.industry,
+    employeeRange: params.employeeRange,
+    verification,
+    tab: tab === 'all' ? undefined : tab,
   };
   const { data, isPending, error } = useCompanies(query);
   const { data: lookups } = useLookups();
@@ -56,13 +69,15 @@ export function CompaniesList() {
   const rowIds = rows?.map((r) => r.id).join(',');
   useEffect(() => setSelected(new Set()), [rowIds]);
 
-  const label = (group: 'country' | 'industry') => (v: string | null) => {
+  const label = (group: 'country' | 'industry' | 'employee_range') => (v: string | null) => {
     if (!v) return null;
     const row = lookups?.[group]?.find((x) => x.value === v);
     return row ? lookupLabel(row, lang) : v;
   };
   const countryName = label('country');
   const industryName = label('industry');
+  const sizeName = label('employee_range');
+  const sizes = (lookups?.employee_range ?? []).filter((x) => x.isActive || x.value === query.employeeRange);
 
   const filterOptions = (group: 'country' | 'industry', any: string, current?: string): ComboOption[] => {
     const values: LookupValue[] = (lookups?.[group] ?? []).filter((x) => x.isActive || x.value === current);
@@ -100,7 +115,6 @@ export function CompaniesList() {
     else update({ sort: column, dir: column === 'updatedAt' ? 'desc' : 'asc' });
   };
 
-  const fmt = (d: string) => formatDate(d, { locale: me.language, timezone: me.timezone, dateFormat: me.dateFormat });
   const allOnPage = Boolean(rows?.length) && rows!.every((r) => selected.has(r.id));
   const toggle = (id: number) =>
     setSelected((s) => {
@@ -110,7 +124,7 @@ export function CompaniesList() {
       return next;
     });
   const toggleAll = () => setSelected(allOnPage ? new Set() : new Set(rows?.map((r) => r.id)));
-  const filtered = Boolean(query.q || query.status || query.country || query.industry);
+  const filtered = Boolean(query.q || query.status || query.country || query.industry || query.employeeRange || query.verification);
 
   const sortable = (column: CompanySort, text: string) => (
     <SortHeader key={column} label={text} column={column} sort={query.sort} dir={query.dir} onSort={onSort} />
@@ -129,128 +143,197 @@ export function CompaniesList() {
           ),
         ]
       : []),
-    plain('number', t('Number')),
-    sortable('name', t('Name')),
+    sortable('name', t('Company name')),
+    plain('website', t('Website')),
     sortable('industry', t('Industry')),
     sortable('country', t('Country')),
-    plain('contact', t('Primary contact')),
+    plain('city', t('City')),
+    plain('size', t('Company size')),
+    plain('contacts', t('Contacts')),
+    plain('leads', t('Leads')),
+    plain('verification', t('Verification')),
     sortable('status', t('Status')),
-    sortable('updatedAt', t('Last updated')),
+  ];
+  const tiles = data?.tiles;
+  const counts = data?.counts;
+  const tabs = [
+    { id: 'all', label: t('All companies'), count: counts?.all },
+    { id: 'clients', label: t('Clients'), count: counts?.clients },
+    { id: 'open', label: t('With open leads'), count: counts?.open },
+    { id: 'verify', label: t('Needs verification'), count: counts?.verify },
+    { id: 'dups', label: t('Duplicate review'), count: counts?.dups, countClass: 'bad' },
   ];
 
   return (
     <>
       <Topbar title={t('Companies')} sub={t('Master database of every organisation. A company is not a lead.')}>
         <label className="search">
+          {Icons.search}
           <span className="sr">{t('Search companies')}</span>
           <input type="search" value={search.text} onChange={(e) => search.setText(e.target.value)} placeholder={t('Search name, domain or number…')} />
         </label>
         {canManage ? (
           <button type="button" className="btn primary" onClick={() => setAdding(true)}>
             {Icons.plus}
-            {t('Add company')}
+            {t('New company')}
           </button>
         ) : null}
       </Topbar>
       <div className="page">
+        <div className="tiles">
+          <Tile
+            label={t('Total companies')}
+            value={tiles?.total ?? '—'}
+            meta={tiles ? t('{active} active · {inactive} inactive · {closed} closed', { active: tiles.active, inactive: tiles.inactive, closed: tiles.closed }) : undefined}
+          />
+          <Tile
+            label={t('Verified profiles')}
+            value={tiles?.verified ?? '—'}
+            meta={tiles ? t('{partial} partially · {unverified} unverified', { partial: tiles.partiallyVerified, unverified: tiles.unverified }) : undefined}
+          />
+          <Tile
+            label={t('AI research queue')}
+            value={tiles?.aiQueue ?? '—'}
+            meta={tiles ? t('{pending} pending · {processing} processing · {failed} failed', { pending: tiles.aiPending, processing: tiles.aiProcessing, failed: tiles.aiFailed }) : undefined}
+            metaClass="warn"
+          />
+          <Tile
+            label={t('Possible duplicates')}
+            value={tiles?.possibleDuplicates ?? '—'}
+            meta={t('awaiting manual review')}
+            metaClass="bad"
+            to="/companies?tab=dups"
+          />
+        </div>
         <section className="card flush" aria-label={t('Companies')}>
-          <div className="filters">
-            <label className="sr" htmlFor="flt-status">
-              {t('Status')}
-            </label>
-            <select id="flt-status" className="chip" value={query.status ?? ''} onChange={(e) => update({ status: e.target.value })}>
-              <option value="">{t('Any status')}</option>
-              {CompanyStatus.options.map((s) => (
-                <option key={s} value={s}>
-                  {companyStatusText(t, s)}
-                </option>
-              ))}
-            </select>
-            <div className="filter-combo">
-              <Combobox
-                id="flt-country"
-                label={t('Country')}
-                hideLabel
-                options={countryOptions}
-                value={query.country ?? ANY}
-                onChange={(v) => update({ country: v === ANY ? undefined : v })}
-              />
-            </div>
-            <div className="filter-combo">
-              <Combobox
-                id="flt-industry"
-                label={t('Industry')}
-                hideLabel
-                options={industryOptions}
-                value={query.industry ?? ANY}
-                onChange={(v) => update({ industry: v === ANY ? undefined : v })}
-              />
-            </div>
-            {filtered ? (
-              <button type="button" className="btn sm" onClick={reset}>
-                {t('Clear filters')}
-              </button>
+          <Tabs tabs={tabs} active={tab} onChange={(id) => update({ tab: id === 'all' ? undefined : id })} label={t('Company lists')}>
+            {tab === 'dups' ? (
+              <div className="note warn dup-note">
+                {t('Companies whose names match once legal suffixes are ignored. They are not merged automatically; an administrator decides.')}
+              </div>
             ) : null}
-          </div>
-          {canManage && selected.size > 0 ? (
-            <div className="bulkbar" role="region" aria-label={t('Bulk actions')}>
-              <strong>{t('Selected: {n}', { n: selected.size })}</strong>
-              <label className="sr" htmlFor="co-bulk-status">
-                {t('Set status…')}
+            <div className="filters">
+              <div className="filter-combo">
+                <Combobox
+                  id="flt-industry"
+                  label={t('Industry')}
+                  hideLabel
+                  options={industryOptions}
+                  value={query.industry ?? ANY}
+                  onChange={(v) => update({ industry: v === ANY ? undefined : v })}
+                />
+              </div>
+              <div className="filter-combo">
+                <Combobox
+                  id="flt-country"
+                  label={t('Country')}
+                  hideLabel
+                  options={countryOptions}
+                  value={query.country ?? ANY}
+                  onChange={(v) => update({ country: v === ANY ? undefined : v })}
+                />
+              </div>
+              <label className="sr" htmlFor="flt-size">
+                {t('Company size')}
               </label>
-              <select
-                id="co-bulk-status"
-                className="chip"
-                value=""
-                disabled={bulk.isPending}
-                onChange={(e) => {
-                  const s = CompanyStatus.safeParse(e.target.value);
-                  if (s.success) void setStatus(s.data);
-                }}
-              >
-                <option value="">{t('Set status…')}</option>
+              <select id="flt-size" className="chip" value={query.employeeRange ?? ''} onChange={(e) => update({ employeeRange: e.target.value })}>
+                <option value="">{t('Company size: Any')}</option>
+                {sizes.map((x) => (
+                  <option key={x.value} value={x.value}>
+                    {lookupLabel(x, lang)}
+                  </option>
+                ))}
+              </select>
+              <label className="sr" htmlFor="flt-status">
+                {t('Status')}
+              </label>
+              <select id="flt-status" className="chip" value={query.status ?? ''} onChange={(e) => update({ status: e.target.value })}>
+                <option value="">{t('Any status')}</option>
                 {CompanyStatus.options.map((s) => (
                   <option key={s} value={s}>
                     {companyStatusText(t, s)}
                   </option>
                 ))}
               </select>
-              <button type="button" className="btn sm" onClick={() => setSelected(new Set())}>
-                {t('Clear selection')}
-              </button>
+              <label className="sr" htmlFor="flt-verification">
+                {t('Verification')}
+              </label>
+              <select id="flt-verification" className="chip" value={query.verification ?? ''} onChange={(e) => update({ verification: e.target.value })}>
+                <option value="">{t('Verification: Any')}</option>
+                {VERIFICATION_STATUSES.map((v) => (
+                  <option key={v} value={v}>
+                    {verificationText(t, v)}
+                  </option>
+                ))}
+              </select>
+              {filtered ? (
+                <button type="button" className="btn sm" onClick={reset}>
+                  {t('Clear filters')}
+                </button>
+              ) : null}
+              <div className="grow" />
+              {data && counts ? <span className="muted filters-count">{t('Showing {n} of {total}', { n: data.total, total: counts.all })}</span> : null}
             </div>
-          ) : null}
-          {error ? (
-            <div className="empty" role="alert">
-              {errorText(t, error instanceof ApiError ? error.code : 'unknown')}
-            </div>
-          ) : (
-            <Table
-              rawHead
-              head={head}
-              isEmpty={isPending || !rows?.length}
-              empty={isPending ? t('Loading…') : filtered ? t('No companies match these filters') : t('No companies yet')}
-            >
-              {rows?.map((c) => (
-                <CompanyRow
-                  key={c.id}
-                  c={c}
-                  selectable={canManage}
-                  selected={selected.has(c.id)}
-                  onToggle={() => toggle(c.id)}
-                  onOpen={() => navigate(`/companies/${c.id}`)}
-                  industry={industryName(c.industry)}
-                  country={countryName(c.country)}
-                  updated={fmt(c.updatedAt)}
-                />
-              ))}
-            </Table>
-          )}
-          {data && data.total > 0 ? (
-            <div className="foot">
-              <Pager page={data.page} pageSize={data.pageSize} total={data.total} onPage={(page) => update({ page: page > 1 ? page : undefined })} />
-            </div>
-          ) : null}
+            {canManage && selected.size > 0 ? (
+              <div className="bulkbar" role="region" aria-label={t('Bulk actions')}>
+                <strong>{t('Selected: {n}', { n: selected.size })}</strong>
+                <label className="sr" htmlFor="co-bulk-status">
+                  {t('Set status…')}
+                </label>
+                <select
+                  id="co-bulk-status"
+                  className="chip"
+                  value=""
+                  disabled={bulk.isPending}
+                  onChange={(e) => {
+                    const s = CompanyStatus.safeParse(e.target.value);
+                    if (s.success) void setStatus(s.data);
+                  }}
+                >
+                  <option value="">{t('Set status…')}</option>
+                  {CompanyStatus.options.map((s) => (
+                    <option key={s} value={s}>
+                      {companyStatusText(t, s)}
+                    </option>
+                  ))}
+                </select>
+                <button type="button" className="btn sm" onClick={() => setSelected(new Set())}>
+                  {t('Clear selection')}
+                </button>
+              </div>
+            ) : null}
+            {error ? (
+              <div className="empty" role="alert">
+                {errorText(t, error instanceof ApiError ? error.code : 'unknown')}
+              </div>
+            ) : (
+              <Table
+                rawHead
+                head={head}
+                isEmpty={isPending || !rows?.length}
+                empty={isPending ? t('Loading…') : filtered ? t('No companies match these filters') : t('No companies yet')}
+              >
+                {rows?.map((c) => (
+                  <CompanyRow
+                    key={c.id}
+                    c={c}
+                    selectable={canManage}
+                    selected={selected.has(c.id)}
+                    onToggle={() => toggle(c.id)}
+                    onOpen={() => navigate(`/companies/${c.id}`)}
+                    industry={industryName(c.industry)}
+                    country={countryName(c.country)}
+                    size={sizeName(c.employeeRange)}
+                  />
+                ))}
+              </Table>
+            )}
+            {data && data.total > 0 ? (
+              <div className="foot">
+                <Pager page={data.page} pageSize={data.pageSize} total={data.total} onPage={(page) => update({ page: page > 1 ? page : undefined })} />
+              </div>
+            ) : null}
+          </Tabs>
         </section>
       </div>
       {adding ? <CompanyModal onClose={() => setAdding(false)} /> : null}
@@ -259,19 +342,21 @@ export function CompaniesList() {
 }
 
 type RowProps = {
-  c: CompanySummary;
+  c: CompanyListRow;
   selectable: boolean;
   selected: boolean;
   onToggle: () => void;
   onOpen: () => void;
   industry: string | null;
   country: string | null;
-  updated: string;
+  size: string | null;
 };
 
-function CompanyRow({ c, selectable, selected, onToggle, onOpen, industry, country, updated }: RowProps) {
+/** A list row in the prototype's columns; the CO- number sits under the name so it stays searchable at a glance. */
+function CompanyRow({ c, selectable, selected, onToggle, onOpen, industry, country, size }: RowProps) {
   const t = useT();
   const dim = <span className="dim">—</span>;
+  const site = c.domain ? safeUrl(`https://${c.domain}`) : null;
   return (
     <tr className={selected ? 'sel clickable' : 'clickable'} onClick={onOpen}>
       {selectable ? (
@@ -279,26 +364,47 @@ function CompanyRow({ c, selectable, selected, onToggle, onOpen, industry, count
           <input type="checkbox" checked={selected} onChange={onToggle} aria-label={t('Select {name}', { name: c.name })} />
         </td>
       ) : null}
-      <td>{c.number}</td>
       <td>
-        {/* The link makes the row reachable by keyboard; mouse users can click anywhere on the row. */}
-        <Link to={`/companies/${c.id}`} className="row-link" onClick={(e) => e.stopPropagation()}>
-          {c.name}
-        </Link>
-        {c.isClient ? (
-          <>
-            {' '}
-            <span className="badge b-ok">{t('Client')}</span>
-          </>
-        ) : null}
+        <div className="co-cell">
+          <span className="logo" aria-hidden="true">
+            {initials(c.name)}
+          </span>
+          <div>
+            {/* The link makes the row reachable by keyboard; mouse users can click anywhere on the row. */}
+            <Link to={`/companies/${c.id}`} className="row-link" onClick={(e) => e.stopPropagation()}>
+              {c.name}
+            </Link>
+            {c.isClient ? (
+              <>
+                {' '}
+                <span className="badge b-ok">{t('Client')}</span>
+              </>
+            ) : null}
+            <span className="cell-sub">{c.number}</span>
+          </div>
+        </div>
       </td>
-      <td>{industry ?? dim}</td>
+      <td>
+        {site ? (
+          <a href={site} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+            {c.domain}
+          </a>
+        ) : (
+          dim
+        )}
+      </td>
+      <td>{industry ?? <span className="dim">{t('Unknown')}</span>}</td>
       <td>{country ?? dim}</td>
-      <td>{c.primaryContact ? c.primaryContact.name : dim}</td>
+      <td>{c.city ?? dim}</td>
+      <td>{size ?? dim}</td>
+      <td className="num">{c.contactCount}</td>
+      <td className="num">{c.leadCount}</td>
+      <td>
+        <span className={verificationBadge(c.verificationStatus)}>{verificationText(t, c.verificationStatus)}</span>
+      </td>
       <td>
         <span className={companyStatusBadge(c.status)}>{companyStatusText(t, c.status)}</span>
       </td>
-      <td>{updated}</td>
     </tr>
   );
 }

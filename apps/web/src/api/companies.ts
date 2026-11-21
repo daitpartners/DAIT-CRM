@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import type { COMPANY_SORTS, CompanyMatchHow, CompanyStatus } from '@dait-crm/shared';
+import type { COMPANY_SORTS, CompanyMatchHow, CompanyStatus, CompanyTab, VERIFICATION_STATUSES } from '@dait-crm/shared';
 import { useDebounce } from '../hooks/useDebounce';
 import { api } from './client';
 import { keys } from './queries';
@@ -9,6 +9,7 @@ import { keys } from './queries';
 export { keys };
 
 export type CompanySort = (typeof COMPANY_SORTS)[number];
+export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
 export type SortDir = 'asc' | 'desc';
 
 /** A row in `GET /api/companies`. */
@@ -64,6 +65,13 @@ export type CompanyDetail = CompanySummary & {
   socialX: string | null;
   socialYoutube: string | null;
   socialOther: string | null;
+  mapsUrl: string | null;
+  websiteTechnology: string | null;
+  websiteAssessment: string | null;
+  digitalSummary: string | null;
+  verificationStatus: VerificationStatus;
+  aiResearchStatus: string;
+  aiLastResearchAt: string | null;
   createdAt: string;
   createdBy: { id: number; name: string } | null;
 };
@@ -78,10 +86,43 @@ export type CompanyListQuery = {
   status?: CompanyStatus;
   country?: string;
   industry?: string;
+  employeeRange?: string;
+  verification?: VerificationStatus;
+  tab?: CompanyTab;
   isClient?: boolean;
 };
 
-export type CompanyPage = { items: CompanySummary[]; total: number; page: number; pageSize: number };
+/** A list row: the summary plus the prototype's columns. `leadCount` counts only leads the user may see. */
+export type CompanyListRow = CompanySummary & {
+  employeeRange: string | null;
+  verificationStatus: VerificationStatus;
+  leadCount: number;
+};
+
+/** The list's figure tiles, over every company the user may see (filters do not change them). */
+export type CompanyTiles = {
+  total: number;
+  active: number;
+  inactive: number;
+  closed: number;
+  verified: number;
+  partiallyVerified: number;
+  unverified: number;
+  aiQueue: number;
+  aiPending: number;
+  aiProcessing: number;
+  aiFailed: number;
+  possibleDuplicates: number;
+};
+
+export type CompanyPage = {
+  items: CompanyListRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  tiles: CompanyTiles;
+  counts: Record<CompanyTab, number>;
+};
 
 /** A duplicate candidate; a company the user may not open carries only id, number and name. */
 export type DuplicateCandidate = {

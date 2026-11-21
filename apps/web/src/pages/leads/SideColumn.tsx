@@ -4,22 +4,9 @@ import type { LeadFull } from '../../api/leads';
 import { useLookupText } from '../../api/queries';
 import { PlaceholderCard } from '../../components/PlaceholderCard';
 import { useFormatDate } from '../../hooks/useFormatDate';
-import { useLang, useT, type TFn } from '../../i18n/useT';
+import { verificationBadge, verificationText } from '../../i18n/labels';
+import { useLang, useT } from '../../i18n/useT';
 
-function verificationText(t: TFn, v: string): string {
-  switch (v) {
-    case 'Verified':
-      return t('Verified|company');
-    case 'Partially Verified':
-      return t('Partially verified');
-    case 'Unverified':
-      return t('Unverified|company');
-    default:
-      return v;
-  }
-}
-
-const VERIFY_BADGE: Record<string, string> = { Verified: 'badge b-ok', 'Partially Verified': 'badge b-warn' };
 
 /**
  * Right column of the lead page (prototype order): company card, Skills & languages, Projects (release 3),
@@ -85,7 +72,7 @@ function CompanyCard({ lead }: { lead: LeadFull }) {
         <strong>{t('AI summary')}</strong> <span className="ph-note">{t('Available in release 4')}</span>
       </div>
       <div className="co-links">
-        {c.verificationStatus ? <span className={VERIFY_BADGE[c.verificationStatus] ?? 'badge b-grey'}>{verificationText(t, c.verificationStatus)}</span> : null}
+        {c.verificationStatus ? <span className={verificationBadge(c.verificationStatus)}>{verificationText(t, c.verificationStatus)}</span> : null}
         {website ? (
           <a href={website} target="_blank" rel="noopener noreferrer">
             {c.domain ?? website.replace(/^https?:\/\//, '')} ↗

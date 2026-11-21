@@ -6,7 +6,7 @@ async function openNorthwind(page: Page) {
   await page.goto('/companies');
   await page.getByRole('link', { name: 'Northwind Logistics' }).click();
   await expect(page.getByRole('heading', { name: 'Northwind Logistics', level: 1 })).toBeVisible();
-  await expect(page.getByText('CO-0318 · India')).toBeVisible();
+  await expect(page.locator('.topbar .crumb')).toHaveText('Companies / CO-0318');
 }
 
 test('a manager adds a contact and makes them primary', async ({ page }) => {
@@ -20,7 +20,7 @@ test('a manager adds a contact and makes them primary', async ({ page }) => {
   await expect(priya.getByText('Primary', { exact: true })).toBeVisible();
   await expect(page.getByRole('row').filter({ hasText: 'Sameer Kulkarni' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Add contact' }).click();
+  await page.getByRole('tabpanel').getByRole('button', { name: 'Add contact' }).click();
   const modal = page.getByRole('dialog', { name: 'Add contact' });
   await modal.getByLabel('First name').fill('Test');
   await modal.getByLabel('Last name').fill('Contact');
@@ -46,7 +46,7 @@ test('locations tab adds and deletes a location', async ({ page }) => {
   await openNorthwind(page);
   await page.getByRole('tab', { name: /Locations/ }).click();
   await expect(page.getByRole('tab', { name: /Locations/ })).toHaveAttribute('aria-selected', 'true');
-  await expect(page.locator('tbody tr')).toHaveCount(2);
+  await expect(page.locator('.loc-card')).toHaveCount(2);
 
   await page.getByRole('button', { name: 'Add location' }).click();
   const modal = page.getByRole('dialog', { name: 'Add location' });
@@ -58,7 +58,7 @@ test('locations tab adds and deletes a location', async ({ page }) => {
   await modal.getByRole('button', { name: 'Save' }).click();
   await expect(modal).toBeHidden();
 
-  const row = page.getByRole('row').filter({ hasText: 'Test depot' });
+  const row = page.locator('.loc-card').filter({ hasText: 'Test depot' });
   await expect(row).toBeVisible();
   await expect(row).toContainText('Warehouse');
   await expect(row).toContainText('India');
@@ -68,7 +68,7 @@ test('locations tab adds and deletes a location', async ({ page }) => {
   const confirm = page.getByRole('dialog', { name: 'Delete location?' });
   await confirm.getByRole('button', { name: 'Delete' }).click();
   await expect(row).toBeHidden();
-  await expect(page.locator('tbody tr')).toHaveCount(2);
+  await expect(page.locator('.loc-card')).toHaveCount(2);
 });
 
 test('later-release tabs show an empty state', async ({ page }) => {
@@ -107,7 +107,7 @@ test('overview edit opens the company form at the chosen section', async ({ page
   await openNorthwind(page);
   await expect(page.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
   await page.getByRole('button', { name: 'Edit Size & financial' }).click();
-  const modal = page.getByRole('dialog', { name: 'Edit company' });
+  const modal = page.getByRole('dialog', { name: 'Edit company profile' });
   await expect(modal.getByLabel('Employee count')).toBeFocused();
   await modal.getByLabel('Employee count').fill('850');
   await modal.getByLabel('Facebook').fill('facebook.com/northwind-test');
@@ -123,7 +123,7 @@ test('deactivate a contact', async ({ page }) => {
   await openNorthwind(page);
   await page.getByRole('tab', { name: /Contacts/ }).click();
 
-  await page.getByRole('button', { name: 'Add contact' }).click();
+  await page.getByRole('tabpanel').getByRole('button', { name: 'Add contact' }).click();
   const modal = page.getByRole('dialog', { name: 'Add contact' });
   await modal.getByLabel('First name').fill('Gone');
   await modal.getByLabel('Last name').fill(`Away${stamp}`);

@@ -351,7 +351,7 @@ export function CompanyModal({ company, onClose, section }: Props) {
 
   return (
     <Modal
-      title={editing ? t('Edit company') : t('Add company')}
+      title={editing ? t('Edit company profile') : t('New company')}
       onClose={onClose}
       actions={
         <>

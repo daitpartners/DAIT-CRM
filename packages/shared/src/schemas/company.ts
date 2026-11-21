@@ -68,12 +68,25 @@ export type DuplicateCheck = z.infer<typeof DuplicateCheck>;
 /** Columns `GET /companies` may sort by; anything else is a 400. */
 export const COMPANY_SORTS = ['name', 'country', 'industry', 'status', 'updatedAt'] as const;
 
+/**
+ * Company list tabs (prototype order): every company, clients, companies with an open lead, companies not yet
+ * fully verified, and companies whose normalised name is shared with another visible company.
+ */
+export const COMPANY_TABS = ['all', 'clients', 'open', 'verify', 'dups'] as const;
+export type CompanyTab = (typeof COMPANY_TABS)[number];
+
+/** Values of `Company.verificationStatus`. */
+export const VERIFICATION_STATUSES = ['Verified', 'Partially Verified', 'Unverified'] as const;
+
 /** `GET /companies` query: paging plus list filters. Query values arrive as strings. */
 export const CompanyListQuery = PagingQuery.extend({
+  tab: z.enum(COMPANY_TABS).optional(),
   sort: z.enum(COMPANY_SORTS).optional(),
   status: CompanyStatus.optional(),
   country: z.string().trim().max(80).optional(),
   industry: z.string().trim().max(100).optional(),
+  employeeRange: z.string().trim().max(20).optional(),
+  verification: z.enum(VERIFICATION_STATUSES).optional(),
   isClient: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
 });
 export type CompanyListQuery = z.infer<typeof CompanyListQuery>;

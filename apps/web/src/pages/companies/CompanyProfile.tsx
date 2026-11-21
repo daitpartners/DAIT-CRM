@@ -1,27 +1,34 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { safeUrl } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
 import { useCompany } from '../../api/companies';
+import { useCompanyActivities, useLeads } from '../../api/leads';
 import { useLocations } from '../../api/locations';
 import { useLookupText } from '../../api/queries';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Tabs, type TabDef } from '../../components/Tabs';
 import { Topbar } from '../../components/Topbar';
-import { companyStatusBadge, companyStatusText, errorText } from '../../i18n/labels';
+import { companyStatusBadge, companyStatusText, errorText, initials, verificationBadge, verificationText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
+import { LeadModal } from '../leads/LeadModal';
 import { CompanyModal, type CompanySection } from './CompanyModal';
+import { ContactModal } from './ContactModal';
 import { ActivitiesTab } from './tabs/ActivitiesTab';
+import { AiTab, SourcesTab } from './tabs/AiTabs';
 import { ContactsTab } from './tabs/ContactsTab';
-import { EmptyTab } from './tabs/EmptyTab';
 import { LeadsTab } from './tabs/LeadsTab';
 import { LocationsTab } from './tabs/LocationsTab';
-import { OverviewTab } from './tabs/OverviewTab';
+import { OVERVIEW_LEADS, OverviewTab } from './tabs/OverviewTab';
 
 const TAB_IDS = ['overview', 'contacts', 'locations', 'leads', 'activities', 'ai', 'sources'] as const;
 type TabId = (typeof TAB_IDS)[number];
 const isTab = (v: string): v is TabId => (TAB_IDS as readonly string[]).includes(v);
 
-/** `/companies/:id`: header, Edit, and seven tabs; the active tab lives in the URL hash (`#contacts`). */
+/**
+ * `/companies/:id` (prototype views-companies.js): logo, legal name, badges, a facts line and the header actions,
+ * then seven tabs; the active tab lives in the URL hash (`#contacts`).
+ */
 export function CompanyProfile() {
   const t = useT();
   const lang = useLang();
@@ -32,9 +39,12 @@ export function CompanyProfile() {
   const navigate = useNavigate();
   const { data: company, error, isPending } = useCompany(id);
   const { data: locations } = useLocations(id);
+  const { data: leads } = useLeads({ companyId: id, page: 1, pageSize: OVERVIEW_LEADS });
+  const { data: activities } = useCompanyActivities(id, 1);
   const lookupText = useLookupText(lang);
   // undefined = closed; null = whole form (header Edit); a section = that group's Edit button.
   const [editing, setEditing] = useState<CompanySection | null | undefined>(undefined);
+  const [adding, setAdding] = useState<'contact' | 'lead' | null>(null);
 
   const hash = location.hash.replace(/^#/, '');
   const active: TabId = isTab(hash) ? hash : 'overview';
@@ -60,12 +70,13 @@ export function CompanyProfile() {
     );
   }
 
+  const count = (n: number | undefined) => (n !== undefined ? { count: n } : {});
   const tabs: TabDef[] = [
     { id: 'overview', label: t('Overview') },
     { id: 'contacts', label: t('Contacts'), count: company.contactCount },
-    { id: 'locations', label: t('Locations'), ...(locations ? { count: locations.length } : {}) },
-    { id: 'leads', label: t('Leads & Prospects') },
-    { id: 'activities', label: t('Activities') },
+    { id: 'locations', label: t('Locations'), ...count(locations?.length) },
+    { id: 'leads', label: t('Leads & Prospects'), ...count(leads?.total) },
+    { id: 'activities', label: t('Activities'), ...count(activities?.total) },
     { id: 'ai', label: t('AI Intelligence') },
     { id: 'sources', label: t('Research Sources') },
   ];
@@ -87,34 +98,104 @@ export function CompanyProfile() {
     case 'activities':
       panel = <ActivitiesTab company={company} />;
       break;
+    case 'ai':
+      panel = <AiTab />;
+      break;
     default:
-      panel = <EmptyTab release="4" />;
+      panel = <SourcesTab />;
   }
+
+  const closed = company.status === 'Closed';
+  const closedTitle = closed ? errorText(t, 'company_inactive') : undefined;
+  const site = company.website ? safeUrl(company.website) : null;
+  const place = [company.city, lookupText('country', company.country) ?? company.country].filter(Boolean).join(', ');
+  const facts = [
+    lookupText('industry', company.industry) ?? t('Industry unknown'),
+    place || t('Location unknown'),
+    ...(company.employeeRange ? [t('{range} employees', { range: lookupText('employee_range', company.employeeRange) ?? company.employeeRange })] : []),
+    t('{n} contacts', { n: company.contactCount }),
+    ...(leads ? [t('{n} leads', { n: leads.total })] : []),
+    ...(locations ? [t('{n} locations', { n: locations.length })] : []),
+  ];
+  const later = (release: string) => t('Available in release {release}', { release });
 
   return (
     <>
       <Topbar
-        title={company.name}
-        sub={`${company.number} · ${lookupText('country', company.country) ?? company.country}`}
-        crumb={crumb}
+        title={company.legalName || company.name}
+        logo={
+          <span className="logo lg" aria-hidden="true">
+            {initials(company.name)}
+          </span>
+        }
+        crumb={
+          <>
+            {crumb} / {company.number}
+          </>
+        }
+        sub={
+          <>
+            {company.domain ? (
+              <>
+                {site ? (
+                  <a href={site} target="_blank" rel="noopener noreferrer">
+                    {company.domain}
+                  </a>
+                ) : (
+                  company.domain
+                )}
+                {' · '}
+              </>
+            ) : null}
+            {facts.join(' · ')}
+          </>
+        }
         badges={
           <>
             <span className={companyStatusBadge(company.status)}>{companyStatusText(t, company.status)}</span>
+            <span className={verificationBadge(company.verificationStatus)}>{verificationText(t, company.verificationStatus)}</span>
             {company.isClient ? <span className="badge b-ok">{t('Client')}</span> : null}
           </>
         }
       >
-        {canManage ? (
-          <button type="button" className="btn primary" onClick={() => setEditing(null)}>
-            {t('Edit')}
+        <div className="hdr-actions">
+          <button type="button" className="btn" disabled title={later('4')}>
+            {t('Run AI research')}
           </button>
-        ) : null}
+          {canManage ? (
+            <button type="button" className="btn" onClick={() => setAdding('contact')} disabled={closed} title={closedTitle}>
+              {t('Add contact')}
+            </button>
+          ) : null}
+          {me.can('manage_leads') ? (
+            <button type="button" className="btn" onClick={() => setAdding('lead')} disabled={closed} title={closedTitle}>
+              {t('New lead')}
+            </button>
+          ) : null}
+          <button type="button" className="btn" disabled title={later('3')}>
+            {t('New quotation')}
+          </button>
+          {company.isClient ? (
+            <button type="button" className="btn" disabled title={later('3')}>
+              {t('Create project')}
+            </button>
+          ) : null}
+          {canManage ? (
+            <button type="button" className="btn primary" onClick={() => setEditing(null)}>
+              {t('Edit profile')}
+            </button>
+          ) : null}
+        </div>
       </Topbar>
       <Tabs tabs={tabs} active={active} onChange={setActive} label={t('Company sections')} className="profile-tabs" panelClassName="page">
         {panel}
       </Tabs>
       {editing !== undefined ? (
         <CompanyModal company={company} section={editing ?? undefined} onClose={() => setEditing(undefined)} />
+      ) : null}
+      {adding === 'contact' ? <ContactModal companyId={company.id} onClose={() => setAdding(null)} /> : null}
+      {adding === 'lead' ? (
+        <LeadModal company={{ id: company.id, name: company.name, country: company.country }} onClose={() => setAdding(null)} />
       ) : null}
     </>
   );
