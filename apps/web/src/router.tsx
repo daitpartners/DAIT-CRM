@@ -9,7 +9,7 @@ import { LeadPage } from './pages/leads/LeadPage';
 import { LeadsList } from './pages/leads/LeadsList';
 import { NewLeadPage } from './pages/leads/NewLeadPage';
 import { NotificationsList } from './pages/notifications/NotificationsList';
-import { ReportsPage } from './pages/Placeholder';
+import { ReportsPage } from './pages/reports/ReportsPage';
 import { SignIn } from './pages/SignIn';
 import { TasksList } from './pages/tasks/TasksList';
 import { AllocationRules } from './pages/settings/AllocationRules';
