@@ -44,7 +44,7 @@ test('a connected mailbox: row, Sync now, Options; administrators see the app-re
   await captureParity(page, 'connections');
 
   await row.getByRole('button', { name: 'Sync now' }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Mail sync arrives with the Email screen (part 2B)' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Sync started — new mail appears in a few seconds' })).toBeVisible();
 
   await row.getByRole('button', { name: 'Options' }).click();
   const options = page.getByRole('dialog', { name: /Mailbox options/ });
