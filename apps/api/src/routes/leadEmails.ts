@@ -45,7 +45,7 @@ export const leadEmailRoutes: FastifyPluginAsync = async (app) => {
     return guard(reply, async () => {
       await assertLeadVisible(prisma, user, id, { includeArchived: true });
       const rows = await prisma.emailMessage.findMany({
-        where: { leadId: id, userId: user.id }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: 200,
+        where: { leadId: id, userId: user.id, folder: { not: 'drafts' } }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: 200,
       });
       return { items: rows.map(emailView) };
     });

@@ -1,17 +1,84 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { Lead, Prisma } from '@prisma/client';
-import { MailCompose, MailReply } from '@dait-crm/shared';
+import { Prisma, type EmailMessage, type Lead } from '@prisma/client';
+import { LeadCreate, MailCompose, MailLink, MailRead, MailReply, can, checkDomain, domainOf, isFreeMail } from '@dait-crm/shared';
+import { audit } from '../audit.js';
+import { enqueue } from '../jobs/queue.js';
+import type { MailActionPayload } from '../jobs/types.js';
+import { dateOnly, todayIn } from '../leads/dates.js';
+import { auditCreatedLead, createLeadWithCompany, RuleError } from '../leads/service.js';
+import { findCompanyMatches } from '../companies/match.js';
+import { isUniqueViolation } from '../prismaErrors.js';
 import { prisma } from '../db.js';
 import { requireRight, type AuthUser } from '../plugins/auth.js';
 import { NotFoundError, parseBody } from '../validate.js';
-import { assertLeadVisible, canSeeLead } from '../leads/visibility.js';
+import { assertLeadVisible, canSeeLead, leadWhere } from '../leads/visibility.js';
 import { assertCompanyVisible } from '../companies/visibility.js';
 import { matchMail } from '../mail/match.js';
 import { queueOutgoing } from '../mail/outgoing.js';
 import { emailView } from './leadEmails.js';
-import { guard, lockLeads } from './leads.js';
+import { domainTaken, guard, lockLeads } from './leads.js';
 
 type Tx = Prisma.TransactionClient;
+
+const VIEWS = ['inbox', 'sent', 'drafts', 'archive', 'unlinked', 'awaiting', 'mine'] as const;
+type View = (typeof VIEWS)[number];
+const LIST_MAX = 200;
+const PREVIEW = 120;
+const DAY_MS = 86_400_000;
+/** Mailbox changes are retried a little (2, 4 minutes); the next sync shows Outlook's state anyway. */
+const ACTION_ATTEMPTS = 3;
+
+const leadRef = { select: { id: true, number: true, status: true, priority: true, nextFollowUp: true, companyId: true, companyName: true, assignedToId: true } } as const;
+type WithLead = EmailMessage & { lead: { id: number; number: string } | null };
+
+/** A message in the list: no body, a short one-line preview. */
+function listItem(m: WithLead) {
+  return {
+    id: m.id, folder: m.folder, status: m.status, fromAddress: m.fromAddress, fromName: m.fromName, toAddresses: m.toAddresses as string[],
+    subject: m.subject, preview: m.bodyText.replace(/\s+/g, ' ').trim().slice(0, PREVIEW), occurredAt: m.occurredAt, isRead: m.isRead,
+    leadId: m.leadId, leadNumber: m.lead?.number ?? null, companyId: m.companyId, hasAttachments: (m.attachmentNames as string[]).length > 0,
+  };
+}
+
+/** Whether the message came from someone else (received) rather than from the user. */
+const isInbound = (m: EmailMessage) => m.status === 'received';
+
+/** The other party: the sender of received mail, the first recipient of your own. */
+const counterpart = (m: EmailMessage) => (isInbound(m) ? m.fromName || m.fromAddress : ((m.toAddresses as string[])[0] ?? ''));
+
+/** Ids of the user's messages matching a search over subject, sender, recipients and text (case-insensitive). */
+async function searchIds(userId: number, s: string): Promise<number[]> {
+  const like = `%${s.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  const rows = await prisma.$queryRaw<{ id: number }[]>`
+    SELECT id FROM email_messages WHERE user_id = ${userId} AND (
+      subject ILIKE ${like} OR from_address ILIKE ${like} OR coalesce(from_name, '') ILIKE ${like}
+      OR to_addresses::text ILIKE ${like} OR cc_addresses::text ILIKE ${like} OR body_text ILIKE ${like})
+    LIMIT 2000`;
+  return rows.map((r) => r.id);
+}
+
+/** Sent, linked messages with no later received message in their conversation (prototype "Awaiting reply"). */
+async function awaitingIds(userId: number): Promise<number[]> {
+  const rows = await prisma.$queryRaw<{ id: number }[]>`
+    SELECT s.id FROM email_messages s WHERE s.user_id = ${userId} AND s.folder = 'sent' AND s.status IN ('sent', 'queued', 'sending')
+      AND s.lead_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM email_messages r WHERE r.user_id = s.user_id AND r.status = 'received'
+          AND r.thread_id IS NOT NULL AND r.thread_id = s.thread_id AND r.occurred_at > s.occurred_at)
+    ORDER BY s.occurred_at DESC LIMIT ${LIST_MAX}`;
+  return rows.map((r) => r.id);
+}
+
+/** Queues the same change in the user's mailbox (messages that came from it only). */
+async function tellMailbox(db: Tx | typeof prisma, m: EmailMessage, action: MailActionPayload['action']) {
+  if (m.graphId) await enqueue(db, 'mail_action', { emailMessageId: m.id, action }, { maxAttempts: ACTION_ATTEMPTS });
+}
+
+/** Company name guessed from an address's domain ("blue-river.io" → "Blue River"); null for free mail. */
+function nameFromDomain(address: string): string | null {
+  const domain = domainOf(address);
+  if (!domain || isFreeMail(domain)) return null;
+  return domain.split('.')[0]!.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).trim() || null;
+}
 
 /** The caller's connected personal mailbox, or null. */
 const myMailbox = (userId: number) => prisma.emailAccount.findFirst({ where: { kind: 'personal', userId, status: 'connected' } });
@@ -86,6 +153,195 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
         });
       });
       return reply.code(201).send(emailView(created));
+    });
+  });
+
+  app.get<{ Querystring: { view?: string; company?: string; lead?: string; s?: string } }>('/mail', pre, async (request) => {
+    const user = request.user!;
+    const q = request.query;
+    const view: View = (VIEWS as readonly string[]).includes(q.view ?? '') ? (q.view as View) : 'inbox';
+    const and: Prisma.EmailMessageWhereInput[] = [{ userId: user.id }];
+    if (view === 'unlinked') and.push({ leadId: null, folder: { not: 'drafts' } });
+    else if (view === 'mine') and.push({ lead: { assignedToId: user.id }, folder: { not: 'drafts' } });
+    else if (view === 'awaiting') and.push({ id: { in: await awaitingIds(user.id) } });
+    else and.push({ folder: view });
+    const company = Number(q.company);
+    if (q.company && Number.isInteger(company)) and.push({ OR: [{ companyId: company }, { lead: { companyId: company } }] });
+    const lead = Number(q.lead);
+    if (q.lead && Number.isInteger(lead)) and.push({ leadId: lead });
+    const s = q.s?.trim().slice(0, 200);
+    if (s) and.push({ id: { in: await searchIds(user.id, s) } });
+    const rows = await prisma.emailMessage.findMany({
+      where: { AND: and }, include: { lead: { select: { id: true, number: true } } }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: LIST_MAX,
+    });
+    return { items: rows.map(listItem) };
+  });
+
+  app.get('/mail/meta', pre, async (request) => {
+    const user = request.user!;
+    const [mailbox, unread, unlinked, companyIds, leadIds] = await Promise.all([
+      prisma.emailAccount.findFirst({ where: { kind: 'personal', userId: user.id, status: { not: 'disconnected' } }, select: { address: true, status: true, lastSyncAt: true } }),
+      prisma.emailMessage.count({ where: { userId: user.id, folder: 'inbox', isRead: false } }),
+      prisma.emailMessage.count({ where: { userId: user.id, leadId: null, folder: { not: 'drafts' } } }),
+      prisma.emailMessage.findMany({ where: { userId: user.id, companyId: { not: null } }, distinct: ['companyId'], select: { companyId: true } }),
+      prisma.emailMessage.findMany({ where: { userId: user.id, leadId: { not: null } }, distinct: ['leadId'], select: { leadId: true } }),
+    ]);
+    const [companies, leads] = await Promise.all([
+      prisma.company.findMany({ where: { id: { in: companyIds.map((c) => c.companyId!) } }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+      prisma.lead.findMany({
+        where: { AND: [{ id: { in: leadIds.map((l) => l.leadId!) } }, leadWhere(user, { includeArchived: true })] },
+        select: { id: true, number: true, companyId: true, companyName: true, status: true }, orderBy: { id: 'desc' },
+      }),
+    ]);
+    return { mailbox, unread, unlinked, companies, leads };
+  });
+
+  app.get<{ Params: { id: string } }>('/mail/:id', pre, async (request, reply) => {
+    const user = request.user!;
+    return guard(reply, async () => {
+      let m = await ownMessage(prisma, user, request.params.id);
+      if (!m.isRead) {
+        m = await prisma.emailMessage.update({ where: { id: m.id }, data: { isRead: true } });
+        await tellMailbox(prisma, m, 'read');
+      }
+      const [lead, contact, company, thread] = await Promise.all([
+        m.leadId && (await canSeeLead(prisma, user, m.leadId)) ? prisma.lead.findUnique({ where: { id: m.leadId }, ...leadRef }) : null,
+        m.contactId ? prisma.contact.findUnique({ where: { id: m.contactId }, select: { id: true, firstName: true, lastName: true } }) : null,
+        m.companyId ? prisma.company.findUnique({ where: { id: m.companyId }, select: { id: true, name: true } }) : null,
+        m.threadId
+          ? prisma.emailMessage.findMany({ where: { userId: user.id, threadId: m.threadId, id: { not: m.id } }, orderBy: { occurredAt: 'asc' }, take: 50 })
+          : [],
+      ]);
+      return {
+        ...listItem({ ...m, lead: lead ? { id: lead.id, number: lead.number } : null }),
+        ccAddresses: m.ccAddresses as string[], bodyText: m.bodyText, attachmentNames: m.attachmentNames as string[], loggedAt: m.loggedAt,
+        lead: lead ? { id: lead.id, number: lead.number, status: lead.status, priority: lead.priority, nextFollowUp: lead.nextFollowUp, companyId: lead.companyId } : null,
+        contact: contact ? { id: contact.id, name: `${contact.firstName} ${contact.lastName}`.trim() } : null,
+        company,
+        thread: thread.map((t) => ({ id: t.id, occurredAt: t.occurredAt, direction: isInbound(t) ? 'in' : 'out', who: counterpart(t), subject: t.subject })),
+      };
+    });
+  });
+
+  app.post<{ Params: { id: string } }>('/mail/:id/read', pre, async (request, reply) => {
+    const { isRead } = parseBody(MailRead, request.body);
+    return guard(reply, async () => {
+      const m = await ownMessage(prisma, request.user!, request.params.id);
+      if (m.isRead === isRead) return { id: m.id, isRead };
+      const updated = await prisma.$transaction(async (tx) => {
+        const u = await tx.emailMessage.update({ where: { id: m.id }, data: { isRead } });
+        await tellMailbox(tx, u, isRead ? 'read' : 'unread');
+        return u;
+      });
+      return { id: updated.id, isRead: updated.isRead };
+    });
+  });
+
+  app.post<{ Params: { id: string } }>('/mail/:id/archive', pre, async (request, reply) => {
+    return guard(reply, async () => {
+      const m = await ownMessage(prisma, request.user!, request.params.id);
+      if (m.folder === 'drafts') return reply.code(409).send({ error: 'draft' });
+      if (m.folder !== 'archive') {
+        await prisma.$transaction(async (tx) => {
+          const u = await tx.emailMessage.update({ where: { id: m.id }, data: { folder: 'archive' } });
+          await tellMailbox(tx, u, 'archive');
+        });
+      }
+      return { id: m.id, folder: 'archive' };
+    });
+  });
+
+  // Log as activity (prototype): once per message, on its lead; the subject is the sender's alone.
+  app.post<{ Params: { id: string } }>('/mail/:id/log', pre, async (request, reply) => {
+    const user = request.user!;
+    return guard(reply, async () => {
+      const m = await ownMessage(prisma, user, request.params.id);
+      if (!m.leadId || !(await canSeeLead(prisma, user, m.leadId))) return reply.code(409).send({ error: 'no_lead' });
+      const logged = m.loggedAt || (await prisma.leadActivity.count({ where: { relatedType: 'email_message', relatedId: m.id } })) > 0;
+      if (logged) return reply.code(409).send({ error: 'already_logged' });
+      await prisma.$transaction(async (tx) => {
+        const claimed = await tx.emailMessage.updateMany({ where: { id: m.id, loggedAt: null }, data: { loggedAt: new Date() } });
+        if (claimed.count === 0) throw new RuleError('already_logged');
+        await tx.leadActivity.create({
+          data: {
+            leadId: m.leadId!, activityType: 'email', title: `${isInbound(m) ? 'Email received' : 'Email sent'} · ${m.subject}`,
+            relatedType: 'email_message', relatedId: m.id, byUserId: user.id, occurredAt: m.occurredAt,
+          },
+        });
+        await audit(tx, { entityType: 'lead', entityId: m.leadId!, action: 'update', userId: user.id, after: { emailMessageId: m.id } });
+      });
+      return reply.code(201).send({ id: m.id, leadId: m.leadId });
+    });
+  });
+
+  app.post<{ Params: { id: string } }>('/mail/:id/link', pre, async (request, reply) => {
+    const { leadId } = parseBody(MailLink, request.body);
+    const user = request.user!;
+    return guard(reply, async () => {
+      const m = await ownMessage(prisma, user, request.params.id);
+      const lead = await assertLeadVisible(prisma, user, leadId);
+      const keepContact = m.contactId && lead.companyId && (await prisma.contact.count({ where: { id: m.contactId, companyId: lead.companyId } })) > 0;
+      const updated = await prisma.emailMessage.update({
+        where: { id: m.id }, data: { leadId: lead.id, companyId: lead.companyId, contactId: lead.contactId ?? (keepContact ? m.contactId : null) },
+      });
+      return { id: updated.id, leadId: updated.leadId };
+    });
+  });
+
+  // Create lead from this email (prototype): the lead form's duplicate check on the sender's domain, source Other,
+  // the email as notes, a follow-up in 2 days, the allocation rules; the message is linked to it.
+  app.post<{ Params: { id: string } }>('/mail/:id/create-lead', pre, async (request, reply) => {
+    const user = request.user!;
+    return guard(reply, async () => {
+      const m = await ownMessage(prisma, user, request.params.id);
+      if (!can(user.role, 'manage_leads')) return reply.code(403).send({ error: 'forbidden' });
+      const email = isInbound(m) ? m.fromAddress : ((m.toAddresses as string[])[0] ?? '');
+      const name = isInbound(m) ? m.fromName?.trim() : '';
+      const match = (await findCompanyMatches(prisma, { name: '', businessEmail: email })).auto;
+      const [first, ...rest] = (name && !name.includes('@') ? name : '').split(/\s+/);
+      const due = new Date(dateOnly(todayIn(user.timezone)).getTime() + 2 * DAY_MS).toISOString().slice(0, 10);
+      const input = LeadCreate.parse({
+        companyName: (match?.name ?? nameFromDomain(email) ?? (name || email)).slice(0, 200),
+        businessEmail: email || undefined,
+        country: match?.country || 'United States',
+        leadSource: 'Other',
+        nextFollowUp: due,
+        notes: `${m.subject}\n\n${m.bodyText}`.trim().slice(0, 5000),
+      });
+      try {
+        const leadId = await prisma.$transaction(async (tx) => {
+          const created = await createLeadWithCompany(tx, { ...input, contactFirstName: first || null, contactLastName: rest.join(' ') || null, contactEmail: email || null }, user);
+          await auditCreatedLead(tx, user.id, created);
+          const l = created.lead;
+          await tx.emailMessage.update({ where: { id: m.id }, data: { leadId: l.id, companyId: l.companyId, contactId: l.contactId } });
+          return l.id;
+        });
+        return reply.code(201).send({ id: m.id, leadId });
+      } catch (e) {
+        if (isUniqueViolation(e, 'domain')) {
+          const taken = await domainTaken(checkDomain({ businessEmail: email }));
+          if (taken) return reply.code(409).send(taken);
+        }
+        throw e;
+      }
+    });
+  });
+
+  // Add follow-up task (prototype): due tomorrow, assigned to you, on the message's lead.
+  app.post<{ Params: { id: string } }>('/mail/:id/task', pre, async (request, reply) => {
+    const user = request.user!;
+    return guard(reply, async () => {
+      const m = await ownMessage(prisma, user, request.params.id);
+      if (!m.leadId || !(await canSeeLead(prisma, user, m.leadId))) return reply.code(409).send({ error: 'no_lead' });
+      const dueDate = new Date(dateOnly(todayIn(user.timezone)).getTime() + DAY_MS);
+      const task = await prisma.$transaction(async (tx) => {
+        const t = await tx.task.create({
+          data: { leadId: m.leadId, title: `Reply to ${counterpart(m)} · ${m.subject}`.slice(0, 200), dueDate, assignedToId: user.id, origin: 'manual' },
+        });
+        await audit(tx, { entityType: 'task', entityId: t.id, action: 'create', userId: user.id, after: { id: t.id, leadId: t.leadId, dueDate: t.dueDate } });
+        return t;
+      });
+      return reply.code(201).send({ id: task.id, leadId: task.leadId });
     });
   });
 };

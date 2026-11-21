@@ -112,7 +112,7 @@ export function leadDetail(l: LeadDetailRow, today: string) {
 
 /**
  * A timeline entry. `by: null` = system. Privacy (owner, 22 Nov 2026): an email sent from the CRM shows its subject
- * only to its sender (`viewerId`); everyone else sees "Email sent" with no subject or body.
+ * only to its sender (`viewerId`); everyone else sees "Email sent" / "Email received" with no subject or body.
  */
 export function activityRow(a: ActivityRow, viewerId?: number) {
   const hidden = viewerId !== undefined && a.activityType === 'email' && a.relatedType === 'email_message' && a.byUserId !== viewerId;
@@ -120,7 +120,7 @@ export function activityRow(a: ActivityRow, viewerId?: number) {
     id: a.id,
     leadId: a.leadId,
     activityType: a.activityType,
-    title: hidden ? 'Email sent' : a.title,
+    title: hidden ? (a.title.startsWith('Email received') ? 'Email received' : 'Email sent') : a.title,
     body: hidden ? null : a.body,
     url: hidden ? null : a.url,
     statusFrom: a.statusFrom,
