@@ -198,4 +198,22 @@ describe('sending email from a lead (release 2B-1)', () => {
     expect(graph.calls).toHaveLength(0);
     expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ status: 'failed', lastError: 'mailbox_not_connected' });
   });
+
+  it('sending to a New or Not Contacted lead moves it to Contacted (prototype); later statuses are left alone', async () => {
+    const { rep, lead } = await setup();
+    await personal(rep.id, 'seba@daitpartners.com');
+    const cookie = await signIn(app, rep);
+    await prisma.lead.update({ where: { id: lead.id }, data: { status: 'New' } });
+    let fresh = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
+    expect((await call('POST', `/api/leads/${lead.id}/emails`, cookie, body(fresh.updatedAt))).statusCode).toBe(201);
+    fresh = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
+    expect(fresh.status).toBe('Contacted');
+    const change = await prisma.leadActivity.findFirstOrThrow({ where: { activityType: 'status' } });
+    expect(change).toMatchObject({ statusFrom: 'New', statusTo: 'Contacted', body: 'Email sent' });
+
+    await prisma.lead.update({ where: { id: lead.id }, data: { status: 'Interested' } });
+    fresh = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
+    await call('POST', `/api/leads/${lead.id}/emails`, cookie, body(fresh.updatedAt));
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).status).toBe('Interested');
+  });
 });

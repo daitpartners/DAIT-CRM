@@ -8,12 +8,14 @@ import { parseBody } from '../validate.js';
 import { enqueue } from '../jobs/queue.js';
 import { assertLeadVisible } from '../leads/visibility.js';
 import { dateOnly, todayIn } from '../leads/dates.js';
-import { syncFollowUpTask } from '../leads/service.js';
+import { applyStatusChange, syncFollowUpTask } from '../leads/service.js';
 import { guard, lockFresh } from './leads.js';
 
 /** Retries for a user's email: about half an hour of backoff (2, 4, 8, 16 minutes) before it is marked failed. */
 const SEND_ATTEMPTS = 5;
 const DAY_MS = 86_400_000;
+/** Statuses an email moves to Contacted. */
+const CONTACTED_ON_EMAIL = new Set(['New', 'Not Contacted']);
 
 /** An email as its owner sees it (only ever returned to its owner). */
 export function emailView(m: EmailMessage) {
@@ -52,10 +54,15 @@ export const leadEmailRoutes: FastifyPluginAsync = async (app) => {
             relatedId: msg.id, byUserId: user.id,
           },
         });
+        // Emailing a lead not yet contacted moves it to Contacted (prototype; owner, 22 Nov 2026).
+        let current = lead;
+        if (CONTACTED_ON_EMAIL.has(current.status)) {
+          current = await applyStatusChange(tx, current, 'Contacted', { userId: user.id }, { sourceTitle: 'Email sent' });
+        }
         // "Set follow-up in N days" (prototype): an open lead only; a closed lead keeps no follow-up.
-        if (body.followUpDays && !isClosedStatus(lead.status)) {
+        if (body.followUpDays && !isClosedStatus(current.status)) {
           const due = new Date(dateOnly(todayIn(user.timezone)).getTime() + body.followUpDays * DAY_MS);
-          const updated = await tx.lead.update({ where: { id: lead.id }, data: { nextFollowUp: due } });
+          const updated = await tx.lead.update({ where: { id: current.id }, data: { nextFollowUp: due } });
           await syncFollowUpTask(tx, updated);
         }
         // Audit without the content: the mail is private to its sender.
