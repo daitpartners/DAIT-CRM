@@ -4,6 +4,10 @@ Things to click through before the prototype parity release is accepted. Each sc
 
 Differences that were made on purpose are listed at the end; they are not faults.
 
+**Approved design.** `prototype/index.html` (20 Nov 2026 hand-over, unchanged since) is the latest approved design,
+confirmed again on 21 Nov 2026. The older design in `DAIT-CRM/Version 1/prototype/` (12 Nov) is superseded and was not
+used for any build. The verification against it on 21 Nov 2026 is recorded at the end of this file.
+
 ## Before you start
 
 - [ ] Open the prototype next to the CRM. From the repository root run `cd prototype && python3 -m http.server 8765`, then open `http://127.0.0.1:8765/index.html#/dashboard` in a private (incognito) window. The prototype keeps its sample data in the browser, so a private window always starts from the same data.
@@ -126,3 +130,24 @@ These differ from the prototype on purpose:
 - **Tasks show the first 100 of each group.** Overdue, Due today and Upcoming each list at most 100 tasks; a longer group ends with "Showing the first n of total." The prototype lists everything.
 - **New lead number on save.** The New lead page says "Lead ID will be generated on save" without predicting the number, and the AI enrichment step reads "Available in release 4". Edit lead stays a dialog on the lead page.
 - **AI research queue tile shows "—"** with "Available in release 4" until AI research exists; the prototype shows a count of queued jobs.
+
+## Verification against the approved design, 21 Nov 2026
+
+Release `fe22dcc` (live) was checked screen by screen against `prototype/index.html` at 1400×1000: Dashboard, Leads,
+New lead, Lead page, Companies, Company profile, Tasks, Notifications and Settings. The parity e2e specs pass (10/10).
+Section order, headings, tiles, tabs and cards match on every screen. Gaps found that are **not** in the deliberate
+differences above, to fix in a short follow-up before release 1D:
+
+- [ ] **Sidebar counts.** The prototype shows the open-leads count on Leads, "n overdue" on Tasks and "n new" on
+      Notifications. The CRM shows only the Notifications number, without "new".
+- [ ] **Companies filters** read "Any industry", "Any country", "Any status"; the prototype reads "Industry: Any",
+      "Country: Any", "Status: Any", like the Leads filters.
+- [ ] **Companies pager** is Previous / Page n of n / Next; the prototype (and the CRM's Leads list) uses
+      Rows · First · Prev · Page · Next · Last.
+- [ ] **New lead:** Country starts empty ("Type to search…") where the prototype starts on India, and the phone field has
+      no "+91 …" hint.
+
+Additions in the CRM that the prototype does not have, kept because earlier releases need them (owner to confirm):
+
+- Tasks: **New task** button in the topbar and **Edit** / **Snooze** on each row (release 1C).
+- Companies list: tick boxes for bulk status changes and the company number (CO-…) under each name (release 1B).

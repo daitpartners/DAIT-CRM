@@ -2,6 +2,11 @@
 
 Prepared 20 Nov 2026. Read with `docs/DAIT-CRM-Specification-v2.md`, `docs/data-model.md` and the prototype (`dait-crm.html`).
 
+> **Update 21 Nov 2026.** The approved design is `prototype/index.html` (the double-click `dait-crm.html` is built from
+> it); every screen must match it. The project became a fresh build (see
+> `docs/superpowers/specs/2026-11-21-dait-crm-fresh-build-design.md`), so the "Starting point" row below and Phase 0's
+> study of an existing CRM no longer apply. Screen-by-screen status: `docs/RELEASE-PARITY-CHECKLIST.md`.
+
 ## 1. What this plan assumes
 
 | Point | Value | Source |
