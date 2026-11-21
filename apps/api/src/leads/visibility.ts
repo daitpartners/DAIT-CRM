@@ -39,11 +39,16 @@ export async function canSeeLead(db: Db, user: AuthUser, leadId: number): Promis
  * unknown or inactive user.
  */
 export async function canUserSeeLead(db: Db, userId: number, leadId: number): Promise<boolean> {
+  const asUser = await activeUser(db, userId);
+  return asUser ? canSeeLead(db, asUser, leadId) : false;
+}
+
+/** User `userId` as the request layer sees them (for work done on their behalf, e.g. mail sync); null when inactive. */
+export async function activeUser(db: Db, userId: number): Promise<AuthUser | null> {
   const u = await db.user.findFirst({ where: { id: userId, isActive: true } });
-  if (!u) return false;
-  const asUser: AuthUser = {
+  if (!u) return null;
+  return {
     id: u.id, email: u.email, name: u.name, role: roleLabel(u.role), language: u.language, timezone: u.timezone,
     dateFormat: u.dateFormat,
   };
-  return canSeeLead(db, asUser, leadId);
 }
