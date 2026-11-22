@@ -176,13 +176,16 @@ function toMessage(v: Record<string, unknown>): GraphMessage {
   };
 }
 
+/** Zone names Graph or Windows may send for UTC (upper-cased). */
+const UTC_ZONES = new Set(['UTC', 'ETC/UTC', 'ETC/GMT', 'GMT', 'COORDINATED UNIVERSAL TIME', 'TZONE://MICROSOFT/UTC']);
+
 /**
  * A Graph dateTimeTimeZone in UTC (asked for with `outlook.timezone="UTC"`; a missing zone is taken as UTC) as an ISO
  * string; null when unreadable or in another zone (never stored at a wrong time).
  */
 function utc(v: unknown): string | null {
   const tz = str((v as { timeZone?: unknown } | null | undefined)?.timeZone);
-  if (tz && tz.trim().toUpperCase() !== 'UTC') return null;
+  if (tz && !UTC_ZONES.has(tz.trim().toUpperCase())) return null;
   const dt = str((v as { dateTime?: unknown } | null | undefined)?.dateTime);
   const at = dt ? Date.parse(`${dt.replace(/Z$/, '').replace(/(\.\d{3})\d*$/, '$1')}Z`) : NaN;
   return Number.isNaN(at) ? null : new Date(at).toISOString();

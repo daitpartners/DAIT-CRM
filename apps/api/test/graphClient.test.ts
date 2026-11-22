@@ -276,6 +276,19 @@ describe('graph client — mail sync and actions (2B-2)', () => {
     expect(page.skipped).toBe(1);
   });
 
+  test('calendarDeltaPage takes the other names Graph or Windows use for UTC as UTC (any case)', async () => {
+    const zones = ['Etc/UTC', 'etc/gmt', 'GMT', 'Coordinated Universal Time', 'tzone://Microsoft/Utc', 'TZONE://MICROSOFT/UTC'];
+    vi.stubGlobal('fetch', vi.fn(async () => json({
+      value: zones.map((timeZone, i) => ({
+        id: `z${i}`, subject: timeZone,
+        start: { dateTime: '2026-11-25T10:00:00.0000000', timeZone }, end: { dateTime: '2026-11-25T11:00:00.0000000', timeZone },
+      })),
+    })));
+    const page = await createGraphClient(env).calendarDeltaPage(await account(), 'https://graph.microsoft.com/v1.0/x');
+    expect(page.events.map((e) => e.startsAt)).toEqual(zones.map(() => '2026-11-25T10:00:00.000Z'));
+    expect(page.skipped ?? 0).toBe(0);
+  });
+
   test('calendarDeltaPage refuses a link that is not Graph', async () => {
     const fetchMock = vi.fn(async () => json({ value: [] }));
     vi.stubGlobal('fetch', fetchMock);
