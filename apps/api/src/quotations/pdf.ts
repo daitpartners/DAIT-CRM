@@ -86,7 +86,8 @@ export async function renderQuotationPdf(
   const from = snap.issuer ?? settings;
   const L = (phrase: string, vars?: Record<string, string | number>) => t(lang === 'en' ? {} : LABELS[lang], phrase, vars);
   const date = (ymdDate: string | null) => (ymdDate ? formatDate(`${ymdDate}T00:00:00Z`, { locale: lang, timezone: 'UTC', dateFormat: 'DD MMM YYYY' }) : '—');
-  const money = (amount: number) => formatMoney(amount, snap.currency);
+  // Amounts without the currency code; the code is printed once, on the Total line (prototype "Total INR").
+  const money = (amount: number) => formatMoney(amount, snap.currency).slice(snap.currency.length + 1);
 
   const doc = new PDFDocument({
     size: 'A4',
@@ -222,7 +223,7 @@ export async function renderQuotationPdf(
   }
   doc.moveTo(totX, y).lineTo(right, y).lineWidth(0.8).strokeColor(RULE).stroke();
   y += 6;
-  doc.font(BOLD).fontSize(12).fillColor(HEADING).text(L('Total'), totX, y, { width: totW / 2, lineBreak: false });
+  doc.font(BOLD).fontSize(12).fillColor(HEADING).text(`${L('Total')} ${snap.currency}`, totX, y, { width: totW / 2, lineBreak: false });
   doc.text(money(tt.total), totX + totW / 2 - 40, y, { width: totW / 2 + 40 - pad, align: 'right', lineBreak: false });
   y += 30;
 

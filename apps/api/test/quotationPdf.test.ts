@@ -67,8 +67,11 @@ describe('renderQuotationPdf', () => {
     expect(text).toContain('Priya Rao');
     expect(text).toContain('Advisory services for Acme India');
     expect(text).toContain('GST 18%');
-    expect(text).toContain('INR 12,34,567.00');
-    expect(text).toContain('INR 1,50,000.00');
+    // As the prototype: plain amounts, the currency code once on the Total line.
+    expect(text).toContain('Total INR');
+    expect(text).toContain('12,34,567.00');
+    expect(text).toContain('1,50,000.00');
+    expect(text).not.toContain('INR 1,50,000.00');
     expect(text).toContain('GSTIN 07AAAFD1234A1Z5');
     expect(text).toContain('Payment: 40% on acceptance.');
     expect(text).toContain('Page 1 of 1');
@@ -77,7 +80,8 @@ describe('renderQuotationPdf', () => {
   it('prints GSTIN only on INR quotations with a GSTIN set', async () => {
     const usd = pdfText(await render(snapshot({ currency: 'USD', taxRate: 0 }), settings({ gstin: '07AAAFD1234A1Z5' })));
     expect(usd).not.toContain('GSTIN');
-    expect(usd).toContain('USD 150,000.00');
+    expect(usd).toContain('150,000.00');
+    expect(usd).toContain('Total USD');
     expect(pdfText(await render(snapshot(), settings({ gstin: null })))).not.toContain('GSTIN');
   });
 
@@ -120,7 +124,7 @@ describe('renderQuotationPdf', () => {
     // 12,34,567 less 5 % = 11,72,838.65
     expect(snap.totals.net).toBe(1172838.65);
     expect(text).toContain('Net');
-    expect(text).toContain('INR 11,72,838.65');
+    expect(text).toContain('11,72,838.65');
     expect(text).toContain('GST 18%');
   });
 
