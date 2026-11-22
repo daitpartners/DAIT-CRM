@@ -1,6 +1,6 @@
 /* Translated display labels for fixed enums. Each phrase is a literal t() call so scripts/i18n-check.ts sees it. */
-import type { CompanyStatus, LeadType, LookupGroup, Priority, Role, TaskOrigin } from '@dait-crm/shared';
-import { CSV_MAX_ROWS } from '@dait-crm/shared';
+import type { CompanyStatus, LeadType, LookupGroup, Priority, Role, TaskKind, TaskOrigin } from '@dait-crm/shared';
+import { CSV_MAX_ROWS, TASK_DURATION } from '@dait-crm/shared';
 import type { Lang } from '../api/queries';
 import type { TFn } from './useT';
 
@@ -174,6 +174,41 @@ export function taskOriginText(t: TFn, origin: TaskOrigin): string {
   }
 }
 
+/** A task's type: follow-up, call or meeting. */
+export function taskKindText(t: TFn, kind: TaskKind): string {
+  switch (kind) {
+    case 'followup':
+      return t('Follow-up');
+    case 'call':
+      return t('Call');
+    case 'meeting':
+      return t('Meeting');
+    default:
+      return kind;
+  }
+}
+
+/** `HH:MM` plus `minutes`, capped at 23:59 (an entry never runs past midnight; as the API). */
+function endTime(start: string, minutes: number): string {
+  const [h, m] = start.split(':').map(Number) as [number, number];
+  const end = Math.min(h * 60 + m + minutes, 23 * 60 + 59);
+  return `${String(Math.floor(end / 60)).padStart(2, '0')}:${String(end % 60).padStart(2, '0')}`;
+}
+
+/**
+ * When a task happens, shown beside its title: "Call · 10:00–10:30" / "Meeting · 14:00–15:00" for calls and
+ * meetings, the time alone for a timed follow-up, '' for an untimed one.
+ */
+export function taskWhenText(
+  t: TFn,
+  task: { kind: TaskKind; dueTime: string | null; durationMinutes: number | null },
+): string {
+  if (task.kind === 'followup') return task.dueTime ?? '';
+  if (!task.dueTime) return taskKindText(t, task.kind);
+  const minutes = task.durationMinutes ?? TASK_DURATION[task.kind];
+  return `${taskKindText(t, task.kind)} · ${task.dueTime}–${endTime(task.dueTime, minutes)}`;
+}
+
 /** Friendly text for API error codes; `vars` fills codes that carry values (csv_too_large: rows, max). */
 export function errorText(t: TFn, code: string, vars: Record<string, string | number> = {}): string {
   switch (code) {
@@ -253,6 +288,8 @@ export function errorText(t: TFn, code: string, vars: Record<string, string | nu
       return t('This campaign is not scheduled.');
     case 'task_done':
       return t('This task is already done');
+    case 'time_required':
+      return t('Enter a time for a call or meeting');
     default:
       return t('Something went wrong. Please try again.');
   }

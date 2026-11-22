@@ -9,7 +9,7 @@ import { Pager } from '../../components/Pager';
 import { Topbar } from '../../components/Topbar';
 import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
-import { errorText, taskOriginText } from '../../i18n/labels';
+import { errorText, taskOriginText, taskWhenText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
 import { TaskModal } from './TaskModal';
 
@@ -162,10 +162,14 @@ export function TasksList() {
 /** Without `onEdit` / `onSnooze` the row is the prototype's plain checkbox row (dashboard). */
 export type TaskItemProps = { task: TaskRow; busy: boolean; onTick: () => void; onEdit?: () => void; onSnooze?: () => void };
 
-/** The prototype's checkbox row: title, "when · lead · origin · assignee", a state badge, and Edit / Snooze. */
+/**
+ * The prototype's checkbox row: title (with type and time, e.g. "Call · 10:00–10:30"), "when · lead · origin · assignee",
+ * a state badge, and Edit / Snooze.
+ */
 export function TaskItem({ task, busy, onTick, onEdit, onSnooze }: TaskItemProps) {
   const t = useT();
   const { day } = useFormatDate();
+  const when = taskWhenText(t, task);
   return (
     <li className={['task', task.isOverdue ? 'over' : '', task.isDone ? 'done' : ''].filter(Boolean).join(' ')}>
       <input
@@ -176,7 +180,10 @@ export function TaskItem({ task, busy, onTick, onEdit, onSnooze }: TaskItemProps
         aria-label={task.isDone ? t('Mark not done: {title}', { title: task.title }) : t('Mark done: {title}', { title: task.title })}
       />
       <span className="grow">
-        <strong>{task.title}</strong>
+        <strong>
+          {task.title}
+          {when ? <span className="task-when">{when}</span> : null}
+        </strong>
         <span className="m">
           {task.isDone ? (
             day(task.dueDate)

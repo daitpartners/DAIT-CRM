@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useForm, type Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
-import { TaskCreate, TaskUpdate } from '@dait-crm/shared';
+import { TASK_KINDS, TaskCreate, TaskUpdate, type TaskKind } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
 import { useLeads } from '../../api/leads';
 import { keys, useUsers } from '../../api/queries';
@@ -14,11 +14,12 @@ import { Modal } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
 import { applyServerIssues } from '../../forms/applyServerIssues';
 import { useDebounce } from '../../hooks/useDebounce';
+import { taskKindText } from '../../i18n/labels';
 import { useT, type TFn } from '../../i18n/useT';
 
-type Values = { title: string; dueDate: string; assignedToId: string; leadId: string; updatedAt?: string };
+type Values = { title: string; dueDate: string; assignedToId: string; leadId: string; kind: TaskKind; dueTime: string; updatedAt?: string };
 type Field = Exclude<keyof Values, 'updatedAt'>;
-const FIELDS: Field[] = ['title', 'dueDate', 'assignedToId', 'leadId'];
+const FIELDS: Field[] = ['title', 'dueDate', 'assignedToId', 'leadId', 'kind', 'dueTime'];
 
 function fieldMessage(t: TFn, f: Field): string {
   switch (f) {
@@ -28,6 +29,8 @@ function fieldMessage(t: TFn, f: Field): string {
       return t('Enter a valid date');
     case 'assignedToId':
       return t('Choose who does it');
+    case 'dueTime':
+      return t('Enter a time for a call or meeting');
     default:
       return t('Check this value');
   }
@@ -41,7 +44,8 @@ function today(): string {
 
 /**
  * Add a manual task (optionally on a lead; `lead` fixes it, as from the lead page's "+ Task"), or edit a task's
- * title, due date and assignee.
+ * title, type, due date and time, and assignee. Only editing offers type and time (owner, release 3C); a call or
+ * meeting needs a time.
  */
 export function TaskModal({ task, lead, onClose }: { task?: TaskRow; lead?: Pick<TaskRow, 'lead'>['lead']; onClose: () => void }) {
   const t = useT();
@@ -56,16 +60,25 @@ export function TaskModal({ task, lead, onClose }: { task?: TaskRow; lead?: Pick
 
   const resolver = useMemo<Resolver<Values>>(() => {
     const zod = (editing ? zodResolver(TaskUpdate) : zodResolver(TaskCreate)) as unknown as Resolver<Values>;
-    return (values, ctx, opts) =>
-      zod(
+    return async (values, ctx, opts) => {
+      const result = await zod(
         {
           ...values,
           assignedToId: values.assignedToId ? Number(values.assignedToId) : undefined,
           leadId: values.leadId && !editing ? Number(values.leadId) : undefined,
+          // An emptied time is sent as null (cleared); the Add dialog sends neither.
+          kind: editing ? values.kind : undefined,
+          dueTime: editing ? values.dueTime || null : undefined,
         } as unknown as Values,
         ctx,
         opts,
       );
+      // As the server checks it: a call or meeting always has a time.
+      if (editing && values.kind !== 'followup' && !values.dueTime) {
+        return { values: {}, errors: { ...result.errors, dueTime: { type: 'required', message: '' } } };
+      }
+      return result;
+    };
   }, [editing]);
 
   const { register, handleSubmit, setError, setValue, watch, formState } = useForm<Values>({
@@ -75,7 +88,7 @@ export function TaskModal({ task, lead, onClose }: { task?: TaskRow; lead?: Pick
       dueDate: task?.dueDate ?? today(),
       assignedToId: String(task?.assignedTo.id ?? me.id),
       leadId: task?.leadId ? String(task.leadId) : lead ? String(lead.id) : '',
-      ...(task ? { updatedAt: task.updatedAt } : {}),
+      ...(task ? { kind: task.kind, dueTime: task.dueTime ?? '', updatedAt: task.updatedAt } : {}),
     },
   });
   const { errors } = formState;
@@ -101,6 +114,10 @@ export function TaskModal({ task, lead, onClose }: { task?: TaskRow; lead?: Pick
           if (code === 'stale') void qc.invalidateQueries({ queryKey: keys.tasksAll });
           if (code === 'cannot_assign_hidden') {
             setError('assignedToId', { type: 'server', message: t('That person cannot see this lead') });
+            return;
+          }
+          if (code === 'time_required') {
+            setError('dueTime', { type: 'server', message: fieldMessage(t, 'dueTime') });
             return;
           }
           setFormError(applyServerIssues(err, FIELDS, setError, t, (f) => fieldMessage(t, f)).formMessage);
@@ -142,6 +159,22 @@ export function TaskModal({ task, lead, onClose }: { task?: TaskRow; lead?: Pick
         <FormField id="tk-dueDate" label={t('Due date')} required error={err('dueDate')}>
           <input id="tk-dueDate" type="date" className={errors.dueDate ? 'in err' : 'in'} {...aria('dueDate')} {...register('dueDate')} />
         </FormField>
+        {editing ? (
+          <>
+            <FormField id="tk-dueTime" label={t('Time')} error={err('dueTime')}>
+              <input id="tk-dueTime" type="time" className={errors.dueTime ? 'in err' : 'in'} {...aria('dueTime')} {...register('dueTime')} />
+            </FormField>
+            <FormField id="tk-kind" label={t('Type')} error={err('kind')}>
+              <select id="tk-kind" className={errors.kind ? 'in err' : 'in'} {...aria('kind')} {...register('kind')}>
+                {TASK_KINDS.map((k) => (
+                  <option key={k} value={k}>
+                    {taskKindText(t, k)}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+          </>
+        ) : null}
         <FormField id="tk-assignedToId" label={t('Assigned to')} required error={err('assignedToId')}>
           <select id="tk-assignedToId" className={errors.assignedToId ? 'in err' : 'in'} {...aria('assignedToId')} {...register('assignedToId')}>
             <option value={String(me.id)}>{t('Me')}</option>

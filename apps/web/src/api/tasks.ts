@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { TASK_TABS, TaskCreate, TaskOrigin, TaskUpdate } from '@dait-crm/shared';
+import type { TASK_TABS, TaskCreate, TaskKind, TaskOrigin, TaskUpdate } from '@dait-crm/shared';
 import { api } from './client';
 import { keys } from './queries';
 
@@ -13,6 +13,11 @@ export type TaskRow = {
   title: string;
   /** YYYY-MM-DD */
   dueDate: string;
+  kind: TaskKind;
+  /** HH:MM wall clock as entered; required for a call or meeting. */
+  dueTime: string | null;
+  /** 30 for a call, 60 for a meeting, null for a follow-up. */
+  durationMinutes: number | null;
   assignedTo: { id: number; name: string };
   isDone: boolean;
   doneAt: string | null;

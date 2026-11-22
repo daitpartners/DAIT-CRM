@@ -10,7 +10,7 @@ import { useLeadEmails, type LeadEmail } from '../../api/leadEmails';
 import { Tabs } from '../../components/Tabs';
 import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
-import { errorText, leadStatusText, leadTypeText, priorityText } from '../../i18n/labels';
+import { errorText, leadStatusText, leadTypeText, priorityText, taskWhenText } from '../../i18n/labels';
 import { useT, type TFn } from '../../i18n/useT';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { TaskModal } from '../tasks/TaskModal';
@@ -283,13 +283,17 @@ function FollowUpControls({ lead, statuses, live }: Props) {
         </span>
         <div className="fu-list">
           {lead.tasks.length === 0 ? <span className="dim">{t('No open tasks')}</span> : null}
-          {lead.tasks.slice(0, SHOWN_TASKS).map((task) => (
-            <label key={task.id} className="fu-task">
-              <input type="checkbox" checked={false} disabled={saveTask.isPending} onChange={() => tick(task)} />
-              <span className="fu-t">{task.title}</span>
-              <span className={task.isOverdue ? 'fu-due overdue' : 'fu-due'}>{day(task.dueDate)}</span>
-            </label>
-          ))}
+          {lead.tasks.slice(0, SHOWN_TASKS).map((task) => {
+            const when = taskWhenText(t, task);
+            return (
+              <label key={task.id} className="fu-task">
+                <input type="checkbox" checked={false} disabled={saveTask.isPending} onChange={() => tick(task)} />
+                <span className="fu-t">{task.title}</span>
+                {when ? <span className="fu-due">{when}</span> : null}
+                <span className={task.isOverdue ? 'fu-due overdue' : 'fu-due'}>{day(task.dueDate)}</span>
+              </label>
+            );
+          })}
           {lead.tasks.length > SHOWN_TASKS ? (
             <Link to="/tasks" className="fu-more">
               {t('+{n} more', { n: lead.tasks.length - SHOWN_TASKS })}
