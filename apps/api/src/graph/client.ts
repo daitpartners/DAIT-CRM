@@ -3,6 +3,7 @@ import type { EmailAccount, PrismaClient } from '@prisma/client';
 import { prisma } from '../db.js';
 import { decrypt, encrypt } from '../crypto/tokens.js';
 import { readRefreshToken, type MsEnv } from '../auth/microsoft.js';
+import { nearestUtcMidnight } from '../leads/dates.js';
 
 export interface MailMessage {
   to: string[];
@@ -189,8 +190,11 @@ function utc(v: unknown): string | null {
 
 /** A calendar delta entry as a GraphEvent; null for one without readable UTC times (skipped). */
 function toEvent(v: Record<string, unknown>): GraphEvent | null {
-  const startsAt = utc(v.start);
-  const endsAt = utc(v.end);
+  const isAllDay = v.isAllDay === true;
+  // An all-day event is kept as midnight to midnight UTC of its dates (see nearestUtcMidnight).
+  const day = (iso: string | null) => (iso && isAllDay ? nearestUtcMidnight(new Date(iso)).toISOString() : iso);
+  const startsAt = day(utc(v.start));
+  const endsAt = day(utc(v.end));
   if (!startsAt || !endsAt) return null;
   const organizer = v.organizer as GraphAddress;
   const organizerAddress = addressOf(organizer);
@@ -200,7 +204,7 @@ function toEvent(v: Record<string, unknown>): GraphEvent | null {
     subject: str(v.subject) ?? '',
     startsAt,
     endsAt,
-    isAllDay: v.isAllDay === true,
+    isAllDay,
     isCancelled: v.isCancelled === true,
     location: location || null,
     organizer: organizerAddress ? { name: str(organizer?.emailAddress?.name) ?? '', address: organizerAddress } : null,

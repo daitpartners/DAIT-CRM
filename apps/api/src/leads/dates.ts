@@ -17,3 +17,13 @@ export function ymd(d: Date | null | undefined): string | null {
 export function dateOnly(s: string): Date {
   return new Date(`${s}T00:00:00.000Z`);
 }
+
+/**
+ * An all-day calendar time moved to the nearest UTC midnight. Graph is asked for UTC but may send an all-day event's
+ * midnight in its own zone (Kolkata 10 Mar → 2030-03-09T18:30Z); rounding restores the intended date for any offset
+ * under 12 hours.
+ */
+export function nearestUtcMidnight(at: Date): Date {
+  const DAY_MS = 86_400_000;
+  return new Date(Math.round(at.getTime() / DAY_MS) * DAY_MS);
+}

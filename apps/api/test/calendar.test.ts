@@ -6,7 +6,7 @@ import { buildApp } from '../src/app';
 import { encrypt } from '../src/crypto/tokens';
 import { todayIn } from '../src/leads/dates';
 import { resetDb, seedLookups } from './helpers';
-import { makeLead, makeUser, signIn } from './factory';
+import { makeCompany, makeLead, makeUser, signIn } from './factory';
 
 let app: FastifyInstance;
 beforeAll(async () => {
@@ -183,6 +183,29 @@ describe('calendar API', () => {
     // A multi-day all-day event starting before the range shows on the days inside it.
     const spans = (await get('/api/calendar?from=2030-03-21&to=2030-03-25', west.cookie)).json<Body>().items;
     expect(spans.map((i) => [i.id, i.date])).toEqual([[two.id, '2030-03-21']]);
+  });
+
+  it('an all-day row stored at its own zone\'s midnight (east or west of UTC) shows on its intended date(s)', async () => {
+    const rep = await as('SALES_REPRESENTATIVE', 'Asia/Kolkata');
+    const box = await mailbox(rep.user);
+    const east = await event(rep.user, box.id, new Date('2030-03-09T18:30:00Z'), { isAllDay: true, endsAt: new Date('2030-03-10T18:30:00Z') });
+    const west = await event(rep.user, box.id, new Date('2030-03-20T05:00:00Z'), { isAllDay: true, endsAt: new Date('2030-03-22T05:00:00Z') });
+    const items = (await get(`/api/calendar?${RANGE}`, rep.cookie)).json<Body>().items;
+    expect(items.filter((i) => i.id === east.id).map((i) => [i.date, i.time])).toEqual([['2030-03-10', null]]);
+    expect(items.filter((i) => i.id === west.id).map((i) => i.date)).toEqual(['2030-03-20', '2030-03-21']);
+  });
+
+  it('a company-only match shows the company only to someone who may see it', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const rep = await as('SALES_REPRESENTATIVE');
+    const company = await makeCompany({ name: 'Hidden Co' });
+    const at = new Date('2030-03-10T09:00:00Z');
+    const repEvent = await event(rep.user, (await mailbox(rep.user)).id, at, { companyId: company.id });
+    const adminEvent = await event(admin.user, (await mailbox(admin.user)).id, at, { companyId: company.id });
+    const repItems = (await get(`/api/calendar?${RANGE}`, rep.cookie)).json<Body>().items;
+    expect(repItems.find((i) => i.id === repEvent.id)).toMatchObject({ company: null, leadId: null });
+    const adminItems = (await get(`/api/calendar?${RANGE}`, admin.cookie)).json<Body>().items;
+    expect(adminItems.find((i) => i.id === adminEvent.id)).toMatchObject({ company: 'Hidden Co' });
   });
 
   it('an event linked to a lead the viewer can no longer see loses the link', async () => {
