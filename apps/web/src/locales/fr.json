@@ -1339,5 +1339,10 @@
   "e.g. Call back about the proposal": "ex. Rappeler au sujet de la proposition",
   "Follow-up (task)": "Suivi (tâche)",
   "· optional for a follow-up": "· facultatif pour un suivi",
-  "The follow-up from the lead stays a follow-up": "Le suivi du lead reste un suivi"
+  "The follow-up from the lead stays a follow-up": "Le suivi du lead reste un suivi",
+  "{date} · everything assigned to you across leads, email and calendar; quotations from release 3": "{date} · tout ce qui vous est attribué dans les leads, l’e-mail et le calendrier ; les devis arrivent avec la version 3",
+  "next at {time} · {title}": "prochain à {time} · {title}",
+  "Open calendar": "Ouvrir le calendrier",
+  "No events today.": "Aucun événement aujourd’hui.",
+  "done": "fait"
 }

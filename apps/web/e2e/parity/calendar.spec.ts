@@ -96,6 +96,17 @@ test('calendar parity: app side', async ({ page }) => {
     await expect(page.locator('.csum')).toContainText('open item');
     await shot(page, 'day-app');
 
+    // Dashboard: Meetings today and Today's agenda from Arjun's own timed tasks; the Outlook event never shows.
+    await page.goto('/');
+    const agenda = page.getByRole('region', { name: "Today's agenda" });
+    await expect(agenda.getByRole('listitem')).toHaveCount(1);
+    await expect(agenda).toContainText('Call back about the proposal');
+    await expect(agenda).not.toContainText('Pipeline review');
+    await expect(page.locator('.tiles .tile').nth(2)).toContainText('Meetings today');
+    await shot(page, 'dashboard-app');
+    await page.goto(`/calendar?view=day&d=${today}`);
+    await expect(page.locator('.csum')).toContainText('open item');
+
     // New follow-up, each type.
     await page.getByRole('button', { name: 'New follow-up' }).click();
     const dialog = page.getByRole('dialog', { name: 'New follow-up' });
@@ -157,6 +168,8 @@ test('calendar parity: prototype side', async () => {
     S.db.emailAccounts.push({ id: 'EA-9', userId: 'u1', provider: 'microsoft', address: 'arjun.mehta@daitpartners.com', status: 'connected', syncMail: true, syncCalendar: true, sharedMailboxes: [] });
     S.save();
   });
+  await go('#/dashboard');
+  await shot(page, 'dashboard-proto');
 
   await go('#/calendar');
   await shot(page, 'month-proto');

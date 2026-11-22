@@ -501,6 +501,12 @@ fieldset.bare>legend{padding:0}
 .dash-tasks .card-head{flex-wrap:wrap}.dash-tasks h2{white-space:nowrap}
 .dash-badges{display:flex;gap:6px;flex-wrap:wrap}
 .dash-more{font-size:13px;font-weight:600}
+.dash-cal{font-size:12.5px;font-weight:600}
+.agenda{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;font-size:13px}
+.agenda li{display:flex;gap:12px;align-items:flex-start}
+.ag-time{width:48px;flex:0 0 auto;color:var(--muted);font-weight:600}
+.ag-body{border-left:3px solid var(--purple);padding-left:10px}
+.ag-body .m{display:block;color:var(--muted);font-size:12px}
 .dnotes{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;font-size:13px}
 .dnote{display:flex;gap:10px;width:100%;text-align:left;font:inherit;padding:0;border:0;background:none;color:var(--text);cursor:pointer}
 .dnote:hover strong{color:var(--purple)}

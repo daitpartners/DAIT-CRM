@@ -19,6 +19,8 @@ export type Dashboard = {
   };
   /** Open tasks assigned to the user, by due date (first six). */
   tasks: TaskRow[];
+  /** Today's agenda: the user's own timed tasks for today (calls, meetings, timed follow-ups; done ones too), by time. */
+  agenda: TaskRow[];
   /** Latest five notifications. */
   notifications: NotificationRow[];
   /** Open leads assigned to the user per status, first seven open statuses in lookup order. */

@@ -3,6 +3,7 @@ import type { User } from '@prisma/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { prisma } from '../src/db';
 import { buildApp } from '../src/app';
+import { encrypt } from '../src/crypto/tokens';
 import { todayIn } from '../src/leads/dates';
 import { resetDb, seedLookups } from './helpers';
 import { makeLead, makeUser, signIn } from './factory';
@@ -120,5 +121,38 @@ describe('dashboard API', () => {
     expect(body.pipeline.map((p: { status: string }) => p.status)).toEqual([
       'Negotiation', 'Not Contacted', 'Contacted', 'Interested', 'Qualified', 'Proposal Sent',
     ]);
+  });
+  it("today's agenda: the user's own timed tasks for today (calls, meetings, timed follow-ups, done ones too), never Outlook events", async () => {
+    const rep = await as('SALES_REPRESENTATIVE', 'Arjun Mehta');
+    const manager = await as('MANAGER', 'Neha Kapoor');
+    const today = todayIn('Europe/London');
+    const lead = await makeLead({ assignedToId: rep.user.id, companyName: 'Bluefin Marine' });
+    const timed = (assignedToId: number, due: string, title: string, kind: string, dueTime: string | null, extra: { isDone?: boolean; leadId?: number } = {}) =>
+      prisma.task.create({
+        data: {
+          assignedToId, dueDate: new Date(`${due}T00:00:00Z`), title, origin: 'manual', kind, dueTime,
+          durationMinutes: kind === 'call' ? 30 : kind === 'meeting' ? 60 : null, isDone: extra.isDone ?? false, leadId: extra.leadId ?? null,
+        },
+      });
+    const meeting = await timed(rep.user.id, today, 'Demo', 'meeting', '14:00');
+    const call = await timed(rep.user.id, today, 'Call back', 'call', '10:30', { leadId: lead.id });
+    const followUp = await timed(rep.user.id, today, 'Chase reply', 'followup', '16:45');
+    const done = await timed(rep.user.id, today, 'Morning call', 'call', '09:00', { isDone: true });
+    await timed(rep.user.id, today, 'Untimed', 'followup', null);
+    await timed(rep.user.id, shift(today, 1), 'Tomorrow', 'call', '10:00');
+    await timed(manager.user.id, today, 'Not mine', 'meeting', '11:00', { leadId: lead.id });
+    // An Outlook event today, calendar sync on: never on the dashboard.
+    const box = await prisma.emailAccount.create({
+      data: { userId: rep.user.id, address: 'arjun@example.com', provider: 'microsoft', kind: 'personal', refreshTokenEnc: encrypt('rt'), status: 'connected', syncCalendar: true },
+    });
+    await prisma.calendarEvent.create({
+      data: { userId: rep.user.id, accountId: box.id, graphId: 'g1', subject: 'Outlook only', startsAt: new Date(`${today}T12:00:00Z`), endsAt: new Date(`${today}T13:00:00Z`) },
+    });
+
+    const body = (await get(rep.cookie)).json();
+    expect(body.agenda.map((t: { id: number }) => t.id)).toEqual([done.id, call.id, meeting.id, followUp.id]);
+    expect(body.agenda[1]).toMatchObject({ kind: 'call', dueTime: '10:30', durationMinutes: 30, lead: { id: lead.id, companyName: 'Bluefin Marine' } });
+    expect(body.agenda[0]).toMatchObject({ isDone: true });
+    expect(JSON.stringify(body)).not.toContain('Outlook only');
   });
 });

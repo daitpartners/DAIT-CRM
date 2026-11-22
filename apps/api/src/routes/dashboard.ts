@@ -43,7 +43,7 @@ export function startOfDayIn(day: string, timezone: string): Date {
 /**
  * The signed-in user's dashboard (prototype V.dashboard). Personal for every role, Administrator included:
  * "my" leads are visible leads assigned to the user; tasks are the user's own visible tasks; notifications
- * are the user's own. No team numbers.
+ * are the user's own; today's agenda is the user's own timed tasks (never Outlook events). No team numbers.
  */
 export const dashboardRoutes: FastifyPluginAsync = async (app) => {
   app.get('/dashboard', { preHandler: [requireUser] }, async (request) => {
@@ -55,11 +55,14 @@ export const dashboardRoutes: FastifyPluginAsync = async (app) => {
     const mine: Prisma.LeadWhereInput = { AND: [leadWhere(user), { assignedToId: user.id }] };
     const myOpen: Prisma.LeadWhereInput = { AND: [mine, { status: { notIn: [...CLOSED_STATUSES] } }] };
     const myTasks: Prisma.TaskWhereInput = { AND: [taskWhere(user), { assignedToId: user.id, isDone: false }] };
+    // Today's agenda (prototype: today's calendar items): the user's own timed tasks for today, done ones included.
+    // CRM tasks only; Outlook events are never on the dashboard.
+    const agendaWhere: Prisma.TaskWhereInput = { AND: [taskWhere(user), { assignedToId: user.id, dueDate: day, dueTime: { not: null } }] };
     const countTasks = (due: Prisma.DateTimeFilter) => prisma.task.count({ where: { AND: [myTasks, { dueDate: due }] } });
 
     const [
       myOpenLeads, newSinceYesterday, tasksDueToday, overdue, upcoming, unreadNotifications,
-      taskRows, notes, statuses, byStatus, won, lost,
+      taskRows, notes, statuses, byStatus, won, lost, agenda,
     ] = await Promise.all([
       prisma.lead.count({ where: myOpen }),
       prisma.lead.count({ where: { AND: [myOpen, { createdAt: { gte: startOfDayIn(yesterday, user.timezone) } }] } }),
@@ -80,6 +83,7 @@ export const dashboardRoutes: FastifyPluginAsync = async (app) => {
       prisma.lead.groupBy({ by: ['status'], where: myOpen, _count: { _all: true } }),
       prisma.lead.count({ where: { AND: [mine, { status: 'Won' }] } }),
       prisma.lead.count({ where: { AND: [mine, { status: 'Lost' }] } }),
+      prisma.task.findMany({ where: agendaWhere, include: taskInclude, orderBy: [{ dueTime: 'asc' }, { title: 'asc' }, { id: 'asc' }] }),
     ]);
 
     const counts = new Map(byStatus.map((g) => [g.status, g._count._all]));
@@ -87,6 +91,7 @@ export const dashboardRoutes: FastifyPluginAsync = async (app) => {
       greeting: { name: user.name, date: today },
       tiles: { myOpenLeads, newSinceYesterday, tasksDueToday, overdue, upcoming, openTasks: tasksDueToday + overdue + upcoming, unreadNotifications },
       tasks: taskRows.map((r) => taskRow(r, today)),
+      agenda: agenda.map((r) => taskRow(r, today)),
       notifications: notes.map((n) => ({ id: n.id, text: n.text, detail: n.detail, link: n.link, isRead: n.isRead, createdAt: n.createdAt })),
       pipeline: statuses.map((s) => ({ status: s.value, count: counts.get(s.value) ?? 0 })),
       closed: { won, lost },

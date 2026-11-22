@@ -8,7 +8,7 @@ function inDays(days: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-test('dashboard: greeting, prototype tiles, tasks, agenda placeholder, notifications, pipeline', async ({ page }) => {
+test('dashboard: greeting, prototype tiles, tasks, today\'s agenda, notifications, pipeline', async ({ page }) => {
   await signInAs(page, MAYA);
   const me = (await (await page.request.get('/api/me')).json()) as { id: number };
   const title = `Dashboard parity ${Date.now()}`;
@@ -17,17 +17,19 @@ test('dashboard: greeting, prototype tiles, tasks, agenda placeholder, notificat
 
   await page.goto('/');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(/^Good (morning|afternoon|evening), Maya$/);
-  await expect(page.locator('.topbar .sub')).toContainText('everything assigned to you across leads and tasks; email from release 2, calendar and quotations from release 3');
+  await expect(page.locator('.topbar .sub')).toContainText('everything assigned to you across leads, email and calendar; quotations from release 3');
   await expect(page.getByRole('button', { name: /^Notifications/ })).toBeVisible();
   await expect(page.getByRole('button', { name: 'New lead' })).toBeVisible();
 
-  // Tiles in prototype order; the calendar and quotation tiles wait for release 3.
+  // Tiles in prototype order; the quotation tile waits for release 3.
   const labels = await page.locator('.tiles .tile .l').allTextContents();
   expect(labels).toEqual(['My open leads', 'Follow-ups due today', 'Meetings today', 'Quotes awaiting response']);
   await expect(page.locator('.tiles .tile').first()).toContainText('new since yesterday');
   await expect(page.locator('.tiles .tile').first()).toHaveAttribute('href', '/leads?tab=mine');
   await expect(page.locator('.tiles .tile').nth(1)).toContainText('overdue');
-  await expect(page.locator('.tiles .tile').nth(2)).toContainText('Available in release 3');
+  await expect(page.locator('.tiles .tile').nth(2)).toHaveAttribute('href', '/calendar');
+  await expect(page.locator('.tiles .tile').nth(2)).not.toContainText('Available in release');
+  await expect(page.locator('.tiles .tile').nth(3)).toContainText('Available in release 3');
 
   // Columns: Tasks & follow-ups | Today's agenda + Notifications | My pipeline by status.
   const heads = await page.locator('.dash-cols h2').allTextContents();
@@ -37,8 +39,8 @@ test('dashboard: greeting, prototype tiles, tasks, agenda placeholder, notificat
   await expect(tasks.getByRole('listitem').filter({ hasText: title })).toContainText('Overdue');
   await expect(tasks.getByRole('link', { name: /^View all \d+ tasks?$/ })).toBeVisible();
   const agenda = page.getByRole('region', { name: "Today's agenda" });
-  await expect(agenda).toHaveAttribute('aria-disabled', 'true');
-  await expect(agenda.getByRole('button')).toHaveCount(0);
+  await expect(agenda).not.toHaveAttribute('aria-disabled');
+  await expect(agenda.getByRole('link', { name: 'Open calendar' })).toHaveAttribute('href', '/calendar');
   const pipe = page.getByRole('region', { name: 'My pipeline by status' });
   await expect(pipe.getByRole('listitem')).toHaveCount(7);
   await expect(pipe.getByRole('listitem').first()).toContainText('New');
