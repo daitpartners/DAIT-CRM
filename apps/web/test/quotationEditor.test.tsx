@@ -280,8 +280,11 @@ describe('Quotation editor (prototype V.quoteEditor)', () => {
     });
     await userEvent.click(convert);
     expect(await screen.findByText('Project PRJ-4 created from Q-2026-007')).toBeTruthy();
-    const link = await screen.findByRole('link', { name: 'PRJ-4 · Advisory services for Meridian' });
+    // The prototype's green "Project PRJ-n" badge, as a link to the client's projects.
+    const link = await screen.findByRole('link', { name: 'Project PRJ-4' });
     expect(link).toHaveAttribute('href', '/projects?company=4');
+    expect(link).toHaveClass('badge', 'b-ok');
+    expect(link).toHaveAttribute('title', 'Advisory services for Meridian');
     expect(screen.queryByRole('button', { name: 'Convert to project' })).toBeNull();
     expect(calls.filter((c) => c.method === 'POST' && c.url === '/api/quotations/7/convert')).toHaveLength(1);
   });
@@ -320,7 +323,7 @@ describe('Quotation editor (prototype V.quoteEditor)', () => {
     expect(calls.filter((c) => c.method === 'POST' && c.url === '/api/quotations/7/convert')).toHaveLength(1);
     // The next read shows the project link.
     await qc.invalidateQueries({ queryKey: ['quotations'] });
-    expect(await screen.findByRole('link', { name: 'PRJ-4 · Advisory services for Meridian' })).toBeTruthy();
+    expect(await screen.findByRole('link', { name: 'Project PRJ-4' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Convert to project' })).toBeNull();
     expect(screen.getAllByText('Project PRJ-4 created from Q-2026-007')).toHaveLength(1);
   });
@@ -328,7 +331,7 @@ describe('Quotation editor (prototype V.quoteEditor)', () => {
   it('a quotation with a project shows the project, not the button', async () => {
     stub(detail({ status: 'Accepted', locked: true, canEdit: false, projectId: 4, project: { id: 4, number: 'PRJ-4', name: 'Advisory' } }));
     mount();
-    expect(await screen.findByRole('link', { name: 'PRJ-4 · Advisory' })).toHaveAttribute('href', '/projects?company=4');
+    expect(await screen.findByRole('link', { name: 'Project PRJ-4' })).toHaveAttribute('href', '/projects?company=4');
     expect(screen.queryByRole('button', { name: 'Convert to project' })).toBeNull();
   });
 

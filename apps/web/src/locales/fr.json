@@ -944,6 +944,7 @@
   "Sending email arrives in release 2": "L’envoi d’e-mails arrive dans la version 2",
   "No email on file – add a contact": "Aucun e-mail enregistré – ajoutez un contact",
   "Project": "Projet",
+  "Project {number}": "Projet {number}",
   "available once the lead is Won": "disponible une fois le lead Gagné",
   "Template": "Modèle",
   "— blank —": "— vide —",

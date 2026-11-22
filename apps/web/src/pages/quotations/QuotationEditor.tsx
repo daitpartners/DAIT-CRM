@@ -557,8 +557,9 @@ function Editor({ q, crumb, refetch }: { q: QuotationDetail; crumb: React.ReactN
             <div className="q-btns">
               {q.locked ? (
                 q.project ? (
-                  <Link className="q-project" to={`/projects?company=${q.company.id}`}>
-                    {`${q.project.number} · ${q.project.name}`}
+                  // The prototype's green "Project PRJ-n" badge, linking to the client's projects.
+                  <Link className="badge b-ok" to={`/projects?company=${q.company.id}`} title={q.project.name}>
+                    {t('Project {number}', { number: q.project.number })}
                   </Link>
                 ) : q.status === 'Accepted' && q.canConvert ? (
                   <button type="button" className="btn sm primary" disabled={convert.isPending || convert.isSuccess} onClick={convertToProject}>

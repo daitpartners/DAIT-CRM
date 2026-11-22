@@ -107,7 +107,8 @@ test('Convert an accepted quotation: the project at net value, on the list, the 
   await expect(page.getByText(new RegExp(`^Project PRJ-\\d+ created from ${q.number}$`))).toBeVisible();
   const project = (await api()).project!;
   expect(project.name).toBe(`Advisory services for ${company}`);
-  const link = page.getByRole('link', { name: `${project.number} · ${project.name}` });
+  const link = page.getByRole('link', { name: `Project ${project.number}` });
+  await expect(link).toHaveClass(/\bbadge b-ok\b/);
   await expect(link).toHaveAttribute('href', `/projects?company=${lead.companyId}`);
   await expect(page.getByRole('button', { name: 'Convert to project' })).toHaveCount(0);
 
