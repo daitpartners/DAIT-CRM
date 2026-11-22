@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { isClosedStatus, safeUrl } from '@dait-crm/shared';
 import { useLeadAction, useRefreshWhenOutOfDate, type LeadFull } from '../../api/leads';
 import { useLookupText } from '../../api/queries';
+import { Icons } from '../../components/Icons';
 import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
 import { verificationBadge, verificationText } from '../../i18n/labels';
@@ -155,27 +156,45 @@ function CompanyCard({ lead }: { lead: LeadFull }) {
   );
 }
 
-/** Next follow-up and the open tasks, soonest first. */
+/**
+ * Next follow-up and the open tasks, soonest first. A call or meeting shows as the prototype's calendar events: the
+ * calendar icon, date and start time, linking to that week of the Calendar; a timed follow-up shows its time.
+ */
 function ComingUp({ lead }: { lead: LeadFull }) {
   const t = useT();
   const { day } = useFormatDate();
   const items = [
-    ...(lead.nextFollowUp ? [{ key: 'fu', title: t('Follow-up · {number}', { number: lead.number }), due: lead.nextFollowUp, over: lead.isOverdue }] : []),
+    ...(lead.nextFollowUp ? [{ key: 'fu', title: t('Follow-up · {number}', { number: lead.number }), due: lead.nextFollowUp, time: null, event: false, over: lead.isOverdue }] : []),
     ...lead.tasks
       .filter((task) => task.origin !== 'follow_up' || task.dueDate !== lead.nextFollowUp)
-      .map((task) => ({ key: `t${task.id}`, title: task.title, due: task.dueDate, over: task.isOverdue })),
-  ].sort((a, b) => a.due.localeCompare(b.due));
+      .map((task) => ({ key: `t${task.id}`, title: task.title, due: task.dueDate, time: task.dueTime, event: task.kind !== 'followup', over: task.isOverdue })),
+  ].sort((a, b) => a.due.localeCompare(b.due) || (a.time ?? '99').localeCompare(b.time ?? '99'));
   if (items.length === 0) return null;
   return (
     <section className="card side-card" aria-labelledby="lead-up-title">
       <h2 id="lead-up-title">{t('Coming up')}</h2>
       <ul className="up-list">
-        {items.map((i) => (
-          <li key={i.key} className="link">
-            <span>{i.title}</span>
-            <span className={i.over ? 'overdue' : 'dim'}>{day(i.due)}</span>
-          </li>
-        ))}
+        {items.map((i) => {
+          const when = <span className={i.over ? 'overdue' : 'dim'}>{day(i.due) + (i.time ? ` ${i.time}` : '')}</span>;
+          return (
+            <li key={i.key}>
+              {i.event ? (
+                <Link className="link" to={`/calendar?view=week&d=${i.due}`}>
+                  <span>
+                    <span className="up-ic">{Icons.calendar}</span>
+                    {i.title}
+                  </span>
+                  {when}
+                </Link>
+              ) : (
+                <div className="link">
+                  <span>{i.title}</span>
+                  {when}
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </section>
   );
