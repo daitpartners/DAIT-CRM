@@ -1,13 +1,16 @@
 import { Fragment, useState, type ReactNode } from 'react';
-import { defaultQuotationEmailBody, formatMoney } from '@dait-crm/shared';
+import { defaultQuotationEmailBody, formatMoney, type Lang } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
 import { useQuotationAction, type QuotationDetail } from '../../api/quotations';
-import { useCurrentUser } from '../../api/useCurrentUser';
 import { FormField } from '../../components/FormField';
 import { Modal } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
 import { errorText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
+
+const PDF_LANGS: readonly string[] = ['en', 'es', 'fr'];
+/** The PDF language from the owner's (en / es / fr, else en), as the API's pdfLang. */
+const pdfLang = (language: string | null | undefined): Lang => (PDF_LANGS.includes(language ?? '') ? (language as Lang) : 'en');
 
 /** A placeholder value that `withBold` turns into a bold part (pass `bold('status')` as the phrase's `{status}`). */
 export const bold = (key: string) => `\u0000${key}\u0000`;
@@ -28,13 +31,13 @@ export function withBold(text: string, parts: Record<string, string>): ReactNode
 export function SendQuotationModal({ q, total, onClose }: { q: QuotationDetail; total: number; onClose: () => void }) {
   const t = useT();
   const toast = useToast();
-  const me = useCurrentUser();
   const send = useQuotationAction(q.id);
-  const [message, setMessage] = useState(() => defaultQuotationEmailBody(q, me.language));
+  // In the quotation owner's language, as the PDF and the server's default (not the sender's).
+  const [message, setMessage] = useState(() => defaultQuotationEmailBody(q, pdfLang(q.owner.language)));
 
   function go() {
     send.mutate(
-      { kind: 'send', body: message.trim() || undefined },
+      { kind: 'send', body: message.trim() || undefined, updatedAt: q.updatedAt },
       {
         onSuccess: () => {
           onClose();

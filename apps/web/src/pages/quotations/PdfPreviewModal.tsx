@@ -2,13 +2,24 @@ import { Modal } from '../../components/Modal';
 import { useT } from '../../i18n/useT';
 import type { QuotationDetail } from '../../api/quotations';
 
+type PreviewOf = Pick<QuotationDetail, 'id' | 'number' | 'revision' | 'editingNewRevision' | 'revisions'>;
+
+/**
+ * The PDF a send would attach: revision n's frozen snapshot when it was sent and is not being edited (a send without
+ * edits re-sends it as first sent), else the working copy.
+ */
+export function previewPdfUrl(q: PreviewOf): string {
+  const sent = !q.editingNewRevision && q.revisions.some((r) => r.revisionNo === q.revision);
+  return `/api/quotations/${q.id}/pdf${sent ? `?rev=${q.revision}` : ''}`;
+}
+
 /**
  * Preview PDF (prototype V.quoteEditor preview dialog): the PDF the API draws, the same file that is emailed, shown
  * in the dialog with Close and Download (the prototype's "Print / Save as PDF").
  */
-export function PdfPreviewModal({ q, onClose }: { q: Pick<QuotationDetail, 'id' | 'number' | 'revision'>; onClose: () => void }) {
+export function PdfPreviewModal({ q, onClose }: { q: PreviewOf; onClose: () => void }) {
   const t = useT();
-  const src = `/api/quotations/${q.id}/pdf`;
+  const src = previewPdfUrl(q);
   return (
     <Modal
       title={t('Quotation {number}', { number: q.number })}

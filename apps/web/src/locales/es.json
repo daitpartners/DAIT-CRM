@@ -1433,6 +1433,7 @@
   "Subtotal": "Subtotal",
   "That status change is not available": "Ese cambio de estado no está disponible",
   "The PDF is too large to email. Shorten the quotation and try again.": "El PDF es demasiado grande para enviarlo por correo. Acorta el presupuesto e inténtalo de nuevo.",
+  "The quotation total is too large. Lower the amounts and try again.": "El total del presupuesto es demasiado alto. Reduce los importes y vuelve a intentarlo.",
   "This quotation has unsent changes. Reload and try again.": "Este presupuesto tiene cambios sin enviar. Recarga e inténtalo de nuevo.",
   "This quotation is being sent. Try again when it has gone.": "Este presupuesto se está enviando. Inténtalo de nuevo cuando se haya enviado.",
   "This quotation is closed and can no longer be changed": "Este presupuesto está cerrado y ya no se puede modificar",

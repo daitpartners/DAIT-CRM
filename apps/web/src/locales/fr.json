@@ -1433,6 +1433,7 @@
   "Subtotal": "Sous-total",
   "That status change is not available": "Ce changement de statut n'est pas disponible",
   "The PDF is too large to email. Shorten the quotation and try again.": "Le PDF est trop volumineux pour être envoyé par e-mail. Raccourcissez le devis et réessayez.",
+  "The quotation total is too large. Lower the amounts and try again.": "Le total du devis est trop élevé. Réduisez les montants et réessayez.",
   "This quotation has unsent changes. Reload and try again.": "Ce devis contient des modifications non envoyées. Rechargez et réessayez.",
   "This quotation is being sent. Try again when it has gone.": "Ce devis est en cours d'envoi. Réessayez une fois qu'il est parti.",
   "This quotation is closed and can no longer be changed": "Ce devis est clôturé et ne peut plus être modifié",

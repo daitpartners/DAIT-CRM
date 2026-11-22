@@ -321,6 +321,8 @@ export function errorText(t: TFn, code: string, vars: Record<string, string | nu
       return t('Choose a contact with an email address before sending');
     case 'pdf_too_large':
       return t('The PDF is too large to email. Shorten the quotation and try again.');
+    case 'total_too_large':
+      return t('The quotation total is too large. Lower the amounts and try again.');
     case 'invalid_transition':
       return t('That status change is not available');
     default:

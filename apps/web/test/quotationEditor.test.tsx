@@ -407,9 +407,29 @@ describe('Quotation editor (prototype V.quoteEditor)', () => {
     await userEvent.clear(message);
     await userEvent.type(message, 'Hello Tom');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
-    await waitFor(() => expect(calls.find((c) => c.url === '/api/quotations/7/send')?.body).toEqual({ body: 'Hello Tom' }));
+    await waitFor(() => expect(calls.find((c) => c.url === '/api/quotations/7/send')?.body).toEqual({ body: 'Hello Tom', updatedAt: '2026-11-20T09:00:00.000Z' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(await screen.findByRole('button', { name: 'Sending…' })).toBeDisabled();
+  });
+
+  it('the send dialog\'s default message is in the quotation owner\'s language (as the PDF), not the sender\'s', async () => {
+    stub(detail({ owner: { id: 3, name: 'Carlos Torres', language: 'es' } }), undefined, admin);
+    mount(admin);
+    await userEvent.click(await screen.findByRole('button', { name: 'Send by email' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Send Q-2026-007 by email' });
+    expect((within(dialog).getByLabelText('Message') as HTMLTextAreaElement).value).toContain('Adjuntamos el presupuesto Q-2026-007 (revisión 1)');
+  });
+
+  it('a send refused as stale (changed since the dialog opened) toasts and sends nothing more', async () => {
+    const calls = stub(detail(), (c) => (c.url.endsWith('/send') ? Response.json({ error: 'stale' }, { status: 409 }) : undefined));
+    mount();
+    await userEvent.click(await screen.findByRole('button', { name: 'Send by email' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Send Q-2026-007 by email' });
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
+    expect(await screen.findByText('Someone else changed this record. Reload and try again.')).toBeTruthy();
+    expect(calls.filter((c) => c.url.endsWith('/send'))).toEqual([
+      expect.objectContaining({ body: expect.objectContaining({ updatedAt: '2026-11-20T09:00:00.000Z' }) }),
+    ]);
   });
 
   it('while sending the editor is read-only and shows "Sending…"', async () => {
@@ -432,6 +452,37 @@ describe('Quotation editor (prototype V.quoteEditor)', () => {
     expect(within(dialog).getByRole('link', { name: 'Download' })).toHaveAttribute('download', 'Q-2026-007-rev1.pdf');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('Preview PDF of a sent revision with no edits shows that frozen revision (what a send would attach)', async () => {
+    const rev = { revisionNo: 1, sentAt: '2026-11-20T10:00:00.000Z', sentTo: 'tom@meridian.example', subtotal: 1000, discountTotal: 0, taxTotal: 180, grandTotal: 1180, note: 'Sent by email as PDF', currency: 'INR' as const };
+    stub(detail({ status: 'Sent', revisions: [rev] }));
+    mount();
+    await userEvent.click(await screen.findByRole('button', { name: 'Preview PDF' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Quotation Q-2026-007' });
+    expect(dialog.querySelector('iframe')).toHaveAttribute('src', '/api/quotations/7/pdf?rev=1#toolbar=0&navpanes=0&view=FitH');
+    expect(within(dialog).getByRole('link', { name: 'Download' })).toHaveAttribute('href', '/api/quotations/7/pdf?rev=1');
+  });
+
+  it('Preview PDF while revision n+1 is being edited shows the working copy', async () => {
+    const rev = { revisionNo: 1, sentAt: '2026-11-20T10:00:00.000Z', sentTo: 'tom@meridian.example', subtotal: 1000, discountTotal: 0, taxTotal: 180, grandTotal: 1180, note: 'Sent by email as PDF', currency: 'INR' as const };
+    stub(detail({ status: 'Sent', revision: 2, editingNewRevision: true, revisions: [rev] }));
+    mount();
+    await userEvent.click(await screen.findByRole('button', { name: 'Preview PDF' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Quotation Q-2026-007' });
+    expect(within(dialog).getByRole('link', { name: 'Download' })).toHaveAttribute('href', '/api/quotations/7/pdf');
+    expect(within(dialog).getByRole('link', { name: 'Download' })).toHaveAttribute('download', 'Q-2026-007-rev2.pdf');
+  });
+
+  it('a save over the total cap (GST included) says so and keeps the typing', async () => {
+    stub(detail(), (c) => (c.method === 'PATCH'
+      ? Response.json({ error: 'validation', issues: [{ path: ['lines'], message: 'total_too_large' }] }, { status: 400 })
+      : undefined));
+    mount();
+    await screen.findByDisplayValue('Consulting services');
+    fireEvent.change(screen.getByDisplayValue('Consulting services'), { target: { value: 'Programme' } });
+    expect(await screen.findByText('The quotation total is too large. Lower the amounts and try again.', {}, { timeout: 4000 })).toBeTruthy();
+    expect(screen.getByDisplayValue('Programme')).toBeTruthy();
   });
 
   it('clearing the lead hides the quotation from this user: treated as saved', async () => {

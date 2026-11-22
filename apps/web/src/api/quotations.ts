@@ -88,7 +88,9 @@ export type QuotationRevision = {
  * list shows (the last sent revision while revision n+1 is unsent). `canEdit` = not locked, not sending, and the user
  * may edit it; `sending` = a send is queued and the editor is read-only until it settles.
  */
-export type QuotationDetail = Pick<QuotationListItem, 'id' | 'number' | 'status' | 'revision' | 'editingNewRevision' | 'lead' | 'owner'> & {
+export type QuotationDetail = Pick<QuotationListItem, 'id' | 'number' | 'status' | 'revision' | 'editingNewRevision' | 'lead'> & {
+  /** `language`: the owner's, in which the PDF and the send dialog's default message are written. */
+  owner: QuotationListItem['owner'] & { language?: string | null };
   company: QuotationListItem['company'] & { country?: string | null };
   contact: { id: number; name: string; email: string | null } | null;
   locked: boolean;
@@ -150,7 +152,8 @@ export function patchQuotation(id: number, body: QuotationUpdate) {
 export type QuotationAction =
   | { kind: 'negotiate' }
   | { kind: 'accept' | 'reject'; discardUnsent?: boolean }
-  | { kind: 'send'; body?: string }
+  /** `updatedAt`: the version the send dialog was opened on (409 `stale` when the quotation changed since). */
+  | { kind: 'send'; body?: string; updatedAt: string }
   | { kind: 'duplicate' };
 
 /** Negotiating / accept / reject / send / duplicate. The answer is the quotation (for duplicate: the new Draft). */
@@ -158,7 +161,7 @@ export function useQuotationAction(id: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (a: QuotationAction) => {
-      const body = a.kind === 'accept' || a.kind === 'reject' ? (a.discardUnsent ? { discardUnsent: true } : {}) : a.kind === 'send' ? (a.body ? { body: a.body } : {}) : undefined;
+      const body = a.kind === 'accept' || a.kind === 'reject' ? (a.discardUnsent ? { discardUnsent: true } : {}) : a.kind === 'send' ? { ...(a.body ? { body: a.body } : {}), updatedAt: a.updatedAt } : undefined;
       return api<QuotationDetail>(`/api/quotations/${id}/${a.kind}`, { method: 'POST', body });
     },
     onSuccess: (q, a) => {

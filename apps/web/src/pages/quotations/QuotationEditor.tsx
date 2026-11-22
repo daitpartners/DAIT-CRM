@@ -196,7 +196,9 @@ function Editor({ q, crumb, refetch }: { q: QuotationDetail; crumb: React.ReactN
       void invalidateAfterQuotationWrite(qc, res.id);
       return edits.current === seq;
     } catch (err) {
-      const errCode = err instanceof ApiError ? err.code : 'unknown';
+      // A total over what the money columns hold (GST included) is a validation issue with its own message.
+      const tooLarge = err instanceof ApiError && !!err.issues?.some((i) => i.message === 'total_too_large');
+      const errCode = tooLarge ? 'total_too_large' : err instanceof ApiError ? err.code : 'unknown';
       if (!RELOAD_ON.has(errCode) && !(err instanceof ApiError && err.status === 404)) {
         // Anything else (network, validation, server error): the user's typing stays on screen, still unsaved, and is
         // tried again with the next edit or on leaving.
