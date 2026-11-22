@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { Prisma, type EmailMessage, type Lead } from '@prisma/client';
-import { LeadCreate, MailCompose, MailLink, MailRead, MailReply, can, checkDomain, domainOf, isFreeMail } from '@dait-crm/shared';
+import { LeadCreate, MailCompose, MailLink, MailListQuery, MailRead, MailReply, can, checkDomain, domainOf, isFreeMail, pageArgs } from '@dait-crm/shared';
 import { audit } from '../audit.js';
 import { enqueue } from '../jobs/queue.js';
 import type { MailActionPayload } from '../jobs/types.js';
@@ -10,7 +10,7 @@ import { findCompanyMatches } from '../companies/match.js';
 import { isUniqueViolation } from '../prismaErrors.js';
 import { prisma } from '../db.js';
 import { requireRight, type AuthUser } from '../plugins/auth.js';
-import { NotFoundError, parseBody } from '../validate.js';
+import { NotFoundError, parseBody, parseQuery } from '../validate.js';
 import { assertLeadVisible, canSeeLead, leadWhere } from '../leads/visibility.js';
 import { assertCompanyVisible } from '../companies/visibility.js';
 import { matchMail } from '../mail/match.js';
@@ -22,8 +22,7 @@ type Tx = Prisma.TransactionClient;
 
 const VIEWS = ['inbox', 'sent', 'drafts', 'archive', 'unlinked', 'awaiting', 'mine'] as const;
 type View = (typeof VIEWS)[number];
-const LIST_MAX = 200;
-/** Upper bound on Awaiting reply candidates; the list's own cap applies after the other filters. */
+/** Upper bound on Awaiting reply candidates; paging applies after the other filters. */
 const AWAITING_MAX = 5000;
 const PREVIEW = 120;
 const DAY_MS = 86_400_000;
@@ -191,9 +190,10 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
     });
   });
 
-  app.get<{ Querystring: { view?: string; company?: string; lead?: string; s?: string } }>('/mail', pre, async (request) => {
+  // The message list, paged (owner, 22 Nov 2026): every filter applies first, `total` counts what they leave.
+  app.get('/mail', pre, async (request) => {
     const user = request.user!;
-    const q = request.query;
+    const q = parseQuery(MailListQuery, request.query);
     const view: View = (VIEWS as readonly string[]).includes(q.view ?? '') ? (q.view as View) : 'inbox';
     const and: Prisma.EmailMessageWhereInput[] = [{ userId: user.id }];
     if (view === 'unlinked') and.push(unlinkedWhere(user));
@@ -206,15 +206,22 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
     if (q.lead && Number.isInteger(lead)) and.push({ leadId: lead });
     const s = q.s?.trim().slice(0, 200);
     if (s) and.push({ id: { in: await searchIds(user.id, s) } });
-    const rows = await prisma.emailMessage.findMany({
-      where: { AND: and }, include: { lead: { select: { id: true, number: true } } }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: LIST_MAX,
-    });
+    const where = { AND: and };
+    const [rows, total] = await Promise.all([
+      prisma.emailMessage.findMany({
+        where, include: { lead: { select: { id: true, number: true } } }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], ...pageArgs(q),
+      }),
+      prisma.emailMessage.count({ where }),
+    ]);
     // A lead the user can no longer see (moved to someone else) is not shown: no id, no number.
     const leadIds = [...new Set(rows.flatMap((m) => (m.leadId ? [m.leadId] : [])))];
     const visible = new Set(leadIds.length
       ? (await prisma.lead.findMany({ where: { AND: [{ id: { in: leadIds } }, leadWhere(user, { includeArchived: true })] }, select: { id: true } })).map((l) => l.id)
       : []);
-    return { items: rows.map((m) => listItem(m.leadId && !visible.has(m.leadId) ? { ...m, leadId: null, lead: null } : m)) };
+    return {
+      items: rows.map((m) => listItem(m.leadId && !visible.has(m.leadId) ? { ...m, leadId: null, lead: null } : m)),
+      total, page: q.page, pageSize: q.pageSize,
+    };
   });
 
   app.get('/mail/meta', pre, async (request) => {

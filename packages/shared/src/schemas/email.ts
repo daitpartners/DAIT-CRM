@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PagingQuery } from './paging.js';
 
 /** `PATCH /mailboxes/:id` (prototype "Mailbox options"); every field optional. */
 export const MailboxOptions = z.object({
@@ -62,6 +63,19 @@ export type MailCompose = z.infer<typeof MailCompose>;
 /** `POST /mail/:id/reply` (release 2B-2): to the sender (or the original recipients of your own message). */
 export const MailReply = z.object({ cc: mailCc, body: mailBody });
 export type MailReply = z.infer<typeof MailReply>;
+
+/**
+ * `GET /mail` (Email screen list; paged at the owner's request, 22 Nov 2026): 50 a page, at most 100 as other lists.
+ * An unknown view or a non-numeric client/lead is ignored rather than refused, as before paging.
+ */
+export const MailListQuery = PagingQuery.pick({ page: true, pageSize: true }).extend({
+  pageSize: z.coerce.number().int().min(1).max(100).default(50),
+  view: z.string().optional(),
+  company: z.string().optional(),
+  lead: z.string().optional(),
+  s: z.string().optional(),
+});
+export type MailListQuery = z.infer<typeof MailListQuery>;
 
 /** `POST /mail/:id/read`. */
 export const MailRead = z.object({ isRead: z.boolean() });

@@ -617,6 +617,10 @@ td.nowrap{white-space:nowrap}
 .msglist{flex:1 1 300px;max-width:400px;min-width:0;border-right:1px solid var(--line);background:var(--surface)}
 .msglist-head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--muted)}
 .msglist-head strong{color:var(--text)}
+/* Owner request (22 Nov 2026), not in the prototype: the list's pager, fitted to the narrow column (count above the buttons). */
+.msglist .pager{padding:10px 14px;gap:6px 8px;font-size:12.5px;color:var(--muted);border-top:1px solid var(--line)}
+.msglist .pager>span:first-child{flex-basis:100%}
+.msglist .pager .grow{display:none}
 .msg{display:flex;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line-2);cursor:pointer;color:var(--text);width:100%;text-align:left;text-decoration:none}
 .msg.on{background:var(--tint)}
 .msg.unread .who{font-weight:800}

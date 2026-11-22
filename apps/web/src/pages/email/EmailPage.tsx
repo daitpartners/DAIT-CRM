@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { MAIL_VIEWS, useMailList, useMailMeta, useSyncNow, type MailFilter, type MailItem, type MailView } from '../../api/mail';
+import { MAIL_PAGE_SIZE, MAIL_VIEWS, useMailList, useMailMeta, useSyncNow, type MailFilter, type MailItem, type MailView } from '../../api/mail';
 import { useTemplates } from '../../api/templates';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Icons } from '../../components/Icons';
+import { Pager } from '../../components/Pager';
 import { Topbar } from '../../components/Topbar';
 import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
@@ -41,16 +42,19 @@ export function EmailPage() {
   const { id } = useParams();
   const [params, setParams] = useSearchParams();
   const view: MailView = (MAIL_VIEWS as readonly string[]).includes(params.get('folder') ?? '') ? (params.get('folder') as MailView) : 'inbox';
-  const filter: MailFilter = { view, company: num(params.get('company')), lead: num(params.get('lead')), s: params.get('s') ?? undefined };
+  const page = Math.max(1, num(params.get('page')) ?? 1);
+  const filter: MailFilter = { view, company: num(params.get('company')), lead: num(params.get('lead')), s: params.get('s') ?? undefined, page };
   const { data: meta } = useMailMeta();
   const { data: list, isLoading } = useMailList(filter);
   const { data: templates } = useTemplates();
   const sync = useSyncNow();
   const [compose, setCompose] = useState<ComposeStart | null>(null);
   const [search, setSearch] = useState(filter.s ?? '');
+  const listRef = useRef<HTMLElement>(null);
   useEffect(() => setSearch(params.get('s') ?? ''), [params]);
 
-  const items = list ?? [];
+  const items = list?.items ?? [];
+  const total = list?.total ?? 0;
   const selectedId = num(id ?? null) ?? items[0]?.id ?? null;
   const mailbox = meta?.mailbox ?? null;
   const connected = mailbox?.status === 'connected';
@@ -60,9 +64,13 @@ export function EmailPage() {
     [templates, lang],
   );
 
-  /** Same screen with some query values changed (selection kept only when asked). */
+  /**
+   * Same screen with some query values changed (selection kept only when asked). A change of folder, filter or
+   * search goes back to page 1, as the other lists; a change with nothing in it keeps the page.
+   */
   const href = (change: Record<string, string | undefined>, keepId = false) => {
     const q = new URLSearchParams(params);
+    if (!('page' in change) && Object.keys(change).length) q.delete('page');
     for (const [k, v] of Object.entries(change)) {
       if (v) q.set(k, v);
       else q.delete(k);
@@ -71,6 +79,14 @@ export function EmailPage() {
     return `/email${keepId && id ? `/${id}` : ''}${s ? `?${s}` : ''}`;
   };
   const setQuery = (change: Record<string, string | undefined>) => navigate(href(change));
+
+  // A page past the end (old link, or the last messages archived): go to the last page that has messages.
+  useEffect(() => {
+    if (!list || list.items.length > 0 || list.total === 0) return;
+    const last = Math.ceil(list.total / list.pageSize);
+    if (list.page > last) navigate(href({ page: last > 1 ? String(last) : undefined }, true), { replace: true });
+    // Only new data should trigger this.
+  }, [list]);
 
   const folder = (v: MailView, count?: number, hot = false) => (
     <Link key={v} className={view === v ? 'fold on' : 'fold'} to={href({ folder: v === 'inbox' ? undefined : v })}>
@@ -219,9 +235,9 @@ export function EmailPage() {
           </Link>
         </nav>
 
-        <section className="msglist" aria-label={t('Message list')}>
+        <section className="msglist" aria-label={t('Message list')} ref={listRef}>
           <div className="msglist-head">
-            <strong>{viewLabel(t, view)}</strong> · {items.length}
+            <strong>{viewLabel(t, view)}</strong> · {total}
             {companyName ? ` · ${companyName}` : ''}
             {leadNumber ? ` · ${leadNumber}` : ''}
           </div>
@@ -232,6 +248,19 @@ export function EmailPage() {
             <div className="empty">
               {filter.company || filter.lead ? t('No messages for this filter in {folder}.', { folder: viewLabel(t, view) }) : t('Nothing here.')}
             </div>
+          ) : null}
+          {/* Owner request (22 Nov 2026), not in the prototype: the list pages 50 at a time. */}
+          {list && list.total > MAIL_PAGE_SIZE ? (
+            <Pager
+              page={list.page}
+              pageSize={list.pageSize}
+              total={list.total}
+              onPage={(p) => {
+                setQuery({ page: p > 1 ? String(p) : undefined });
+                // The pager sits under 50 rows: show the new page from its top.
+                listRef.current?.scrollIntoView?.({ block: 'start' });
+              }}
+            />
           ) : null}
         </section>
 

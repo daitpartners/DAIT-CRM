@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { EmailPage } from '../src/pages/email/EmailPage';
 import type { MailDetail, MailItem, MailMeta } from '../src/api/mail';
 import { ToastProvider } from '../src/components/Toast';
@@ -44,7 +44,7 @@ function stub(items: MailItem[], details: Record<number, MailDetail>, meta: Mail
       posts.push({ url, body: init.body ? JSON.parse(String(init.body)) : undefined });
       return Response.json({ id: 99, leadId: 5 }, { status: 201 });
     }
-    if (url.startsWith('/api/mail?')) return Response.json({ items });
+    if (url.startsWith('/api/mail?')) return Response.json({ items, total: items.length, page: 1, pageSize: 50 });
     if (url === '/api/mail/meta') return Response.json(meta);
     const m = /^\/api\/mail\/(\d+)(\?peek=1)?$/.exec(url);
     if (m) return Response.json(details[Number(m[1])]);
@@ -56,6 +56,12 @@ function stub(items: MailItem[], details: Record<number, MailDetail>, meta: Mail
     return Response.json({});
   }));
   return posts;
+}
+
+/** The current address, for asserting what the screen put in the URL. */
+function Where() {
+  const loc = useLocation();
+  return <output data-testid="where">{loc.pathname + loc.search}</output>;
 }
 
 function show(path = '/email', user: Me = me, setup?: (qc: ReturnType<typeof makeClient>) => void) {
@@ -71,6 +77,7 @@ function show(path = '/email', user: Me = me, setup?: (qc: ReturnType<typeof mak
                 <Route path="/email" element={<EmailPage />} />
                 <Route path="/email/:id" element={<EmailPage />} />
               </Routes>
+              <Where />
             </MemoryRouter>
           </ConfirmProvider>
         </ToastProvider>
@@ -242,6 +249,100 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     await waitFor(() => expect(row.className).not.toMatch(/\bunread\b/));
     const folders = screen.getByRole('navigation', { name: 'Mail folders' });
     await waitFor(() => expect(within(folders).getByRole('link', { name: /Inbox\s*2/ })).toBeTruthy());
+  });
+
+  describe('pagination (owner, 22 Nov 2026)', () => {
+    /** 120 inbox messages, served 50 a page like the API; records every list request. */
+    function paged() {
+      const all = Array.from({ length: 120 }, (_, i) => item({ id: i + 1, subject: `Message ${i + 1}`, isRead: true }));
+      const lists: URLSearchParams[] = [];
+      stub([], { 1: detail(all[0]!), 51: detail(all[50]!) }, META, (url) => {
+        if (!url.startsWith('/api/mail?')) return undefined;
+        const q = new URL(url, 'http://x').searchParams;
+        lists.push(q);
+        const page = Number(q.get('page') ?? 1);
+        const rows = q.get('view') === 'inbox' ? all : [];
+        return { items: rows.slice((page - 1) * 50, page * 50), total: rows.length, page, pageSize: 50 };
+      });
+      return lists;
+    }
+    const where = () => screen.getByTestId('where').textContent;
+
+    it('shows the pager under the list, the header counts the total, Next asks for page 2 and keeps it in the URL', async () => {
+      const u = userEvent.setup();
+      const lists = paged();
+      show();
+      const list = screen.getByRole('region', { name: 'Message list' });
+      expect(await within(list).findByText('Message 1')).toBeTruthy();
+      expect(within(list).getByText(/Inbox/).parentElement!.textContent).toMatch(/Inbox · 120/);
+      expect(lists.at(-1)!.get('pageSize')).toBe('50');
+      const pager = within(list).getByRole('navigation', { name: 'Pagination' });
+      expect(within(pager).getByText('Showing 1–50 of 120')).toBeTruthy();
+      await u.click(within(pager).getByRole('button', { name: 'Next' }));
+      expect(await within(list).findByText('Message 51')).toBeTruthy();
+      expect(lists.at(-1)!.get('page')).toBe('2');
+      expect(where()).toBe('/email?page=2');
+      // The first message of the current page is shown on arrival.
+      expect(within(list).getByText('Message 51').closest('a')!.getAttribute('aria-current')).toBe('true');
+      // Opening a message keeps the page.
+      expect(within(list).getByText('Message 52').closest('a')!.getAttribute('href')).toBe('/email/52?page=2');
+    });
+
+    it('a folder, Client / Lead filter or search goes back to page 1', async () => {
+      const u = userEvent.setup();
+      const lists = paged();
+      show('/email?page=3');
+      const list = screen.getByRole('region', { name: 'Message list' });
+      expect(await within(list).findByText('Message 101')).toBeTruthy();
+      expect(lists.at(-1)!.get('page')).toBe('3');
+      const folders = screen.getByRole('navigation', { name: 'Mail folders' });
+      expect(within(folders).getByRole('link', { name: 'Sent' }).getAttribute('href')).toBe('/email?folder=sent');
+      await u.selectOptions(screen.getByRole('combobox', { name: 'Client / company' }), '4');
+      await waitFor(() => expect(where()).toBe('/email?company=4'));
+      await waitFor(() => expect(lists.at(-1)!.get('page')).toBeNull());
+    });
+
+    it('a search goes back to page 1', async () => {
+      const u = userEvent.setup();
+      paged();
+      show('/email?page=2');
+      expect(await screen.findByText('Message 51')).toBeTruthy();
+      await u.type(screen.getByRole('searchbox', { name: 'Search mail' }), 'quote{Enter}');
+      await waitFor(() => expect(where()).toBe('/email?s=quote'));
+    });
+
+    it('a page past the end goes to the last page', async () => {
+      paged();
+      show('/email?page=9');
+      expect(await screen.findByText('Message 101')).toBeTruthy();
+      expect(where()).toBe('/email?page=3');
+    });
+
+    it('no pager when everything fits on one page', async () => {
+      const a = item();
+      stub([a, item({ id: 2 })], { 1: detail(a) });
+      show();
+      const list = screen.getByRole('region', { name: 'Message list' });
+      expect(await within(list).findAllByText('Proposal')).toHaveLength(2);
+      expect(within(list).getByText(/Inbox/).parentElement!.textContent).toMatch(/Inbox · 2/);
+      expect(within(list).queryByRole('navigation', { name: 'Pagination' })).toBeNull();
+    });
+
+    it('opening an unread message on page 2 clears its bold at once', async () => {
+      const u = userEvent.setup();
+      const all = Array.from({ length: 60 }, (_, i) => item({ id: i + 1, subject: `Message ${i + 1}`, isRead: i !== 55 }));
+      stub([], { 51: detail(all[50]!), 56: detail({ ...all[55]!, isRead: true }) }, META, (url) => {
+        if (!url.startsWith('/api/mail?')) return undefined;
+        const page = Number(new URL(url, 'http://x').searchParams.get('page') ?? 1);
+        return { items: all.slice((page - 1) * 50, page * 50), total: 60, page, pageSize: 50 };
+      });
+      show('/email?page=2');
+      const list = screen.getByRole('region', { name: 'Message list' });
+      const row = (await within(list).findByText('Message 56')).closest('a')!;
+      expect(row.className).toMatch(/\bunread\b/);
+      await u.click(row);
+      await waitFor(() => expect(row.className).not.toMatch(/\bunread\b/));
+    });
   });
 
   it('compose lead option shows translated status and source', async () => {

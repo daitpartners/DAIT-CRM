@@ -6,7 +6,13 @@ import { keys } from './queries';
 export const MAIL_VIEWS = ['inbox', 'sent', 'drafts', 'archive', 'unlinked', 'awaiting', 'mine'] as const;
 export type MailView = (typeof MAIL_VIEWS)[number];
 
-export type MailFilter = { view: MailView; company?: number; lead?: number; s?: string };
+export type MailFilter = { view: MailView; company?: number; lead?: number; s?: string; page?: number };
+
+/** Messages shown a page (owner, 22 Nov 2026: the synced list had grown too long). */
+export const MAIL_PAGE_SIZE = 50;
+
+/** One page of the list; `total` counts every message the filters leave. */
+export type MailPage = { items: MailItem[]; total: number; page: number; pageSize: number };
 
 /** A message in the list (release 2B-2): only ever the signed-in user's own. */
 export type MailItem = {
@@ -57,17 +63,19 @@ const listPath = (f: MailFilter) => {
   if (f.company) q.set('company', String(f.company));
   if (f.lead) q.set('lead', String(f.lead));
   if (f.s) q.set('s', f.s);
+  if (f.page && f.page > 1) q.set('page', String(f.page));
+  q.set('pageSize', String(MAIL_PAGE_SIZE));
   return `/api/mail?${q.toString()}`;
 };
 
 export function useMailList(f: MailFilter, enabled = true) {
   return useQuery({
     queryKey: [...ROOT, 'list', f],
-    queryFn: async () => (await api<{ items: MailItem[] }>(listPath(f))).items,
+    queryFn: () => api<MailPage>(listPath(f)),
     placeholderData: keepPreviousData,
     enabled,
     // New mail arrives with each 5-minute sync; a queued message turns Sent within seconds.
-    refetchInterval: (q) => (q.state.data?.some((m) => m.status === 'queued' || m.status === 'sending') ? 5000 : 60_000),
+    refetchInterval: (q) => (q.state.data?.items.some((m) => m.status === 'queued' || m.status === 'sending') ? 5000 : 60_000),
   });
 }
 
@@ -84,8 +92,11 @@ export function useMailMessage(id: number | null, peek = false) {
       const m = await api<MailDetail>(`/api/mail/${id}${peek ? '?peek=1' : ''}`);
       // Opening marks it read: the row loses its bold at once (no list refetch), the counts change.
       if (!peek) {
-        qc.setQueriesData<MailItem[]>({ queryKey: [...ROOT, 'list'] }, (items) =>
-          items?.some((x) => x.id === id && !x.isRead) ? items.map((x) => (x.id === id ? { ...x, isRead: true } : x)) : items,
+        // Every cached page of every list: the message is on whichever page holds it.
+        qc.setQueriesData<MailPage>({ queryKey: [...ROOT, 'list'] }, (data) =>
+          data?.items.some((x) => x.id === id && !x.isRead)
+            ? { ...data, items: data.items.map((x) => (x.id === id ? { ...x, isRead: true } : x)) }
+            : data,
         );
       }
       void qc.invalidateQueries({ queryKey: [...ROOT, 'meta'] });

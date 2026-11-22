@@ -248,6 +248,45 @@ describe('reading mail on the Email screen (2B-2)', () => {
     expect(res.items.map((i: { id: number }) => i.id)).toEqual([old.id]);
   });
 
+  it('pages the list: 50 newest per page by default, total after filters, ordering kept (owner, 22 Nov 2026)', async () => {
+    const { rep, admin, box, lead, company } = await setup();
+    await prisma.emailMessage.createMany({
+      data: Array.from({ length: 120 }, (_, i) => ({
+        userId: rep.id, accountId: box.id, folder: 'inbox', status: 'received', fromAddress: 'ana@acme.com', subject: `M ${i}`,
+        // Every third message is on the lead; two share each minute so the id breaks the tie.
+        leadId: i % 3 === 0 ? lead.id : null, companyId: i % 3 === 0 ? company.id : null, occurredAt: new Date(Date.UTC(2026, 10, 1, 0, Math.floor(i / 2))),
+      })),
+    });
+    await synced(admin.id, null, { subject: 'Not yours' });
+    const cookie = await signIn(app, rep);
+    const get = async (q: string) => (await call('GET', `/api/mail?${q}`, cookie)).json();
+    const all = await prisma.emailMessage.findMany({ where: { userId: rep.id }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], select: { id: true } });
+    const p1 = await get('view=inbox');
+    expect(p1).toMatchObject({ total: 120, page: 1, pageSize: 50 });
+    expect(p1.items.map((i: { id: number }) => i.id)).toEqual(all.slice(0, 50).map((m) => m.id));
+    const p2 = await get('view=inbox&page=2');
+    expect(p2.items.map((i: { id: number }) => i.id)).toEqual(all.slice(50, 100).map((m) => m.id));
+    const p3 = await get('view=inbox&page=3');
+    expect(p3).toMatchObject({ total: 120, page: 3, pageSize: 50 });
+    expect(p3.items).toHaveLength(20);
+    expect((await get('view=inbox&page=9')).items).toEqual([]);
+    // Filters come first: 40 on the lead, 25 a page.
+    const f2 = await get(`view=inbox&lead=${lead.id}&page=2&pageSize=25`);
+    expect(f2).toMatchObject({ total: 40, page: 2, pageSize: 25 });
+    expect(f2.items).toHaveLength(15);
+    expect((await get(`view=inbox&company=${company.id}`)).total).toBe(40);
+    expect(await get('view=inbox&s=M 11')).toMatchObject({ total: 11 }); // M 11, M 110–119
+    expect((await get('view=sent')).total).toBe(0);
+  });
+
+  it('list page size is at most 100, as other lists', async () => {
+    const { rep } = await setup();
+    const cookie = await signIn(app, rep);
+    expect((await call('GET', '/api/mail?view=inbox&pageSize=101', cookie)).statusCode).toBe(400);
+    expect((await call('GET', '/api/mail?view=inbox&page=0', cookie)).statusCode).toBe(400);
+    expect((await call('GET', '/api/mail?view=inbox&pageSize=100', cookie)).json()).toMatchObject({ items: [], total: 0, page: 1, pageSize: 100 });
+  });
+
   it('meta gives the mailbox, unread and unlinked counts, and the clients and leads in your mail', async () => {
     const { rep, box, lead, company } = await setup();
     await synced(rep.id, box.id, { leadId: lead.id, companyId: company.id });
