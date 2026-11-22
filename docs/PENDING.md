@@ -56,6 +56,16 @@ Kept here at the owner's request; picked up when the owner says so.
   starts with 25 open leads (closed ones filtered on the server); no "0 open items" / "Nothing overdue." flash while
   the calendar loads; Coming up on the lead page shows calls and meetings with the calendar icon, date and time, linking
   to that week; a done call or meeting no longer pushes its "Done" badge out of the Completed card on Tasks.
+- **Fixed in the final review (22 Nov):**
+  - Dashboard: "Meetings today" and "Today's agenda" now work as the prototype, from your own calls, meetings and
+    timed follow-ups for today (CRM tasks only, never Outlook events); the tile shows the next one ("next at 14:00 ·
+    Demo") and links to the Calendar. The calendar no longer says "release 3" (quotations still do).
+  - Planning a call or meeting no longer counts as contact: it still shows on the lead timeline, but not as the lead's
+    "Last contact" nor in the company's Activity summary.
+  - Copied Outlook events show only while "Sync calendar" is on and the mailbox is connected (or needs reconnecting).
+  - The automatic follow-up task (from the lead's follow-up date) keeps its type: Type is greyed out in Edit task and
+    the server refuses a change; its time can still be set.
+  - Outlook events sent in other names for UTC (Etc/UTC, GMT, Coordinated Universal Time, …) are no longer skipped.
 - **Follow-ups (not fixed):**
   - All-day Outlook events may show one day off for users in UTC+12 to +14 (New Zealand, Tonga, Kiribati).
   - Check the first live Outlook sync: compare times and all-day events with Outlook for a couple of users.
@@ -63,7 +73,8 @@ Kept here at the owner's request; picked up when the owner says so.
     built); plan from the Calendar or add a task on the lead.
   - While a mailbox is in error ("needs reconnecting") its old copied Outlook events keep showing until it is fixed,
     switched off or disconnected.
-  - If Microsoft sends an event change in an unexpected time format, the old time shows until the daily full re-sync.
+  - If Microsoft sends an event change in another time zone (not UTC under any of its names), the old time shows until
+    the daily full re-sync.
   - The calendar entry written on the lead timeline when a call or meeting is planned is not in the lead's audit log
     (other notes are).
   - An impossible date typed into the address bar (e.g. 31 Feb) is accepted, as in the prototype.
