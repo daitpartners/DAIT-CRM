@@ -26,7 +26,7 @@ vi.mock('@azure/msal-node', () => ({
 
 import { prisma } from '../src/db';
 import { decrypt, encrypt } from '../src/crypto/tokens';
-import { createGraphClient, deltaStartUrl, GRAPH_MAIL_SCOPES, GRAPH_SEND_SCOPES, GraphError, isAuthFailure } from '../src/graph/client';
+import { calendarDeltaStartUrl, createGraphClient, deltaStartUrl, GRAPH_CALENDAR_SCOPES, GRAPH_MAIL_SCOPES, GRAPH_SEND_SCOPES, GraphError, isAuthFailure } from '../src/graph/client';
 import { resetDb } from './helpers';
 
 const env = { MS_TENANT_ID: 't', MS_CLIENT_ID: 'c', MS_CLIENT_SECRET: 's' };
@@ -193,6 +193,61 @@ describe('graph client — mail sync and actions (2B-2)', () => {
     const fetchMock = vi.fn(async () => json({ value: [] }));
     vi.stubGlobal('fetch', fetchMock);
     const err = await createGraphClient(env).deltaPage(await account(), 'https://evil.example/delta').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test('calendarDeltaStartUrl asks the calendar view delta for a window, with no $select or $filter', () => {
+    const url = new URL(calendarDeltaStartUrl(new Date('2026-10-23T00:00:00.000Z'), new Date('2027-05-21T00:00:00.000Z')));
+    expect(`${url.origin}${url.pathname}`).toBe('https://graph.microsoft.com/v1.0/me/calendarView/delta');
+    expect(url.searchParams.get('startDateTime')).toBe('2026-10-23T00:00:00.000Z');
+    expect(url.searchParams.get('endDateTime')).toBe('2027-05-21T00:00:00.000Z');
+    expect([...url.searchParams.keys()].sort()).toEqual(['endDateTime', 'startDateTime']);
+  });
+
+  test('calendarDeltaPage maps events (UTC times, lower-cased addresses), cancellations, removals and links', async () => {
+    const fetchMock = vi.fn(async () => json({
+      value: [
+        {
+          id: 'ev1', subject: 'Discovery call', isAllDay: false, isCancelled: false, isOnlineMeeting: true,
+          start: { dateTime: '2026-11-25T10:00:00.0000000', timeZone: 'UTC' }, end: { dateTime: '2026-11-25T10:30:00.0000000', timeZone: 'UTC' },
+          location: { displayName: 'Microsoft Teams Meeting' }, organizer: { emailAddress: { name: 'Ana Ruiz', address: 'Ana@Acme.com' } },
+          attendees: [{ type: 'required', emailAddress: { name: 'Maya', address: 'Maya@DaitPartners.com' } }, { type: 'optional', emailAddress: { name: 'x' } }],
+        },
+        { id: 'ev2', subject: null, isAllDay: true, isCancelled: true, start: { dateTime: '2026-11-27T00:00:00.0000000', timeZone: 'UTC' }, end: { dateTime: '2026-11-28T00:00:00.0000000', timeZone: 'UTC' }, location: { displayName: '' } },
+        { id: 'ev3', '@removed': { reason: 'deleted' } },
+      ],
+      '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/me/calendarView/delta?$deltatoken=abc',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const page = await createGraphClient(env).calendarDeltaPage(await account(), 'https://graph.microsoft.com/v1.0/x');
+    expect(page).toEqual({
+      events: [
+        {
+          id: 'ev1', subject: 'Discovery call', startsAt: '2026-11-25T10:00:00.000Z', endsAt: '2026-11-25T10:30:00.000Z', isAllDay: false, isCancelled: false,
+          location: 'Microsoft Teams Meeting', organizer: { name: 'Ana Ruiz', address: 'ana@acme.com' }, attendees: ['maya@daitpartners.com'], isOnline: true,
+        },
+        {
+          id: 'ev2', subject: '', startsAt: '2026-11-27T00:00:00.000Z', endsAt: '2026-11-28T00:00:00.000Z', isAllDay: true, isCancelled: true,
+          location: null, organizer: null, attendees: [], isOnline: false,
+        },
+      ],
+      removed: ['ev3'],
+      nextLink: undefined,
+      deltaLink: 'https://graph.microsoft.com/v1.0/me/calendarView/delta?$deltatoken=abc',
+    });
+    const [url, init] = call(fetchMock);
+    expect(url).toBe('https://graph.microsoft.com/v1.0/x');
+    expect(headers(init).Prefer).toContain('IdType="ImmutableId"');
+    expect(headers(init).Prefer).toContain('odata.maxpagesize=50');
+    expect(headers(init).Prefer).toContain('outlook.timezone="UTC"');
+    expect(msalState.scopes[0]).toEqual(GRAPH_CALENDAR_SCOPES);
+  });
+
+  test('calendarDeltaPage refuses a link that is not Graph', async () => {
+    const fetchMock = vi.fn(async () => json({ value: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const err = await createGraphClient(env).calendarDeltaPage(await account(), 'https://evil.example/delta').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
     expect(fetchMock).not.toHaveBeenCalled();
   });

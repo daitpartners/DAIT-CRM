@@ -1,6 +1,6 @@
-export type JobType = 'send_email' | 'send_user_email' | 'sync_mailbox' | 'mail_action' | 'campaign_step';
+export type JobType = 'send_email' | 'send_user_email' | 'sync_mailbox' | 'mail_action' | 'campaign_step' | 'sync_calendar';
 
-export const JOB_TYPES: readonly JobType[] = ['send_email', 'send_user_email', 'sync_mailbox', 'mail_action', 'campaign_step'];
+export const JOB_TYPES: readonly JobType[] = ['send_email', 'send_user_email', 'sync_mailbox', 'mail_action', 'campaign_step', 'sync_calendar'];
 
 export const JOB_STATUSES = ['queued', 'running', 'done', 'failed'] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
@@ -21,6 +21,11 @@ export interface SendUserEmailPayload {
 
 /** `sync_mailbox` (release 2B-2): read new mail from a personal mailbox. */
 export interface SyncMailboxPayload {
+  accountId: number;
+}
+
+/** `sync_calendar` (release 3C): copy the owner's Outlook calendar from a personal mailbox. */
+export interface SyncCalendarPayload {
   accountId: number;
 }
 

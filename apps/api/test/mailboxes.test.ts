@@ -381,3 +381,45 @@ describe('personal and system mailboxes (release 2A)', () => {
     expect(await prisma.emailAccount.count({ where: { address } })).toBe(2);
   });
 });
+
+describe('Outlook calendar copy on a personal mailbox (release 3C)', () => {
+  async function withEvents() {
+    const a = await app();
+    const rep = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    const box = await prisma.emailAccount.create({
+      data: {
+        address: 'rep@daitpartners.com', provider: 'microsoft', kind: 'personal', userId: rep.id, refreshTokenEnc: encrypt(RAW_TOKEN), status: 'connected',
+        syncCalendar: true, calendarSyncState: { link: 'https://graph.microsoft.com/v1.0/x', userId: rep.id }, calendarSyncAt: new Date(),
+      },
+    });
+    const at = new Date('2026-11-25T10:00:00.000Z');
+    await prisma.calendarEvent.createMany({
+      data: ['e1', 'e2'].map((graphId) => ({ userId: rep.id, accountId: box.id, graphId, subject: 's', startsAt: at, endsAt: at })),
+    });
+    return { a, rep, box, cookie: await signIn(a, rep) };
+  }
+
+  test('switching Sync calendar off deletes the copied events and the sync state; other options keep them', async () => {
+    const { a, box, cookie } = await withEvents();
+    const mail = await a.inject({ method: 'PATCH', url: `/api/mailboxes/${box.id}`, headers: { cookie }, payload: { syncMail: false } });
+    expect(mail.statusCode).toBe(200);
+    expect(await prisma.calendarEvent.count({ where: { accountId: box.id } })).toBe(2);
+
+    const off = await a.inject({ method: 'PATCH', url: `/api/mailboxes/${box.id}`, headers: { cookie }, payload: { syncCalendar: false } });
+    expect(off.statusCode).toBe(200);
+    expect(await prisma.calendarEvent.count({ where: { accountId: box.id } })).toBe(0);
+    const after = await prisma.emailAccount.findUniqueOrThrow({ where: { id: box.id } });
+    expect(after.calendarSyncState).toBeNull();
+    expect(after.calendarSyncAt).toBeNull();
+  });
+
+  test('disconnecting the mailbox deletes the copied events and the sync state', async () => {
+    const { a, box, cookie } = await withEvents();
+    const res = await a.inject({ method: 'POST', url: `/api/mailboxes/${box.id}/disconnect`, headers: { cookie } });
+    expect(res.statusCode).toBe(204);
+    expect(await prisma.calendarEvent.count({ where: { accountId: box.id } })).toBe(0);
+    const after = await prisma.emailAccount.findUniqueOrThrow({ where: { id: box.id } });
+    expect(after.calendarSyncState).toBeNull();
+    expect(after.calendarSyncAt).toBeNull();
+  });
+});

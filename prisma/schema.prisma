@@ -51,6 +51,7 @@ model User {
   assignmentsBy   LeadAssignment[] @relation("AssignmentBy")
   tasks           Task[]
   campaigns       EmailCampaign[]  @relation("CampaignSender")
+  calendarEvents  CalendarEvent[]
 
   @@map("users")
 }
@@ -99,31 +100,37 @@ model AllocationRule {
 }
 
 model EmailAccount {
-  id              Int       @id @default(autoincrement())
-  userId          Int?      @map("user_id")
-  address         String
+  id                Int       @id @default(autoincrement())
+  userId            Int?      @map("user_id")
+  address           String
   /// Mailbox the CRM sends as (a shared mailbox the connecting user has Send-As on); null = `address`.
-  sendAs          String?   @map("send_as")
-  provider        String
-  kind            String
-  refreshTokenEnc String    @map("refresh_token_enc")
-  tokenExpiresAt  DateTime? @map("token_expires_at")
-  status          String
-  lastError       String?   @map("last_error")
+  sendAs            String?   @map("send_as")
+  provider          String
+  kind              String
+  refreshTokenEnc   String    @map("refresh_token_enc")
+  tokenExpiresAt    DateTime? @map("token_expires_at")
+  status            String
+  lastError         String?   @map("last_error")
   /// Release 2A personal mailbox options (prototype "Mailbox options"); sync itself arrives in 2B.
-  syncMail        Boolean   @default(true) @map("sync_mail")
-  syncCalendar    Boolean   @default(false) @map("sync_calendar")
-  sharedMailboxes String[]  @default([]) @map("shared_mailboxes")
-  lastSyncAt      DateTime? @map("last_sync_at")
-  messageCount    Int       @default(0) @map("message_count")
+  syncMail          Boolean   @default(true) @map("sync_mail")
+  syncCalendar      Boolean   @default(false) @map("sync_calendar")
+  sharedMailboxes   String[]  @default([]) @map("shared_mailboxes")
+  lastSyncAt        DateTime? @map("last_sync_at")
+  messageCount      Int       @default(0) @map("message_count")
   /// Release 2B-2 mail sync: per folder `{ link }`, the Graph next or delta link to continue from.
-  syncState       Json      @default("{}") @map("sync_state")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  syncState         Json      @default("{}") @map("sync_state")
+  /// Release 3C calendar sync: `{ link, userId, full?, at }` (Graph link to continue from; `full` while the first
+  /// listing of a restart is still being read; `at` = last completed run).
+  calendarSyncState Json?     @map("calendar_sync_state")
+  /// When the calendar sync last restarted from scratch (daily, to roll the 30/180-day window).
+  calendarSyncAt    DateTime? @map("calendar_sync_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
-  user      User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
-  messages  EmailMessage[]
-  campaigns EmailCampaign[]
+  user           User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  messages       EmailMessage[]
+  campaigns      EmailCampaign[]
+  calendarEvents CalendarEvent[]
 
   /// One system row and at most one personal row per user; the same address may be both (Deepak's).
   @@unique([address, kind])
@@ -184,6 +191,42 @@ model EmailMessage {
   @@index([userId, leadId])
   @@index([userId, folder, occurredAt])
   @@map("email_messages")
+}
+
+/// A copy of one event of a user's Outlook calendar (release 3C), read from their personal mailbox. Private to `userId`
+/// (administrators included); deleted when Sync calendar is switched off or the mailbox disconnected.
+model CalendarEvent {
+  id                Int      @id @default(autoincrement())
+  userId            Int      @map("user_id")
+  accountId         Int      @map("account_id")
+  /// Graph immutable id; unique per user.
+  graphId           String   @map("graph_id") @db.VarChar(255)
+  subject           String   @db.VarChar(500)
+  /// UTC; an all-day event runs from midnight to midnight UTC of its dates (Graph's own representation).
+  startsAt          DateTime @map("starts_at")
+  endsAt            DateTime @map("ends_at")
+  isAllDay          Boolean  @default(false) @map("is_all_day")
+  location          String?  @db.VarChar(500)
+  organizerName     String?  @map("organizer_name") @db.VarChar(255)
+  organizerAddress  String?  @map("organizer_address") @db.VarChar(320)
+  /// Lower-cased attendee addresses (the organiser apart).
+  attendeeAddresses Json     @default("[]") @map("attendee_addresses")
+  isOnline          Boolean  @default(false) @map("is_online")
+  /// An attendee's open lead the user could see when synced (mail matching rules); re-checked when read.
+  leadId            Int?     @map("lead_id")
+  companyId         Int?     @map("company_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account EmailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  lead    Lead?        @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  company Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, graphId])
+  @@index([userId, startsAt])
+  @@index([accountId])
+  @@map("calendar_events")
 }
 
 /// Team email templates (release 2A): written in the CRM or read from an uploaded Outlook .oft (file not kept).
@@ -329,7 +372,8 @@ model Company {
   locations CompanyLocation[]
   leads     Lead[]
 
-  emailMessages EmailMessage[]
+  emailMessages  EmailMessage[]
+  calendarEvents CalendarEvent[]
 
   @@index([name])
   @@index([nameNormalised, country])
@@ -459,6 +503,7 @@ model Lead {
 
   emailMessages      EmailMessage[]
   campaignRecipients EmailCampaignRecipient[]
+  calendarEvents     CalendarEvent[]
 
   @@index([status])
   @@index([assignedToId])

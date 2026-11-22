@@ -9,6 +9,7 @@ import { accountSummary } from '../graph/accounts.js';
 import { staleRunningWhere } from '../jobs/queue.js';
 import { sendSystemEmail } from '../email/system.js';
 import { requestSync } from '../mail/schedule.js';
+import { dropCalendarCopy } from '../calendar/schedule.js';
 
 export const TEST_EMAIL_SUBJECT = 'DAIT CRM test email';
 
@@ -51,6 +52,8 @@ export const mailboxRoutes: FastifyPluginAsync = async (app) => {
     const a = await ownMailbox(request.user!, Number(request.params.id));
     if (!a) return reply.code(404).send({ error: 'not_found' });
     const saved = await prisma.$transaction(async (tx) => {
+      // Sync calendar off (release 3C): the copied Outlook events go with it.
+      if (body.syncCalendar === false) await dropCalendarCopy(tx, a.id);
       const updated = await tx.emailAccount.update({ where: { id: a.id }, data: body, include });
       await audit(tx, {
         entityType: 'email_account', entityId: a.id, action: 'update', userId: request.user!.id,
@@ -62,11 +65,12 @@ export const mailboxRoutes: FastifyPluginAsync = async (app) => {
     return mailboxView(saved);
   });
 
-  /** Stops sending and syncing through the mailbox and deletes its token; mail already linked stays. */
+  /** Stops sending and syncing through the mailbox and deletes its token; mail already linked stays, the calendar copy goes. */
   app.post<{ Params: { id: string } }>('/mailboxes/:id/disconnect', { preHandler: [requireUser] }, async (request, reply) => {
     const a = await ownMailbox(request.user!, Number(request.params.id));
     if (!a) return reply.code(404).send({ error: 'not_found' });
     await prisma.$transaction(async (tx) => {
+      await dropCalendarCopy(tx, a.id);
       const updated = await tx.emailAccount.update({ where: { id: a.id }, data: { status: 'disconnected', refreshTokenEnc: '', tokenExpiresAt: null } });
       await audit(tx, { entityType: 'email_account', entityId: a.id, action: 'update', userId: request.user!.id, before: accountSummary(a), after: accountSummary(updated) });
     });

@@ -5,10 +5,12 @@ import { pruneJobs } from './jobs/queue.js';
 import { sendUserEmailHandler } from './jobs/handlers/sendUserEmail.js';
 import { sendEmailHandler } from './jobs/handlers/sendEmail.js';
 import { syncMailboxHandler } from './jobs/handlers/syncMailbox.js';
+import { syncCalendarHandler } from './jobs/handlers/syncCalendar.js';
 import { mailActionHandler } from './jobs/handlers/mailAction.js';
 import { campaignStepHandler } from './jobs/handlers/campaignStep.js';
 import { scheduleCampaigns } from './mailer/schedule.js';
 import { scheduleMailSync } from './mail/schedule.js';
+import { scheduleCalendarSync } from './calendar/schedule.js';
 
 export { runOnce, runForever } from './jobs/runner.js';
 
@@ -43,7 +45,12 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<void> 
   // Mail sync (release 2B-2): each connected mailbox gets a run queued 5 minutes after its last one.
   const warn = (what: string) => (err: unknown) => console.warn(`worker: ${what} failed: ${err instanceof Error ? err.message : String(err)}`);
   // Mailer (release 2C): scheduled campaigns start, due ones get their next step.
-  const schedule = () => Promise.all([scheduleMailSync().catch(warn('mail schedule')), scheduleCampaigns().catch(warn('mailer schedule'))]);
+  // Calendar (release 3C): each calendar with Sync calendar on is copied 5 minutes after its last run.
+  const schedule = () => Promise.all([
+    scheduleMailSync().catch(warn('mail schedule')),
+    scheduleCampaigns().catch(warn('mailer schedule')),
+    scheduleCalendarSync().catch(warn('calendar schedule')),
+  ]);
   void schedule();
   const scheduler = setInterval(schedule, SCHEDULE_EVERY_MS);
   // Old done / failed job rows are deleted at start and hourly.
@@ -54,8 +61,11 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<void> 
   console.log('worker: started');
   try {
     await runForever({
-      types: ['send_email', 'send_user_email', 'sync_mailbox', 'mail_action', 'campaign_step'],
-      handlers: { send_email: sendEmailHandler, send_user_email: sendUserEmailHandler, sync_mailbox: syncMailboxHandler, mail_action: mailActionHandler, campaign_step: campaignStepHandler },
+      types: ['send_email', 'send_user_email', 'sync_mailbox', 'mail_action', 'campaign_step', 'sync_calendar'],
+      handlers: {
+        send_email: sendEmailHandler, send_user_email: sendUserEmailHandler, sync_mailbox: syncMailboxHandler, mail_action: mailActionHandler,
+        campaign_step: campaignStepHandler, sync_calendar: syncCalendarHandler,
+      },
       graph: opts.graph ?? createGraphClient(process.env),
       pollMs: opts.pollMs,
       signal: controller.signal,

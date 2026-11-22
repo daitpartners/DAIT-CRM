@@ -42,6 +42,29 @@ export interface DeltaPage {
   deltaLink?: string;
 }
 
+/** A calendar event as calendar sync stores it (release 3C): times in UTC, addresses lower-cased. */
+export interface GraphEvent {
+  id: string;
+  subject: string;
+  startsAt: string;
+  endsAt: string;
+  isAllDay: boolean;
+  isCancelled: boolean;
+  location: string | null;
+  organizer: { name: string; address: string } | null;
+  /** Attendee addresses (the organiser apart unless listed). */
+  attendees: string[];
+  isOnline: boolean;
+}
+
+/** One page of a calendar view delta query. */
+export interface CalendarDeltaPage {
+  events: GraphEvent[];
+  removed: string[];
+  nextLink?: string;
+  deltaLink?: string;
+}
+
 export interface GraphClient {
   sendMail(account: EmailAccount, msg: MailMessage): Promise<void>;
   /** Release 2B-2 (the account's own mailbox, delegated): */
@@ -50,6 +73,8 @@ export interface GraphClient {
   markRead(account: EmailAccount, graphId: string, isRead: boolean): Promise<void>;
   moveTo(account: EmailAccount, graphId: string, folder: 'archive' | 'inbox'): Promise<void>;
   reply(account: EmailAccount, graphId: string, msg: { to: string[]; cc?: string[]; html: string }): Promise<void>;
+  /** Release 3C (the account's own calendar, read only): */
+  calendarDeltaPage(account: EmailAccount, url: string): Promise<CalendarDeltaPage>;
 }
 
 export const GRAPH_SEND_SCOPES = [
@@ -65,6 +90,12 @@ export const GRAPH_MAIL_SCOPES = [
   'offline_access',
 ];
 
+/**
+ * Reading the user's own calendar (release 3C). Calendars.ReadWrite is the permission consented at connect time
+ * (CONNECT_SCOPES); the CRM never writes to Outlook.
+ */
+export const GRAPH_CALENDAR_SCOPES = ['https://graph.microsoft.com/Calendars.ReadWrite', 'offline_access'];
+
 const GRAPH = 'https://graph.microsoft.com/v1.0';
 const SYNC_FIELDS = [
   'subject', 'from', 'toRecipients', 'ccRecipients', 'receivedDateTime', 'sentDateTime', 'isRead', 'isDraft',
@@ -77,6 +108,15 @@ const IMMUTABLE = 'IdType="ImmutableId"';
 export function deltaStartUrl(folder: MailFolder, since: Date): string {
   const q = new URLSearchParams({ $select: SYNC_FIELDS.join(','), $filter: `receivedDateTime ge ${since.toISOString()}` });
   return `${GRAPH}/me/mailFolders/${folder}/messages/delta?${q.toString()}`;
+}
+
+/**
+ * Start of a calendar view delta query over [start, end): recurring meetings come as single occurrences. The view
+ * delta takes no $select or $filter, and its links keep this window.
+ */
+export function calendarDeltaStartUrl(start: Date, end: Date): string {
+  const q = new URLSearchParams({ startDateTime: start.toISOString(), endDateTime: end.toISOString() });
+  return `${GRAPH}/me/calendarView/delta?${q.toString()}`;
 }
 
 const messageUrl = (graphId: string) => `${GRAPH}/me/messages/${encodeURIComponent(graphId)}`;
@@ -130,6 +170,35 @@ function toMessage(v: Record<string, unknown>): GraphMessage {
     internetMessageId: str(v.internetMessageId),
     hasAttachments: v.hasAttachments === true,
     bodyText: str(body?.content) ?? '',
+  };
+}
+
+/** A Graph dateTimeTimeZone in UTC (asked for with `outlook.timezone="UTC"`) as an ISO string; null when unreadable. */
+function utc(v: unknown): string | null {
+  const dt = str((v as { dateTime?: unknown } | null | undefined)?.dateTime);
+  const at = dt ? Date.parse(`${dt.replace(/Z$/, '').replace(/(\.\d{3})\d*$/, '$1')}Z`) : NaN;
+  return Number.isNaN(at) ? null : new Date(at).toISOString();
+}
+
+/** A calendar delta entry as a GraphEvent; null for one without readable times (skipped). */
+function toEvent(v: Record<string, unknown>): GraphEvent | null {
+  const startsAt = utc(v.start);
+  const endsAt = utc(v.end);
+  if (!startsAt || !endsAt) return null;
+  const organizer = v.organizer as GraphAddress;
+  const organizerAddress = addressOf(organizer);
+  const location = str((v.location as { displayName?: unknown } | undefined)?.displayName)?.trim();
+  return {
+    id: String(v.id),
+    subject: str(v.subject) ?? '',
+    startsAt,
+    endsAt,
+    isAllDay: v.isAllDay === true,
+    isCancelled: v.isCancelled === true,
+    location: location || null,
+    organizer: organizerAddress ? { name: str(organizer?.emailAddress?.name) ?? '', address: organizerAddress } : null,
+    attendees: addressList(v.attendees),
+    isOnline: v.isOnlineMeeting === true,
   };
 }
 
@@ -279,6 +348,23 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
         comment: msg.html,
         message: { toRecipients: recipients(msg.to), ccRecipients: recipients(msg.cc) },
       });
+    },
+
+    async calendarDeltaPage(account, url) {
+      if (!url.startsWith(`${GRAPH}/`)) throw new Error('not_a_graph_link');
+      const token = await accessToken(account, GRAPH_CALENDAR_SCOPES);
+      const res = await request('graph_request_failed', token, url, { method: 'GET', prefer: `${IMMUTABLE}, odata.maxpagesize=50, outlook.timezone="UTC"` });
+      const page = (await res.json()) as { value?: Record<string, unknown>[]; '@odata.nextLink'?: string; '@odata.deltaLink'?: string };
+      const events: GraphEvent[] = [];
+      const removed: string[] = [];
+      for (const v of page.value ?? []) {
+        if (v['@removed']) removed.push(String(v.id));
+        else {
+          const event = toEvent(v);
+          if (event) events.push(event);
+        }
+      }
+      return { events, removed, nextLink: page['@odata.nextLink'], deltaLink: page['@odata.deltaLink'] };
     },
   };
 }
