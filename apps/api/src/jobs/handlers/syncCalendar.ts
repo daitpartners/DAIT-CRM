@@ -51,6 +51,17 @@ async function storeEvent(account: EmailAccount, user: AuthUser, e: GraphEvent):
 }
 
 /**
+ * Sync calendar switched off, the mailbox disconnected or taken over while a run was reading: nothing the run stored
+ * may stay. True when the copy was dropped.
+ */
+async function dropIfGone(accountId: number, userId: number): Promise<boolean> {
+  const fresh = await prisma.emailAccount.findUnique({ where: { id: accountId } });
+  if (!fresh || (fresh.status !== 'disconnected' && fresh.syncCalendar && fresh.userId === userId)) return false;
+  await dropCalendarCopy(prisma, accountId);
+  return true;
+}
+
+/**
  * Copies the owner's Outlook calendar (release 3C) from a connected personal mailbox with Sync calendar on: a Graph
  * calendar view delta over 30 days back to 180 days ahead, continued from the stored link, at most MAX_PAGES pages per
  * run (the rest a minute later). It starts afresh when there is no link, the link was read for another user, the last
@@ -73,6 +84,7 @@ export async function syncCalendarHandler(job: Job, ctx: JobContext): Promise<vo
   let full = restarted || saved.full === true;
   let url = restarted ? startUrl() : saved.link!;
   let more = true;
+  let skipped = 0;
   try {
     for (let pages = 0; pages < MAX_PAGES; pages++) {
       let page;
@@ -90,6 +102,7 @@ export async function syncCalendarHandler(job: Job, ctx: JobContext): Promise<vo
       }
       // Changes are applied page by page: a run that fails keeps the old link, and reading it again is harmless.
       for (const e of page.events) await storeEvent(account, user, e);
+      skipped += page.skipped ?? 0;
       if (page.removed.length) await prisma.calendarEvent.deleteMany({ where: { userId: user.id, graphId: { in: page.removed } } });
       if (!page.nextLink) {
         url = page.deltaLink ?? url;
@@ -105,10 +118,13 @@ export async function syncCalendarHandler(job: Job, ctx: JobContext): Promise<vo
         where: { id: account.id, status: 'connected', refreshTokenEnc: account.refreshTokenEnc },
         data: { status: 'error', lastError: errorMessage(err) },
       });
+      await dropIfGone(account.id, user.id);
       return;
     }
+    await dropIfGone(account.id, user.id);
     throw err;
   }
+  if (skipped) console.warn(`sync_calendar: account ${account.id}: ${skipped} event(s) skipped (time not in UTC or unreadable)`);
 
   if (full && !more) await prisma.calendarEvent.deleteMany({ where: { accountId: account.id, updatedAt: { lt: restartedAt } } });
   const state: CalendarSyncState = { link: url, userId: user.id, ...(full && more ? { full: true } : {}), at: new Date().toISOString() };
@@ -117,9 +133,7 @@ export async function syncCalendarHandler(job: Job, ctx: JobContext): Promise<vo
     data: { calendarSyncState: state as object, calendarSyncAt: restartedAt },
   });
   if (stored.count === 0) {
-    // Switched off, disconnected or taken over while this run was reading: nothing it stored may stay.
-    const fresh = await prisma.emailAccount.findUnique({ where: { id: account.id } });
-    if (fresh && (fresh.status === 'disconnected' || !fresh.syncCalendar || fresh.userId !== user.id)) await dropCalendarCopy(prisma, account.id);
+    await dropIfGone(account.id, user.id);
     return;
   }
   if (more) await enqueue(prisma, 'sync_calendar', { accountId: account.id }, { runAt: new Date(Date.now() + MORE_AFTER_MS), maxAttempts: 1 });

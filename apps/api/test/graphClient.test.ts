@@ -244,6 +244,20 @@ describe('graph client — mail sync and actions (2B-2)', () => {
     expect(msalState.scopes[0]).toEqual(GRAPH_CALENDAR_SCOPES);
   });
 
+  test('calendarDeltaPage skips (and counts) an event whose times are not in UTC; a lower-case or missing zone is UTC', async () => {
+    const at = (dateTime: string, timeZone?: string) => (timeZone ? { dateTime, timeZone } : { dateTime });
+    vi.stubGlobal('fetch', vi.fn(async () => json({
+      value: [
+        { id: 'pst', subject: 'Wrong zone', start: at('2026-11-25T10:00:00.0000000', 'Pacific Standard Time'), end: at('2026-11-25T11:00:00.0000000', 'Pacific Standard Time') },
+        { id: 'lower', subject: 'utc', start: at('2026-11-25T10:00:00.0000000', 'utc'), end: at('2026-11-25T11:00:00.0000000', 'utc') },
+        { id: 'none', subject: 'no zone', start: at('2026-11-25T12:00:00.0000000'), end: at('2026-11-25T13:00:00.0000000') },
+      ],
+    })));
+    const page = await createGraphClient(env).calendarDeltaPage(await account(), 'https://graph.microsoft.com/v1.0/x');
+    expect(page.events.map((e) => [e.id, e.startsAt])).toEqual([['lower', '2026-11-25T10:00:00.000Z'], ['none', '2026-11-25T12:00:00.000Z']]);
+    expect(page.skipped).toBe(1);
+  });
+
   test('calendarDeltaPage refuses a link that is not Graph', async () => {
     const fetchMock = vi.fn(async () => json({ value: [] }));
     vi.stubGlobal('fetch', fetchMock);

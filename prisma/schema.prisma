@@ -199,8 +199,8 @@ model CalendarEvent {
   id                Int      @id @default(autoincrement())
   userId            Int      @map("user_id")
   accountId         Int      @map("account_id")
-  /// Graph immutable id; unique per user.
-  graphId           String   @map("graph_id") @db.VarChar(255)
+  /// Graph immutable id (recurring occurrences have long ones); unique per user.
+  graphId           String   @map("graph_id")
   subject           String   @db.VarChar(500)
   /// UTC; an all-day event runs from midnight to midnight UTC of its dates (Graph's own representation).
   startsAt          DateTime @map("starts_at")

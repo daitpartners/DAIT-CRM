@@ -8,7 +8,7 @@ CREATE TABLE "calendar_events" (
     "id" SERIAL NOT NULL,
     "user_id" INTEGER NOT NULL,
     "account_id" INTEGER NOT NULL,
-    "graph_id" VARCHAR(255) NOT NULL,
+    "graph_id" TEXT NOT NULL,
     "subject" VARCHAR(500) NOT NULL,
     "starts_at" TIMESTAMP(3) NOT NULL,
     "ends_at" TIMESTAMP(3) NOT NULL,

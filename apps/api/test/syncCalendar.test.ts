@@ -221,6 +221,53 @@ describe('calendar sync (3C)', () => {
     expect((await prisma.emailAccount.findUniqueOrThrow({ where: { id: account.id } })).calendarSyncState).toBeNull();
   });
 
+  test('disconnected mid-run, then 503: the run fails and leaves nothing behind', async () => {
+    const { user, account } = await mailbox();
+    const graph = fakeGraph({
+      async calendarDeltaPage(_account, url) {
+        if (url.includes('startDateTime=')) return { events: [event(), event()], removed: [], nextLink: 'https://graph.microsoft.com/v1.0/p/2' };
+        // The route has deleted the copy and disconnected; then Graph fails.
+        await prisma.emailAccount.update({ where: { id: account.id }, data: { status: 'disconnected', refreshTokenEnc: '' } });
+        throw new GraphError('graph_request_failed status=503', 503);
+      },
+    });
+    await expect(syncCalendarHandler(job(account.id), { graph })).rejects.toThrow('503');
+    expect(await prisma.calendarEvent.count({ where: { userId: user.id } })).toBe(0);
+  });
+
+  test('switched off mid-run, then 401: nothing is left behind', async () => {
+    const { user, account } = await mailbox();
+    const graph = fakeGraph({
+      async calendarDeltaPage(_account, url) {
+        if (url.includes('startDateTime=')) return { events: [event()], removed: [], nextLink: 'https://graph.microsoft.com/v1.0/p/2' };
+        await prisma.emailAccount.update({ where: { id: account.id }, data: { syncCalendar: false } });
+        throw new GraphError('graph_request_failed status=401', 401);
+      },
+    });
+    await syncCalendarHandler(job(account.id), { graph });
+    expect(await prisma.calendarEvent.count({ where: { userId: user.id } })).toBe(0);
+    expect((await prisma.emailAccount.findUniqueOrThrow({ where: { id: account.id } })).calendarSyncState).toBeNull();
+  });
+
+  test('a failure while sync is still on keeps what was stored (read again next run)', async () => {
+    const { user, account } = await mailbox();
+    const graph = fakeGraph({
+      async calendarDeltaPage(_account, url) {
+        if (url.includes('startDateTime=')) return { events: [event()], removed: [], nextLink: 'https://graph.microsoft.com/v1.0/p/2' };
+        throw new GraphError('graph_request_failed status=503', 503);
+      },
+    });
+    await expect(syncCalendarHandler(job(account.id), { graph })).rejects.toThrow('503');
+    expect(await prisma.calendarEvent.count({ where: { userId: user.id } })).toBe(1);
+  });
+
+  test('a recurring occurrence with a long Graph id is stored', async () => {
+    const { user, account } = await mailbox();
+    const id = `AAMk${'x'.repeat(400)}`;
+    await syncCalendarHandler(job(account.id), scripted({ start: final([event({ id })]) }));
+    expect((await prisma.calendarEvent.findFirstOrThrow({ where: { userId: user.id } })).graphId).toBe(id);
+  });
+
   test('the same Graph id for two users gives each their own row', async () => {
     const a = await mailbox();
     const b = await mailbox();

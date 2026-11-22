@@ -63,6 +63,8 @@ export interface CalendarDeltaPage {
   removed: string[];
   nextLink?: string;
   deltaLink?: string;
+  /** Entries left out because their times were not in UTC or unreadable (present when any). */
+  skipped?: number;
 }
 
 export interface GraphClient {
@@ -173,14 +175,19 @@ function toMessage(v: Record<string, unknown>): GraphMessage {
   };
 }
 
-/** A Graph dateTimeTimeZone in UTC (asked for with `outlook.timezone="UTC"`) as an ISO string; null when unreadable. */
+/**
+ * A Graph dateTimeTimeZone in UTC (asked for with `outlook.timezone="UTC"`; a missing zone is taken as UTC) as an ISO
+ * string; null when unreadable or in another zone (never stored at a wrong time).
+ */
 function utc(v: unknown): string | null {
+  const tz = str((v as { timeZone?: unknown } | null | undefined)?.timeZone);
+  if (tz && tz.trim().toUpperCase() !== 'UTC') return null;
   const dt = str((v as { dateTime?: unknown } | null | undefined)?.dateTime);
   const at = dt ? Date.parse(`${dt.replace(/Z$/, '').replace(/(\.\d{3})\d*$/, '$1')}Z`) : NaN;
   return Number.isNaN(at) ? null : new Date(at).toISOString();
 }
 
-/** A calendar delta entry as a GraphEvent; null for one without readable times (skipped). */
+/** A calendar delta entry as a GraphEvent; null for one without readable UTC times (skipped). */
 function toEvent(v: Record<string, unknown>): GraphEvent | null {
   const startsAt = utc(v.start);
   const endsAt = utc(v.end);
@@ -357,14 +364,16 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
       const page = (await res.json()) as { value?: Record<string, unknown>[]; '@odata.nextLink'?: string; '@odata.deltaLink'?: string };
       const events: GraphEvent[] = [];
       const removed: string[] = [];
+      let skipped = 0;
       for (const v of page.value ?? []) {
         if (v['@removed']) removed.push(String(v.id));
         else {
           const event = toEvent(v);
           if (event) events.push(event);
+          else skipped += 1;
         }
       }
-      return { events, removed, nextLink: page['@odata.nextLink'], deltaLink: page['@odata.deltaLink'] };
+      return { events, removed, nextLink: page['@odata.nextLink'], deltaLink: page['@odata.deltaLink'], ...(skipped ? { skipped } : {}) };
     },
   };
 }
