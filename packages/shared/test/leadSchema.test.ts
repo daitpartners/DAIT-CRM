@@ -143,6 +143,11 @@ describe('LeadListQuery', () => {
     expect(LeadListQuery.safeParse({ archived: 'yes' }).success).toBe(false);
     expect(LeadListQuery.parse({ archived: '1' }).archived).toBe('1');
   });
+  test('open is 0 or 1, like archived', () => {
+    expect(LeadListQuery.parse({ open: '1' }).open).toBe('1');
+    expect(LeadListQuery.parse({ open: '0' }).open).toBe('0');
+    expect(LeadListQuery.safeParse({ open: 'yes' }).success).toBe(false);
+  });
 });
 
 describe('LeadBulk and SwitchContact', () => {
