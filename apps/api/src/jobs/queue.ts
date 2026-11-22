@@ -9,6 +9,10 @@ const MAX_ERROR_LENGTH = 1000;
 /** A `running` job locked longer than this was interrupted (crash, reload, host sleep) and may be retried. */
 export const STALE_AFTER_MS = 15 * 60_000;
 
+/** Finished jobs are kept this many days (done) and this many (failed, for diagnosis), then deleted. */
+export const DONE_KEEP_DAYS = 7;
+export const FAILED_KEEP_DAYS = 30;
+
 /** Prisma filter for interrupted jobs. */
 export function staleRunningWhere(): Prisma.JobWhereInput {
   return { status: 'running', lockedAt: { lt: new Date(Date.now() - STALE_AFTER_MS) } };
@@ -78,4 +82,18 @@ export async function fail(id: number, err: unknown): Promise<void> {
   } else {
     await prisma.job.update({ where: { id }, data: { attempts, lastError, status: 'failed', lockedAt: null } });
   }
+}
+
+/** Deletes done jobs older than DONE_KEEP_DAYS and failed ones older than FAILED_KEEP_DAYS; returns the number deleted. */
+export async function pruneJobs(db: Db, now = new Date()): Promise<number> {
+  const before = (days: number) => new Date(now.getTime() - days * 86_400_000);
+  const { count } = await db.job.deleteMany({
+    where: {
+      OR: [
+        { status: 'done', updatedAt: { lt: before(DONE_KEEP_DAYS) } },
+        { status: 'failed', updatedAt: { lt: before(FAILED_KEEP_DAYS) } },
+      ],
+    },
+  });
+  return count;
 }

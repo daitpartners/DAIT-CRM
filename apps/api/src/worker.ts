@@ -1,6 +1,7 @@
 import { prisma } from './db.js';
 import { createGraphClient, type GraphClient } from './graph/client.js';
 import { runForever } from './jobs/runner.js';
+import { pruneJobs } from './jobs/queue.js';
 import { sendUserEmailHandler } from './jobs/handlers/sendUserEmail.js';
 import { sendEmailHandler } from './jobs/handlers/sendEmail.js';
 import { syncMailboxHandler } from './jobs/handlers/syncMailbox.js';
@@ -13,6 +14,8 @@ export { runOnce, runForever } from './jobs/runner.js';
 
 /** How often the worker checks which mailboxes are due a sync. */
 const SCHEDULE_EVERY_MS = 60_000;
+/** How often old finished job rows are cleaned up. */
+const CLEANUP_EVERY_MS = 60 * 60_000;
 
 export interface StartWorkerOptions {
   graph?: GraphClient;
@@ -43,6 +46,10 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<void> 
   const schedule = () => Promise.all([scheduleMailSync().catch(warn('mail schedule')), scheduleCampaigns().catch(warn('mailer schedule'))]);
   void schedule();
   const scheduler = setInterval(schedule, SCHEDULE_EVERY_MS);
+  // Old done / failed job rows are deleted at start and hourly.
+  const cleanup = () => pruneJobs(prisma).catch(warn('job cleanup'));
+  void cleanup();
+  const cleaner = setInterval(cleanup, CLEANUP_EVERY_MS);
 
   console.log('worker: started');
   try {
@@ -56,6 +63,7 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<void> 
     });
   } finally {
     clearInterval(scheduler);
+    clearInterval(cleaner);
     process.off('SIGTERM', onTerm);
     process.off('SIGINT', onInt);
     opts.signal?.removeEventListener('abort', onAbort);

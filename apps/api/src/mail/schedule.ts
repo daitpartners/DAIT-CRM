@@ -20,12 +20,12 @@ async function pendingAccountIds(db: Db): Promise<Set<number>> {
 }
 
 /**
- * Queues a `sync_mailbox` run for each connected personal mailbox with Sync mail on that has none waiting, due 5
+ * Queues a `sync_mailbox` run for each connected personal mailbox with Sync mail on, of an active user, that has none waiting, due 5
  * minutes after its last sync (now when never synced). The worker calls it every minute. Returns the number queued.
  */
 export async function scheduleMailSync(db: Db = prisma, now = new Date()): Promise<number> {
   const accounts = await db.emailAccount.findMany({
-    where: { kind: 'personal', status: 'connected', syncMail: true, userId: { not: null } },
+    where: { kind: 'personal', status: 'connected', syncMail: true, userId: { not: null }, user: { isActive: true } },
     select: { id: true, lastSyncAt: true },
     orderBy: { id: 'asc' },
   });

@@ -253,6 +253,33 @@ describe('mail sync (2B-2)', () => {
       .toEqual([[other.id, 'theirs'], [a.user.id, 'mine']]);
   });
 
+  test('a draft sent from Outlook becomes sent', async () => {
+    const { user, account } = await mailbox();
+    const m = msg({ from: { name: 'Maya', address: ADDRESS }, to: ['ana@acme.com'], isDraft: true, subject: 'Proposal' });
+    await prisma.emailMessage.create({
+      data: { userId: user.id, accountId: account.id, graphId: m.id, folder: 'drafts', status: 'draft', source: 'sync', fromAddress: ADDRESS, subject: 'Proposal' },
+    });
+    const sentAt = '2026-11-21T08:30:00.000Z';
+    const { graph } = scripted({ 'start:sentitems': final('sentitems', [{ ...m, isDraft: false, sentAt, receivedAt: '2026-11-21T08:30:05.000Z' }]) });
+    await syncMailboxHandler(job(account.id), { graph });
+    const row = await prisma.emailMessage.findFirstOrThrow({ where: { graphId: m.id } });
+    expect(row).toMatchObject({ status: 'sent', folder: 'sent', occurredAt: new Date(sentAt) });
+  });
+
+  test("message count counts only the current owner's mail", async () => {
+    const { user: first, account } = await mailbox();
+    const second = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    const row = (userId: number, i: number) => ({
+      userId, accountId: account.id, graphId: `old-${userId}-${i}`, folder: 'inbox', status: 'received', source: 'sync', fromAddress: 'a@b.com', subject: 's',
+    });
+    await prisma.emailMessage.createMany({ data: [0, 1, 2].map((i) => row(first.id, i)) });
+    await prisma.emailMessage.createMany({ data: [0, 1].map((i) => row(second.id, i)) });
+    await prisma.emailAccount.update({ where: { id: account.id }, data: { userId: second.id } });
+    const { graph } = scripted({});
+    await syncMailboxHandler(job(account.id), { graph });
+    expect((await prisma.emailAccount.findUniqueOrThrow({ where: { id: account.id } })).messageCount).toBe(2);
+  });
+
   test('long bodies are cut to 50,000 characters', async () => {
     const { account } = await mailbox();
     const { graph } = scripted({ 'start:inbox': final('inbox', [msg({ bodyText: 'x'.repeat(60_000) })]) });
@@ -274,6 +301,12 @@ describe('mail sync scheduling (2B-2)', () => {
     expect(jobs.map((j) => j.payload)).toEqual([{ accountId: a.account.id }, { accountId: b.account.id }]);
     expect(jobs[0]!.runAt.getTime()).toBe(recent.getTime() + 5 * 60_000);
     expect(jobs[1]!.runAt.getTime()).toBeLessThanOrEqual(Date.now());
+  });
+
+  test("no sync is queued for a deactivated user's mailbox", async () => {
+    const { user } = await mailbox();
+    await prisma.user.update({ where: { id: user.id }, data: { isActive: false } });
+    expect(await scheduleMailSync(prisma)).toBe(0);
   });
 
   test('after a failed run the next one waits 5 minutes, not one', async () => {

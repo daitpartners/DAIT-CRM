@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from 'vitest';
 import { prisma } from '../src/db';
-import { claimNext, complete, enqueue, fail } from '../src/jobs/queue';
+import { claimNext, complete, enqueue, fail, pruneJobs } from '../src/jobs/queue';
 import { sendSystemEmail } from '../src/email/system';
 import { resetDb } from './helpers';
 
@@ -85,6 +85,22 @@ describe('job queue', () => {
     const after = await prisma.job.findUniqueOrThrow({ where: { id: job.id } });
     expect(after.runAt.getTime() - before).toBeLessThan(60 * 60_000 + 5_000);
     expect(after.runAt.getTime() - before).toBeGreaterThan(60 * 60_000 - 5_000);
+  });
+
+  test('pruneJobs removes old finished jobs only', async () => {
+    const now = new Date();
+    const daysAgo = (d: number) => new Date(now.getTime() - d * 86_400_000);
+    const make = (status: string, at: Date) =>
+      prisma.job.create({ data: { type: 'send_email', payload, status, runAt: at, updatedAt: at, ...(status === 'running' ? { lockedAt: at } : {}) } });
+    await make('done', daysAgo(8));
+    const doneKept = await make('done', daysAgo(6));
+    await make('failed', daysAgo(31));
+    const failedKept = await make('failed', daysAgo(29));
+    const queued = await make('queued', daysAgo(40));
+    const running = await make('running', daysAgo(40));
+    expect(await pruneJobs(prisma, now)).toBe(2);
+    const left = await prisma.job.findMany({ orderBy: { id: 'asc' } });
+    expect(left.map((j) => j.id)).toEqual([doneKept.id, failedKept.id, queued.id, running.id]);
   });
 
   test('sendSystemEmail enqueues send_email inside a transaction', async () => {

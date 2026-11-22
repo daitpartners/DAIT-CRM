@@ -58,9 +58,11 @@ async function claimCrmCopy(userId: number, m: GraphMessage): Promise<boolean> {
 async function storeMessage(account: EmailAccount, user: AuthUser, folder: string, m: GraphMessage, ctx: JobContext): Promise<void> {
   const existing = await prisma.emailMessage.findUnique({ where: { userId_graphId: { userId: user.id, graphId: m.id } } });
   const outbound = m.isDraft || folder === 'sent' || folder === 'drafts' || isOwn(account, m.from?.address);
+  const occurredAt = new Date(outbound ? (m.sentAt ?? m.receivedAt) : m.receivedAt);
   if (existing) {
-    // Links the user (or matching) set are kept; only Outlook's state follows.
-    await prisma.emailMessage.update({ where: { id: existing.id }, data: { folder, isRead: outbound ? true : m.isRead } });
+    // Links the user (or matching) set are kept; only Outlook's state follows. A draft sent from Outlook becomes Sent.
+    const sentDraft = existing.status === 'draft' && !m.isDraft ? { status: outbound ? 'sent' : 'received', occurredAt } : {};
+    await prisma.emailMessage.update({ where: { id: existing.id }, data: { folder, isRead: outbound ? true : m.isRead, ...sentDraft } });
     return;
   }
   if (outbound && !m.isDraft && (await claimCrmCopy(user.id, m))) return;
@@ -79,7 +81,7 @@ async function storeMessage(account: EmailAccount, user: AuthUser, folder: strin
         fromAddress: m.from?.address ?? '', fromName: m.from?.name ? m.from.name.slice(0, 255) : null,
         toAddresses: m.to, ccAddresses: m.cc, subject: m.subject.slice(0, 500), bodyText: m.bodyText.slice(0, BODY_MAX),
         messageId: m.internetMessageId?.slice(0, 255) ?? null, threadId: m.conversationId?.slice(0, 255) ?? null,
-        isRead: outbound ? true : m.isRead, occurredAt: new Date(outbound ? (m.sentAt ?? m.receivedAt) : m.receivedAt),
+        isRead: outbound ? true : m.isRead, occurredAt,
         attachmentNames, ...links,
       },
     });
@@ -181,7 +183,8 @@ export async function syncMailboxHandler(job: Job, ctx: JobContext): Promise<voi
     throw err;
   }
   const lastError = failures.length ? errorMessage(failures.map((x) => `${x.folder}: ${errorMessage(x.err)}`).join('; ')) : null;
-  const messageCount = await prisma.emailMessage.count({ where: { accountId: account.id } });
+  // Only the current owner's mail: rows a previous owner synced stay theirs (and out of this count).
+  const messageCount = await prisma.emailMessage.count({ where: { accountId: account.id, userId: user.id } });
   await prisma.emailAccount.update({ where: { id: account.id }, data: { lastSyncAt: new Date(), messageCount, lastError } });
   if (more) await enqueue(prisma, 'sync_mailbox', { accountId: account.id }, { runAt: new Date(Date.now() + MORE_AFTER_MS), maxAttempts: 1 });
 }
