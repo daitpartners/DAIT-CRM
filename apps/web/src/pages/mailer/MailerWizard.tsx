@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LAWFUL_BASES, MAILER_INTERVALS, fillTemplate } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
@@ -9,6 +9,7 @@ import { useCurrentUser } from '../../api/useCurrentUser';
 import { Icons } from '../../components/Icons';
 import { Modal } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
+import { useFormatDate } from '../../hooks/useFormatDate';
 import { errorText } from '../../i18n/labels';
 import { useT, type TFn } from '../../i18n/useT';
 import { zoneSourceText, zoneText } from './zones';
@@ -19,6 +20,10 @@ const STEPS = ['Template', 'Cc / Bcc', 'Timing', 'Review & send'] as const;
 
 const emails = (t: TFn, n: number) => (n === 1 ? t('1 email') : t('{n} emails', { n }));
 const minutes = (t: TFn, n: number) => (n === 1 ? t('1 minute') : t('{n} minutes', { n }));
+
+/** The prototype shows the merge fields in <code>: wrap them wherever the translated sentence puts them. */
+const MERGE_FIELD = /(\{first_name\}|\{company\}|\{me\}|\{lead_id\})/;
+const withCode = (text: string) => text.split(MERGE_FIELD).map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part));
 
 /** Local "YYYY-MM-DDTHH:00" one hour from now (prototype default start). */
 function nextHour(): string {
@@ -58,7 +63,7 @@ export function SendViaMailerButton({ leadIds, disabled, title, onQueued }: { le
 
   return (
     <>
-      <button type="button" className="btn sm" disabled={disabled || check.isPending} title={title} onClick={start}>
+      <button type="button" className="btn sm primary" disabled={disabled || check.isPending} title={title} onClick={start}>
         {Icons.send}
         {t('Send via mailer')}
       </button>
@@ -78,6 +83,7 @@ export function MailerWizard({ leadIds, check, onClose, onQueued }: Props) {
   const toast = useToast();
   const navigate = useNavigate();
   const me = useCurrentUser();
+  const { date: fmtDate } = useFormatDate();
   const create = useCreateCampaign();
   const { data: templates } = useTemplates();
   const { data: users } = useUsers();
@@ -87,6 +93,11 @@ export function MailerWizard({ leadIds, check, onClose, onQueued }: Props) {
     name: '', templateId: 0, cc: '', bcc: '', when: 'now' as 'now' | 'later', startAt: nextHour(), intervalMinutes: 3,
     workingHoursOnly: false, unsubscribeLine: true, lawfulBasis: '',
   });
+  const ccRef = useRef<HTMLInputElement>(null);
+  // The prototype focuses the first field of each step; the dialog itself focuses step 1's on opening.
+  useEffect(() => {
+    if (step === 1) ccRef.current?.focus();
+  }, [step]);
   const set = (patch: Partial<typeof st>) => setSt((s) => ({ ...s, ...patch }));
 
   const rows = check.rows;
@@ -97,13 +108,14 @@ export function MailerWizard({ leadIds, check, onClose, onQueued }: Props) {
   );
   const tpl = sorted.find((x) => x.id === st.templateId) ?? sorted[0] ?? null;
   useEffect(() => {
-    if (!st.name && okRows.length) set({ name: t('Mailer · {date} · {n}', { date: new Date().toLocaleDateString(me.language), n: okRows.length === 1 ? t('1 lead') : t('{n} leads', { n: okRows.length }) }) });
+    if (!st.name && okRows.length) set({ name: t('Mailer · {date} · {n}', { date: fmtDate(new Date().toISOString()), n: okRows.length === 1 ? t('1 lead') : t('{n} leads', { n: okRows.length }) }) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [okRows.length]);
 
   const first = okRows[0];
   const sample = first ? { firstName: first.name.split(' ')[0] || 'there', company: first.company, me: me.name, leadNumber: first.leadNumber ?? '' } : null;
-  const staff = (users ?? []).filter((u) => u.isActive && u.id !== me.id && u.email);
+  // Quick-add in user order (prototype db().users), not the API's alphabetical list.
+  const staff = (users ?? []).filter((u) => u.isActive && u.id !== me.id && u.email).sort((a, b) => a.id - b.id);
   const addQuick = (field: 'cc' | 'bcc', email: string) => {
     const cur = list(st[field]);
     if (!cur.includes(email.toLowerCase())) cur.push(email.toLowerCase());
@@ -196,7 +208,7 @@ export function MailerWizard({ leadIds, check, onClose, onQueued }: Props) {
               <div className="note warn">{t('No templates yet. Add one under Settings → Email templates.')}</div>
             ) : null}
             <div className="dim mw-help">
-              {t('Each email is filled in per lead: {first_name}, {company}, {me}, {lead_id}. From: {address}.', { address: check.mailbox?.address ?? '—' })}
+              {withCode(t('Each email is filled in per lead: {first_name}, {company}, {me}, {lead_id}. From: {address}.', { address: check.mailbox?.address ?? '—' }))}
             </div>
           </>
         ) : null}
@@ -209,7 +221,14 @@ export function MailerWizard({ leadIds, check, onClose, onQueued }: Props) {
                   {f === 'cc' ? t('Cc') : t('Bcc')}{' '}
                   <span className="dim">{f === 'cc' ? t('· on every email, visible to the recipient') : t('· on every email, hidden from the recipient')}</span>
                 </label>
-                <input id={`mw-${f}`} className="in" value={st[f]} placeholder="name@company.com" onChange={(e) => set({ [f]: e.target.value } as Partial<typeof st>)} />
+                <input
+                  id={`mw-${f}`}
+                  ref={f === 'cc' ? ccRef : undefined}
+                  className="in"
+                  value={st[f]}
+                  placeholder={f === 'cc' ? 'name@company.com, another@company.com' : 'name@company.com'}
+                  onChange={(e) => set({ [f]: e.target.value } as Partial<typeof st>)}
+                />
                 <div className="mquick">
                   {staff.map((u) => (
                     <button key={u.id} type="button" className="btn xs" onClick={() => addQuick(f, u.email)}>{`+ ${u.name}`}</button>
@@ -254,9 +273,10 @@ export function MailerWizard({ leadIds, check, onClose, onQueued }: Props) {
                 emails: emails(t, n), minutes: minutes(t, st.intervalMinutes),
                 total: total < 60 ? minutes(t, total) : t('{h} hours', { h: Math.round(total / 6) / 10 }),
               })}{' '}
+              {t("That is far inside Microsoft 365's limits (about 30 a minute, 10,000 recipients a day).")}{' '}
               {t('Your mailbox sends at most 200 mailer emails a day; the rest continue the next day.')}
               {st.workingHoursOnly ? ` ${t('Each lead waits for working hours in their own time zone (shown on the next step).')}` : ''}
-              {n > 200 ? ` ${t('More than 200 in one run looks like bulk mail from a personal mailbox; consider splitting it across days.')}` : ''}
+              {n > 200 ? <> <strong>{t('More than 200 in one run')}</strong> {t('starts to look like bulk mail from a personal mailbox; consider splitting it across days.')}</> : null}
             </div>
           </>
         ) : null}
@@ -286,8 +306,8 @@ export function MailerWizard({ leadIds, check, onClose, onQueued }: Props) {
                       <td>{r.leadNumber ?? '—'}</td>
                       <td>{r.name || r.company || '—'}</td>
                       <td>{r.to || <span className="dim">—</span>}</td>
-                      <td title={zoneSourceText(t, r.source)}>{zoneText(t, r.zones)}</td>
-                      <td>
+                      <td className="wrap" title={zoneSourceText(t, r.source)}>{zoneText(t, r.zones)}</td>
+                      <td className="wrap">
                         {r.block ? (
                           <><span className="badge b-grey">{t('Skipped')}</span> <span className="dim">{t(r.block)}</span></>
                         ) : (

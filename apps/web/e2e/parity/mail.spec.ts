@@ -91,6 +91,8 @@ test('mail parity: app side', async ({ page }) => {
   for (const want of ['LD-1001', 'LD-1002', 'LD-1003', ...numbers]) {
     await page.getByRole('checkbox', { name: new RegExp(`^Select ${want} `) }).check();
   }
+  await expect(page.getByRole('region', { name: 'Bulk actions' })).toBeVisible();
+  await shot(page, 'leads-bulkbar-app');
   await page.getByRole('region', { name: 'Bulk actions' }).getByRole('button', { name: 'Send via mailer' }).click();
   const wiz = page.getByRole('dialog', { name: 'Send via mailer' });
   await expect(wiz.getByText(/^Preview for /)).toBeVisible();
@@ -118,7 +120,7 @@ test('mail parity: app side', async ({ page }) => {
   await page.reload();
   await expect(page.getByRole('table', { name: 'Recipients' })).toContainText('Failed');
   await shot(page, 'campaign-app');
-  // The recipients table is wider than its card: scroll it to the end to see the last columns.
+  // Were the recipients table wider than its card, scroll it to the end to see the last columns (it should fit).
   await page.getByRole('table', { name: 'Recipients' }).evaluate((el) => {
     for (let n: HTMLElement | null = el.parentElement; n; n = n.parentElement) if (n.scrollWidth > n.clientWidth) { n.scrollLeft = n.scrollWidth; break; }
   });
@@ -175,6 +177,7 @@ test('mail parity: prototype side', async () => {
 
   await go('#/leads');
   await tick(['LD-2041', 'LD-2039', 'LD-2036', 'LD-2035', 'LD-2033', 'LD-2038']);
+  await shot(page, 'leads-bulkbar-proto');
   await page.locator('[data-act=mailer]').click();
   await shot(page, 'wizard-1-template-proto');
   await page.locator('[data-next]').click();

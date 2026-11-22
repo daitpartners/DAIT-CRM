@@ -1,10 +1,11 @@
+import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 
 type TileProps = {
   label: string;
   value: number | string;
   /** Small line under the value. */
-  meta?: string;
+  meta?: ReactNode;
   metaClass?: 'ok' | 'bad' | 'warn';
   /** Makes the whole tile a link. */
   to?: string;

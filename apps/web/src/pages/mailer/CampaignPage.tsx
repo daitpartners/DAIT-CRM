@@ -11,12 +11,18 @@ import { useT } from '../../i18n/useT';
 import { Progress, StatusBadge, pauseReasonText, waitText } from './status';
 import { zoneSourceText, zoneText } from './zones';
 
+/** An address that may wrap only before its @ (keeps "name" and "@domain" whole, so the table fits its card). */
+function AddressBreak({ to }: { to: string }) {
+  const at = to.indexOf('@');
+  return at > 0 ? <>{to.slice(0, at)}<wbr />{to.slice(at)}</> : <>{to}</>;
+}
+
 /** One campaign (prototype mailer detail): tiles, recipients with their audit trail, details, the email as queued. */
 export function CampaignPage() {
   const t = useT();
   const toast = useToast();
   const confirm = useConfirm();
-  const { dateTime: date } = useFormatDate();
+  const { dateTime: date, date: day } = useFormatDate();
   const id = Number(useParams().id);
   const { data: c, isError } = useCampaign(id);
   const action = useCampaignAction(id);
@@ -82,7 +88,7 @@ export function CampaignPage() {
       </Topbar>
       <div className="page">
         <div className="tiles">
-          <Tile label={t('Sent')} value={c.stats.sent} meta={`${c.stats.sent + c.stats.failed} / ${c.stats.toSend}`} />
+          <Tile label={t('Sent')} value={c.stats.sent} meta={<Progress stats={c.stats} />} />
           <Tile label={t('Queued')} value={c.stats.queued} meta={live ? t('one every {minutes}', { minutes: minutes(c.intervalMinutes) }) : t('nothing waiting')} />
           <Tile label={t('Skipped / failed')} value={`${c.stats.skipped} / ${c.stats.failed}`} meta={t('reason shown under the status')} metaClass={c.stats.failed ? 'bad' : undefined} />
           <Tile label={t('Replied')} value={c.stats.replied} meta={t('matched from the mailbox')} metaClass={c.stats.replied ? 'ok' : undefined} />
@@ -93,11 +99,9 @@ export function CampaignPage() {
               <div className="head">
                 <h2>{t('Recipients')}</h2>
                 <span className="dim mw-help">{c.stats.total === 1 ? t('1 lead · audit record per recipient') : t('{n} leads · audit record per recipient', { n: c.stats.total })}</span>
-                <span className="grow" />
-                <Progress stats={c.stats} />
               </div>
               <div className="tbl">
-                <table aria-label={t('Recipients')}>
+                <table aria-label={t('Recipients')} className="mw-rec">
                   <thead>
                     <tr><th>{t('Lead')}</th><th>{t('Name')}</th><th>{t('To')}</th><th>{t('Local time')}</th><th>{t('Status')}</th><th>{t('Sent at')}</th><th>{t('Message')}</th></tr>
                   </thead>
@@ -106,14 +110,14 @@ export function CampaignPage() {
                       <tr key={r.id}>
                         <td>{r.leadId && r.leadNumber ? <Link to={`/leads/${r.leadId}`} className="strong">{r.leadNumber}</Link> : '—'}</td>
                         <td>{r.name || r.company || '—'}</td>
-                        <td>{r.to || <span className="dim">—</span>}</td>
-                        <td title={zoneSourceText(t, r.timezoneSource)}>{zoneText(t, r.timezones)}</td>
-                        <td className="wrap">
+                        <td className="mw-to">{r.to ? <AddressBreak to={r.to} /> : <span className="dim">—</span>}</td>
+                        <td className="wrap" title={zoneSourceText(t, r.timezoneSource)}>{zoneText(t, r.timezones)}</td>
+                        <td className="wrap mw-status">
                           <StatusBadge t={t} status={r.status} />
                           {r.error ? <div className="dim mw-err">{t(r.error)}</div> : null}
                         </td>
-                        <td>{r.sentAt ? date(r.sentAt) : <span className="dim">—</span>}</td>
-                        <td><span className="dim">{r.messageId ?? '—'}</span></td>
+                        <td className="mw-sent">{r.sentAt ? date(r.sentAt) : <span className="dim">—</span>}</td>
+                        <td className="mw-msg"><span className="dim">{r.messageId ?? '—'}</span></td>
                       </tr>
                     ))}
                   </tbody>
@@ -124,9 +128,9 @@ export function CampaignPage() {
           <aside className="col-side">
             <section className="card">
               <h2>{t('Details')}</h2>
-              <dl className="kv mw-kv">
+              <dl className="kv mw-details">
                 <dt>{t('Template')}</dt>
-                <dd>{c.templateName}{c.templateUpdatedAt ? <span className="dim"> · {t('version of {date}', { date: date(c.templateUpdatedAt) })}</span> : null}</dd>
+                <dd>{c.templateName}{c.templateUpdatedAt ? <span className="dim"> · {t('version of {date}', { date: day(c.templateUpdatedAt) })}</span> : null}</dd>
                 <dt>{t('From')}</dt><dd>{c.sender.name}<div className="dim">{c.senderAddress}</div></dd>
                 <dt>{t('Cc')}</dt><dd>{c.cc.join(', ') || <span className="dim">—</span>}</dd>
                 <dt>{t('Bcc')}</dt><dd>{c.bcc.join(', ') || <span className="dim">—</span>}</dd>
@@ -134,7 +138,8 @@ export function CampaignPage() {
                 <dt>{t('Delay')}</dt><dd>{t('One every {minutes}', { minutes: minutes(c.intervalMinutes) })}{c.workingHoursOnly ? ` · ${t("client's working hours only")}` : ''}</dd>
                 <dt>{t('Opt-out line')}</dt><dd>{c.unsubscribeLine ? t('Included') : t('Not included')}</dd>
                 <dt>{t('Lawful basis')}</dt><dd>{t(c.lawfulBasis)}</dd>
-                <dt>{t('Created')}</dt><dd>{date(c.createdAt)}</dd>
+                {/* The sender is the campaign's creator: only the sender creates and acts on a campaign. */}
+                <dt>{t('Created')}</dt><dd>{`${c.sender.name} · ${date(c.createdAt)}`}</dd>
               </dl>
             </section>
             <section className="card">

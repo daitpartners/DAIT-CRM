@@ -664,6 +664,19 @@ td.nowrap{white-space:nowrap}
 .mw-help{font-size:12.5px}
 .mw-err{font-size:12px;margin-top:3px}
 .mw-kv{grid-template-columns:120px 1fr}
+.mw-details{grid-template-columns:110px 1fr}
+.modal:has(> .wiz){width:760px}
+.modal .actions .btn svg{width:14px;height:14px}
+/* Leads bulk bar (prototype .mbulk). */
+.mbulk{display:none;align-items:center;gap:8px;padding:8px 18px;background:var(--tint);border-bottom:1px solid var(--line);font-size:13px;flex-wrap:wrap}
+.mbulk.on{display:flex}.mbulk .btn svg{width:14px;height:14px}.mbulk .btn:disabled{opacity:.5;cursor:not-allowed}
+a.strong{font-weight:600}
+/* Campaign recipients fit their card at 1440 px with the added Local time column: long cells wrap (an address before
+   its @, the local time before its zone, the sent time after its date, a message id anywhere). */
+.mw-rec th,.mw-rec td{padding-left:10px;padding-right:10px}
+.mw-rec td.mw-to,.mw-rec td.mw-sent{white-space:normal}
+.mw-rec td.mw-status{min-width:150px}.mw-rec td.mw-sent{min-width:106px}
+.mw-rec td.mw-msg{white-space:normal;overflow-wrap:anywhere;font-size:12px;min-width:96px}
 .mrec{max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px}
 .mrec td,.mrec th{padding:7px 10px}
 .mbar{display:inline-block;width:90px;height:6px;border-radius:3px;background:var(--tint);overflow:hidden;vertical-align:middle}

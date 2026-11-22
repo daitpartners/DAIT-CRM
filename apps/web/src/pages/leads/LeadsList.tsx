@@ -26,7 +26,7 @@ import { usePageClamp, useUrlListState } from '../../hooks/useUrlListState';
 import { errorText, leadStatusText, leadTypeText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
 import { CsvImportModal } from './CsvImportModal';
-import { SendViaMailerButton } from '../mailer/MailerWizard';
+import { LeadsBulkBar } from './LeadsBulkBar';
 import { useMailboxes } from '../../api/mailboxes';
 
 /** Rows per page offered by the pager (prototype SIZES); 50 by default. */
@@ -377,8 +377,13 @@ export function LeadsList() {
               {data && counts ? <span className="muted filters-count">{t('Showing {n} of {total}', { n: data.total, total: counts.all })}</span> : null}
             </div>
             {canManage && selected.size > 0 ? (
-              <div className="bulkbar" role="region" aria-label={t('Bulk actions')}>
-                <strong>{t('Selected: {n}', { n: selected.size })}</strong>
+              <LeadsBulkBar
+                leadIds={[...selected]}
+                canMail={me.rights.includes('use_email')}
+                mailboxConnected={mailboxes ? mailboxConnected : undefined}
+                onClear={() => setSelected(new Set())}
+                onQueued={() => setSelected(new Set())}
+              >
                 {canBulkAssign ? (
                   <>
                     <label className="sr" htmlFor="ld-bulk-assign">
@@ -396,22 +401,10 @@ export function LeadsList() {
                     </select>
                   </>
                 ) : null}
-                {me.rights.includes('use_email') ? (
-                  // Release 2C: Send via mailer for the ticked leads (prototype bulk bar); checks them before the wizard opens.
-                  <SendViaMailerButton
-                    leadIds={[...selected]}
-                    disabled={!mailboxConnected}
-                    title={mailboxConnected ? undefined : t('Connect your Microsoft 365 mailbox in Settings to use the mailer.')}
-                    onQueued={() => setSelected(new Set())}
-                  />
-                ) : null}
                 <button type="button" className="btn sm" disabled={bulk.isPending} onClick={() => void archive()}>
                   {t('Archive')}
                 </button>
-                <button type="button" className="btn sm" onClick={() => setSelected(new Set())}>
-                  {t('Clear selection')}
-                </button>
-              </div>
+              </LeadsBulkBar>
             ) : null}
             {error ? (
               <div className="empty" role="alert">

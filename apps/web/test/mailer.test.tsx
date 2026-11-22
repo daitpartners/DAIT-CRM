@@ -7,6 +7,7 @@ import type { CampaignDetail, RecipientCheck } from '../src/api/mailer';
 import { t as translate } from '@dait-crm/shared';
 import { MailerWizard, SendViaMailerButton } from '../src/pages/mailer/MailerWizard';
 import { CampaignPage } from '../src/pages/mailer/CampaignPage';
+import { LeadsBulkBar } from '../src/pages/leads/LeadsBulkBar';
 import { pauseReasonText } from '../src/pages/mailer/status';
 import { zoneText } from '../src/pages/mailer/zones';
 import type { TFn } from '../src/i18n/useT';
@@ -25,7 +26,9 @@ const ROWS: RecipientCheck[] = [
 ];
 const TEMPLATE = { id: 3, name: 'Intro ES', language: 'es', subject: 'Hola {first_name}', body: 'Hola {first_name} de {company}.\n{me}', sourceType: 'manual', fileName: null, fileSize: null, createdBy: null, createdAt: '', updatedAt: '' };
 
-function stub(campaign?: CampaignDetail, rows: RecipientCheck[] = ROWS) {
+const CARLOS = { id: 4, name: 'Carlos Torres', email: 'carlos@daitpartners.com', role: 'Administrator', language: 'es', timezone: 'UTC', isActive: true, lastLoginAt: null };
+
+function stub(campaign?: CampaignDetail, rows: RecipientCheck[] = ROWS, users: unknown[] = [CARLOS]) {
   const posts: { url: string; body: unknown }[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
@@ -38,7 +41,7 @@ function stub(campaign?: CampaignDetail, rows: RecipientCheck[] = ROWS) {
       return Response.json(campaign ? { ...campaign, status: url.endsWith('/pause') ? 'Paused' : campaign.status } : { id: 7 }, { status: 201 });
     }
     if (url.startsWith('/api/email-templates')) return Response.json({ items: [TEMPLATE] });
-    if (url === '/api/users') return Response.json([{ id: 4, name: 'Carlos Torres', email: 'carlos@daitpartners.com', role: 'Administrator', isActive: true }]);
+    if (url === '/api/users') return Response.json({ items: users });
     if (url === '/api/mailer/7' && campaign) return Response.json(campaign);
     if (url === '/api/me') return Response.json(me);
     return Response.json({});
@@ -46,9 +49,9 @@ function stub(campaign?: CampaignDetail, rows: RecipientCheck[] = ROWS) {
   return posts;
 }
 
-function wrap(ui: React.ReactNode, path = '/') {
+function wrap(ui: React.ReactNode, path = '/', users: unknown[] = [CARLOS]) {
   const qc = makeClient(me);
-  qc.setQueryData(keys.users, [{ id: 4, name: 'Carlos Torres', email: 'carlos@daitpartners.com', role: 'Administrator', language: 'es', timezone: 'UTC', isActive: true, lastLoginAt: null }]);
+  qc.setQueryData(keys.users, users);
   return render(
     <QueryClientProvider client={qc}>
       <ToastProvider>
@@ -102,6 +105,63 @@ describe('Send via mailer wizard (release 2C, prototype V.mailerWizard)', () => 
   });
 });
 
+describe('Send via mailer wizard matches the prototype (parity 6.x)', () => {
+  async function open(u: ReturnType<typeof userEvent.setup>, users?: unknown[]) {
+    stub(undefined, ROWS, users);
+    wrap(<SendViaMailerButton leadIds={[5, 6]} onQueued={() => undefined} />, '/', users);
+    await u.click(screen.getByRole('button', { name: 'Send via mailer' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Send via mailer' });
+    await within(dialog).findByText('Hola Ana');
+    return dialog;
+  }
+
+  it('default campaign name uses the user’s date format (6.2)', async () => {
+    const u = userEvent.setup();
+    const dialog = await open(u);
+    const today = new Date().toISOString().slice(0, 10).split('-'); // the user's zone is UTC
+    expect((within(dialog).getByLabelText('Campaign name') as HTMLInputElement).value).toBe(`Mailer · ${today[2]}/${today[1]}/${today[0]} · 1 lead`);
+  });
+
+  it('step 1 shows the merge fields as code (6.3)', async () => {
+    const u = userEvent.setup();
+    const dialog = await open(u);
+    expect([...dialog.querySelectorAll('.mw-help code')].map((c) => c.textContent)).toEqual(['{first_name}', '{company}', '{me}', '{lead_id}']);
+    expect(within(dialog).getByText(/From: arjun@daitpartners.com\./)).toBeTruthy();
+  });
+
+  it('step 2 focuses Cc, has the prototype placeholder, and lists colleagues in user order (6.4, 6.5)', async () => {
+    const u = userEvent.setup();
+    const users = [
+      { ...CARLOS, id: 4, name: 'Zoe Admin', email: 'zoe@daitpartners.com' },
+      { ...CARLOS, id: 8, name: 'Ana Rep', email: 'ana@daitpartners.com' },
+    ];
+    const dialog = await open(u, users);
+    await u.click(within(dialog).getByRole('button', { name: 'Next' }));
+    const cc = within(dialog).getByRole('textbox', { name: /^Cc/ });
+    expect(document.activeElement).toBe(cc);
+    expect(cc.getAttribute('placeholder')).toBe('name@company.com, another@company.com');
+    expect(within(dialog).getByRole('textbox', { name: /^Bcc/ }).getAttribute('placeholder')).toBe('name@company.com');
+    const quick = within(within(dialog).getByRole('group', { name: 'Cc' })).getAllByRole('button').map((b) => b.textContent);
+    expect(quick).toEqual(['+ Zoe Admin', '+ Ana Rep']);
+  });
+
+  it('step 3 note carries the prototype Microsoft 365 limits sentence (6.7)', async () => {
+    const u = userEvent.setup();
+    const dialog = await open(u);
+    await u.click(within(dialog).getByRole('button', { name: 'Next' }));
+    await u.click(within(dialog).getByRole('button', { name: 'Next' }));
+    expect(dialog.querySelector('.note.info')!.textContent).toContain("That is far inside Microsoft 365's limits (about 30 a minute, 10,000 recipients a day).");
+  });
+
+  it('the bulk-bar button is primary with the send icon (6.10)', () => {
+    stub();
+    wrap(<SendViaMailerButton leadIds={[5]} onQueued={() => undefined} />);
+    const b = screen.getByRole('button', { name: 'Send via mailer' });
+    expect(b.className).toContain('primary');
+    expect(b.querySelector('svg')).toBeTruthy();
+  });
+});
+
 describe('Send via mailer from the Leads bulk bar (prototype V.mailerWizard guard)', () => {
   it('send via mailer refuses when no ticked lead can be emailed', async () => {
     const u = userEvent.setup();
@@ -130,6 +190,49 @@ describe('Send via mailer from the Leads bulk bar (prototype V.mailerWizard guar
     expect(await screen.findByText('You can send to at most 500 leads in one run.')).toBeTruthy();
     expect(posts).toEqual([]);
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+});
+
+describe('Leads bulk bar (prototype views-leads2.js .mbulk, parity 6.10)', () => {
+  const bar = (props: Partial<React.ComponentProps<typeof LeadsBulkBar>> = {}) => (
+    <LeadsBulkBar leadIds={[5, 6, 7]} canMail mailboxConnected onClear={() => undefined} onQueued={() => undefined} {...props}>
+      <button type="button" className="btn sm">Archive</button>
+    </LeadsBulkBar>
+  );
+
+  it('reads "<n> selected" and ends with Clear then the primary Send via mailer with its icon', () => {
+    stub();
+    wrap(bar());
+    const region = screen.getByRole('region', { name: 'Bulk actions' });
+    expect(region.className).toBe('mbulk on');
+    expect(region.querySelector('strong')!.textContent).toBe('3');
+    expect(region.firstElementChild!.textContent).toBe('3 selected');
+    expect(within(region).getAllByRole('button').map((b) => b.textContent)).toEqual(['Archive', 'Clear', 'Send via mailer']);
+    const send = within(region).getByRole('button', { name: 'Send via mailer' });
+    expect(send.className).toBe('btn sm primary');
+    expect(send.querySelector('svg')).toBeTruthy();
+    expect((send as HTMLButtonElement).disabled).toBe(false);
+    expect(send.previousElementSibling!.previousElementSibling!.className).toBe('grow');
+    expect(within(region).queryByRole('link', { name: 'Open Settings' })).toBeNull();
+  });
+
+  it('mailbox not connected: the prototype hint after the count, and Send disabled with the reason as its title', () => {
+    stub();
+    wrap(bar({ mailboxConnected: false }));
+    const region = screen.getByRole('region', { name: 'Bulk actions' });
+    expect(region.firstElementChild!.textContent).toBe('3 selected · Connect your Microsoft 365 mailbox in Settings to use the mailer. Open Settings');
+    expect(within(region).getByRole('link', { name: 'Open Settings' }).getAttribute('href')).toBe('/settings/connections');
+    const send = within(region).getByRole('button', { name: 'Send via mailer' }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    expect(send.title).toBe('Connect your Microsoft 365 mailbox in Settings to use the mailer.');
+  });
+
+  it('without the mailer right there is no Send via mailer and no hint', () => {
+    stub();
+    wrap(bar({ canMail: false, mailboxConnected: false }));
+    const region = screen.getByRole('region', { name: 'Bulk actions' });
+    expect(within(region).getAllByRole('button').map((b) => b.textContent)).toEqual(['Archive', 'Clear']);
+    expect(region.firstElementChild!.textContent).toBe('3 selected');
   });
 });
 
@@ -198,6 +301,21 @@ describe('Campaign page (prototype mailer detail)', () => {
     stub({ ...CAMPAIGN, status: 'Paused', pauseReason: 'Paused by Carlos Torres', waitReason: null });
     wrap(<CampaignPage />, '/mailer/7');
     expect(await screen.findByText(/Paused by Carlos Torres/)).toBeTruthy();
+  });
+
+  it('details show the creator, the template version date dimmed, and the progress bar in the Sent tile (5.3, 5.5, 5.6)', async () => {
+    stub({ ...CAMPAIGN, templateUpdatedAt: '2026-10-01T09:30:00.000Z' });
+    const { container } = wrap(<CampaignPage />, '/mailer/7');
+    await screen.findByRole('heading', { name: /MC-007/ });
+    const created = screen.getByText('Created').nextElementSibling!;
+    expect(created.textContent).toBe('Arjun Mehta · 22/11/2026, 10:00');
+    const tpl = screen.getByText('Template', { selector: 'dt' }).nextElementSibling!;
+    expect(tpl.textContent).toBe('Intro ES · version of 01/10/2026');
+    expect(tpl.querySelector('.dim')!.textContent).toBe(' · version of 01/10/2026');
+    expect(container.querySelector('.tile .mbar')).toBeTruthy();
+    expect(container.querySelector('.card .head .mbar')).toBeNull();
+    // Lead links bold (prototype font-weight 600).
+    expect(screen.getByRole('link', { name: 'LD-1005' }).className).toContain('strong');
   });
 
   it('an administrator viewing someone else’s campaign gets no actions', async () => {
