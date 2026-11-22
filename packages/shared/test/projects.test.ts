@@ -1,5 +1,5 @@
 import { PROJECT_STATUSES, projectBadge, primaryStakeholderIds } from '../src/projects';
-import { projectCreateSchema, projectUpdateSchema } from '../src/schemas/project';
+import { projectCreateSchema, projectFormOptionsQuerySchema, projectListQuerySchema, projectUpdateSchema } from '../src/schemas/project';
 
 const updatedAt = '2026-11-22T10:00:00.000Z';
 const valid = {
@@ -83,5 +83,18 @@ describe('projectUpdateSchema', () => {
     expect(projectUpdateSchema.safeParse({ ...edit, updatedAt, status: 'Paused' }).success).toBe(false);
     expect(projectUpdateSchema.safeParse({ ...edit, updatedAt, value: -0.01 }).success).toBe(false);
     expect(projectUpdateSchema.safeParse({ ...edit, updatedAt, leadId: null, quotationId: null }).success).toBe(true);
+  });
+});
+
+describe('project list / form-options queries', () => {
+  test('list filters are optional; company coerced; status must be a project status', () => {
+    expect(projectListQuerySchema.parse({})).toEqual({});
+    expect(projectListQuerySchema.parse({ company: '4', status: 'On hold' })).toEqual({ company: 4, status: 'On hold' });
+    expect(projectListQuerySchema.safeParse({ status: 'Done' }).success).toBe(false);
+    expect(projectListQuerySchema.safeParse({ company: 'x' }).success).toBe(false);
+  });
+  test('form-options needs the company', () => {
+    expect(projectFormOptionsQuerySchema.parse({ company: '7' })).toEqual({ company: 7 });
+    expect(projectFormOptionsQuerySchema.safeParse({}).success).toBe(false);
   });
 });

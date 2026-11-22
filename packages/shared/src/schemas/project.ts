@@ -33,3 +33,13 @@ export type ProjectCreate = z.infer<typeof projectCreateSchema>;
 /** `PATCH /projects/:id`: every field but the client; `updatedAt` is the version the dialog loaded (409 when stale). */
 export const projectUpdateSchema = z.object({ ...projectFields, updatedAt: z.string().datetime() });
 export type ProjectUpdate = z.infer<typeof projectUpdateSchema>;
+
+/** `GET /projects?company=&status=`: the list filters (kept in the URL). Tiles ignore them. */
+export const projectListQuerySchema = z.object({
+  company: z.coerce.number().int().positive().optional(),
+  status: z.enum(PROJECT_STATUSES).optional(),
+});
+export type ProjectListQuery = z.infer<typeof projectListQuerySchema>;
+
+/** `GET /projects/form-options?company=`: the Create / Edit dialog's choices for one client. */
+export const projectFormOptionsQuerySchema = z.object({ company: z.coerce.number().int().positive() });

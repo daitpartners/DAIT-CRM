@@ -172,6 +172,8 @@ export const quotationInclude = {
   owner: { select: { id: true, name: true, language: true } },
   lines: { orderBy: { sortOrder: 'asc' } },
   revisions: { orderBy: { revisionNo: 'asc' } },
+  // Release 3B: the project made from or linked to it (the editor shows it instead of Convert to project).
+  project: { select: { id: true, number: true, name: true } },
 } satisfies Prisma.QuotationInclude;
 
 type QuotationRow = Prisma.QuotationGetPayload<{ include: typeof quotationInclude }>;
@@ -216,6 +218,7 @@ export function quotationDetail(q: QuotationRow, user: AuthUser) {
     overallDiscount: Number(q.overallDiscount),
     notes: q.notes,
     projectId: q.projectId,
+    project: q.project,
     lines: q.lines.map((l) => ({
       id: l.id, sortOrder: l.sortOrder, item: l.item, description: l.description, qty: Number(l.qty), unit: l.unit,
       unitPrice: Number(l.unitPrice), discount: Number(l.discount), total: lineTotal(l),

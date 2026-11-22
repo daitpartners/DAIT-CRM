@@ -26,6 +26,7 @@ import { leadEmailRoutes } from './routes/leadEmails.js';
 import { mailRoutes } from './routes/mail.js';
 import { mailerRoutes } from './routes/mailer.js';
 import { quotationRoutes } from './routes/quotations.js';
+import { projectRoutes } from './routes/projects.js';
 import { settingsRoutes } from './routes/settings.js';
 import { NotFoundError, ValidationError } from './validate.js';
 import { registerAuth } from './plugins/auth.js';
@@ -154,6 +155,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(mailRoutes, { prefix: '/api' });
   await app.register(mailerRoutes, { prefix: '/api' });
   await app.register(quotationRoutes, { prefix: '/api' });
+  await app.register(projectRoutes, { prefix: '/api' });
   await app.register(settingsRoutes, { prefix: '/api' });
   await app.register(dashboardRoutes, { prefix: '/api' });
   await app.register(importRoutes, { prefix: '/api' });

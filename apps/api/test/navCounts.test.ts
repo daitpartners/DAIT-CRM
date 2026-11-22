@@ -58,6 +58,34 @@ describe('nav counts API', () => {
 
     const res = await get(await signIn(app, rep));
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ leads: 3, overdueTasks: 2, unread: 1, mailUnread: 0, mailerLive: 0 });
+    expect(res.json()).toEqual({ leads: 3, overdueTasks: 2, unread: 1, mailUnread: 0, mailerLive: 0, projects: 0 });
+  });
+
+  it('counts the projects the user can see: lead rule, company rule without a lead, or manager = me', async () => {
+    const rep = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    const admin = await makeUser({ role: 'ADMINISTRATOR' });
+    const mine = await makeLead({ assignedToId: rep.id });
+    const archived = await makeLead({ assignedToId: rep.id, archivedAt: new Date() });
+    const theirs = await makeLead({ assignedToId: other.id });
+    let k = 0;
+    const project = (companyId: number, leadId: number | null, managerId: number) => {
+      k += 1;
+      return prisma.project.create({
+        data: {
+          number: `PRJ-${k}`, companyId, leadId, name: `P${k}`, startDate: new Date('2026-11-22T00:00:00Z'), currency: 'INR',
+          managerId, createdById: admin.id,
+        },
+      });
+    };
+    await project(mine.companyId!, mine.id, admin.id); // my lead
+    await project(archived.companyId!, archived.id, admin.id); // my archived lead still counts
+    await project(theirs.companyId!, theirs.id, admin.id); // hidden
+    await project(theirs.companyId!, theirs.id, rep.id); // hidden lead, but I manage it
+    await project(mine.companyId!, null, admin.id); // no lead: my company (a lead of mine is on it)
+    await project(theirs.companyId!, null, admin.id); // no lead, hidden company
+
+    expect((await get(await signIn(app, rep))).json().projects).toBe(4);
+    expect((await get(await signIn(app, admin))).json().projects).toBe(6);
   });
 });
