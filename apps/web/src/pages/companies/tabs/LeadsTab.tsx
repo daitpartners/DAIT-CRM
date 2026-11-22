@@ -69,45 +69,48 @@ export function LeadsTab({ company, canManage }: { company: CompanyDetail; canMa
           </div>
         ) : (
           <Table head={head} isEmpty={isPending || !rows?.length} empty={isPending ? t('Loading…') : t('No leads for this company yet')}>
-            {rows?.map((l) => (
-              <tr key={l.id} className="clickable" onClick={() => navigate(`/leads/${l.id}`)}>
-                <td>
-                  <Link to={`/leads/${l.id}`} className="row-link" onClick={(e) => e.stopPropagation()}>
-                    {l.number}
-                  </Link>
-                </td>
-                <td>
-                  <span className={l.leadType === 'Lead' ? 'badge b-purple' : 'badge b-grey'}>{leadTypeText(t, l.leadType)}</span>
-                </td>
-                <td>{l.contact ? l.contact.name : dim}</td>
-                <td>{lookup('lead_source', l.leadSource)}</td>
-                <td>
-                  <StatusBadge status={l.status} />
-                </td>
-                <td>
-                  <PriorityLabel priority={l.priority} />
-                </td>
-                <td>{l.assignedTo ? l.assignedTo.name : <span className="dim">{t('Unassigned')}</span>}</td>
-                <td>
-                  {l.nextFollowUp ? (
-                    l.isOverdue ? <span className="overdue">{t('{date} · overdue', { date: day(l.nextFollowUp) })}</span> : day(l.nextFollowUp)
-                  ) : (
-                    dim
-                  )}
-                </td>
-                <td onClick={(e) => e.stopPropagation()}>
-                  {quotesOf(l.id).length
-                    ? quotesOf(l.id).map((q, i) => (
-                        <span key={q.id}>
-                          {i ? ', ' : null}
-                          <Link to={`/quotations/${q.id}`}>{`${q.number} · ${quoteStatusText(t, q.status)}`}</Link>
-                        </span>
-                      ))
-                    : dim}
-                </td>
-                <td className="muted">{date(l.createdAt)}</td>
-              </tr>
-            ))}
+            {rows?.map((l) => {
+              const leadQuotes = quotesOf(l.id);
+              return (
+                <tr key={l.id} className="clickable" onClick={() => navigate(`/leads/${l.id}`)}>
+                  <td>
+                    <Link to={`/leads/${l.id}`} className="row-link" onClick={(e) => e.stopPropagation()}>
+                      {l.number}
+                    </Link>
+                  </td>
+                  <td>
+                    <span className={l.leadType === 'Lead' ? 'badge b-purple' : 'badge b-grey'}>{leadTypeText(t, l.leadType)}</span>
+                  </td>
+                  <td>{l.contact ? l.contact.name : dim}</td>
+                  <td>{lookup('lead_source', l.leadSource)}</td>
+                  <td>
+                    <StatusBadge status={l.status} />
+                  </td>
+                  <td>
+                    <PriorityLabel priority={l.priority} />
+                  </td>
+                  <td>{l.assignedTo ? l.assignedTo.name : <span className="dim">{t('Unassigned')}</span>}</td>
+                  <td>
+                    {l.nextFollowUp ? (
+                      l.isOverdue ? <span className="overdue">{t('{date} · overdue', { date: day(l.nextFollowUp) })}</span> : day(l.nextFollowUp)
+                    ) : (
+                      dim
+                    )}
+                  </td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    {leadQuotes.length
+                      ? leadQuotes.map((q, i) => (
+                          <span key={q.id}>
+                            {i ? ', ' : null}
+                            <Link to={`/quotations/${q.id}`}>{`${q.number} · ${quoteStatusText(t, q.status)}`}</Link>
+                          </span>
+                        ))
+                      : dim}
+                  </td>
+                  <td className="muted">{date(l.createdAt)}</td>
+                </tr>
+              );
+            })}
           </Table>
         )}
         {data && data.total > PAGE_SIZE ? (

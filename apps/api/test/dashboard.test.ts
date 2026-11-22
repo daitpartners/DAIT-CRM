@@ -180,10 +180,10 @@ describe('dashboard API', () => {
     await quote(other.cookie, theirs.id, 90, 'Sent');
 
     const body = (await get(rep.cookie)).json();
-    // 1000 + 18 % GST in INR; 2500 at 0 % in USD; oldest first, as the prototype's store order.
+    // 1000 + 18 % GST in INR; 2500 at 0 % in USD; newest first, as the prototype's store order.
     expect(body.awaitingQuotes).toEqual([
-      { id: sent, currency: 'INR', total: 1180 },
       { id: neg, currency: 'USD', total: 2500 },
+      { id: sent, currency: 'INR', total: 1180 },
     ]);
     expect((await get(other.cookie)).json().awaitingQuotes).toHaveLength(1);
   });

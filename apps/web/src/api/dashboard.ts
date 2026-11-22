@@ -27,7 +27,7 @@ export type Dashboard = {
   /** Open leads assigned to the user per status, first seven open statuses in lookup order. */
   pipeline: { status: string; count: number }[];
   closed: { won: number; lost: number };
-  /** Quotes awaiting response: the user's own Sent / Negotiating quotations (display totals), oldest first. */
+  /** Quotes awaiting response: the user's own Sent / Negotiating quotations (display totals), newest first. */
   awaitingQuotes: { id: number; currency: QuoteCurrency; total: number }[];
 };
 

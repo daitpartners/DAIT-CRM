@@ -46,7 +46,7 @@ export function startOfDayIn(day: string, timezone: string): Date {
  * The signed-in user's dashboard (prototype V.dashboard). Personal for every role, Administrator included:
  * "my" leads are visible leads assigned to the user; tasks are the user's own visible tasks; notifications
  * are the user's own; today's agenda is the user's own timed tasks (never Outlook events); quotes awaiting response
- * are the user's own Sent / Negotiating quotations with their display totals (oldest first). No team numbers.
+ * are the user's own Sent / Negotiating quotations with their display totals (newest first, as the prototype's store). No team numbers.
  */
 export const dashboardRoutes: FastifyPluginAsync = async (app) => {
   app.get('/dashboard', { preHandler: [requireUser] }, async (request) => {
@@ -90,7 +90,7 @@ export const dashboardRoutes: FastifyPluginAsync = async (app) => {
       prisma.quotation.findMany({
         where: { AND: [quotationWhere(user), { ownerId: user.id, status: { in: ['Sent', 'Negotiating'] } }] },
         include: quotationListInclude,
-        orderBy: { id: 'asc' },
+        orderBy: { id: 'desc' },
       }),
     ]);
 
