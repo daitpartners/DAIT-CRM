@@ -21,7 +21,9 @@ test('Email screen: read, log on the lead, add a task; mail stays private', asyn
   await expect(reader).toContainText('Attachments: orbit-notes.pdf');
   const side = page.getByRole('complementary', { name: 'Linked records' });
   await expect(side.getByRole('link', { name: /Company\s*Orbit Fintech/ })).toBeVisible();
-  await expect(side).toContainText('Sent to finance@orbit.example');
+  await expect(side.getByRole('link', { name: /Contact\s*/ })).toBeVisible();
+  // Thread history, newest first, the open message included (prototype "18 Nov 11:14 · reply received").
+  await expect(side).toContainText(/\d{2} \w{3} \d{2}:\d{2} · reply received\s*\d{2} \w{3} \d{2}:\d{2} · sent by Neha/);
   await expect(folders.getByRole('link', { name: /^Inbox\s*1$/ })).toBeVisible();
 
   await reader.getByRole('button', { name: 'Log as activity' }).click();

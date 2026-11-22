@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ApiError } from '../../api/client';
 import { useLeads, type LeadSummary } from '../../api/leads';
 import { useMailAction, type MailDetail } from '../../api/mail';
+import { Combobox } from '../../components/Combobox';
 import { Modal } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
 import { useDebounce } from '../../hooks/useDebounce';
@@ -15,7 +16,10 @@ type Props = {
   onCreated: (leadId: number) => void;
 };
 
-/** Prototype "Link email to a lead": an existing lead, or a new lead created from the email. */
+/**
+ * Prototype "Link email to a lead": one "Existing lead" select, searchable in place (prototype UI.enhanceSelects),
+ * whose blank choice creates a new lead from the email. Typing searches all visible leads on the server.
+ */
 export function LinkLeadModal({ message, onClose, onLinked, onCreated }: Props) {
   const t = useT();
   const toast = useToast();
@@ -23,10 +27,15 @@ export function LinkLeadModal({ message, onClose, onLinked, onCreated }: Props) 
   const [q, setQ] = useState('');
   // The chosen lead is kept as is: a later search that no longer finds it does not drop the choice.
   const [chosen, setChosen] = useState<LeadSummary | null>(null);
-  const debounced = useDebounce(q, 250);
+  const debounced = useDebounce(q.trim(), 250);
   const { data } = useLeads({ q: debounced || undefined, pageSize: 25, tab: 'all' });
   const found = (data?.items ?? []).filter((l) => !l.archivedAt);
-  const leads = chosen && !found.some((l) => l.id === chosen.id) ? [chosen, ...found] : found;
+  // While typing only the matches are offered (as the prototype filters); closed, the chosen lead stays listed for its label.
+  const leads = !q.trim() && chosen && !found.some((l) => l.id === chosen.id) ? [chosen, ...found] : found;
+  const options = [
+    ...(q.trim() ? [] : [{ value: '', label: t('— create a new lead from this email —') }]),
+    ...leads.map((l) => ({ value: String(l.id), label: `${l.number} · ${l.companyName}` })),
+  ];
 
   function go() {
     const onError = (err: unknown) => toast(err instanceof ApiError ? errorText(t, err.code) : t('Something went wrong. Try again.'), 'warn');
@@ -47,6 +56,7 @@ export function LinkLeadModal({ message, onClose, onLinked, onCreated }: Props) 
     <Modal
       title={t('Link email to a lead')}
       onClose={onClose}
+      focusDialog
       actions={
         <>
           <button type="button" className="btn" onClick={onClose}>{t('Cancel')}</button>
@@ -54,19 +64,16 @@ export function LinkLeadModal({ message, onClose, onLinked, onCreated }: Props) 
         </>
       }
     >
-      <div>
-        <label className="lbl" htmlFor="link-q">{t('Find a lead')}</label>
-        <input id="link-q" className="in" type="search" value={q} placeholder={t('Lead number, company or contact')} onChange={(e) => setQ(e.target.value)} />
-      </div>
-      <div>
-        <label className="lbl" htmlFor="link-lead">{t('Existing lead')}</label>
-        <select id="link-lead" className="in" value={chosen?.id ?? ''} onChange={(e) => setChosen(leads.find((l) => String(l.id) === e.target.value) ?? null)}>
-          <option value="">{t('— create a new lead from this email —')}</option>
-          {leads.map((l) => (
-            <option key={l.id} value={l.id}>{`${l.number} · ${l.companyName}`}</option>
-          ))}
-        </select>
-      </div>
+      <Combobox
+        id="link-lead"
+        label={t('Existing lead')}
+        searchable
+        options={options}
+        value={chosen ? String(chosen.id) : null}
+        placeholder={t('— create a new lead from this email —')}
+        onQuery={setQ}
+        onChange={(v) => setChosen(leads.find((l) => String(l.id) === v) ?? null)}
+      />
       <div className="note info">
         {t("Creating a lead runs the same duplicate check as the lead form: the sender's email domain is matched against existing companies first.")}
       </div>

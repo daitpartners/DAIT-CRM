@@ -271,11 +271,29 @@ describe('reading mail on the Email screen (2B-2)', () => {
     expect(res.json()).toMatchObject({
       id: m.id, bodyText: 'Looks good', attachmentNames: ['quote.pdf'], isRead: true,
       lead: { id: lead.id, number: lead.number, status: 'New', priority: lead.priority }, contact: { id: contact.id, name: 'Ana Ruiz' }, company: { id: company.id, name: 'Acme' },
-      thread: [{ id: first.id, direction: 'out', who: 'ana@acme.com' }],
+      // Newest first and the open message included (prototype "18 Nov 11:14 · reply received" / "… · sent by Arjun").
+      thread: [
+        { id: m.id, direction: 'in', who: 'Ana Ruiz', kind: 'reply', by: null, unmatched: false },
+        { id: first.id, direction: 'out', who: 'ana@acme.com', kind: 'sent', by: 'Maya', unmatched: true },
+      ],
     });
     expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: m.id } })).isRead).toBe(true);
     expect((await prisma.job.findFirstOrThrow({ where: { type: 'mail_action' } })).payload).toEqual({ emailMessageId: m.id, action: 'read' });
     expect((await call('GET', `/api/mail/${m.id}`, await signIn(app, admin))).statusCode).toBe(404);
+  });
+
+  it('a message alone in its conversation lists itself; other mailboxes in the same conversation stay out', async () => {
+    const { rep, admin, box } = await setup();
+    // Another user's copy of the same conversation (same Graph conversation id) is theirs only.
+    await synced(admin.id, null, { threadId: 'solo', fromAddress: 'deepak@daitpartners.com', status: 'sent', folder: 'sent', occurredAt: new Date('2026-11-21T10:00:00Z') });
+    const m = await synced(rep.id, box.id, { threadId: 'solo', subject: 'Interested in your work' });
+    const noThread = await synced(rep.id, box.id, { threadId: null, folder: 'sent', status: 'sent', fromAddress: 'maya@daitpartners.com', fromName: null });
+    const cookie = await signIn(app, rep);
+    expect((await call('GET', `/api/mail/${m.id}`, cookie)).json().thread).toEqual([
+      { id: m.id, occurredAt: '2026-11-20T10:00:00.000Z', direction: 'in', who: 'Ana Ruiz', subject: 'Interested in your work', kind: 'received', by: null, unmatched: true },
+    ]);
+    // Without a conversation id: the message alone; sent by the mailbox owner (first name of the user when Graph gave no sender name).
+    expect((await call('GET', `/api/mail/${noThread.id}`, cookie)).json().thread).toMatchObject([{ id: noThread.id, kind: 'sent', by: 'Maya' }]);
   });
 
   it('a preview (the first message shown on arrival) does not mark it read', async () => {

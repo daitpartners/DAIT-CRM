@@ -48,6 +48,27 @@ const isInbound = (m: EmailMessage) => m.status === 'received';
 /** The other party: the sender of received mail, the first recipient of your own. */
 const counterpart = (m: EmailMessage) => (isInbound(m) ? m.fromName || m.fromAddress : ((m.toAddresses as string[])[0] ?? ''));
 
+const THREAD_MAX = 50;
+const REPLY_SUBJECT = /^\s*(re|aw|sv|rv)\s*:/i;
+
+/**
+ * The side panel's thread history (prototype `history`, newest first): the open message and the rest of the
+ * conversation in the user's own mailbox. `kind` words the event ("sent by Maya", "reply received", "received"),
+ * `by` is the sender's first name for your own mail, `unmatched` marks mail with no lead and no contact.
+ */
+function threadHistory(user: AuthUser, open: EmailMessage, others: EmailMessage[]) {
+  const all = [...others, open].sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime() || b.id - a.id);
+  return all.map((t, i) => {
+    const inbound = isInbound(t);
+    const earlier = i < all.length - 1;
+    const kind = t.status === 'draft' ? 'draft' : !inbound ? 'sent' : earlier || REPLY_SUBJECT.test(t.subject) ? 'reply' : 'received';
+    return {
+      id: t.id, occurredAt: t.occurredAt, direction: inbound ? 'in' : 'out', who: counterpart(t), subject: t.subject,
+      kind, by: inbound ? null : ((t.fromName || user.name).trim().split(/\s+/)[0] ?? null), unmatched: !t.leadId && !t.contactId,
+    };
+  });
+}
+
 /** Ids of the user's messages matching a search over subject, sender, recipients and text (case-insensitive). */
 async function searchIds(userId: number, s: string): Promise<number[]> {
   const like = `%${s.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
@@ -229,7 +250,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
         m.contactId ? prisma.contact.findUnique({ where: { id: m.contactId }, select: { id: true, firstName: true, lastName: true } }) : null,
         m.companyId ? prisma.company.findUnique({ where: { id: m.companyId }, select: { id: true, name: true } }) : null,
         m.threadId
-          ? prisma.emailMessage.findMany({ where: { userId: user.id, threadId: m.threadId, id: { not: m.id } }, orderBy: { occurredAt: 'asc' }, take: 50 })
+          ? prisma.emailMessage.findMany({ where: { userId: user.id, threadId: m.threadId, id: { not: m.id } }, orderBy: { occurredAt: 'desc' }, take: THREAD_MAX - 1 })
           : [],
       ]);
       return {
@@ -238,7 +259,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
         lead: lead ? { id: lead.id, number: lead.number, status: lead.status, priority: lead.priority, nextFollowUp: lead.nextFollowUp, companyId: lead.companyId } : null,
         contact: contact ? { id: contact.id, name: `${contact.firstName} ${contact.lastName}`.trim() } : null,
         company,
-        thread: thread.map((t) => ({ id: t.id, occurredAt: t.occurredAt, direction: isInbound(t) ? 'in' : 'out', who: counterpart(t), subject: t.subject })),
+        thread: threadHistory(user, m, thread),
       };
     });
   });

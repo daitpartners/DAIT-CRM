@@ -3,14 +3,17 @@ import { useEffect, useId, useRef, type ReactNode, type RefObject } from 'react'
 const FOCUSABLE =
   'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
-/** Keeps Tab inside `ref`, calls `onEscape` on Escape, and restores focus to the opener on unmount. */
-export function useDialogFocus(ref: RefObject<HTMLElement | null>, onEscape: () => void, initial?: string) {
+/**
+ * Keeps Tab inside `ref`, calls `onEscape` on Escape, and restores focus to the opener on unmount. Focus starts on
+ * `initial` (a selector, default the first focusable field), or on the dialog itself when `initial` is null.
+ */
+export function useDialogFocus(ref: RefObject<HTMLElement | null>, onEscape: () => void, initial?: string | null) {
   const escape = useRef(onEscape);
   escape.current = onEscape;
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
     const root = ref.current;
-    const first = root?.querySelector<HTMLElement>(initial ?? FOCUSABLE);
+    const first = initial === null ? root : root?.querySelector<HTMLElement>(initial ?? FOCUSABLE);
     first?.focus();
     function onKey(e: KeyboardEvent) {
       if (!root) return;
@@ -42,13 +45,23 @@ export function useDialogFocus(ref: RefObject<HTMLElement | null>, onEscape: () 
   }, [ref, initial]);
 }
 
-type ModalProps = { title: string; onClose: () => void; children: ReactNode; actions?: ReactNode };
+type ModalProps = {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+  actions?: ReactNode;
+  /**
+   * Focus the dialog itself on opening instead of its first field: a first field that is a searchable picker would
+   * open its list over the form (the prototype's dialogs open with nothing focused).
+   */
+  focusDialog?: boolean;
+};
 
 /** Accessible dialog: role="dialog", aria-modal, labelled by its title, Escape and backdrop close it. */
-export function Modal({ title, onClose, children, actions }: ModalProps) {
+export function Modal({ title, onClose, children, actions, focusDialog = false }: ModalProps) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
-  useDialogFocus(ref, onClose);
+  useDialogFocus(ref, onClose, focusDialog ? null : undefined);
   return (
     <div
       className="modal-bg"
@@ -56,7 +69,7 @@ export function Modal({ title, onClose, children, actions }: ModalProps) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div ref={ref} className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <div ref={ref} className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={focusDialog ? -1 : undefined}>
         <h2 id={titleId}>{title}</h2>
         {children}
         {actions ? <div className="actions">{actions}</div> : null}

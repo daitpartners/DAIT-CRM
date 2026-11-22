@@ -10,7 +10,8 @@ const ymdIn = (d: Date, timeZone: string) => new Intl.DateTimeFormat('en-CA', { 
  * Date formatters in the user's language and date format: `date` for a timestamp (shown in the
  * user's time zone), `day` for a calendar date `YYYY-MM-DD` (shown as is, no time-zone shift), `dateTime` for a
  * timestamp with its time (24-hour), `relative` for a timestamp as "Today, 09:05" / "Yesterday, 17:00" / the
- * date and time (prototype `rel`).
+ * date and time (prototype `rel`), `short` for a timestamp as "18 Nov 11:14" (day, short month, time; no year, no
+ * comma: the prototype's thread history).
  */
 export function useFormatDate() {
   const t = useT();
@@ -34,5 +35,15 @@ export function useFormatDate() {
     },
     [t, timezone, dateTime],
   );
-  return { date, day, dateTime, relative };
+  const short = useCallback(
+    (iso: string) => {
+      const at = new Date(iso);
+      const parts = new Intl.DateTimeFormat(language, { timeZone: timezone, day: '2-digit', month: 'short' }).formatToParts(at);
+      const part = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+      const time = new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(at);
+      return `${part('day')} ${part('month')} ${time}`;
+    },
+    [language, timezone],
+  );
+  return { date, day, dateTime, relative, short };
 }

@@ -127,7 +127,7 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       1: detail(a, {
         lead: { id: 5, number: 'LD-1005', status: 'Contacted', priority: 'High', nextFollowUp: '2026-11-25', companyId: 4 },
         contact: { id: 9, name: 'Ana Ruiz' }, company: { id: 4, name: 'Acme' },
-        thread: [{ id: 8, occurredAt: '2026-11-19T10:00:00.000Z', direction: 'out', who: 'ana@acme.com', subject: 'Proposal' }],
+        thread: [{ id: 8, occurredAt: '2026-11-19T10:00:00.000Z', direction: 'out', who: 'ana@acme.com', subject: 'Proposal', kind: 'sent', by: 'Arjun', unmatched: false }],
       }),
     });
     show('/email/1');
@@ -266,13 +266,13 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     expect(await within(dialog).findByText(/· Decisor/)).toBeTruthy();
   });
 
-  it('link modal keeps the chosen lead when the search hides it', async () => {
+  it('link modal: one searchable Existing lead select (no separate search box) that keeps the chosen lead', async () => {
     const u = userEvent.setup();
     const a = item();
     const posts = stub([a], { 1: detail(a) }, META, (url) => {
       if (!url.startsWith('/api/leads')) return undefined;
       const q = new URL(url, 'http://x').searchParams.get('q');
-      // The first page shows LD-1 only; the search "zeta" finds LD-2 only.
+      // The first page shows LD-1 only; the search "zeta" finds LD-2 only (server search, beyond the first page).
       const items = q ? [leadRow(2, 'LD-2', { companyName: 'Zeta' })] : [leadRow(1, 'LD-1')];
       return { items, total: items.length, page: 1, pageSize: 25 };
     });
@@ -280,14 +280,108 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     const reader = await screen.findByRole('article');
     await u.click(await within(reader).findByRole('button', { name: 'Link to lead / create lead' }));
     const dialog = await screen.findByRole('dialog', { name: 'Link email to a lead' });
-    const select = within(dialog).getByLabelText('Existing lead') as HTMLSelectElement;
-    await within(dialog).findByRole('option', { name: 'LD-1 · Acme' });
-    await u.selectOptions(select, '1');
-    await u.type(within(dialog).getByLabelText('Find a lead'), 'zeta');
-    await waitFor(() => expect(within(dialog).getByRole('option', { name: 'LD-2 · Zeta' })).toBeTruthy());
-    expect(select.value).toBe('1');
-    expect(within(dialog).getByRole('option', { name: 'LD-1 · Acme' })).toBeTruthy();
+    expect(within(dialog).queryByLabelText('Find a lead')).toBeNull();
+    const box = within(dialog).getByRole('combobox', { name: 'Existing lead' }) as HTMLInputElement;
+    // Opens closed, like the prototype: the list stays shut and the box shows the "create" choice as its placeholder.
+    expect(box.getAttribute('aria-expanded')).toBe('false');
+    expect(box.placeholder).toBe('— create a new lead from this email —');
+    await u.click(box);
+    await u.click(await within(dialog).findByRole('option', { name: 'LD-1 · Acme' }));
+    expect(box.value).toBe('LD-1 · Acme');
+    await u.type(box, 'zeta');
+    expect(await within(dialog).findByRole('option', { name: 'LD-2 · Zeta' })).toBeTruthy();
+    await u.keyboard('{Escape}');
+    await waitFor(() => expect(box.value).toBe('LD-1 · Acme'));
     await u.click(within(dialog).getByRole('button', { name: 'Link' }));
     await waitFor(() => expect(posts).toEqual([{ url: '/api/mail/1/link', body: { leadId: 1 } }]));
+  });
+
+  it('link modal finds a lead by server search and links it', async () => {
+    const u = userEvent.setup();
+    const a = item();
+    const posts = stub([a], { 1: detail(a) }, META, (url) => {
+      if (!url.startsWith('/api/leads')) return undefined;
+      const q = new URL(url, 'http://x').searchParams.get('q');
+      const items = q ? [leadRow(2, 'LD-2', { companyName: 'Zeta' })] : [leadRow(1, 'LD-1')];
+      return { items, total: items.length, page: 1, pageSize: 25 };
+    });
+    show('/email/1');
+    const reader = await screen.findByRole('article');
+    await u.click(await within(reader).findByRole('button', { name: 'Link to lead / create lead' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Link email to a lead' });
+    await u.type(within(dialog).getByRole('combobox', { name: 'Existing lead' }), 'zeta');
+    await u.click(await within(dialog).findByRole('option', { name: 'LD-2 · Zeta' }));
+    await u.click(within(dialog).getByRole('button', { name: 'Link' }));
+    await waitFor(() => expect(posts).toEqual([{ url: '/api/mail/1/link', body: { leadId: 2 } }]));
+  });
+
+  it('a linked message without a contact still shows the Contact card with a dash', async () => {
+    const a = item({ leadId: 5, leadNumber: 'LD-1005' });
+    stub([a], {
+      1: detail(a, { lead: { id: 5, number: 'LD-1005', status: 'New', priority: 'Medium', nextFollowUp: null, companyId: 4 }, contact: null, company: { id: 4, name: 'Acme' } }),
+    });
+    show('/email/1');
+    const side = await screen.findByRole('complementary', { name: 'Linked records' });
+    expect(await within(side).findByRole('link', { name: /Lead\s*LD-1005/ })).toBeTruthy();
+    const contact = within(side).getByRole('link', { name: /Contact\s*—/ });
+    expect(contact.getAttribute('href')).toBe('/companies/4?tab=contacts');
+    expect(within(side).getByRole('link', { name: /Company\s*Acme/ })).toBeTruthy();
+  });
+
+  it('thread history lists the open message too, newest first, in the prototype wording', async () => {
+    at1200();
+    const a = item({ id: 1, leadId: 5, leadNumber: 'LD-1005', occurredAt: '2026-11-18T11:14:00.000Z' });
+    stub([a], {
+      1: detail(a, {
+        lead: { id: 5, number: 'LD-1005', status: 'Contacted', priority: 'High', nextFollowUp: null, companyId: 4 },
+        thread: [
+          { id: 1, occurredAt: '2026-11-18T11:14:00.000Z', direction: 'in', who: 'Ana Ruiz', subject: 'Re: Proposal', kind: 'reply', by: null, unmatched: false },
+          { id: 8, occurredAt: '2026-11-07T10:20:00.000Z', direction: 'out', who: 'ana@acme.com', subject: 'Proposal', kind: 'sent', by: 'Arjun', unmatched: false },
+        ],
+      }),
+    }, META, (url) => (url === '/api/me' ? london : undefined));
+    show('/email/1', london);
+    const side = await screen.findByRole('complementary', { name: 'Linked records' });
+    expect(await within(side).findByText('18 Nov 11:14 · reply received')).toBeTruthy();
+    expect(within(side).getByText('07 Nov 10:20 · sent by Arjun')).toBeTruthy();
+    expect(within(side).queryByText('No earlier messages.')).toBeNull();
+  });
+
+  it('a single unmatched message shows its own history entry', async () => {
+    at1200();
+    const a = item({ id: 1, occurredAt: '2026-11-16T09:30:00.000Z' });
+    stub([a], {
+      1: detail(a, { thread: [{ id: 1, occurredAt: '2026-11-16T09:30:00.000Z', direction: 'in', who: 'Ana Ruiz', subject: 'Proposal', kind: 'received', by: null, unmatched: true }] }),
+    }, META, (url) => (url === '/api/me' ? london : undefined));
+    show('/email/1', london);
+    const side = await screen.findByRole('complementary', { name: 'Linked records' });
+    expect(await within(side).findByText('16 Nov 09:30 · received · no matching contact')).toBeTruthy();
+  });
+
+  it('thread history words are translated', async () => {
+    at1200();
+    const spanish: Me = { ...london, language: 'es' };
+    const a = item({ id: 1, occurredAt: '2026-11-16T09:30:00.000Z' });
+    stub([a], {
+      1: detail(a, { thread: [{ id: 1, occurredAt: '2026-11-16T09:30:00.000Z', direction: 'out', who: 'ana@acme.com', subject: 'Proposal', kind: 'sent', by: 'Arjun', unmatched: true }] }),
+    }, META, (url) => (url === '/api/me' ? spanish : undefined));
+    show('/email/1', spanish);
+    const side = await screen.findByRole('complementary', { name: es['Linked records'] });
+    expect(await within(side).findByText(`16 nov 09:30 · ${es['sent by {who}'].replace('{who}', 'Arjun')}`)).toBeTruthy();
+  });
+
+  it('compose opens with the form visible: no field takes focus, the chosen client shows at once', async () => {
+    const u = userEvent.setup();
+    stub([], {});
+    show('/email?company=4');
+    await u.click(await screen.findByRole('button', { name: '+ Compose' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Compose email' });
+    const client = within(dialog).getByRole('combobox', { name: 'Client' }) as HTMLInputElement;
+    // The companies search answers nothing here: the name comes from the screen's own client filter.
+    expect(client.value).toBe('Acme');
+    expect(client.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(dialog);
+    // "(stakeholders)" is a muted, normal-weight note in the Cc label, as in the prototype.
+    expect(within(dialog).getByText('(stakeholders)').className).toBe('lbl-note');
   });
 });

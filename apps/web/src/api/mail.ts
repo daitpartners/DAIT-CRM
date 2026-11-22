@@ -34,7 +34,11 @@ export type MailDetail = MailItem & {
   lead: { id: number; number: string; status: string; priority: string; nextFollowUp: string | null; companyId: number | null } | null;
   contact: { id: number; name: string } | null;
   company: { id: number; name: string } | null;
-  thread: { id: number; occurredAt: string; direction: 'in' | 'out'; who: string; subject: string }[];
+  /** Thread history, newest first, the open message included (see the API's threadHistory). */
+  thread: {
+    id: number; occurredAt: string; direction: 'in' | 'out'; who: string; subject: string;
+    kind: 'sent' | 'reply' | 'received' | 'draft'; by: string | null; unmatched: boolean;
+  }[];
 };
 
 export type MailMeta = {

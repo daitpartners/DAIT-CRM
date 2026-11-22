@@ -17,6 +17,8 @@ import { fillTemplate } from '../../lib/mergeFields';
 /** What Compose opens with: a client / lead context, a filled template, or a reply to one of your messages. */
 export type ComposeStart = {
   companyId?: number;
+  /** The client's name, so the Client picker shows it at once (before, or without, a companies search). */
+  companyName?: string;
   leadId?: number;
   subject?: string;
   body?: string;
@@ -108,6 +110,7 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
     <Modal
       title={reply ? t('Reply') : t('Compose email')}
       onClose={onClose}
+      focusDialog
       actions={
         <>
           <button type="button" className="btn" onClick={onClose}>{t('Discard')}</button>
@@ -127,6 +130,7 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
             id="cm-company"
             label={t('Client')}
             value={companyId}
+            selected={companyId === start.companyId && start.companyName ? { value: String(start.companyId), label: start.companyName } : null}
             onChange={(id) => {
               setCompanyId(id);
               setLeadId(undefined);
@@ -182,7 +186,7 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
         </div>
         <div>
           <label className="lbl" htmlFor="cm-cc">
-            {t('Cc')} <span className="dim">{t('(stakeholders)')}</span>
+            {t('Cc')} <span className="lbl-note">{t('(stakeholders)')}</span>
           </label>
           <input id="cm-cc" className="in" value={cc} onChange={(e) => setCc(e.target.value)} />
         </div>

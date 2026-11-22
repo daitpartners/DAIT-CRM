@@ -113,7 +113,7 @@ export function EmailPage() {
             {t('Connect Microsoft 365')}
           </Link>
         )}
-        <button type="button" className="btn primary" onClick={() => setCompose({ companyId: filter.company, leadId: filter.lead })}>
+        <button type="button" className="btn primary" onClick={() => setCompose({ companyId: filter.company, companyName, leadId: filter.lead })}>
           {t('+ Compose')}
         </button>
       </Topbar>

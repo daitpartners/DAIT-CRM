@@ -25,7 +25,7 @@ export function Reader({ id, peek = false, connected, onReply, onArchived }: Pro
   const t = useT();
   const toast = useToast();
   const navigate = useNavigate();
-  const { dateTime, relative, day } = useFormatDate();
+  const { dateTime, short, day } = useFormatDate();
   const { data: m, isError } = useMailMessage(id, peek);
   const action = useMailAction();
   const [linking, setLinking] = useState(false);
@@ -124,7 +124,7 @@ export function Reader({ id, peek = false, connected, onReply, onArchived }: Pro
           )}
         </div>
       </article>
-      <MailSide m={m} day={day} relative={relative} />
+      <MailSide m={m} day={day} short={short} />
       {linking ? (
         <LinkLeadModal
           message={m}
@@ -140,9 +140,14 @@ export function Reader({ id, peek = false, connected, onReply, onArchived }: Pro
   );
 }
 
-function MailSide({ m, day, relative }: { m: MailDetail; day: (ymd: string) => string; relative: (iso: string) => string }) {
+function MailSide({ m, day, short }: { m: MailDetail; day: (ymd: string) => string; short: (iso: string) => string }) {
   const t = useT();
   const l = m.lead;
+  const companyId = l?.companyId ?? m.company?.id;
+  const event = (h: MailDetail['thread'][number]) => {
+    const what = h.kind === 'sent' ? t('sent by {who}', { who: h.by ?? '' }) : h.kind === 'reply' ? t('reply received') : h.kind === 'draft' ? t('draft') : t('received');
+    return h.direction === 'in' && h.unmatched ? `${what} · ${t('no matching contact')}` : what;
+  };
   return (
     <aside className="mailside" aria-label={t('Linked records')}>
       <div className="navsec mail-sec">{t('Linked records')}</div>
@@ -155,35 +160,18 @@ function MailSide({ m, day, relative }: { m: MailDetail; day: (ymd: string) => s
             </span>
             <PriorityLabel priority={l.priority as Priority} />
           </Link>
-          {m.contact ? (
-            <Link className="link" to={`/companies/${l.companyId ?? m.company?.id}?tab=contacts`}>
-              <span>
-                <strong>{t('Contact')}</strong>
-                <span className="link-sub">{m.contact.name}</span>
-              </span>
-            </Link>
-          ) : null}
-          {m.company ? (
-            <Link className="link" to={`/companies/${m.company.id}`}>
-              <span>
-                <strong>{t('Company')}</strong>
-                <span className="link-sub">{m.company.name}</span>
-              </span>
-            </Link>
-          ) : null}
+          {/* Prototype: a linked message always shows Lead, Contact (name or "—") and Company. */}
+          <SideLink to={companyId ? `/companies/${companyId}?tab=contacts` : null} title={t('Contact')} sub={m.contact?.name ?? '—'} />
+          <SideLink to={m.company ? `/companies/${m.company.id}` : companyId ? `/companies/${companyId}` : null} title={t('Company')} sub={m.company?.name ?? '—'} />
         </>
       ) : (
         <div className="note warn">{t('No matching contact or lead. Link it to an existing lead or create one.')}</div>
       )}
       <div className="navsec mail-sec">{t('Thread history')}</div>
       <div className="mail-thread">
-        {m.thread.length
-          ? m.thread.map((h) => (
-              <div key={h.id}>
-                {relative(h.occurredAt)} · {h.direction === 'in' ? t('Received from {who}', { who: h.who }) : t('Sent to {who}', { who: h.who })}
-              </div>
-            ))
-          : <div className="dim">{t('No earlier messages.')}</div>}
+        {m.thread.map((h) => (
+          <div key={h.id}>{`${short(h.occurredAt)} · ${event(h)}`}</div>
+        ))}
       </div>
       {l?.nextFollowUp ? (
         <>
@@ -195,4 +183,15 @@ function MailSide({ m, day, relative }: { m: MailDetail; day: (ymd: string) => s
       ) : null}
     </aside>
   );
+}
+
+/** A card in the side panel: a link when the record can be opened. */
+function SideLink({ to, title, sub }: { to: string | null; title: string; sub: string }) {
+  const inner = (
+    <span>
+      <strong>{title}</strong>
+      <span className="link-sub">{sub}</span>
+    </span>
+  );
+  return to ? <Link className="link" to={to}>{inner}</Link> : <div className="link">{inner}</div>;
 }

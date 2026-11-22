@@ -55,7 +55,7 @@ test('mail parity: app side', async ({ page }) => {
   await page.getByRole('button', { name: '+ Compose' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await shot(page, 'compose-open-app');
-  // The client picker takes focus and opens its list; close it to see the whole form.
+  // The dialog opens with nothing focused (as the prototype); a click on the title leaves it unchanged.
   await page.getByRole('dialog').getByText('Compose email', { exact: true }).click();
   await shot(page, 'compose-app');
   await page.getByRole('dialog').getByRole('button', { name: 'Discard' }).click();
