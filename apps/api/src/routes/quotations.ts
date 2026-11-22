@@ -1,0 +1,140 @@
+import type { FastifyPluginAsync, FastifyReply } from 'fastify';
+import { QuotationCreate, QuotationDecision, QuotationListQuery, QuotationUpdate, type QuoteTab } from '@dait-crm/shared';
+import { prisma } from '../db.js';
+import { NotFoundError, parseBody, parseQuery } from '../validate.js';
+import { requireRight, requireUser, type AuthUser } from '../plugins/auth.js';
+import { StaleError, isNotFound } from '../prismaErrors.js';
+import { RuleError } from '../leads/service.js';
+import { todayIn } from '../leads/dates.js';
+import { quotationWhere } from '../quotations/visibility.js';
+import {
+  createQuotation, decideQuotation, duplicateQuotation, markNegotiating, quotationDetail, quotationInclude, quotationListInclude,
+  quotationListItem, sumsByCurrency, updateQuotation,
+} from '../quotations/service.js';
+
+/** RuleError codes answered with 409; `forbidden` is a 403; any other rule refusal is a 400. */
+const CONFLICT_CODES = new Set(['locked', 'sending', 'unsent_changes', 'invalid_transition']);
+
+async function guard<T>(reply: FastifyReply, fn: () => Promise<T>): Promise<T | FastifyReply> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e instanceof StaleError || isNotFound(e)) return reply.code(409).send({ error: 'stale' });
+    if (e instanceof RuleError) {
+      const code = e.code === 'forbidden' ? 403 : CONFLICT_CODES.has(e.code) ? 409 : 400;
+      return reply.code(code).send({ error: e.code });
+    }
+    throw e;
+  }
+}
+
+/** Prototype V.quotes tab filters. */
+const TABS: Record<QuoteTab, (status: string) => boolean> = {
+  all: () => true,
+  draft: (s) => s === 'Draft',
+  sent: (s) => s === 'Sent' || s === 'Negotiating',
+  accepted: (s) => s === 'Accepted',
+  closed: (s) => s === 'Rejected' || s === 'Expired',
+};
+
+async function detailOf(id: number, user: AuthUser) {
+  const q = await prisma.quotation.findFirst({ where: { AND: [{ id }, quotationWhere(user)] }, include: quotationInclude });
+  if (!q) throw new NotFoundError();
+  return quotationDetail(q, user);
+}
+
+const idOf = (raw: string) => Number(raw);
+
+export const quotationRoutes: FastifyPluginAsync = async (app) => {
+  /**
+   * Every visible quotation (newest date first) for the tab and search, with the tab counts and tiles computed over
+   * all visible quotations, as the prototype does. Totals are the display figures (last sent revision while revision
+   * n+1 is unsent).
+   */
+  app.get('/quotations', { preHandler: [requireUser] }, async (request) => {
+    const query = parseQuery(QuotationListQuery, request.query);
+    const user = request.user!;
+    const today = todayIn(user.timezone);
+    const rows = await prisma.quotation.findMany({
+      where: quotationWhere(user), include: quotationListInclude, orderBy: [{ quotationDate: 'desc' }, { id: 'desc' }],
+    });
+    const all = rows.map((r) => quotationListItem(r, today));
+    const s = query.s?.toLowerCase();
+    const items = all.filter((q) => TABS[query.tab](q.status)
+      && (!s || [q.number, q.company.name, q.company.legalName ?? '', q.lead?.number ?? '', q.subject].join(' ').toLowerCase().includes(s)));
+    const open = all.filter((q) => TABS.sent(q.status));
+    const accepted = all.filter((q) => TABS.accepted(q.status));
+    const sentCount = all.filter((q) => q.status !== 'Draft').length;
+    return {
+      items,
+      counts: {
+        all: all.length, draft: all.filter((q) => TABS.draft(q.status)).length, sent: open.length, accepted: accepted.length,
+        closed: all.filter((q) => TABS.closed(q.status)).length,
+      },
+      tiles: {
+        openCount: open.length,
+        openSums: sumsByCurrency(open),
+        acceptedCount: accepted.length,
+        acceptedSums: sumsByCurrency(accepted),
+        expiringSoon: open.filter((q) => q.expiringSoon).map((q) => ({ id: q.id, number: q.number, validUntil: q.validUntil })),
+        winRate: Math.round((accepted.length / Math.max(1, sentCount)) * 100),
+        sentCount,
+      },
+    };
+  });
+
+  app.post('/quotations', { preHandler: [requireRight('manage_quotes')] }, async (request, reply) => {
+    const body = parseBody(QuotationCreate, request.body);
+    const user = request.user!;
+    return guard(reply, async () => {
+      const id = await prisma.$transaction((tx) => createQuotation(tx, user, body));
+      return reply.code(201).send(await detailOf(id, user));
+    });
+  });
+
+  app.get<{ Params: { id: string } }>('/quotations/:id', { preHandler: [requireUser] }, async (request) => {
+    const id = idOf(request.params.id);
+    if (!Number.isInteger(id)) throw new NotFoundError();
+    return detailOf(id, request.user!);
+  });
+
+  app.patch<{ Params: { id: string } }>('/quotations/:id', { preHandler: [requireUser] }, async (request, reply) => {
+    const body = parseBody(QuotationUpdate, request.body);
+    const user = request.user!;
+    const id = idOf(request.params.id);
+    return guard(reply, async () => {
+      await prisma.$transaction((tx) => updateQuotation(tx, user, id, body));
+      return detailOf(id, user);
+    });
+  });
+
+  app.post<{ Params: { id: string } }>('/quotations/:id/negotiate', { preHandler: [requireUser] }, async (request, reply) => {
+    const user = request.user!;
+    const id = idOf(request.params.id);
+    return guard(reply, async () => {
+      await prisma.$transaction((tx) => markNegotiating(tx, user, id));
+      return detailOf(id, user);
+    });
+  });
+
+  for (const [path, to] of [['accept', 'Accepted'], ['reject', 'Rejected']] as const) {
+    app.post<{ Params: { id: string } }>(`/quotations/:id/${path}`, { preHandler: [requireUser] }, async (request, reply) => {
+      const body = parseBody(QuotationDecision, request.body);
+      const user = request.user!;
+      const id = idOf(request.params.id);
+      return guard(reply, async () => {
+        await prisma.$transaction((tx) => decideQuotation(tx, user, id, to, body.discardUnsent === true));
+        return detailOf(id, user);
+      });
+    });
+  }
+
+  app.post<{ Params: { id: string } }>('/quotations/:id/duplicate', { preHandler: [requireRight('manage_quotes')] }, async (request, reply) => {
+    const user = request.user!;
+    const id = idOf(request.params.id);
+    return guard(reply, async () => {
+      const newId = await prisma.$transaction((tx) => duplicateQuotation(tx, user, id));
+      return reply.code(201).send(await detailOf(newId, user));
+    });
+  });
+};

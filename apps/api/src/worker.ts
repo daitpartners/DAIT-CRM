@@ -11,6 +11,7 @@ import { campaignStepHandler } from './jobs/handlers/campaignStep.js';
 import { scheduleCampaigns } from './mailer/schedule.js';
 import { scheduleMailSync } from './mail/schedule.js';
 import { scheduleCalendarSync } from './calendar/schedule.js';
+import { scheduleQuotationExpiry } from './jobs/quotationExpiry.js';
 
 export { runOnce, runForever } from './jobs/runner.js';
 
@@ -46,10 +47,12 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<void> 
   const warn = (what: string) => (err: unknown) => console.warn(`worker: ${what} failed: ${err instanceof Error ? err.message : String(err)}`);
   // Mailer (release 2C): scheduled campaigns start, due ones get their next step.
   // Calendar (release 3C): each calendar with Sync calendar on is copied 5 minutes after its last run.
+  // Quotations (release 3A): Sent / Negotiating past valid-until become Expired (checked at most hourly).
   const schedule = () => Promise.all([
     scheduleMailSync().catch(warn('mail schedule')),
     scheduleCampaigns().catch(warn('mailer schedule')),
     scheduleCalendarSync().catch(warn('calendar schedule')),
+    scheduleQuotationExpiry().catch(warn('quotation expiry')),
   ]);
   void schedule();
   const scheduler = setInterval(schedule, SCHEDULE_EVERY_MS);

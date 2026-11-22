@@ -70,3 +70,21 @@ export const CompanySettingsUpdate = z.object({
   defaultNotes: z.string().max(NOTES_MAX),
 });
 export type CompanySettingsUpdate = z.infer<typeof CompanySettingsUpdate>;
+
+/** Quotations list tabs (prototype V.quotes): sent = Sent + Negotiating, closed = Rejected + Expired. */
+export const QUOTE_TABS = ['all', 'draft', 'sent', 'accepted', 'closed'] as const;
+export type QuoteTab = (typeof QUOTE_TABS)[number];
+
+/** `GET /quotations`: the tab and a search over number, company, lead number and subject. */
+export const QuotationListQuery = z.object({
+  tab: z.enum(QUOTE_TABS).default('all'),
+  s: z.string().trim().max(200).optional(),
+});
+export type QuotationListQuery = z.infer<typeof QuotationListQuery>;
+
+/**
+ * Accept / reject. While revision n+1 has unsent edits the client must confirm they are discarded
+ * (`discardUnsent: true`, else 409 `unsent_changes`): the answer is to what the client received.
+ */
+export const QuotationDecision = z.object({ discardUnsent: z.boolean().optional() });
+export type QuotationDecision = z.infer<typeof QuotationDecision>;
