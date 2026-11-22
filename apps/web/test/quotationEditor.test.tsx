@@ -286,6 +286,45 @@ describe('Quotation editor (prototype V.quoteEditor)', () => {
     expect(calls.filter((c) => c.method === 'POST' && c.url === '/api/quotations/7/convert')).toHaveLength(1);
   });
 
+  it('after a convert the button stays disabled until the quotation shows its project: one POST, one toast', async () => {
+    const created = { id: 4, number: 'PRJ-4', name: 'Advisory services for Meridian', company: { id: 4, name: 'Meridian' } };
+    const accepted = detail({ status: 'Accepted', locked: true, canEdit: false, canConvert: true });
+    const linked = detail({ status: 'Accepted', locked: true, canEdit: false, projectId: 4, project: { id: 4, number: 'PRJ-4', name: created.name } });
+    // The first read after the convert still lacks the project (a lagging read); later reads carry it.
+    let reads = 0;
+    let converted = false;
+    const calls: Call[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      calls.push({ method, url });
+      if (url === '/api/me') return Response.json(seller);
+      if (url === '/api/quotations/7/convert') {
+        converted = true;
+        return Response.json(created, { status: 201 });
+      }
+      if (url === '/api/quotations/7') {
+        if (!converted) return Response.json(accepted);
+        reads += 1;
+        return Response.json(reads === 1 ? accepted : linked);
+      }
+      return Response.json({ items: [], total: 0, page: 1, pageSize: 100 });
+    }));
+    const u = userEvent.setup();
+    const qc = mount();
+    await u.click(await screen.findByRole('button', { name: 'Convert to project' }));
+    expect(await screen.findByText('Project PRJ-4 created from Q-2026-007')).toBeTruthy();
+    // The quotation still reads without its project: the button is there but disabled, a second click does nothing.
+    const again = screen.getByRole('button', { name: 'Convert to project' });
+    expect(again).toBeDisabled();
+    await u.click(again);
+    expect(calls.filter((c) => c.method === 'POST' && c.url === '/api/quotations/7/convert')).toHaveLength(1);
+    // The next read shows the project link.
+    await qc.invalidateQueries({ queryKey: ['quotations'] });
+    expect(await screen.findByRole('link', { name: 'PRJ-4 · Advisory services for Meridian' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Convert to project' })).toBeNull();
+    expect(screen.getAllByText('Project PRJ-4 created from Q-2026-007')).toHaveLength(1);
+  });
+
   it('a quotation with a project shows the project, not the button', async () => {
     stub(detail({ status: 'Accepted', locked: true, canEdit: false, projectId: 4, project: { id: 4, number: 'PRJ-4', name: 'Advisory' } }));
     mount();

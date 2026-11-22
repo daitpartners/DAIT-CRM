@@ -219,10 +219,17 @@ describe('Company profile: Projects', () => {
     expect(link).not.toHaveClass('pj-mine');
   });
 
-  it('Leads tab: the Pipeline card counts the projects', async () => {
+  it('Leads tab: the Pipeline card lists the project numbers (prototype)', async () => {
     stub();
     mount(<CompanyProfile />, { at: '/companies/4#leads', path: '/companies/:id' });
     const pipeline = await screen.findByRole('region', { name: 'Pipeline at this company' });
-    await waitFor(() => expect(within(pipeline).getByText('Projects').nextElementSibling).toHaveTextContent('2'));
+    await waitFor(() => expect(within(pipeline).getByText('Projects').nextElementSibling?.textContent).toBe('PRJ-2, PRJ-1'));
+  });
+
+  it('Leads tab: no projects shows a dash', async () => {
+    stub({ items: [] });
+    mount(<CompanyProfile />, { at: '/companies/4#leads', path: '/companies/:id' });
+    const pipeline = await screen.findByRole('region', { name: 'Pipeline at this company' });
+    await waitFor(() => expect(within(pipeline).getByText('Projects').nextElementSibling?.textContent).toBe('—'));
   });
 });

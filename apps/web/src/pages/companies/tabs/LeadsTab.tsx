@@ -144,7 +144,7 @@ export function LeadsTab({ company, canManage }: { company: CompanyDetail; canMa
 /**
  * Prototype "Pipeline at this company": open leads and Won / Lost among the leads the user may see, from one
  * company-scoped request; the open quotation value lists each Draft / Sent / Negotiating total joined " + ", as the
- * prototype; Projects counts the company's projects the user can see.
+ * prototype; Projects lists the numbers of the company's projects the user can see (prototype).
  */
 function PipelineCard({ companyId, quotes }: { companyId: number; quotes: QuotationListItem[] | undefined }) {
   const t = useT();
@@ -162,7 +162,7 @@ function PipelineCard({ companyId, quotes }: { companyId: number; quotes: Quotat
         <dt>{t('Won / Lost')}</dt>
         <dd>{data ? `${data.won} / ${data.lost}` : dim}</dd>
         <dt>{t('Projects')}</dt>
-        <dd>{projects ? projects.items.length : dim}</dd>
+        <dd>{projects ? projects.items.map((p) => p.number).join(', ') || '—' : dim}</dd>
       </dl>
     </section>
   );

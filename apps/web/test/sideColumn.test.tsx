@@ -113,16 +113,30 @@ describe('SideColumn', () => {
 });
 
 describe('Won dialog: Mark Won and create project (prototype)', () => {
-  it('says the project is a separate step and offers the three buttons', () => {
-    stub();
+  it('the prototype Won confirmation: title, paragraph, three buttons; Mark Won toasts and closes', async () => {
+    const calls = stub();
+    const onClose = vi.fn();
+    const u = userEvent.setup();
     render(
       <Wrap qc={makeClient(seller)}>
-        <CloseLeadModal lead={makeLead()} initialStatus="Won" onClose={() => {}} />
+        <CloseLeadModal lead={makeLead()} initialStatus="Won" onClose={onClose} />
       </Wrap>,
     );
-    const dialog = screen.getByRole('dialog', { name: 'Close lead' });
-    expect(dialog).toHaveTextContent('A client can have several projects, so the project is created as a separate step.');
-    expect(within(dialog).getAllByRole('button').map((b) => b.textContent).slice(-3)).toEqual(['Cancel', 'Mark Won', 'Mark Won and create project']);
+    const dialog = screen.getByRole('dialog', { name: 'Mark LD-1005 as Won?' });
+    expect(dialog.querySelector('p')).toHaveTextContent(
+      'The lead closes as Won and Meridian Textiles is flagged as a client. The follow-up date and open tasks on this lead are closed. A client can have several projects, so the project is created as a separate step.',
+    );
+    const buttons = within(dialog).getAllByRole('button');
+    expect(buttons.map((b) => b.textContent)).toEqual(['Cancel', 'Mark Won', 'Mark Won and create project']);
+    expect(buttons[1]).toHaveClass('btn');
+    expect(buttons[1]).not.toHaveClass('primary');
+    expect(buttons[2]).toHaveClass('btn', 'primary');
+    expect(within(dialog).queryByRole('radio')).toBeNull();
+    await u.click(buttons[1]!);
+    expect(await screen.findByText('LD-1005 won · Meridian Textiles is now a client')).toBeTruthy();
+    expect(calls.find((c) => c.method === 'POST')).toMatchObject({ url: '/api/leads/5/status', body: { status: 'Won' } });
+    expect(onClose).toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Create project' })).toBeNull();
   });
 
   it('marks the lead Won, then opens Create project preset with this client and lead', async () => {
@@ -139,7 +153,8 @@ describe('Won dialog: Mark Won and create project (prototype)', () => {
     expect(calls.find((c) => c.method === 'POST')).toMatchObject({ url: '/api/leads/5/status', body: { status: 'Won' } });
     await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'From lead' })).toHaveValue('5'));
     expect(calls.some((c) => c.url === '/api/projects/form-options?company=4')).toBe(true);
-    expect(screen.queryByRole('dialog', { name: 'Close lead' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: 'Mark LD-1005 as Won?' })).toBeNull();
+    expect(screen.getByText('LD-1005 won · Meridian Textiles is now a client')).toBeTruthy();
     expect(onClose).not.toHaveBeenCalled();
     await u.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     expect(onClose).toHaveBeenCalled();
@@ -154,8 +169,19 @@ describe('Won dialog: Mark Won and create project (prototype)', () => {
       </Wrap>,
     );
     await u.click(screen.getByRole('button', { name: 'Mark Won and create project' }));
-    await waitFor(() => expect(screen.getByRole('dialog', { name: 'Close lead' })).toHaveTextContent('Someone else changed this record'));
+    await waitFor(() => expect(screen.getByRole('dialog', { name: 'Mark LD-1005 as Won?' })).toHaveTextContent('Someone else changed this record'));
     expect(screen.queryByRole('dialog', { name: 'Create project' })).toBeNull();
+  });
+
+  it('Lost keeps the Close lead dialog', () => {
+    stub();
+    render(
+      <Wrap qc={makeClient(seller)}>
+        <CloseLeadModal lead={makeLead()} initialStatus="Lost" onClose={() => {}} />
+      </Wrap>,
+    );
+    expect(screen.getByRole('dialog', { name: 'Close lead' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Mark Won and create project' })).toBeNull();
   });
 
   it('no third button without quotation rights', () => {
@@ -166,6 +192,6 @@ describe('Won dialog: Mark Won and create project (prototype)', () => {
       </Wrap>,
     );
     expect(screen.queryByRole('button', { name: 'Mark Won and create project' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Mark Won' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Mark Won' })).toHaveClass('primary');
   });
 });

@@ -1477,7 +1477,6 @@
   "No projects yet. Create the first one for this engagement.": "Aucun projet pour l'instant. Créez le premier pour cette mission.",
   "Mark Won": "Marquer gagné",
   "Mark Won and create project": "Marquer gagné et créer un projet",
-  "A client can have several projects, so the project is created as a separate step.": "Un client peut avoir plusieurs projets : le projet se crée donc dans une étape distincte.",
   "Projects at {company}": "Projets chez {company}",
   "One client, many projects; each starts from its own lead.": "Un client, plusieurs projets ; chacun part de son propre lead.",
   "No projects yet. Create the first one.": "Aucun projet pour l'instant. Créez le premier.",
@@ -1486,5 +1485,8 @@
   "A company becomes a {client} when a lead is Won or a quotation is accepted.": "Une entreprise devient {client} lorsqu’un lead est gagné ou qu’un devis est accepté.",
   "Each project records the lead it came from, its stakeholders, manager, value and linked quotation.": "Chaque projet enregistre le lead dont il est issu, ses parties prenantes, son chef, sa valeur et le devis lié.",
   "Emails composed with a project selected copy its primary stakeholders and stay attached to the project.": "Les e-mails rédigés avec un projet sélectionné mettent en copie ses parties prenantes principales et restent rattachés au projet.",
-  "Project {project} created from {quotation}": "Projet {project} créé à partir de {quotation}"
+  "Project {project} created from {quotation}": "Projet {project} créé à partir de {quotation}",
+  "Mark {number} as Won?": "Marquer {number} comme gagné ?",
+  "The lead closes as Won and {company} is flagged as a client. The follow-up date and open tasks on this lead are closed. A client can have several projects, so the project is created as a separate step.": "Le lead est clôturé comme Gagné et {company} est marqué comme client. La date de relance et les tâches ouvertes de ce lead sont clôturées. Un client peut avoir plusieurs projets : le projet se crée donc dans une étape distincte.",
+  "{number} won · {company} is now a client": "{number} gagné · {company} est désormais client"
 }

@@ -13,13 +13,85 @@ import { useActionError } from './staleToast';
 /**
  * Close a lead as Won (confirm: the company becomes a client), Lost or Not Relevant (reason
  * required). Closing clears the follow-up and closes the lead's open tasks. `initialStatus` preselects the
- * status picked in the Follow-up tab's Status select. Won offers the prototype's "Mark Won" and "Mark Won and create
- * project": the latter marks the lead Won the same way, then opens Create project preset with this client and lead
- * (nothing opens when marking Won fails).
+ * status picked in the Follow-up tab's Status select; Won picked there opens the prototype's own Won confirmation.
  */
 export function CloseLeadModal({ lead, onClose, initialStatus }: { lead: LeadFull; onClose: () => void; initialStatus?: ClosedStatus }) {
+  if (initialStatus === 'Won') return <WonModal lead={lead} onClose={onClose} />;
+  return <CloseLeadForm lead={lead} onClose={onClose} initialStatus={initialStatus} />;
+}
+
+/**
+ * The prototype's Won confirmation (views-lead-detail.js): "Mark Won", or "Mark Won and create project", which marks
+ * the lead Won the same way and then opens Create project preset with this client and lead (nothing opens when
+ * marking Won fails). The project button needs a company and quotation rights.
+ */
+function WonModal({ lead, onClose }: { lead: LeadFull; onClose: () => void }) {
   const t = useT();
   const me = useCurrentUser();
+  const toast = useToast();
+  const onFail = useActionError();
+  const action = useLeadAction();
+  const [problem, setProblem] = useState<string | null>(null);
+  const [projectNext, setProjectNext] = useState(false);
+  const company = lead.company?.name ?? lead.companyName;
+  const canCreateProject = lead.companyId !== null && me.can('manage_quotes');
+
+  function markWon(withProject: boolean) {
+    setProblem(null);
+    action.mutate(
+      { lead, action: 'status', body: { status: 'Won' } },
+      {
+        onSuccess: () => {
+          toast(t('{number} won · {company} is now a client', { number: lead.number, company }));
+          if (withProject) setProjectNext(true);
+          else onClose();
+        },
+        onError: (err) => setProblem(errorText(t, onFail(err))),
+      },
+    );
+  }
+
+  if (projectNext && lead.companyId !== null) {
+    return <ProjectModal preset={{ companyId: lead.companyId, leadId: lead.id }} onClose={onClose} />;
+  }
+
+  return (
+    <Modal
+      title={t('Mark {number} as Won?', { number: lead.number })}
+      onClose={onClose}
+      actions={
+        <>
+          <button type="button" className="btn" onClick={onClose}>
+            {t('Cancel')}
+          </button>
+          <button type="button" className={canCreateProject ? 'btn' : 'btn primary'} disabled={action.isPending} onClick={() => markWon(false)}>
+            {t('Mark Won')}
+          </button>
+          {canCreateProject ? (
+            <button type="button" className="btn primary" disabled={action.isPending} onClick={() => markWon(true)}>
+              {t('Mark Won and create project')}
+            </button>
+          ) : null}
+        </>
+      }
+    >
+      <p style={{ margin: 0, fontSize: 13, color: 'var(--body)' }}>
+        {t(
+          'The lead closes as Won and {company} is flagged as a client. The follow-up date and open tasks on this lead are closed. A client can have several projects, so the project is created as a separate step.',
+          { company },
+        )}
+      </p>
+      {problem ? (
+        <div className="note warn" role="alert">
+          {problem}
+        </div>
+      ) : null}
+    </Modal>
+  );
+}
+
+function CloseLeadForm({ lead, onClose, initialStatus }: { lead: LeadFull; onClose: () => void; initialStatus?: ClosedStatus }) {
+  const t = useT();
   const toast = useToast();
   const onFail = useActionError();
   const action = useLeadAction();
@@ -28,9 +100,7 @@ export function CloseLeadModal({ lead, onClose, initialStatus }: { lead: LeadFul
   const [statusError, setStatusError] = useState(false);
   const [reasonError, setReasonError] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [projectNext, setProjectNext] = useState(false);
   const needsReason = status === 'Lost' || status === 'Not Relevant';
-  const canCreateProject = lead.companyId !== null && me.can('manage_quotes');
 
   const hint: Record<ClosedStatus, string> = {
     Won: lead.company
@@ -40,7 +110,7 @@ export function CloseLeadModal({ lead, onClose, initialStatus }: { lead: LeadFul
     'Not Relevant': t('Not a fit for our services.'),
   };
 
-  function submit(withProject = false) {
+  function submit() {
     setProblem(null);
     if (!status) {
       setStatusError(true);
@@ -55,8 +125,7 @@ export function CloseLeadModal({ lead, onClose, initialStatus }: { lead: LeadFul
       {
         onSuccess: () => {
           toast(t('Lead closed as {status}', { status: leadStatusText(t, status) }));
-          if (withProject) setProjectNext(true);
-          else onClose();
+          onClose();
         },
         onError: (err) => {
           const code = onFail(err);
@@ -65,10 +134,6 @@ export function CloseLeadModal({ lead, onClose, initialStatus }: { lead: LeadFul
         },
       },
     );
-  }
-
-  if (projectNext && lead.companyId !== null) {
-    return <ProjectModal preset={{ companyId: lead.companyId, leadId: lead.id }} onClose={onClose} />;
   }
 
   return (
@@ -80,22 +145,9 @@ export function CloseLeadModal({ lead, onClose, initialStatus }: { lead: LeadFul
           <button type="button" className="btn" onClick={onClose}>
             {t('Cancel')}
           </button>
-          {status === 'Won' ? (
-            <>
-              <button type="button" className={canCreateProject ? 'btn' : 'btn primary'} disabled={action.isPending} onClick={() => submit()}>
-                {t('Mark Won')}
-              </button>
-              {canCreateProject ? (
-                <button type="button" className="btn primary" disabled={action.isPending} onClick={() => submit(true)}>
-                  {t('Mark Won and create project')}
-                </button>
-              ) : null}
-            </>
-          ) : (
-            <button type="button" className="btn danger" disabled={action.isPending} onClick={() => submit()}>
-              {t('Close lead')}
-            </button>
-          )}
+          <button type="button" className={status === 'Won' ? 'btn primary' : 'btn danger'} disabled={action.isPending} onClick={submit}>
+            {t('Close lead')}
+          </button>
         </>
       }
     >
@@ -148,12 +200,7 @@ export function CloseLeadModal({ lead, onClose, initialStatus }: { lead: LeadFul
           />
         </FormField>
       ) : null}
-      {status ? (
-        <div className="note info">
-          {t('The follow-up date is cleared and open tasks are closed.')}
-          {status === 'Won' ? ` ${t('A client can have several projects, so the project is created as a separate step.')}` : null}
-        </div>
-      ) : null}
+      {status ? <div className="note info">{t('The follow-up date is cleared and open tasks are closed.')}</div> : null}
       {problem ? (
         <div className="note warn" role="alert">
           {problem}

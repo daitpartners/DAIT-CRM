@@ -1477,7 +1477,6 @@
   "No projects yet. Create the first one for this engagement.": "Aún no hay proyectos. Crea el primero para este encargo.",
   "Mark Won": "Marcar como ganado",
   "Mark Won and create project": "Marcar como ganado y crear proyecto",
-  "A client can have several projects, so the project is created as a separate step.": "Un cliente puede tener varios proyectos, así que el proyecto se crea en un paso aparte.",
   "Projects at {company}": "Proyectos en {company}",
   "One client, many projects; each starts from its own lead.": "Un cliente, muchos proyectos; cada uno nace de su propio lead.",
   "No projects yet. Create the first one.": "Aún no hay proyectos. Crea el primero.",
@@ -1486,5 +1485,8 @@
   "A company becomes a {client} when a lead is Won or a quotation is accepted.": "Una empresa pasa a ser {client} cuando un lead se gana o se acepta un presupuesto.",
   "Each project records the lead it came from, its stakeholders, manager, value and linked quotation.": "Cada proyecto registra el lead del que viene, sus interlocutores, jefe, valor y presupuesto vinculado.",
   "Emails composed with a project selected copy its primary stakeholders and stay attached to the project.": "Los correos redactados con un proyecto seleccionado copian a sus interlocutores principales y quedan vinculados al proyecto.",
-  "Project {project} created from {quotation}": "Proyecto {project} creado a partir de {quotation}"
+  "Project {project} created from {quotation}": "Proyecto {project} creado a partir de {quotation}",
+  "Mark {number} as Won?": "¿Marcar {number} como ganado?",
+  "The lead closes as Won and {company} is flagged as a client. The follow-up date and open tasks on this lead are closed. A client can have several projects, so the project is created as a separate step.": "El lead se cierra como Ganado y {company} se marca como cliente. Se cierran la fecha de seguimiento y las tareas abiertas de este lead. Un cliente puede tener varios proyectos, así que el proyecto se crea en un paso aparte.",
+  "{number} won · {company} is now a client": "{number} ganado · {company} ya es cliente"
 }

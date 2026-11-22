@@ -323,6 +323,13 @@ function Editor({ q, crumb, refetch }: { q: QuotationDetail; crumb: React.ReactN
     });
   }
 
+  // After a convert the button stays disabled until the refetched quotation shows the project link (no second POST).
+  const { reset: resetConvert } = convert;
+  const linkedProjectId = q.project?.id;
+  useEffect(() => {
+    if (linkedProjectId !== undefined) resetConvert();
+  }, [linkedProjectId, resetConvert]);
+
   function convertToProject() {
     convert.mutate(q.id, {
       onSuccess: (p) => toast(t('Project {project} created from {quotation}', { project: p.number, quotation: q.number })),
@@ -554,7 +561,7 @@ function Editor({ q, crumb, refetch }: { q: QuotationDetail; crumb: React.ReactN
                     {`${q.project.number} · ${q.project.name}`}
                   </Link>
                 ) : q.status === 'Accepted' && q.canConvert ? (
-                  <button type="button" className="btn sm primary" disabled={convert.isPending} onClick={convertToProject}>
+                  <button type="button" className="btn sm primary" disabled={convert.isPending || convert.isSuccess} onClick={convertToProject}>
                     {t('Convert to project')}
                   </button>
                 ) : null
