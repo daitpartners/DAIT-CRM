@@ -27,6 +27,8 @@ type Tx = Prisma.TransactionClient;
 const ACTIVITY_PAGE_SIZE = 15;
 const WEBSITE_SOURCE = 'Website Contact Form';
 const DAY_MS = 86_400_000;
+/** Not a call or meeting planned from the calendar (marked with its task); a null relatedType must stay in. */
+const NOT_PLANNED: Prisma.LeadActivityWhereInput = { OR: [{ relatedType: null }, { relatedType: { not: 'task' } }] };
 
 /* ------------------------------------------------------------------ errors */
 
@@ -263,7 +265,7 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
         // The lead page's "Calls {n}" tab and "Last contact: {type · when}" line.
         prisma.leadActivity.count({ where: { leadId: id, activityType: 'call' } }),
         prisma.leadActivity.findFirst({
-          where: { leadId: id, activityType: { in: ['call', 'email', 'meeting'] }, occurredAt: { lte: new Date() } },
+          where: { leadId: id, activityType: { in: ['call', 'email', 'meeting'] }, occurredAt: { lte: new Date() }, ...NOT_PLANNED },
           orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], select: { activityType: true, occurredAt: true },
         }),
         prisma.leadActivity.findMany({
@@ -298,9 +300,10 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
         where, include: { ...activityInclude, lead: { select: { id: true, number: true } } },
         orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], ...pageArgs(query),
       }),
-      prisma.leadActivity.groupBy({ by: ['activityType'], where, _count: { _all: true } }),
+      // Planned calls and meetings (calendar) are listed but are not contacts: left out of the summary.
+      prisma.leadActivity.groupBy({ by: ['activityType'], where: { AND: [where, NOT_PLANNED] }, _count: { _all: true } }),
       // A meeting may be dated ahead; the last touch is the latest one that has already happened.
-      prisma.leadActivity.aggregate({ where: { AND: [where, { occurredAt: { lte: new Date() } }] }, _max: { occurredAt: true } }),
+      prisma.leadActivity.aggregate({ where: { AND: [where, NOT_PLANNED, { occurredAt: { lte: new Date() } }] }, _max: { occurredAt: true } }),
     ]);
     const ofType = (type: string) => byType.find((g) => g.activityType === type)?._count._all ?? 0;
     return {

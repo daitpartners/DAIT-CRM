@@ -381,6 +381,26 @@ describe('timed tasks (calls and meetings)', () => {
     expect(await prisma.leadActivity.count()).toBe(4);
   });
 
+  it('a planned entry is marked with its task and is not a contact (lead Last contact, company Activity summary)', async () => {
+    const { rep, lead } = await setup();
+    const base = { leadId: lead.id, dueDate: '2026-11-23', assignedToId: rep.user.id, timeline: true };
+    const call = await create(rep.cookie, { ...base, title: 'Pricing call', kind: 'call', dueTime: '09:00' });
+    const meeting = await create(rep.cookie, { ...base, title: 'Demo', kind: 'meeting', dueTime: '10:00' });
+    await create(rep.cookie, { ...base, title: 'Send deck' });
+    const rows = await prisma.leadActivity.findMany({ where: { leadId: lead.id }, orderBy: { id: 'asc' } });
+    expect(rows.slice(0, 2).map((a) => [a.relatedType, a.relatedId])).toEqual([['task', call.json().id], ['task', meeting.json().id]]);
+    const detail = (await req('GET', `/api/leads/${lead.id}`, rep.cookie)).json();
+    expect(detail.lastContact).toBeNull();
+    expect(detail.activities).toHaveLength(3); // the timeline still shows them
+    const company = (await req('GET', `/api/companies/${lead.companyId}/activities`, rep.cookie)).json();
+    expect(company.summary).toEqual({ call: 0, email: 0, meeting: 0, quote: 0, lastAt: null });
+    expect(company.items).toHaveLength(3);
+    // A logged meeting still counts.
+    await prisma.leadActivity.create({ data: { leadId: lead.id, activityType: 'meeting', title: 'Met', byUserId: rep.user.id } });
+    expect((await req('GET', `/api/leads/${lead.id}`, rep.cookie)).json().lastContact).toMatchObject({ type: 'meeting' });
+    expect((await req('GET', `/api/companies/${lead.companyId}/activities`, rep.cookie)).json().summary).toMatchObject({ meeting: 1 });
+  });
+
   it('editing the type keeps a time and sets the duration', async () => {
     const { rep, lead } = await setup();
     const t = await task(rep.user.id, '2026-11-23', { leadId: lead.id });

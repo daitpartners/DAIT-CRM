@@ -107,7 +107,8 @@ async function plannedActivity(tx: Tx, user: AuthUser, task: Task, assignee: Pic
       title: `${task.kind === 'call' ? 'Call' : 'Meeting'} scheduled · ${task.title}`,
       body: `${date} ${task.dueTime}–${taskEndTime(task.dueTime!, task.durationMinutes!)} · ${task.kind === 'call' ? 'Phone' : 'Microsoft Teams'}`,
     };
-  await tx.leadActivity.create({ data: { leadId: task.leadId!, ...data, byUserId: user.id } });
+  // Marked with its task: a plan is not a contact (lead "Last contact", company Activity summary skip it).
+  await tx.leadActivity.create({ data: { leadId: task.leadId!, ...data, relatedType: 'task', relatedId: task.id, byUserId: user.id } });
 }
 
 async function rowOf(id: number, user: AuthUser) {
