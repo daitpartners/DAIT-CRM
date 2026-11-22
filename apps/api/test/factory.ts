@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { Company, Contact, Lead, Prisma, User } from '@prisma/client';
+import type { Company, Contact, Lead, Prisma, Project, User } from '@prisma/client';
 import { domainOf, isFreeMail, normaliseCompanyName, normalisePhone, type RoleEnum } from '@dait-crm/shared';
 import { prisma } from '../src/db';
 
@@ -81,6 +81,19 @@ export async function makeLead(overrides: Partial<Prisma.LeadUncheckedCreateInpu
       leadSource: 'Manual Entry',
       ...overrides,
       companyId,
+    },
+  });
+}
+
+let pn = 0;
+
+/** A project on `companyId` (optionally a lead), managed by `managerId`; numbered PRJ-<n> in creation order. */
+export async function makeProject(o: { companyId: number; managerId: number; leadId?: number | null; name?: string }): Promise<Project> {
+  pn += 1;
+  return prisma.project.create({
+    data: {
+      number: `PRJ-${pn}`, companyId: o.companyId, leadId: o.leadId ?? null, name: o.name ?? `Project ${pn}`,
+      startDate: new Date('2026-11-01T00:00:00Z'), currency: 'INR', managerId: o.managerId, createdById: o.managerId,
     },
   });
 }

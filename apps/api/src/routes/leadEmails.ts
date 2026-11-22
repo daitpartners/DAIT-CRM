@@ -5,7 +5,7 @@ import { prisma } from '../db.js';
 import { requireRight } from '../plugins/auth.js';
 import { parseBody } from '../validate.js';
 import { assertLeadVisible } from '../leads/visibility.js';
-import { queueOutgoing } from '../mail/outgoing.js';
+import { assertProjectFor, queueOutgoing } from '../mail/outgoing.js';
 import { guard, lockFresh } from './leads.js';
 
 /** An email as its owner sees it (only ever returned to its owner). */
@@ -31,8 +31,10 @@ export const leadEmailRoutes: FastifyPluginAsync = async (app) => {
       if (!account) return reply.code(409).send({ error: 'no_mailbox' });
       const created = await prisma.$transaction(async (tx) => {
         const { lead } = await lockFresh(tx, user, id, body.updatedAt);
+        if (body.projectId) await assertProjectFor(tx, user, body.projectId, lead.companyId);
         return queueOutgoing(tx, user, account, {
           lead, to: [body.to], cc: body.cc, subject: body.subject, body: body.body, followUpDays: body.followUpDays,
+          projectId: body.projectId ?? null,
         });
       });
       return reply.code(201).send(emailView(created));

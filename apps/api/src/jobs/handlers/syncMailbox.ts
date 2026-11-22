@@ -55,6 +55,18 @@ async function claimCrmCopy(userId: number, m: GraphMessage): Promise<boolean> {
   return true;
 }
 
+/**
+ * Release 3B: a message joining a conversation takes the project of the user's own latest tagged message in it (their
+ * mailbox only: another user's mail never lends its tag); null when none carries one.
+ */
+async function inheritedProject(userId: number, threadId: string | null): Promise<number | null> {
+  if (!threadId) return null;
+  const tagged = await prisma.emailMessage.findFirst({
+    where: { userId, threadId, projectId: { not: null } }, select: { projectId: true }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
+  });
+  return tagged?.projectId ?? null;
+}
+
 async function storeMessage(account: EmailAccount, user: AuthUser, folder: string, m: GraphMessage, ctx: JobContext): Promise<void> {
   const existing = await prisma.emailMessage.findUnique({ where: { userId_graphId: { userId: user.id, graphId: m.id } } });
   const outbound = m.isDraft || folder === 'sent' || folder === 'drafts' || isOwn(account, m.from?.address);
@@ -72,7 +84,9 @@ async function storeMessage(account: EmailAccount, user: AuthUser, folder: strin
     counterparts: outbound ? [...m.to, ...m.cc] : m.from ? [m.from.address] : [],
     ownAddress: account.address,
   });
+  const threadId = m.conversationId?.slice(0, 255) ?? null;
   const attachmentNames = m.hasAttachments ? await ctx.graph.attachmentNames(account, m.id).catch(() => []) : [];
+  const projectId = await inheritedProject(user.id, threadId);
   try {
     await prisma.emailMessage.create({
       data: {
@@ -80,9 +94,9 @@ async function storeMessage(account: EmailAccount, user: AuthUser, folder: strin
         status: m.isDraft ? 'draft' : outbound ? 'sent' : 'received',
         fromAddress: m.from?.address ?? '', fromName: m.from?.name ? m.from.name.slice(0, 255) : null,
         toAddresses: m.to, ccAddresses: m.cc, subject: m.subject.slice(0, 500), bodyText: m.bodyText.slice(0, BODY_MAX),
-        messageId: m.internetMessageId?.slice(0, 255) ?? null, threadId: m.conversationId?.slice(0, 255) ?? null,
+        messageId: m.internetMessageId?.slice(0, 255) ?? null, threadId,
         isRead: outbound ? true : m.isRead, occurredAt,
-        attachmentNames, ...links,
+        attachmentNames, projectId, ...links,
       },
     });
   } catch (err) {

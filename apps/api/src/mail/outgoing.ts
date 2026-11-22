@@ -6,7 +6,8 @@ import type { SendUserEmailPayload } from '../jobs/types.js';
 import { enqueue } from '../jobs/queue.js';
 import { audit } from '../audit.js';
 import { dateOnly, todayIn } from '../leads/dates.js';
-import { applyStatusChange, syncFollowUpTask } from '../leads/service.js';
+import { RuleError, applyStatusChange, syncFollowUpTask } from '../leads/service.js';
+import { projectWhere } from '../projects/visibility.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -36,6 +37,20 @@ export interface Outgoing {
    * gets no "Email sent" line or status change now: the quotation writes "Quotation sent" when the send succeeds.
    */
   quotation?: SendUserEmailPayload['quotation'];
+  /**
+   * Release 3B: the project the message is tagged with (checked by the caller with `assertProjectFor`, or carried over
+   * from the replied-to message). A tag never widens who sees the message: it stays its sender's alone.
+   */
+  projectId?: number | null;
+}
+
+/**
+ * A project the sender may tag an email with (release 3B): one they can see, of the company the email is for (the
+ * lead's, or the client given without a lead). Otherwise 400 `invalid_project`.
+ */
+export async function assertProjectFor(tx: Tx, user: AuthUser, projectId: number, companyId: number | null): Promise<void> {
+  const project = await tx.project.findFirst({ where: { AND: [{ id: projectId }, projectWhere(user)] }, select: { companyId: true } });
+  if (!project || companyId === null || project.companyId !== companyId) throw new RuleError('invalid_project');
 }
 
 /**
@@ -52,7 +67,7 @@ export async function queueOutgoing(tx: Tx, user: AuthUser, account: EmailAccoun
     data: {
       userId: user.id, accountId: account.id, leadId: lead?.id ?? null, ...links,
       folder: 'sent', status: 'queued', source: 'crm', fromAddress: account.address, toAddresses: o.to, ccAddresses: o.cc,
-      subject: o.subject, bodyText: o.body, replyToId: o.replyToId ?? null, threadId: o.threadId ?? null,
+      subject: o.subject, bodyText: o.body, replyToId: o.replyToId ?? null, threadId: o.threadId ?? null, projectId: o.projectId ?? null,
       attachmentNames: (o.attachments ?? []).map((a) => a.name),
     },
   });

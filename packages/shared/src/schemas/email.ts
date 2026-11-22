@@ -41,6 +41,8 @@ export const LeadEmailSend = z.object({
   body: z.string().trim().min(1).max(20000),
   /** Set the lead's next follow-up this many days from today (prototype "Set follow-up in"); null = leave it. */
   followUpDays: z.union([z.literal(2), z.literal(3), z.literal(7)]).nullish(),
+  /** Release 3B: tag it with one of the lead's company's projects (a project the sender can see). */
+  projectId: z.number().int().positive().nullish(),
   updatedAt: z.string().datetime(),
 });
 export type LeadEmailSend = z.infer<typeof LeadEmailSend>;
@@ -57,6 +59,8 @@ export const MailCompose = z.object({
   body: mailBody,
   leadId: z.number().int().positive().nullish(),
   companyId: z.number().int().positive().nullish(),
+  /** Release 3B: a project the sender can see, of the lead's company (or the client given without a lead). */
+  projectId: z.number().int().positive().nullish(),
 });
 export type MailCompose = z.infer<typeof MailCompose>;
 
@@ -73,6 +77,8 @@ export const MailListQuery = PagingQuery.pick({ page: true, pageSize: true }).ex
   view: z.string().optional(),
   company: z.string().optional(),
   lead: z.string().optional(),
+  /** Release 3B: only the caller's own messages tagged with this project. */
+  project: z.string().optional(),
   s: z.string().optional(),
 });
 export type MailListQuery = z.infer<typeof MailListQuery>;

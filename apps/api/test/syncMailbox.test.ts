@@ -6,7 +6,7 @@ import { GraphError, type DeltaPage, type GraphMessage } from '../src/graph/clie
 import { syncMailboxHandler } from '../src/jobs/handlers/syncMailbox';
 import { requestSync, scheduleMailSync } from '../src/mail/schedule';
 import { fakeGraph, resetDb } from './helpers';
-import { makeCompany, makeContact, makeLead, makeUser } from './factory';
+import { makeCompany, makeContact, makeLead, makeProject, makeUser } from './factory';
 
 beforeEach(async () => {
   await resetDb();
@@ -331,3 +331,26 @@ describe('mail sync scheduling (2B-2)', () => {
   });
 });
 
+
+describe('project tag on synced replies (3B)', () => {
+  test('a reply in a conversation whose earlier message of yours carries a project inherits the latest one', async () => {
+    const { user, account } = await mailbox();
+    const other = await mailbox();
+    const company = await makeCompany({ website: 'https://acme.com' });
+    const older = await makeProject({ companyId: company.id, managerId: user.id });
+    const latest = await makeProject({ companyId: company.id, managerId: user.id });
+    const theirs = await makeProject({ companyId: company.id, managerId: other.user.id });
+    const base = { accountId: account.id, folder: 'sent', status: 'sent', source: 'crm', fromAddress: ADDRESS, subject: 'Kick-off', threadId: 'conv-p' };
+    await prisma.emailMessage.create({ data: { ...base, userId: user.id, projectId: older.id, occurredAt: new Date('2026-11-18T10:00:00Z') } });
+    await prisma.emailMessage.create({ data: { ...base, userId: user.id, projectId: latest.id, occurredAt: new Date('2026-11-19T10:00:00Z') } });
+    await prisma.emailMessage.create({ data: { ...base, userId: user.id, projectId: null, occurredAt: new Date('2026-11-19T12:00:00Z') } });
+    // Another user's message in a conversation of the same id never lends its project.
+    await prisma.emailMessage.create({ data: { ...base, accountId: other.account.id, userId: other.user.id, threadId: 'conv-q', projectId: theirs.id, occurredAt: new Date('2026-11-19T10:00:00Z') } });
+    const reply = msg({ conversationId: 'conv-p', subject: 'RE: Kick-off' });
+    const unrelated = msg({ conversationId: 'conv-q', subject: 'Other' });
+    const { graph } = scripted({ 'start:inbox': final('inbox', [reply, unrelated]) });
+    await syncMailboxHandler(job(account.id), { graph });
+    expect((await prisma.emailMessage.findFirstOrThrow({ where: { graphId: reply.id } })).projectId).toBe(latest.id);
+    expect((await prisma.emailMessage.findFirstOrThrow({ where: { graphId: unrelated.id, userId: user.id } })).projectId).toBeNull();
+  });
+});

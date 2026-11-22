@@ -10,7 +10,7 @@ import { runOnce } from '../src/jobs/runner';
 import { sendUserEmailHandler } from '../src/jobs/handlers/sendUserEmail';
 import { todayIn } from '../src/leads/dates';
 import { fakeGraph, resetDb, seedLookups } from './helpers';
-import { makeCompany, makeContact, makeLead, makeUser, signIn } from './factory';
+import { makeCompany, makeContact, makeLead, makeProject, makeUser, signIn } from './factory';
 
 let app: FastifyInstance;
 beforeAll(async () => {
@@ -216,5 +216,28 @@ describe('sending email from a lead (release 2B-1)', () => {
     fresh = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
     await call('POST', `/api/leads/${lead.id}/emails`, cookie, body(fresh.updatedAt));
     expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).status).toBe('Interested');
+  });
+});
+
+describe('project tag on lead page email (3B)', () => {
+  it('stores the project; one you cannot see or on another company is 400 invalid_project', async () => {
+    const { rep, admin, lead, company } = await setup();
+    await personal(rep.id, 'seba@daitpartners.com');
+    const project = await makeProject({ companyId: company.id, leadId: lead.id, managerId: rep.id });
+    const other = await makeCompany({ name: 'Otra' });
+    const foreign = await makeProject({ companyId: other.id, managerId: rep.id });
+    const hidden = await makeProject({ companyId: other.id, leadId: (await makeLead({ companyId: other.id, assignedToId: admin.id })).id, managerId: admin.id });
+    const cookie = await signIn(app, rep);
+    for (const bad of [foreign.id, hidden.id]) {
+      const fresh = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
+      const res = await call('POST', `/api/leads/${lead.id}/emails`, cookie, body(fresh.updatedAt, { projectId: bad }));
+      expect(res.statusCode, res.body).toBe(400);
+      expect(res.json().error).toBe('invalid_project');
+    }
+    expect(await prisma.emailMessage.count()).toBe(0);
+    const fresh = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
+    const res = await call('POST', `/api/leads/${lead.id}/emails`, cookie, body(fresh.updatedAt, { projectId: project.id }));
+    expect(res.statusCode, res.body).toBe(201);
+    expect((await prisma.emailMessage.findFirstOrThrow()).projectId).toBe(project.id);
   });
 });

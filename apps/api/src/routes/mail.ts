@@ -14,7 +14,8 @@ import { NotFoundError, parseBody, parseQuery } from '../validate.js';
 import { assertLeadVisible, canSeeLead, leadWhere } from '../leads/visibility.js';
 import { assertCompanyVisible } from '../companies/visibility.js';
 import { matchMail } from '../mail/match.js';
-import { queueOutgoing } from '../mail/outgoing.js';
+import { assertProjectFor, queueOutgoing } from '../mail/outgoing.js';
+import { projectWhere } from '../projects/visibility.js';
 import { emailView } from './leadEmails.js';
 import { domainTaken, guard, lockLeads } from './leads.js';
 
@@ -30,7 +31,7 @@ const DAY_MS = 86_400_000;
 const ACTION_ATTEMPTS = 3;
 
 const leadRef = { select: { id: true, number: true, status: true, priority: true, nextFollowUp: true, companyId: true, companyName: true, assignedToId: true } } as const;
-type WithLead = EmailMessage & { lead: { id: number; number: string } | null };
+type WithLead = EmailMessage & { lead: { id: number; number: string } | null; project?: { id: number; number: string } | null };
 
 /** A message in the list: no body, a short one-line preview. */
 function listItem(m: WithLead) {
@@ -38,6 +39,7 @@ function listItem(m: WithLead) {
     id: m.id, folder: m.folder, status: m.status, fromAddress: m.fromAddress, fromName: m.fromName, toAddresses: m.toAddresses as string[],
     subject: m.subject, preview: m.bodyText.replace(/\s+/g, ' ').trim().slice(0, PREVIEW), occurredAt: m.occurredAt, isRead: m.isRead,
     leadId: m.leadId, leadNumber: m.lead?.number ?? null, companyId: m.companyId, hasAttachments: (m.attachmentNames as string[]).length > 0,
+    projectId: m.project?.id ?? null, projectNumber: m.project?.number ?? null,
   };
 }
 
@@ -121,6 +123,14 @@ async function ownMessage(db: Tx | typeof prisma, user: AuthUser, rawId: string)
   return m;
 }
 
+/** Of `ids`, the projects the user can see (a tag on one they cannot see shows no id or number, as a lead's). */
+async function visibleProjects(user: AuthUser, ids: (number | null)[]): Promise<Map<number, { id: number; number: string }>> {
+  const unique = [...new Set(ids.filter((id): id is number => id !== null))];
+  if (!unique.length) return new Map();
+  const rows = await prisma.project.findMany({ where: { AND: [{ id: { in: unique } }, projectWhere(user)] }, select: { id: true, number: true } });
+  return new Map(rows.map((p) => [p.id, p]));
+}
+
 /** A live lead the user can see, locked for the transaction. */
 async function lockedLead(tx: Tx, user: AuthUser, leadId: number): Promise<Lead> {
   await assertLeadVisible(tx, user, leadId);
@@ -156,7 +166,11 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
           const m = await matchMail(tx, user, { threadId: null, counterparts: [body.to, ...body.cc], ownAddress: account.address });
           links = { companyId: m.companyId, contactId: m.contactId };
         }
-        return queueOutgoing(tx, user, account, { lead, ...links, to: [body.to], cc: body.cc, subject: body.subject, body: body.body });
+        // The project's company must be the lead's, or without a lead the client chosen (not one matching guessed).
+        if (body.projectId) await assertProjectFor(tx, user, body.projectId, lead ? lead.companyId : (body.companyId ?? null));
+        return queueOutgoing(tx, user, account, {
+          lead, ...links, to: [body.to], cc: body.cc, subject: body.subject, body: body.body, projectId: body.projectId ?? null,
+        });
       });
       return reply.code(201).send(emailView(created));
     });
@@ -183,7 +197,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
           : null;
         return queueOutgoing(tx, user, account, {
           lead, companyId: original.companyId, contactId: original.contactId, to, cc: body.cc, subject, body: body.body,
-          replyToId: original.id, threadId: original.threadId,
+          replyToId: original.id, threadId: original.threadId, projectId: original.projectId,
         });
       });
       return reply.code(201).send(emailView(created));
@@ -204,6 +218,9 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
     if (q.company && Number.isInteger(company)) and.push({ OR: [{ companyId: company }, { lead: { companyId: company } }] });
     const lead = Number(q.lead);
     if (q.lead && Number.isInteger(lead)) and.push({ leadId: lead });
+    // Narrows the caller's own mail only (the userId filter above stays): a tag never shows anyone else's message.
+    const project = Number(q.project);
+    if (q.project && Number.isInteger(project)) and.push({ projectId: project });
     const s = q.s?.trim().slice(0, 200);
     if (s) and.push({ id: { in: await searchIds(user.id, s) } });
     const where = { AND: and };
@@ -218,8 +235,11 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
     const visible = new Set(leadIds.length
       ? (await prisma.lead.findMany({ where: { AND: [{ id: { in: leadIds } }, leadWhere(user, { includeArchived: true })] }, select: { id: true } })).map((l) => l.id)
       : []);
+    const projects = await visibleProjects(user, rows.map((m) => m.projectId));
     return {
-      items: rows.map((m) => listItem(m.leadId && !visible.has(m.leadId) ? { ...m, leadId: null, lead: null } : m)),
+      items: rows.map((m) => listItem({
+        ...(m.leadId && !visible.has(m.leadId) ? { ...m, leadId: null, lead: null } : m), project: m.projectId ? projects.get(m.projectId) ?? null : null,
+      })),
       total, page: q.page, pageSize: q.pageSize,
     };
   });
@@ -233,14 +253,16 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
       prisma.emailMessage.findMany({ where: { userId: user.id, companyId: { not: null } }, distinct: ['companyId'], select: { companyId: true } }),
       prisma.emailMessage.findMany({ where: { userId: user.id, leadId: { not: null } }, distinct: ['leadId'], select: { leadId: true } }),
     ]);
-    const [companies, leads] = await Promise.all([
+    const [companies, leads, projects] = await Promise.all([
       prisma.company.findMany({ where: { id: { in: companyIds.map((c) => c.companyId!) } }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
       prisma.lead.findMany({
         where: { AND: [{ id: { in: leadIds.map((l) => l.leadId!) } }, leadWhere(user, { includeArchived: true })] },
         select: { id: true, number: true, companyId: true, companyName: true, status: true }, orderBy: { id: 'desc' },
       }),
+      // Release 3B: the projects the user can see (Project filter and Compose picker), not only those in their mail.
+      prisma.project.findMany({ where: projectWhere(user), select: { id: true, number: true, name: true, companyId: true }, orderBy: { id: 'desc' } }),
     ]);
-    return { mailbox, unread, unlinked, companies, leads };
+    return { mailbox, unread, unlinked, companies, leads, projects };
   });
 
   // `peek=1`: the first message shown on arrival, which the user has not opened yet, stays unread.
@@ -252,16 +274,17 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
         m = await prisma.emailMessage.update({ where: { id: m.id }, data: { isRead: true } });
         await tellMailbox(prisma, m, 'read');
       }
-      const [lead, contact, company, thread] = await Promise.all([
+      const [lead, contact, company, thread, projects] = await Promise.all([
         m.leadId && (await canSeeLead(prisma, user, m.leadId)) ? prisma.lead.findUnique({ where: { id: m.leadId }, ...leadRef }) : null,
         m.contactId ? prisma.contact.findUnique({ where: { id: m.contactId }, select: { id: true, firstName: true, lastName: true } }) : null,
         m.companyId ? prisma.company.findUnique({ where: { id: m.companyId }, select: { id: true, name: true } }) : null,
         m.threadId
           ? prisma.emailMessage.findMany({ where: { userId: user.id, threadId: m.threadId, id: { not: m.id } }, orderBy: { occurredAt: 'desc' }, take: THREAD_MAX - 1 })
           : [],
+        visibleProjects(user, [m.projectId]),
       ]);
       return {
-        ...listItem({ ...m, lead: lead ? { id: lead.id, number: lead.number } : null }),
+        ...listItem({ ...m, lead: lead ? { id: lead.id, number: lead.number } : null, project: m.projectId ? projects.get(m.projectId) ?? null : null }),
         ccAddresses: m.ccAddresses as string[], bodyText: m.bodyText, attachmentNames: m.attachmentNames as string[], loggedAt: m.loggedAt,
         lead: lead ? { id: lead.id, number: lead.number, status: lead.status, priority: lead.priority, nextFollowUp: ymd(lead.nextFollowUp), companyId: lead.companyId } : null,
         contact: contact ? { id: contact.id, name: `${contact.firstName} ${contact.lastName}`.trim() } : null,

@@ -9,7 +9,7 @@ import { sendUserEmailHandler } from '../src/jobs/handlers/sendUserEmail';
 import { mailActionHandler } from '../src/jobs/handlers/mailAction';
 import { todayIn } from '../src/leads/dates';
 import { fakeGraph, resetDb, seedLookups } from './helpers';
-import { makeCompany, makeContact, makeLead, makeUser, signIn } from './factory';
+import { makeCompany, makeContact, makeLead, makeProject, makeUser, signIn } from './factory';
 
 // Lets a test make the reply's lead lock fail like a database error would.
 const lockFault = vi.hoisted(() => ({ error: null as Error | null }));
@@ -439,5 +439,102 @@ describe('reading mail on the Email screen (2B-2)', () => {
     const cookie = await signIn(app, rep);
     expect((await call('GET', '/api/nav-counts', cookie)).json().mailUnread).toBe(1);
     expect((await call('GET', `/api/leads/${lead.id}/emails`, cookie)).json().items.map((i: { subject: string; status: string }) => [i.subject, i.status])).toEqual([['Reply', 'received']]);
+  });
+});
+
+describe('project-tagged email (3B)', () => {
+  it('compose with a project stores the tag; the list carries it and ?project= narrows to it', async () => {
+    const { rep, box, lead, company } = await setup();
+    const project = await makeProject({ companyId: company.id, leadId: lead.id, managerId: rep.id, name: 'Website' });
+    const cookie = await signIn(app, rep);
+    const res = await call('POST', '/api/mail', cookie, { to: 'ana@acme.com', subject: 'Kick-off', body: 'Hi', leadId: lead.id, projectId: project.id });
+    expect(res.statusCode, res.body).toBe(201);
+    expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: res.json().id } })).projectId).toBe(project.id);
+    // Without a lead, for the client.
+    const res2 = await call('POST', '/api/mail', cookie, { to: 'ana@acme.com', subject: 'Plan', body: 'Hi', companyId: company.id, projectId: project.id });
+    expect(res2.statusCode, res2.body).toBe(201);
+    expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: res2.json().id } })).projectId).toBe(project.id);
+    await synced(rep.id, box.id, { folder: 'sent', status: 'sent', subject: 'Untagged' });
+    const all = (await call('GET', '/api/mail?view=sent', cookie)).json();
+    expect(all.total).toBe(3);
+    const tagged = (await call('GET', `/api/mail?view=sent&project=${project.id}`, cookie)).json();
+    expect(tagged.items.map((i: { subject: string }) => i.subject).sort()).toEqual(['Kick-off', 'Plan']);
+    expect(tagged.items[0]).toMatchObject({ projectId: project.id, projectNumber: project.number });
+    expect((await call('GET', `/api/mail/${res.json().id}`, cookie)).json()).toMatchObject({ projectId: project.id, projectNumber: project.number });
+    expect(tagged.total).toBe(2);
+  });
+
+  it('a project you cannot see, or on another company, is 400 invalid_project and nothing is queued', async () => {
+    const { rep, admin, lead, company } = await setup();
+    const other = await makeCompany({ name: 'Other Co' });
+    const otherLead = await makeLead({ companyId: other.id, assignedToId: admin.id });
+    const hidden = await makeProject({ companyId: other.id, leadId: otherLead.id, managerId: admin.id });
+    const mine = await makeProject({ companyId: company.id, leadId: lead.id, managerId: rep.id });
+    const foreign = await makeProject({ companyId: other.id, managerId: rep.id }); // visible (manager), but another client
+    const cookie = await signIn(app, rep);
+    const send = (extra: Record<string, unknown>) => call('POST', '/api/mail', cookie, { to: 'ana@acme.com', subject: 's', body: 'b', ...extra });
+    for (const res of [
+      await send({ leadId: lead.id, projectId: hidden.id }),
+      await send({ leadId: lead.id, projectId: foreign.id }),
+      await send({ companyId: company.id, projectId: foreign.id }),
+      await send({ projectId: mine.id }), // no lead and no client given
+      await send({ leadId: lead.id, projectId: 999999 }),
+    ]) {
+      expect(res.statusCode, res.body).toBe(400);
+      expect(res.json().error).toBe('invalid_project');
+    }
+    expect(await prisma.emailMessage.count()).toBe(0);
+    expect(await prisma.job.count()).toBe(0);
+  });
+
+  it('Review Focus 5: ?project= lists only your own mail even when someone else emailed the same project', async () => {
+    const { rep, admin, box, lead, company } = await setup();
+    const project = await makeProject({ companyId: company.id, leadId: lead.id, managerId: rep.id });
+    const adminBox = await prisma.emailAccount.findFirstOrThrow({ where: { userId: admin.id } });
+    await synced(admin.id, adminBox.id, { folder: 'sent', status: 'sent', subject: 'Admin on the project', projectId: project.id, companyId: company.id });
+    await synced(rep.id, box.id, { folder: 'sent', status: 'sent', subject: 'Rep on the project', projectId: project.id, companyId: company.id });
+    const repList = (await call('GET', `/api/mail?view=sent&project=${project.id}`, await signIn(app, rep))).json();
+    expect(repList.items.map((i: { subject: string }) => i.subject)).toEqual(['Rep on the project']);
+    expect(repList.total).toBe(1);
+    const adminList = (await call('GET', `/api/mail?view=sent&project=${project.id}`, await signIn(app, admin))).json();
+    expect(adminList.items.map((i: { subject: string }) => i.subject)).toEqual(['Admin on the project']);
+    // A stranger who cannot see the project gets nothing, not someone else's tagged mail.
+    const stranger = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    expect((await call('GET', `/api/mail?view=sent&project=${project.id}`, await signIn(app, stranger))).json()).toMatchObject({ items: [], total: 0 });
+  });
+
+  it('a tag on a project you can no longer see shows no project id or number', async () => {
+    const { rep, box, company } = await setup();
+    const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    const otherLead = await makeLead({ companyId: company.id, assignedToId: other.id });
+    const project = await makeProject({ companyId: company.id, leadId: otherLead.id, managerId: other.id });
+    const m = await synced(rep.id, box.id, { projectId: project.id });
+    const cookie = await signIn(app, rep);
+    const item = (await call('GET', '/api/mail?view=inbox', cookie)).json().items[0];
+    expect(item).toMatchObject({ projectId: null, projectNumber: null });
+    expect((await call('GET', `/api/mail/${m.id}`, cookie)).json()).toMatchObject({ projectId: null, projectNumber: null });
+  });
+
+  it('reply carries over the replied-to message’s project', async () => {
+    const { rep, box, lead, company } = await setup();
+    const project = await makeProject({ companyId: company.id, leadId: lead.id, managerId: rep.id });
+    const original = await synced(rep.id, box.id, { leadId: lead.id, companyId: company.id, projectId: project.id });
+    const res = await call('POST', `/api/mail/${original.id}/reply`, await signIn(app, rep), { cc: [], body: 'Thanks' });
+    expect(res.statusCode).toBe(201);
+    expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: res.json().id } })).projectId).toBe(project.id);
+  });
+
+  it('meta lists the projects you can see (id, number, name, client)', async () => {
+    const { rep, admin, lead, company } = await setup();
+    const other = await makeCompany({ name: 'Other Co' });
+    const otherLead = await makeLead({ companyId: other.id, assignedToId: admin.id });
+    const mine = await makeProject({ companyId: company.id, leadId: lead.id, managerId: admin.id, name: 'Website' });
+    await makeProject({ companyId: other.id, leadId: otherLead.id, managerId: admin.id, name: 'Hidden' });
+    const managed = await makeProject({ companyId: other.id, managerId: rep.id, name: 'Managed' });
+    const meta = (await call('GET', '/api/mail/meta', await signIn(app, rep))).json();
+    expect(meta.projects).toEqual([
+      { id: managed.id, number: managed.number, name: 'Managed', companyId: other.id },
+      { id: mine.id, number: mine.number, name: 'Website', companyId: company.id },
+    ]);
   });
 });
