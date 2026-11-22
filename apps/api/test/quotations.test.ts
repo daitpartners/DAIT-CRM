@@ -165,6 +165,18 @@ describe('quotations API', () => {
     expect((await req('GET', '/api/quotations?tab=nope', admin.cookie)).statusCode).toBe(400);
   });
 
+  it('companyId narrows the list, counts and tiles to one company (company page)', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const a = await setup(null);
+    const b = await setup(null, 'United States');
+    const qa = await createQuote(admin.cookie, { companyId: a.company.id, leadId: a.lead.id });
+    await createQuote(admin.cookie, { companyId: b.company.id });
+    const body = (await req('GET', `/api/quotations?companyId=${a.company.id}`, admin.cookie)).json();
+    expect(body.items.map((i: { id: number }) => i.id)).toEqual([qa.id]);
+    expect(body.counts.all).toBe(1);
+    expect((await req('GET', '/api/quotations?companyId=x', admin.cookie)).statusCode).toBe(400);
+  });
+
   it('a rep cannot see a quotation on a lead hidden from them (404, not listed); without a lead the company decides', async () => {
     const repA = await as('SALES_REPRESENTATIVE');
     const repB = await as('SALES_REPRESENTATIVE');

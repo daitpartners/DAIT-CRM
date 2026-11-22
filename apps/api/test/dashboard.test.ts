@@ -6,7 +6,7 @@ import { buildApp } from '../src/app';
 import { encrypt } from '../src/crypto/tokens';
 import { todayIn } from '../src/leads/dates';
 import { resetDb, seedLookups } from './helpers';
-import { makeLead, makeUser, signIn } from './factory';
+import { makeCompany, makeLead, makeUser, signIn } from './factory';
 
 let app: FastifyInstance;
 beforeAll(async () => {
@@ -154,5 +154,37 @@ describe('dashboard API', () => {
     expect(body.agenda[1]).toMatchObject({ kind: 'call', dueTime: '10:30', durationMinutes: 30, lead: { id: lead.id, companyName: 'Bluefin Marine' } });
     expect(body.agenda[0]).toMatchObject({ isDone: true });
     expect(JSON.stringify(body)).not.toContain('Outlook only');
+  });
+  it('quotes awaiting response: the user\'s own Sent / Negotiating quotations with their display totals (prototype tile)', async () => {
+    const rep = await as('SALES_REPRESENTATIVE', 'Arjun Mehta');
+    const other = await as('SALES_REPRESENTATIVE', 'Ravi Shah');
+    const india = await makeCompany({ country: 'India', createdById: rep.user.id });
+    const us = await makeCompany({ country: 'United States', createdById: rep.user.id });
+    const theirs = await makeCompany({ country: 'India', createdById: other.user.id });
+    const quote = async (cookie: string, companyId: number, price: number, status: string) => {
+      const created = await app.inject({ method: 'POST', url: '/api/quotations', headers: { cookie }, payload: { companyId } });
+      expect(created.statusCode, created.body).toBe(201);
+      const q = created.json();
+      const res = await app.inject({
+        method: 'PATCH', url: `/api/quotations/${q.id}`, headers: { cookie },
+        payload: { updatedAt: q.updatedAt, lines: [{ item: 'Work', description: null, qty: 1, unit: 'unit', unitPrice: price, discount: 0 }] },
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      await prisma.quotation.update({ where: { id: q.id }, data: { status } });
+      return q.id as number;
+    };
+    const sent = await quote(rep.cookie, india.id, 1000, 'Sent');
+    const neg = await quote(rep.cookie, us.id, 2500, 'Negotiating');
+    await quote(rep.cookie, india.id, 50, 'Draft');
+    await quote(rep.cookie, us.id, 70, 'Accepted');
+    await quote(other.cookie, theirs.id, 90, 'Sent');
+
+    const body = (await get(rep.cookie)).json();
+    // 1000 + 18 % GST in INR; 2500 at 0 % in USD; oldest first, as the prototype's store order.
+    expect(body.awaitingQuotes).toEqual([
+      { id: sent, currency: 'INR', total: 1180 },
+      { id: neg, currency: 'USD', total: 2500 },
+    ]);
+    expect((await get(other.cookie)).json().awaitingQuotes).toHaveLength(1);
   });
 });

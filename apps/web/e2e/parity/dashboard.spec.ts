@@ -17,11 +17,11 @@ test('dashboard: greeting, prototype tiles, tasks, today\'s agenda, notification
 
   await page.goto('/');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(/^Good (morning|afternoon|evening), Maya$/);
-  await expect(page.locator('.topbar .sub')).toContainText('everything assigned to you across leads, email and calendar; quotations from release 3');
+  await expect(page.locator('.topbar .sub')).toContainText('everything assigned to you across leads, email, calendar and quotations');
   await expect(page.getByRole('button', { name: /^Notifications/ })).toBeVisible();
   await expect(page.getByRole('button', { name: 'New lead' })).toBeVisible();
 
-  // Tiles in prototype order; the quotation tile waits for release 3.
+  // Tiles in prototype order.
   const labels = await page.locator('.tiles .tile .l').allTextContents();
   expect(labels).toEqual(['My open leads', 'Follow-ups due today', 'Meetings today', 'Quotes awaiting response']);
   await expect(page.locator('.tiles .tile').first()).toContainText('new since yesterday');
@@ -29,7 +29,8 @@ test('dashboard: greeting, prototype tiles, tasks, today\'s agenda, notification
   await expect(page.locator('.tiles .tile').nth(1)).toContainText('overdue');
   await expect(page.locator('.tiles .tile').nth(2)).toHaveAttribute('href', '/calendar');
   await expect(page.locator('.tiles .tile').nth(2)).not.toContainText('Available in release');
-  await expect(page.locator('.tiles .tile').nth(3)).toContainText('Available in release 3');
+  await expect(page.locator('.tiles .tile').nth(3)).toHaveAttribute('href', '/quotations');
+  await expect(page.locator('.tiles .tile').nth(3)).not.toContainText('Available in release');
 
   // Columns: Tasks & follow-ups | Today's agenda + Notifications | My pipeline by status.
   const heads = await page.locator('.dash-cols h2').allTextContents();

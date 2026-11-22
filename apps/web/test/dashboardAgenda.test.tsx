@@ -30,6 +30,7 @@ function data(agenda: TaskRow[]): DashboardData {
     notifications: [],
     pipeline: [],
     closed: { won: 0, lost: 0 },
+    awaitingQuotes: [],
   };
 }
 
@@ -72,7 +73,7 @@ describe("Dashboard: Meetings today and Today's agenda (prototype V.dashboard)",
     expect(rows[2]).toHaveTextContent('Arjun Mehta · Microsoft Teams');
 
     expect(document.body.textContent).not.toMatch(/calendar and quotations from release|Available in release 3[^]*Available in release 3/);
-    expect(screen.getByText(/everything assigned to you across leads, email and calendar/)).toBeTruthy();
+    expect(screen.getByText(/everything assigned to you across leads, email, calendar and quotations/)).toBeTruthy();
   });
 
   it('says so when nothing is planned today; the tile shows 0 and a dash', () => {

@@ -138,6 +138,32 @@ export function leadStatusBadge(status: string): string {
   return `badge ${cls[status] ?? 'b-grey'}`;
 }
 
+/** A quotation status (`|quote`: Spanish "el presupuesto" and French "le devis" are masculine). */
+export function quoteStatusText(t: TFn, status: string): string {
+  switch (status) {
+    case 'Draft':
+      return t('Draft|quote');
+    case 'Sent':
+      return t('Sent|quote');
+    case 'Negotiating':
+      return t('Negotiating|quote');
+    case 'Accepted':
+      return t('Accepted|quote');
+    case 'Rejected':
+      return t('Rejected|quote');
+    case 'Expired':
+      return t('Expired|quote');
+    default:
+      return status;
+  }
+}
+
+/** Badge class per quotation status (prototype/js/ui.js STATUS). */
+export function quoteStatusBadge(status: string): string {
+  const cls: Record<string, string> = { Draft: 'b-grey', Sent: 'b-purple', Negotiating: 'b-warn', Accepted: 'b-ok', Rejected: 'b-bad', Expired: 'b-grey' };
+  return `badge ${cls[status] ?? 'b-grey'}`;
+}
+
 export function leadTypeText(t: TFn, type: LeadType): string {
   return type === 'Prospect' ? t('Prospect') : t('Lead');
 }

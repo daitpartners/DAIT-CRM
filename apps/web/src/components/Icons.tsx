@@ -123,6 +123,12 @@ export const Icons: Record<string, ReactElement> = {
       <path d="M3 10h18M8 3v4M16 3v4" />
     </svg>
   ),
+  quote: (
+    <svg {...base}>
+      <path d="M6 3h8l4 4v14H6z" />
+      <path d="M14 3v4h4M9 12h6M9 16h6" />
+    </svg>
+  ),
   search: (
     <svg {...base}>
       <circle cx="11" cy="11" r="7" />

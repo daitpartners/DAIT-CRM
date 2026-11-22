@@ -747,3 +747,8 @@ a.strong{font-weight:600}
 .cleg .k.t-call{background:var(--orange)}.cleg .k.t-meeting{background:var(--purple)}.cleg .k.t-internal{background:#6A5E86}.cleg .k.over{background:var(--bad-fg)}.cleg .k.done{background:var(--field)}
 @media (max-width:1000px){.page.ccal{flex-direction:column}.cside{flex:none;width:100%;flex-direction:row;flex-wrap:wrap}.cmini{flex:0 0 260px}.cover{flex:1;min-width:220px}}
 @media (max-width:640px){.cgh>div{padding:8px 2px;text-align:center;font-size:10.5px;overflow:hidden}.cc{min-height:84px;padding:3px}.cit{padding:3px 4px;font-size:10.5px}.cit .tm{display:none}.cgrid.week .cgb,.cgrid.week .cgh{grid-template-columns:repeat(7,minmax(0,1fr))}.cmini{flex:1 1 100%}}
+
+/* ---------- Quotations (prototype V.quotes; its inline styles as classes) ---------- */
+.q-num{font-weight:600}
+.q-exp{color:var(--bad-fg);font-weight:600}
+.q-act{font-size:12.5px;font-weight:600}.q-convert{color:var(--orange)}

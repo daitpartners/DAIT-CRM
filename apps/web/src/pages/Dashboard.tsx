@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
+import { formatMoney } from '@dait-crm/shared';
 import { ApiError } from '../api/client';
 import { useDashboard } from '../api/dashboard';
 import { useRefreshWhenOutOfDate } from '../api/leads';
@@ -13,9 +14,6 @@ import { useFormatDate } from '../hooks/useFormatDate';
 import { errorText, leadStatusText } from '../i18n/labels';
 import { useT, type TFn } from '../i18n/useT';
 import { TaskItem } from './tasks/TasksList';
-
-/** Quotations arrive with release 3 (docs/development-plan.md). */
-const QUOTES_RELEASE = '3';
 
 /** Only in-app paths are followed from a notification. */
 const inApp = (link: string | null): link is string => Boolean(link && link.startsWith('/') && !link.startsWith('//'));
@@ -44,7 +42,7 @@ function greeting(t: TFn, hour: number, name: string): string {
 
 /**
  * Dashboard (prototype V.dashboard): greeting and date, tiles (my open leads, follow-ups due today, meetings today
- * and the release-3 quotes tile), then Tasks & follow-ups, Today's agenda with Notifications, and My pipeline by
+ * and quotes awaiting response), then Tasks & follow-ups, Today's agenda with Notifications, and My pipeline by
  * status. Everything is the signed-in user's own, whatever their role. Meetings today and Today's agenda are the
  * user's own timed tasks for today (calls, meetings, timed follow-ups); Outlook events are never shown here.
  */
@@ -72,7 +70,7 @@ export function Dashboard() {
         new Date(`${today}T00:00:00Z`),
       )
     : '';
-  const sub = t('{date} · everything assigned to you across leads, email and calendar; quotations from release 3', { date: longDate });
+  const sub = t('{date} · everything assigned to you across leads, email, calendar and quotations', { date: longDate });
   const tiles = data?.tiles;
   const unread = tiles?.unreadNotifications ?? 0;
 
@@ -82,7 +80,8 @@ export function Dashboard() {
   }
 
   const max = Math.max(1, ...(data?.pipeline.map((p) => p.count) ?? []));
-  const quotesNote = t('Available in release {release}', { release: QUOTES_RELEASE });
+  // The prototype's meta: each of the user's Sent / Negotiating quotations' totals, joined " · ".
+  const awaiting = data?.awaitingQuotes;
   const agenda = data?.agenda;
   const now = timeIn(me.timezone);
   const next = agenda?.find((a) => !a.isDone && (a.dueTime ?? '') > now);
@@ -127,7 +126,12 @@ export function Dashboard() {
             meta={agenda ? (next ? t('next at {time} · {title}', { time: next.dueTime ?? '', title: next.title }) : '—') : undefined}
             to="/calendar"
           />
-          <Tile label={t('Quotes awaiting response')} value="—" meta={quotesNote} />
+          <Tile
+            label={t('Quotes awaiting response')}
+            value={awaiting?.length ?? '—'}
+            meta={awaiting ? awaiting.map((q) => formatMoney(q.total, q.currency)).join(' · ') || '—' : undefined}
+            to="/quotations"
+          />
         </div>
 
         {error ? (

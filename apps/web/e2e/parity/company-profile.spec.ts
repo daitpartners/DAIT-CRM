@@ -34,7 +34,7 @@ test('company profile: prototype header, tabs and section headings', async ({ pa
   const actions = await page.locator('.topbar .hdr-actions .btn').allTextContents();
   expect(actions).toEqual(['Run AI research', 'Add contact', 'New lead', 'New quotation', 'Edit profile']);
   await expect(page.getByRole('button', { name: 'Run AI research' })).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'New quotation' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'New quotation' })).toBeEnabled();
 
   const tabs = await page.getByRole('tab').evaluateAll((els) => els.map((el) => (el.textContent ?? '').replace(/\s*\d+$/, '').trim()));
   expect(tabs).toEqual(['Overview', 'Contacts', 'Locations', 'Leads & Prospects', 'Activities', 'AI Intelligence', 'Research Sources']);

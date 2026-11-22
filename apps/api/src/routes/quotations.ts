@@ -58,7 +58,7 @@ export const quotationRoutes: FastifyPluginAsync = async (app) => {
     const user = request.user!;
     const today = todayIn(user.timezone);
     const rows = await prisma.quotation.findMany({
-      where: quotationWhere(user), include: quotationListInclude, orderBy: [{ quotationDate: 'desc' }, { id: 'desc' }],
+      where: query.companyId ? { AND: [quotationWhere(user), { companyId: query.companyId }] } : quotationWhere(user), include: quotationListInclude, orderBy: [{ quotationDate: 'desc' }, { id: 'desc' }],
     });
     const all = rows.map((r) => quotationListItem(r, today));
     const s = query.s?.toLowerCase();

@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import type { QuoteCurrency } from '@dait-crm/shared';
 import { api } from './client';
 import type { NotificationRow } from './notifications';
 import { keys } from './queries';
@@ -26,6 +27,8 @@ export type Dashboard = {
   /** Open leads assigned to the user per status, first seven open statuses in lookup order. */
   pipeline: { status: string; count: number }[];
   closed: { won: number; lost: number };
+  /** Quotes awaiting response: the user's own Sent / Negotiating quotations (display totals), oldest first. */
+  awaitingQuotes: { id: number; currency: QuoteCurrency; total: number }[];
 };
 
 export function useDashboard() {

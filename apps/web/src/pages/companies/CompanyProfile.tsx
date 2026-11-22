@@ -6,9 +6,11 @@ import { useCompany, useCompanyPipeline } from '../../api/companies';
 import { useCompanyActivities } from '../../api/leads';
 import { useLocations } from '../../api/locations';
 import { useLookupText } from '../../api/queries';
+import { useCreateQuotationForCompany } from '../../api/quotations';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Tabs, type TabDef } from '../../components/Tabs';
 import { Topbar } from '../../components/Topbar';
+import { useToast } from '../../components/Toast';
 import { companyStatusBadge, companyStatusText, errorText, initials, verificationBadge, verificationText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
 import { CompanyModal, type CompanySection } from './CompanyModal';
@@ -46,6 +48,8 @@ export function CompanyProfile() {
   // undefined = closed; null = whole form (header Edit); a section = that group's Edit button.
   const [editing, setEditing] = useState<CompanySection | null | undefined>(undefined);
   const [adding, setAdding] = useState<'contact' | null>(null);
+  const toast = useToast();
+  const newQuote = useCreateQuotationForCompany();
 
   const hash = location.hash.replace(/^#/, '');
   const active: TabId = isTab(hash) ? hash : 'overview';
@@ -173,9 +177,21 @@ export function CompanyProfile() {
               {t('New lead')}
             </button>
           ) : null}
-          <button type="button" className="btn" disabled title={later('3')}>
-            {t('New quotation')}
-          </button>
+          {me.can('manage_quotes') ? (
+            <button
+              type="button"
+              className="btn"
+              disabled={newQuote.isPending}
+              onClick={() =>
+                newQuote.mutate(company.id, {
+                  onSuccess: (q) => navigate(`/quotations/${q.id}`),
+                  onError: (err) => toast(errorText(t, err instanceof ApiError ? err.code : 'unknown'), 'warn'),
+                })
+              }
+            >
+              {t('New quotation')}
+            </button>
+          ) : null}
           {company.isClient ? (
             <button type="button" className="btn" disabled title={later('3')}>
               {t('Create project')}

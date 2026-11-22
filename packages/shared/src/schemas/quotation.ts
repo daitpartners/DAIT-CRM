@@ -75,10 +75,14 @@ export type CompanySettingsUpdate = z.infer<typeof CompanySettingsUpdate>;
 export const QUOTE_TABS = ['all', 'draft', 'sent', 'accepted', 'closed'] as const;
 export type QuoteTab = (typeof QUOTE_TABS)[number];
 
-/** `GET /quotations`: the tab and a search over number, company, lead number and subject. */
+/**
+ * `GET /quotations`: the tab and a search over number, company, lead number and subject; `companyId` narrows the
+ * list, counts and tiles to one company (the company page).
+ */
 export const QuotationListQuery = z.object({
   tab: z.enum(QUOTE_TABS).default('all'),
   s: z.string().trim().max(200).optional(),
+  companyId: z.coerce.number().int().positive().optional(),
 });
 export type QuotationListQuery = z.infer<typeof QuotationListQuery>;
 

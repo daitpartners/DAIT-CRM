@@ -6,6 +6,7 @@ import { api } from './client';
 import type { CompanyListQuery, DuplicateInput } from './companies';
 import type { ContactDuplicateInput, ContactListQuery } from './contacts';
 import type { LeadListQuery } from './leads';
+import type { QuotationListQuery } from './quotations';
 import type { TaskListQuery } from './tasks';
 
 export type Lang = 'en' | 'es' | 'fr';
@@ -117,6 +118,10 @@ export const keys = {
   navCounts: ['tasks', 'nav-counts'] as const,
   /** The dashboard: under the tasks prefix so task and lead writes refresh it. */
   dashboard: ['tasks', 'dashboard'] as const,
+  /** Prefix of every quotation query: invalidate this after any quotation write. */
+  quotationsAll: ['quotations'] as const,
+  quotations: (query: QuotationListQuery) => ['quotations', 'list', query] as const,
+  quotation: (id: number) => ['quotations', 'detail', id] as const,
   /** Prefix of every notification query. */
   notificationsAll: ['notifications'] as const,
   notifications: (page: number) => ['notifications', 'list', page] as const,

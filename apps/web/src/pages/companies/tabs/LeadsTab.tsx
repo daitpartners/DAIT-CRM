@@ -1,14 +1,16 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { formatMoney } from '@dait-crm/shared';
 import { ApiError } from '../../../api/client';
 import { useCompanyPipeline, type CompanyDetail } from '../../../api/companies';
 import { useLeads } from '../../../api/leads';
+import { useQuotations, type QuotationListItem } from '../../../api/quotations';
 import { Icons } from '../../../components/Icons';
 import { Pager } from '../../../components/Pager';
 import { PriorityLabel, StatusBadge } from '../../../components/StatusBadge';
 import { Table } from '../../../components/Table';
 import { useFormatDate } from '../../../hooks/useFormatDate';
-import { errorText, leadTypeText } from '../../../i18n/labels';
+import { errorText, leadTypeText, quoteStatusText } from '../../../i18n/labels';
 import { useLang, useT } from '../../../i18n/useT';
 import { useLookupText } from '../../../api/queries';
 
@@ -25,6 +27,9 @@ export function LeadsTab({ company, canManage }: { company: CompanyDetail; canMa
   const lookup = useLookupText(useLang());
   const [page, setPage] = useState(1);
   const { data, isPending, error } = useLeads({ companyId: company.id, page, pageSize: PAGE_SIZE });
+  // Every quotation the user can see at this company: the Quotation column and the Pipeline card's open value.
+  const { data: quotes } = useQuotations({ companyId: company.id });
+  const quotesOf = (leadId: number) => quotes?.items.filter((q) => q.lead?.id === leadId) ?? [];
   const closed = company.status === 'Closed';
 
   useEffect(() => {
@@ -90,7 +95,16 @@ export function LeadsTab({ company, canManage }: { company: CompanyDetail; canMa
                     dim
                   )}
                 </td>
-                <td>{dim}</td>
+                <td onClick={(e) => e.stopPropagation()}>
+                  {quotesOf(l.id).length
+                    ? quotesOf(l.id).map((q, i) => (
+                        <span key={q.id}>
+                          {i ? ', ' : null}
+                          <Link to={`/quotations/${q.id}`}>{`${q.number} · ${quoteStatusText(t, q.status)}`}</Link>
+                        </span>
+                      ))
+                    : dim}
+                </td>
                 <td className="muted">{date(l.createdAt)}</td>
               </tr>
             ))}
@@ -103,7 +117,7 @@ export function LeadsTab({ company, canManage }: { company: CompanyDetail; canMa
         ) : null}
       </section>
       <aside className="col-side">
-        <PipelineCard companyId={company.id} />
+        <PipelineCard companyId={company.id} quotes={quotes?.items} />
         <section className="card side-card" aria-labelledby="co-rules-title">
           <h2 id="co-rules-title">{t('Rules enforced here')}</h2>
           <ul className="rules">
@@ -125,9 +139,10 @@ export function LeadsTab({ company, canManage }: { company: CompanyDetail; canMa
 
 /**
  * Prototype "Pipeline at this company": open leads and Won / Lost among the leads the user may see, from one
- * company-scoped request. Quotation value and projects arrive in release 3.
+ * company-scoped request; the open quotation value lists each Draft / Sent / Negotiating total joined " + ", as the
+ * prototype. Projects arrive in release 3B.
  */
-function PipelineCard({ companyId }: { companyId: number }) {
+function PipelineCard({ companyId, quotes }: { companyId: number; quotes: QuotationListItem[] | undefined }) {
   const t = useT();
   const { data } = useCompanyPipeline(companyId);
   const dim = <span className="dim">—</span>;
@@ -138,7 +153,7 @@ function PipelineCard({ companyId }: { companyId: number }) {
         <dt>{t('Open leads')}</dt>
         <dd>{data ? data.open : dim}</dd>
         <dt>{t('Open quotation value')}</dt>
-        <dd className="null">—</dd>
+        <dd>{quotes ? openValue(quotes) : dim}</dd>
         <dt>{t('Won / Lost')}</dt>
         <dd>{data ? `${data.won} / ${data.lost}` : dim}</dd>
         <dt>{t('Projects')}</dt>
@@ -147,6 +162,10 @@ function PipelineCard({ companyId }: { companyId: number }) {
     </section>
   );
 }
+
+const OPEN_QUOTE = new Set(['Draft', 'Sent', 'Negotiating']);
+const openValue = (quotes: QuotationListItem[]) =>
+  quotes.filter((q) => OPEN_QUOTE.has(q.status)).map((q) => formatMoney(q.total, q.currency)).join(' + ') || '—';
 
 /** Renders a translated sentence with a link in place of `slot` (word order stays the translator's). */
 function WithLink({ text, slot, link }: { text: string; slot: string; link: ReactNode }) {

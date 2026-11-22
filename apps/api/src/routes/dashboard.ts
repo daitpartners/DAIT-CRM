@@ -6,6 +6,8 @@ import { requireUser, type AuthUser } from '../plugins/auth.js';
 import { leadWhere } from '../leads/visibility.js';
 import { taskInclude, taskRow } from '../leads/serialize.js';
 import { dateOnly, todayIn } from '../leads/dates.js';
+import { quotationWhere } from '../quotations/visibility.js';
+import { quotationListInclude, quotationListItem } from '../quotations/service.js';
 import { taskWhere } from './tasks.js';
 
 /** Task rows on the dashboard card (prototype V.dashboard shows the first six). */
@@ -43,7 +45,8 @@ export function startOfDayIn(day: string, timezone: string): Date {
 /**
  * The signed-in user's dashboard (prototype V.dashboard). Personal for every role, Administrator included:
  * "my" leads are visible leads assigned to the user; tasks are the user's own visible tasks; notifications
- * are the user's own; today's agenda is the user's own timed tasks (never Outlook events). No team numbers.
+ * are the user's own; today's agenda is the user's own timed tasks (never Outlook events); quotes awaiting response
+ * are the user's own Sent / Negotiating quotations with their display totals (oldest first). No team numbers.
  */
 export const dashboardRoutes: FastifyPluginAsync = async (app) => {
   app.get('/dashboard', { preHandler: [requireUser] }, async (request) => {
@@ -62,7 +65,7 @@ export const dashboardRoutes: FastifyPluginAsync = async (app) => {
 
     const [
       myOpenLeads, newSinceYesterday, tasksDueToday, overdue, upcoming, unreadNotifications,
-      taskRows, notes, statuses, byStatus, won, lost, agenda,
+      taskRows, notes, statuses, byStatus, won, lost, agenda, awaiting,
     ] = await Promise.all([
       prisma.lead.count({ where: myOpen }),
       prisma.lead.count({ where: { AND: [myOpen, { createdAt: { gte: startOfDayIn(yesterday, user.timezone) } }] } }),
@@ -84,6 +87,11 @@ export const dashboardRoutes: FastifyPluginAsync = async (app) => {
       prisma.lead.count({ where: { AND: [mine, { status: 'Won' }] } }),
       prisma.lead.count({ where: { AND: [mine, { status: 'Lost' }] } }),
       prisma.task.findMany({ where: agendaWhere, include: taskInclude, orderBy: [{ dueTime: 'asc' }, { title: 'asc' }, { id: 'asc' }] }),
+      prisma.quotation.findMany({
+        where: { AND: [quotationWhere(user), { ownerId: user.id, status: { in: ['Sent', 'Negotiating'] } }] },
+        include: quotationListInclude,
+        orderBy: { id: 'asc' },
+      }),
     ]);
 
     const counts = new Map(byStatus.map((g) => [g.status, g._count._all]));
@@ -95,6 +103,10 @@ export const dashboardRoutes: FastifyPluginAsync = async (app) => {
       notifications: notes.map((n) => ({ id: n.id, text: n.text, detail: n.detail, link: n.link, isRead: n.isRead, createdAt: n.createdAt })),
       pipeline: statuses.map((s) => ({ status: s.value, count: counts.get(s.value) ?? 0 })),
       closed: { won, lost },
+      awaitingQuotes: awaiting.map((q) => {
+        const item = quotationListItem(q, today);
+        return { id: item.id, currency: item.currency, total: item.total };
+      }),
     };
   });
 };
