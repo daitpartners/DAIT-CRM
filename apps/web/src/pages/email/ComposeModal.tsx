@@ -81,6 +81,8 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
   const companyLabel = lead?.company?.name ?? contacts[0]?.company.name ?? project?.company.name ?? null;
   // The client's name for the picker when Compose opens on one (a project link may name a client outside your mail).
   const startCompanyName = start.companyName ?? companyProjects?.items[0]?.company.name ?? contacts[0]?.company.name;
+  // Clients are marked "name · client" in the picker, as in the prototype.
+  const clientLabel = (name: string, isClient: boolean | undefined) => (isClient ? `${name} · ${t('client|project')}` : name);
   const sortedTemplates = useMemo(
     () => [...(templates ?? [])].sort((a, b) => Number(b.language === me.language) - Number(a.language === me.language)),
     [templates, me.language],
@@ -171,7 +173,8 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
             id="cm-company"
             label={t('Client')}
             value={companyId}
-            selected={companyId === start.companyId && startCompanyName ? { value: String(start.companyId), label: startCompanyName } : null}
+            selected={companyId === start.companyId && startCompanyName ? { value: String(start.companyId), label: clientLabel(startCompanyName, companyProjects?.isClient) } : null}
+            optionLabel={(c) => clientLabel(c.name, c.isClient)}
             onChange={(id) => changeCompany(id)}
             emptyLabel={t('— choose client / company —')}
             onClear={() => changeCompany(undefined)}

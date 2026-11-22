@@ -29,7 +29,7 @@ const detail = (m: MailItem, over: Partial<MailDetail> = {}): MailDetail => ({
 });
 const META: MailMeta = {
   mailbox: { id: 7, address: 'arjun@daitpartners.com', status: 'connected', lastSyncAt: '2026-11-22T09:00:00.000Z' },
-  unread: 3, unlinked: 2, companies: [{ id: 4, name: 'Acme' }], leads: [{ id: 5, number: 'LD-1005', companyId: 4, companyName: 'Acme', status: 'New' }],
+  unread: 3, unlinked: 2, companies: [{ id: 4, name: 'Acme', isClient: true }, { id: 6, name: 'Bolt', isClient: false }], leads: [{ id: 5, number: 'LD-1005', companyId: 4, companyName: 'Acme', status: 'New' }],
   projects: [{ id: 3, number: 'PRJ-3', name: 'Website rebuild', companyId: 4 }, { id: 8, number: 'PRJ-8', name: 'Brand refresh', companyId: 6 }],
 };
 
@@ -147,7 +147,9 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     stub([], {});
     show('/email?company=4&project=3');
     const client = await screen.findByRole('combobox', { name: 'Client / company' });
-    await within(client).findByRole('option', { name: 'Acme' });
+    // Clients are marked as in the prototype ("name · client").
+    await within(client).findByRole('option', { name: 'Acme · client' });
+    expect(within(client).getByRole('option', { name: 'Bolt' })).toBeTruthy();
     await u.selectOptions(client, '');
     await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/email'));
   });

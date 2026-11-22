@@ -296,7 +296,7 @@ describe('reading mail on the Email screen (2B-2)', () => {
     expect(meta).toMatchObject({
       mailbox: { address: 'maya@daitpartners.com', status: 'connected', lastSyncAt: null },
       unread: 1, unlinked: 1,
-      companies: [{ id: company.id, name: 'Acme' }],
+      companies: [{ id: company.id, name: 'Acme', isClient: false }],
       leads: [{ id: lead.id, number: lead.number, companyId: company.id, companyName: lead.companyName, status: 'New' }],
     });
   });

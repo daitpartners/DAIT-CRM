@@ -17,7 +17,7 @@ const me = { ...rep, rights: [...rep.rights, 'use_email' as const] };
 
 const META: MailMeta = {
   mailbox: { id: 7, address: 'arjun@daitpartners.com', status: 'connected', lastSyncAt: '2026-11-22T09:00:00.000Z' },
-  unread: 0, unlinked: 0, companies: [{ id: 4, name: 'Acme' }], leads: [{ id: 5, number: 'LD-1005', companyId: 4, companyName: 'Acme', status: 'Won' }],
+  unread: 0, unlinked: 0, companies: [{ id: 4, name: 'Acme', isClient: true }], leads: [{ id: 5, number: 'LD-1005', companyId: 4, companyName: 'Acme', status: 'Won' }],
   projects: [{ id: 3, number: 'PRJ-3', name: 'Website rebuild', companyId: 4 }],
 };
 
@@ -155,7 +155,8 @@ describe('Compose: Client → Lead → Project (release 3B, prototype V.compose)
     show('/email?compose=1&company=4&lead=5&project=3');
     const dialog = await screen.findByRole('dialog', { name: 'Compose email' });
     await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Project' })).toHaveValue('3'));
-    expect(within(dialog).getByRole('combobox', { name: 'Client' })).toHaveValue('Acme');
+    // The client marked as in the prototype's Client picker.
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Client' })).toHaveValue('Acme · client'));
     await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Lead' })).toHaveValue('5'));
     await waitFor(() => expect(within(dialog).getByLabelText(/^Cc/)).toHaveValue('ben@acme.com'));
     // The one-off open is not kept in the address (a refresh or Back does not reopen it); the filters stay.

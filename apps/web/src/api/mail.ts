@@ -55,7 +55,8 @@ export type MailMeta = {
   mailbox: { id: number; address: string; status: string; lastSyncAt: string | null } | null;
   unread: number;
   unlinked: number;
-  companies: { id: number; name: string }[];
+  /** `isClient` marks the option "name · client" (prototype). */
+  companies: { id: number; name: string; isClient: boolean }[];
   leads: { id: number; number: string; companyId: number | null; companyName: string; status: string }[];
   /** Release 3B: every project the user can see (the Project filter). */
   projects: { id: number; number: string; name: string; companyId: number }[];

@@ -180,7 +180,7 @@ export function EmailPage() {
         >
           <option value="">{t('Client: all')}</option>
           {(meta?.companies ?? []).map((c) => (
-            <option key={c.id} value={c.id}>{c.name}</option>
+            <option key={c.id} value={c.id}>{c.isClient ? `${c.name} · ${t('client|project')}` : c.name}</option>
           ))}
         </select>
         <select
