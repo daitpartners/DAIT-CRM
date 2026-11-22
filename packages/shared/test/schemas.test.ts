@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   can, UserCreate, UserUpdate, PreferencesUpdate, LookupValueCreate, LookupValueUpdate,
-  AllocationRuleCreate, LOOKUP_GROUPS, t, formatDate, lookupLabel,
+  AllocationRuleCreate, LOOKUP_GROUPS, t, formatDate, lookupLabel, taskEndTime, CalendarQuery,
 } from '../src/index.js';
 
 describe('rights', () => {
@@ -97,5 +97,21 @@ describe('i18n', () => {
     expect(lookupLabel({ label: 'New', labelEs: 'Nuevo' }, 'es')).toBe('Nuevo');
     expect(lookupLabel({ label: 'New', labelFr: null }, 'fr')).toBe('New');
     expect(lookupLabel({ label: 'New' }, 'en')).toBe('New');
+  });
+});
+
+describe('calendar', () => {
+  it('taskEndTime adds the minutes, capped at 23:59', () => {
+    expect(taskEndTime('10:00', 30)).toBe('10:30');
+    expect(taskEndTime('09:45', 60)).toBe('10:45');
+    expect(taskEndTime('23:30', 60)).toBe('23:59');
+  });
+
+  it('CalendarQuery: from/to, who defaults to mine, at most 62 days', () => {
+    expect(CalendarQuery.parse({ from: '2030-03-01', to: '2030-03-31' })).toEqual({ from: '2030-03-01', to: '2030-03-31', who: 'mine' });
+    expect(CalendarQuery.safeParse({ from: '2030-03-01', to: '2030-05-01', who: 'all' }).success).toBe(true);
+    expect(CalendarQuery.safeParse({ from: '2030-03-01', to: '2030-05-02' }).success).toBe(false);
+    expect(CalendarQuery.safeParse({ from: '2030-03-02', to: '2030-03-01' }).success).toBe(false);
+    expect(CalendarQuery.safeParse({ from: '2030-03-01', to: '2030-03-01', who: 'team' }).success).toBe(false);
   });
 });

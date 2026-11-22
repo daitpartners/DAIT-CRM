@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { Lead, Prisma, Task, User } from '@prisma/client';
-import { TASK_DURATION, TaskCreate, TaskListQuery, TaskUpdate, UpdatedAtOnly, can, isClosedStatus, pageArgs, type TaskListQuery as Query } from '@dait-crm/shared';
+import { TASK_DURATION, TaskCreate, taskEndTime, TaskListQuery, TaskUpdate, UpdatedAtOnly, can, isClosedStatus, pageArgs, type TaskListQuery as Query } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { audit } from '../audit.js';
 import { NotFoundError, parseBody, parseQuery } from '../validate.js';
@@ -93,13 +93,6 @@ async function mirrorFollowUp(tx: Tx, user: AuthUser, lead: Lead, next: Date | n
 /** Minutes a task of this kind lasts: calls and meetings have a fixed length, follow-ups none. */
 const durationOf = (kind: string): number | null => (kind === 'call' || kind === 'meeting' ? TASK_DURATION[kind] : null);
 
-/** `HH:MM` plus `minutes`, capped at 23:59 (an entry never runs past midnight). */
-function endTime(start: string, minutes: number): string {
-  const [h, m] = start.split(':').map(Number) as [number, number];
-  const end = Math.min(h * 60 + m + minutes, 23 * 60 + 59);
-  return `${String(Math.floor(end / 60)).padStart(2, '0')}:${String(end % 60).padStart(2, '0')}`;
-}
-
 /**
  * The lead timeline entry for a task planned from the Calendar (as the prototype's createFollowUp /
  * createEvent): a follow-up is a note with date, optional time and assignee; a call or meeting is a
@@ -112,7 +105,7 @@ async function plannedActivity(tx: Tx, user: AuthUser, task: Task, assignee: Pic
     : {
       activityType: 'meeting',
       title: `${task.kind === 'call' ? 'Call' : 'Meeting'} scheduled · ${task.title}`,
-      body: `${date} ${task.dueTime}–${endTime(task.dueTime!, task.durationMinutes!)} · ${task.kind === 'call' ? 'Phone' : 'Microsoft Teams'}`,
+      body: `${date} ${task.dueTime}–${taskEndTime(task.dueTime!, task.durationMinutes!)} · ${task.kind === 'call' ? 'Phone' : 'Microsoft Teams'}`,
     };
   await tx.leadActivity.create({ data: { leadId: task.leadId!, ...data, byUserId: user.id } });
 }
