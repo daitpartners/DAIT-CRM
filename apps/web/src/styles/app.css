@@ -682,3 +682,58 @@ a.strong{font-weight:600}
 .mrec td,.mrec th{padding:7px 10px}
 .mbar{display:inline-block;width:90px;height:6px;border-radius:3px;background:var(--tint);overflow:hidden;vertical-align:middle}
 .mbar i{display:block;height:100%;background:linear-gradient(90deg,var(--purple),var(--peach));transition:width .4s ease}
+
+/* Calendar (release 3C): prototype .ccal / .cmini / .cgrid / .cit rules, copied verbatim. The prototype's .seg (links in a
+   bordered strip) is .seg.link-seg here, as the Tasks page keeps its own .seg of buttons. */
+.seg.link-seg{gap:0;border:1px solid var(--field);border-radius:8px;overflow:hidden;background:var(--surface)}
+.link-seg a{padding:7px 14px;font-size:13px;font-weight:600;color:var(--muted)}.link-seg a+a{border-left:1px solid var(--line)}
+.link-seg a.on{background:var(--tint);color:#4B0A9A}.link-seg a:hover{color:var(--purple)}
+.page.ccal{flex-direction:row;align-items:flex-start;gap:20px}
+.cside{flex:0 0 260px;display:flex;flex-direction:column;gap:18px;min-width:0}
+.cmain{flex:1;min-width:0;display:flex;flex-direction:column;gap:10px}
+.cmini{padding:14px;gap:10px;min-width:0;overflow:hidden}.cmh{display:flex;align-items:center;gap:6px;font-size:14px}
+.cnav{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:1px solid var(--field);border-radius:8px;background:var(--surface);color:var(--text)}
+.cnav svg{width:14px;height:14px}.cnav:hover{border-color:var(--purple);color:var(--purple)}.cnav.lg{width:36px;height:36px}
+.cmg{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px;text-align:center}
+.cmg .wd{font-size:10.5px;font-weight:600;color:var(--muted);padding:4px 0}
+.cmg a{position:relative;display:flex;align-items:center;justify-content:center;aspect-ratio:1;border-radius:8px;font-size:12.5px;font-weight:500}
+.cmg a.in{background:var(--tint);color:#4B0A9A}.cmg a.out{color:var(--faint)}
+.cmg a:hover{outline:1px solid var(--purple)}
+.cmg a.sel{outline:2px solid var(--purple)}
+.cmg a.today{background:var(--purple);color:#fff;font-weight:700}
+.cmg a.has::after{content:"";position:absolute;bottom:3px;left:50%;width:4px;height:4px;margin-left:-2px;border-radius:50%;background:var(--orange)}
+.cmg a.today.has::after{background:#fff}
+.coh{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--bad-fg);display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.coh span{background:var(--bad-fg);color:#fff;border-radius:999px;padding:1px 8px;font-size:11px;letter-spacing:0}
+.coi{display:block;padding:9px 12px;margin-bottom:8px;border-left:3px solid var(--bad-fg);border-radius:6px;background:var(--bad-bg);color:var(--ink)}
+.coi strong{display:block;font-size:13px}.coi span{font-size:12px;color:var(--bad-fg)}.coi:hover{color:var(--ink);box-shadow:0 2px 10px rgba(163,32,32,.15)}
+.con{font-size:12.5px;color:var(--muted)}
+.cbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.cbar .btn svg{width:14px;height:14px}
+.ctitle{font-size:20px;font-weight:800;color:var(--ink);margin:0 0 0 8px}
+.csum{font-size:12.5px;color:var(--muted)}
+.cgrid{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.cgh{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border-bottom:1px solid var(--line)}
+.cgh>div{padding:9px 12px;font-size:12px;font-weight:600;color:var(--muted)}.cgh b{color:var(--text)}.cgh .today{color:var(--purple)}.cgh .today b{color:var(--purple)}
+.cgb{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
+.cc{min-height:112px;padding:6px 6px 8px;border-right:1px solid var(--line-2);border-bottom:1px solid var(--line-2);display:flex;flex-direction:column;gap:4px;cursor:pointer;min-width:0}
+.cgb .cc:nth-child(7n){border-right:0}.cc:hover{background:#FBF9FF}
+.cc.out{background:#FAF8FD}.cc.out .cn{color:var(--faint)}
+.cc.tall{min-height:420px}.cgrid.day .cc{border:0;padding:14px;gap:8px;min-height:300px}
+.cn{font-size:13px;font-weight:600;padding:2px 4px;color:var(--text)}
+.cc.today .cn span{display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;padding:0 7px;border-radius:999px;background:var(--purple);color:#fff}
+.cnone{color:var(--faint);font-size:12px;padding:4px}
+.cit{display:flex;align-items:baseline;gap:6px;width:100%;text-align:left;font:inherit;font-size:12px;font-weight:600;padding:4px 8px;border:0;border-left:3px solid var(--peach);border-radius:5px;background:#FFF4E8;color:var(--ink);overflow:hidden;white-space:nowrap}
+.cit .tt{overflow:hidden;text-overflow:ellipsis}.cit .tm{font-weight:500;color:var(--muted);flex:0 0 auto}.cit .co{margin-left:auto;font-weight:500;color:var(--muted);flex:0 0 auto;padding-left:12px}
+.cit:hover{color:var(--ink);filter:brightness(.97)}
+.cit.t-call{border-left-color:var(--orange);background:#FBE9DF}
+.cit.t-meeting{border-left-color:var(--purple);background:var(--tint)}
+.cit.t-internal,.cit.t-task{border-left-color:#6A5E86;background:#EDE9F4}
+.cit.over{border-left-color:var(--bad-fg);background:var(--bad-bg)}
+.cit.done{background:#F6F3FB;border-left-color:var(--field);color:var(--faint);font-weight:500}.cit.done .tt{text-decoration:line-through}
+.cgrid.day .cit{font-size:13.5px;padding:10px 12px}
+.cmore{font-size:11.5px;font-weight:600;padding:0 8px}
+.cleg{display:flex;align-items:center;flex-wrap:wrap;gap:6px 6px;font-size:12px;color:var(--muted)}
+.cleg .k{display:inline-block;width:10px;height:10px;border-radius:3px;margin-left:12px;background:var(--peach)}.cleg .k:first-child{margin-left:0}
+.cleg .k.t-call{background:var(--orange)}.cleg .k.t-meeting{background:var(--purple)}.cleg .k.t-internal{background:#6A5E86}.cleg .k.over{background:var(--bad-fg)}.cleg .k.done{background:var(--field)}
+@media (max-width:1000px){.page.ccal{flex-direction:column}.cside{flex:none;width:100%;flex-direction:row;flex-wrap:wrap}.cmini{flex:0 0 260px}.cover{flex:1;min-width:220px}}
+@media (max-width:640px){.cgh>div{padding:8px 2px;text-align:center;font-size:10.5px;overflow:hidden}.cc{min-height:84px;padding:3px}.cit{padding:3px 4px;font-size:10.5px}.cit .tm{display:none}.cgrid.week .cgb,.cgrid.week .cgh{grid-template-columns:repeat(7,minmax(0,1fr))}.cmini{flex:1 1 100%}}

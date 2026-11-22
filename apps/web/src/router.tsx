@@ -1,5 +1,6 @@
 import { Navigate, createBrowserRouter, useLocation } from 'react-router-dom';
 import { RequireAuth } from './components/RequireAuth';
+import { CalendarPage } from './pages/calendar/CalendarPage';
 import { Dashboard } from './pages/Dashboard';
 import { EmailPage } from './pages/email/EmailPage';
 import { CampaignPage } from './pages/mailer/CampaignPage';
@@ -46,6 +47,7 @@ export const router = createBrowserRouter([
       { path: 'email/:id', element: <EmailPage /> },
       { path: 'mailer', element: <MailerPage /> },
       { path: 'mailer/:id', element: <CampaignPage /> },
+      { path: 'calendar', element: <CalendarPage /> },
       { path: 'tasks', element: <TasksList /> },
       { path: 'notifications', element: <NotificationsList /> },
       { path: 'reports', element: <ReportsPage /> },
