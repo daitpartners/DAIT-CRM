@@ -37,7 +37,7 @@ jobs:
         run: |
           tar czf "$SHA.tgz" package.json package-lock.json node_modules \
             packages/shared/package.json packages/shared/dist \
-            apps/api/package.json apps/api/dist \
+            apps/api/package.json apps/api/dist apps/api/assets \
             apps/worker/package.json apps/worker/dist \
             apps/web/dist prisma deploy
       - name: Set up SSH

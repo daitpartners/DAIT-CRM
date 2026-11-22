@@ -79,4 +79,12 @@ bash "$SCRIPT" promote > "$T/out4.log" 2>&1 || { cat "$T/out4.log"; fail "promot
 [[ $(readlink "$RELEASE_ROOT/live/current") == "$RELEASE_ROOT/live/releases/abc123" ]] || fail "live current not abc123"
 grep -q -- "--only crm-live,crm-live-worker" "$FAKE_LOG" || fail "pm2 not called for crm-live,crm-live-worker"
 echo "ok: promote"
+
+# 5. the CI release tarball carries every folder the API reads at run time (not only dist/): the quotation PDF logo
+WORKFLOW="$HERE/../../.github/workflows/deploy-test.yml"
+PACK=$(sed -n '/tar czf/,/deploy$/p' "$WORKFLOW" | tr -s ' \\\t' '\n\n\n')
+for d in apps/api/dist apps/api/assets apps/worker/dist apps/web/dist packages/shared/dist prisma deploy; do
+  grep -qx -- "$d" <<< "$PACK" || fail "deploy-test.yml does not pack $d"
+done
+echo "ok: release tarball contents"
 echo "All release.sh tests passed"
