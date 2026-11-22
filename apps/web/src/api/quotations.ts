@@ -108,6 +108,8 @@ export type QuotationDetail = Pick<QuotationListItem, 'id' | 'number' | 'status'
   displayTotals: QuoteTotals & { currency: QuoteCurrency };
   revisions: QuotationRevision[];
   history: { at: string; text: string }[];
+  /** GST each currency starts with (Settings → Company details). */
+  taxDefaults?: Record<QuoteCurrency, number>;
   createdAt: string;
   updatedAt: string;
 };

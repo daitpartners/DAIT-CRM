@@ -20,6 +20,9 @@ import { LinesTable, amount, blankLine, newLineKey, num, type DraftLine } from '
 import { PdfPreviewModal } from './PdfPreviewModal';
 import { SendQuotationModal, bold, withBold } from './SendQuotationModal';
 
+/** Save refusals after which the server copy replaces the draft (someone else changed it, it locked, or a send began). */
+const RELOAD_ON = new Set(['stale', 'locked', 'sending']);
+
 /** Autosave waits this long after the last keystroke. */
 const SAVE_DEBOUNCE_MS = 600;
 /** Contacts / leads offered for the company: the API's largest page. */
@@ -176,6 +179,8 @@ function Editor({ q, crumb, refetch }: { q: QuotationDetail; crumb: React.ReactN
     try {
       const before = base.current;
       const res = await patchQuotation(before.id, { ...patch, updatedAt: before.updatedAt });
+      // GST still left to the server for this currency (not edited, no other currency picked meanwhile): its value.
+      const takeTax = patch.currency !== undefined && taxAuto.current && draftRef.current.currency === res.currency;
       if (patch.currency) taxAuto.current = false;
       base.current = res;
       qc.setQueryData(keys.quotation(res.id), res);
@@ -184,13 +189,21 @@ function Editor({ q, crumb, refetch }: { q: QuotationDetail; crumb: React.ReactN
       if (edits.current === seq) {
         const fresh = draftOf(res, draftRef.current.lines);
         if (JSON.stringify(bodyOf(fresh)) !== JSON.stringify(bodyOf(draftRef.current))) setDraft(fresh);
+      } else if (takeTax && draftRef.current.taxRate !== String(res.taxRate)) {
+        setDraft({ ...draftRef.current, taxRate: String(res.taxRate) });
       }
       if (res.revision > before.revision && res.editingNewRevision) toast(t('Revision {n} opened · previous version kept', { n: res.revision }));
       void invalidateAfterQuotationWrite(qc, res.id);
       return edits.current === seq;
     } catch (err) {
-      settled.current = edits.current;
       const errCode = err instanceof ApiError ? err.code : 'unknown';
+      if (!RELOAD_ON.has(errCode) && !(err instanceof ApiError && err.status === 404)) {
+        // Anything else (network, validation, server error): the user's typing stays on screen, still unsaved, and is
+        // tried again with the next edit or on leaving.
+        toast(errorText(t, errCode), 'warn');
+        return false;
+      }
+      settled.current = edits.current;
       if (err instanceof ApiError && err.status === 404) {
         // Clearing the lead can leave the quotation outside what this user may see: it was saved.
         gone.current = true;
@@ -212,13 +225,18 @@ function Editor({ q, crumb, refetch }: { q: QuotationDetail; crumb: React.ReactN
     return chain.current;
   }, [saveNow]);
 
-  // Leaving the page with a save still waiting: save it now rather than drop it.
+  // Leaving the page with a save still waiting: save it now rather than drop it; a blank subject or item cannot be
+  // saved, so say the edits were not kept.
   const flushRef = useRef(flush);
   flushRef.current = flush;
+  const warnRef = useRef(() => {});
+  warnRef.current = () => toast(t('Not saved: the subject and the item on every line must be filled in'), 'warn');
   useEffect(
     () => () => {
       window.clearTimeout(timer.current);
-      if (edits.current !== settled.current) void flushRef.current();
+      if (edits.current === settled.current || gone.current) return;
+      if (savable(changed(bodyOf(draftRef.current), bodyOf(draftOf(base.current))))) void flushRef.current();
+      else warnRef.current();
     },
     [],
   );
@@ -248,7 +266,7 @@ function Editor({ q, crumb, refetch }: { q: QuotationDetail; crumb: React.ReactN
   function changeCurrency(currency: QuoteCurrency) {
     // Builder's call: a new currency resets GST to its default (INR 18, USD 0, CAD 0; the server applies Company details).
     taxAuto.current = true;
-    edit({ currency, taxRate: String(defaultTaxRate(currency)) });
+    edit({ currency, taxRate: String(q.taxDefaults?.[currency] ?? defaultTaxRate(currency)) });
   }
 
   const { data: contactPage } = useContacts({ companyId: q.company.id, page: 1, pageSize: PICK_PAGE });
@@ -277,6 +295,11 @@ function Editor({ q, crumb, refetch }: { q: QuotationDetail; crumb: React.ReactN
       discardUnsent = true;
     }
     run({ kind, discardUnsent });
+  }
+
+  async function negotiate() {
+    if (!(await ready())) return;
+    run({ kind: 'negotiate' });
   }
 
   function run(a: Parameters<typeof action.mutate>[0]) {
@@ -529,8 +552,8 @@ function Editor({ q, crumb, refetch }: { q: QuotationDetail; crumb: React.ReactN
                     {t('Mark rejected')}
                   </button>
                   {q.status === 'Sent' ? (
-                    <button type="button" className="btn sm" disabled={!editable || action.isPending} onClick={() => run({ kind: 'negotiate' })}>
-                      {t('Mark negotiating')}
+                    <button type="button" className="btn sm" disabled={!editable || action.isPending} onClick={() => void negotiate()}>
+                      {t('Negotiating|action')}
                     </button>
                   ) : null}
                 </>

@@ -273,16 +273,94 @@ describe('Quotation editor (prototype V.quoteEditor)', () => {
     expect(await screen.findByText('Duplicated as Q-2026-012')).toBeTruthy();
   });
 
-  it('status buttons: Mark negotiating only when Sent; Mark accepted posts to accept', async () => {
+  it('status buttons: Negotiating (prototype label) only when Sent; Mark accepted posts to accept', async () => {
     const calls = stub(detail({ status: 'Sent' }));
     mount();
     await screen.findByDisplayValue('Consulting services');
     const buttons = within(screen.getByRole('heading', { level: 2, name: 'Status' }).closest('section') as HTMLElement).getAllByRole('button').map((b) => b.textContent);
-    expect(buttons).toEqual(['Mark accepted', 'Mark rejected', 'Mark negotiating']);
+    expect(buttons).toEqual(['Mark accepted', 'Mark rejected', 'Negotiating']);
     await userEvent.click(screen.getByRole('button', { name: 'Mark accepted' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url === '/api/quotations/7/accept')).toBe(true));
     expect(calls.find((c) => c.url === '/api/quotations/7/accept')!.body).toEqual({});
     expect(await screen.findByText('Q-2026-007 marked Accepted')).toBeTruthy();
+  });
+
+  it('Negotiating saves waiting edits first, then marks the quotation', async () => {
+    const calls = stub(detail({ status: 'Sent' }));
+    mount();
+    await screen.findByDisplayValue('Consulting services');
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Revised subject' } });
+    await userEvent.click(screen.getByRole('button', { name: 'Negotiating' }));
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/quotations/7/negotiate')).toBe(true));
+    const writes = calls.filter((c) => c.method !== 'GET').map((c) => `${c.method} ${c.url}`);
+    expect(writes).toEqual(['PATCH /api/quotations/7', 'POST /api/quotations/7/negotiate']);
+    expect(patches(calls)[0]!.body!.subject).toBe('Revised subject');
+  });
+
+  it('a save refused for another reason (server error) keeps the typing on screen, unsaved, with a toast', async () => {
+    const calls = stub(detail(), (c) => (c.method === 'PATCH' ? Response.json({ error: 'internal' }, { status: 500 }) : undefined));
+    mount();
+    await screen.findByDisplayValue('Consulting services');
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Changed subject' } });
+    await waitFor(() => expect(patches(calls)).toHaveLength(1), { timeout: 3000 });
+    expect(await screen.findByText('Something went wrong. Please try again.')).toBeTruthy();
+    expect(screen.getByLabelText('Subject')).toHaveValue('Changed subject');
+    // Still unsaved: the next edit sends it again.
+    fireEvent.change(screen.getByLabelText('Notes & terms shown on the PDF'), { target: { value: 'New terms' } });
+    await waitFor(() => expect(patches(calls)).toHaveLength(2), { timeout: 3000 });
+    expect(patches(calls)[1]!.body).toMatchObject({ subject: 'Changed subject', notes: 'New terms' });
+  });
+
+  it('a currency change shows that currency\'s GST from Company details at once', async () => {
+    stub(detail({ taxDefaults: { INR: 18, USD: 5, CAD: 13 } }));
+    mount();
+    await screen.findByDisplayValue('Consulting services');
+    await userEvent.selectOptions(screen.getByLabelText('Currency'), 'CAD');
+    expect(screen.getByLabelText('GST %')).toHaveValue(13);
+  });
+
+  it('typing on while a currency change saves still takes the server\'s GST for the new currency', async () => {
+    let state = detail();
+    let n = 0;
+    const calls = stub(state, (c) => {
+      if (c.method !== 'PATCH') return undefined;
+      const { updatedAt: _u, ...rest } = c.body ?? {};
+      n += 1;
+      state = { ...state, ...(rest as Partial<QuotationDetail>), ...(rest.currency ? { taxRate: 7 } : {}), updatedAt: `2026-11-20T10:00:0${n}.000Z` };
+      return Response.json(state);
+    });
+    // Hold the first save's answer until the user has typed on.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const inner = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      if (init?.method === 'PATCH' && patches(calls).length === 0) {
+        const res = inner(url, init);
+        await gate;
+        return res;
+      }
+      return inner(url, init);
+    });
+    mount();
+    await screen.findByDisplayValue('Consulting services');
+    await userEvent.selectOptions(screen.getByLabelText('Currency'), 'USD');
+    await waitFor(() => expect(patches(calls)).toHaveLength(1), { timeout: 3000 });
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Typed meanwhile' } });
+    release();
+    await waitFor(() => expect(screen.getByLabelText('GST %')).toHaveValue(7));
+    expect(screen.getByLabelText('Subject')).toHaveValue('Typed meanwhile');
+    await waitFor(() => expect(patches(calls)).toHaveLength(2), { timeout: 3000 });
+    expect(patches(calls)[1]!.body).toEqual({ subject: 'Typed meanwhile', updatedAt: '2026-11-20T10:00:01.000Z' });
+  });
+
+  it('leaving with a blank subject says the edits were not saved', async () => {
+    const calls = stub(detail());
+    mount();
+    await screen.findByDisplayValue('Consulting services');
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: '' } });
+    await userEvent.click(screen.getByRole('link', { name: 'Quotations' }));
+    expect(await screen.findByText('Not saved: the subject and the item on every line must be filled in')).toBeTruthy();
+    expect(patches(calls)).toHaveLength(0);
   });
 
   it('accepting while revision n+1 is unsent asks first, then sends discardUnsent', async () => {
