@@ -25,8 +25,6 @@ const LABELS: Record<Exclude<Lang, 'en'>, Record<string, string>> = {
     'Unit price': 'Precio unitario',
     Total: 'Total',
     '{n}% discount': '{n}% de descuento',
-    Subtotal: 'Subtotal',
-    'Discount {n}%': 'Descuento {n}%',
     Net: 'Neto',
     'GST {n}%': 'GST {n}%',
     'Page {n} of {total}': 'Página {n} de {total}',
@@ -43,8 +41,6 @@ const LABELS: Record<Exclude<Lang, 'en'>, Record<string, string>> = {
     'Unit price': 'Prix unitaire',
     Total: 'Total',
     '{n}% discount': 'Remise de {n} %',
-    Subtotal: 'Sous-total',
-    'Discount {n}%': 'Remise {n} %',
     Net: 'Net',
     'GST {n}%': 'GST {n} %',
     'Page {n} of {total}': 'Page {n} sur {total}',
@@ -61,6 +57,9 @@ const MUTED = '#6A5E86';
 const NOTES = '#4A3F66';
 const RULE = '#E4DEF0';
 const HEAD_BG = '#F6F3FB';
+
+/** Height of the lines table's header row. */
+const HEADER_H = 22;
 
 const REGULAR = 'Helvetica';
 const BOLD = 'Helvetica-Bold';
@@ -149,7 +148,7 @@ export async function renderQuotationPdf(
   const pad = 6;
 
   const header = () => {
-    const h = 22;
+    const h = HEADER_H;
     doc.rect(left, y, width, h).fill(HEAD_BG);
     doc.font(BOLD).fontSize(9).fillColor(MUTED);
     doc.text(L('Item'), x.item + pad, y + 7, { width: itemW - 2 * pad, lineBreak: false });
@@ -164,22 +163,35 @@ export async function renderQuotationPdf(
   };
 
   header();
+  const cellW = itemW - 2 * pad;
+  /** The most a row may take: a fresh page below the table header. */
+  const maxCell = bottom() - doc.page.margins.top - HEADER_H - 2 * pad;
   for (const l of snap.lines) {
-    const cellW = itemW - 2 * pad;
     const item = printable(l.item);
-    const extra = [l.description ? printable(l.description) : '', l.discount ? L('{n}% discount', { n: num(l.discount) }) : ''].filter(Boolean);
+    const discount = l.discount ? L('{n}% discount', { n: num(l.discount) }) : '';
+    let desc = l.description ? printable(l.description) : '';
     doc.font(BOLD).fontSize(9.5);
-    let h = doc.heightOfString(item || ' ', { width: cellW });
+    const itemH = Math.min(doc.heightOfString(item || ' ', { width: cellW }), maxCell);
     doc.font(REGULAR).fontSize(9);
-    for (const e of extra) h += 2 + doc.heightOfString(e, { width: cellW });
+    const discountH = discount ? 2 + doc.heightOfString(discount, { width: cellW }) : 0;
+    // A description taller than a page is cut (with an ellipsis) to what fits on one, so the row never runs on.
+    const descRoom = Math.max(0, maxCell - itemH - discountH - 2);
+    let descH = desc ? doc.heightOfString(desc, { width: cellW }) : 0;
+    if (descH > descRoom) {
+      const lineH = doc.currentLineHeight(true);
+      descH = Math.floor(descRoom / lineH) * lineH;
+      if (descH <= 0) desc = '';
+    }
+    const h = itemH + (desc ? 2 + descH : 0) + discountH;
     const rowH = h + 2 * pad;
     if (y + rowH > bottom()) {
       newPage();
       header();
     }
-    doc.font(BOLD).fontSize(9.5).fillColor(INK).text(item, x.item + pad, y + pad, { width: cellW });
+    doc.font(BOLD).fontSize(9.5).fillColor(INK).text(item, x.item + pad, y + pad, { width: cellW, height: itemH, ellipsis: true });
     doc.font(REGULAR).fontSize(9).fillColor(MUTED);
-    for (const e of extra) doc.text(e, x.item + pad, doc.y + 2, { width: cellW });
+    if (desc) doc.text(desc, x.item + pad, y + pad + itemH + 2, { width: cellW, height: descH, ellipsis: true });
+    if (discount) doc.text(discount, x.item + pad, y + pad + itemH + (desc ? 2 + descH : 0) + 2, { width: cellW });
     doc.fillColor(INK).fontSize(9.5);
     doc.text(`${num(l.qty)} ${printable(l.unit)}`, x.qty, y + pad, { width: cols.qty - pad, align: 'right', lineBreak: false });
     doc.text(money(l.unitPrice), x.price, y + pad, { width: cols.price - pad, align: 'right', lineBreak: false });
@@ -188,11 +200,9 @@ export async function renderQuotationPdf(
     doc.moveTo(left, y).lineTo(right, y).lineWidth(0.6).strokeColor(RULE).stroke();
   }
 
-  /* ---- totals (prototype: Net, Tax, Total; the overall discount shown when there is one) */
+  /* ---- totals, exactly as the prototype: Net (already less any overall discount), GST r%, Total */
   const tt = snap.totals;
-  const rows: [string, string][] = [];
-  if (tt.overall) rows.push([L('Subtotal'), money(tt.afterLines)], [L('Discount {n}%', { n: num(snap.overallDiscount) }), `– ${money(tt.overall)}`]);
-  rows.push([L('Net'), money(tt.net)], [L('GST {n}%', { n: num(snap.taxRate) }), money(tt.tax)]);
+  const rows: [string, string][] = [[L('Net'), money(tt.net)], [L('GST {n}%', { n: num(snap.taxRate) }), money(tt.tax)]];
   const totW = 260;
   const totX = right - totW;
   const rowH = 16;

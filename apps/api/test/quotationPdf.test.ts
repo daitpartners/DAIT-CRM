@@ -100,6 +100,36 @@ describe('renderQuotationPdf', () => {
     expect(text).toContain(`Page ${pageCount(buf)} of ${pageCount(buf)}`);
   });
 
+  it('totals are always Net / GST / Total (prototype); Net already carries the overall discount', async () => {
+    const snap = snapshot({ overallDiscount: 5 });
+    snap.totals = quoteTotals({ lines: snap.lines.map((l) => ({ qty: l.qty, price: l.unitPrice, discount: l.discount })), overallDiscount: 5, taxRate: 18 });
+    const text = pdfText(await render(snap, settings()));
+    expect(text).not.toContain('Subtotal');
+    expect(text).not.toMatch(/Discount 5%/);
+    // 12,34,567 less 5 % = 11,72,838.65
+    expect(snap.totals.net).toBe(1172838.65);
+    expect(text).toContain('Net');
+    expect(text).toContain('INR 11,72,838.65');
+    expect(text).toContain('GST 18%');
+  });
+
+  it('cuts a description taller than a page to one page, so the layout and page numbers stay right', async () => {
+    const long = Array.from({ length: 400 }, (_, i) => `Sentence ${i + 1} of a very long scope description.`).join(' ');
+    const lines = [
+      { item: 'Huge scope', description: long, qty: 1, unit: 'project', unitPrice: 1000, discount: 0 },
+      { item: 'After line', description: null, qty: 1, unit: 'unit', unitPrice: 10, discount: 0 },
+    ];
+    const buf = await render(snapshot({}, lines), settings());
+    // page 1: heading and table header; page 2: the cut row on a page of its own; page 3: the next line and totals
+    // (uncut, the description alone ran onto 8 pages with the rows drawn over it)
+    expect(pageCount(buf)).toBe(3);
+    const text = pdfText(buf);
+    expect(text).toContain('Huge scope');
+    expect(text).not.toContain('Sentence 400 ');
+    expect(text).toContain('After line');
+    for (const n of [1, 2, 3]) expect(text).toContain(`Page ${n} of 3`);
+  });
+
   it('shows characters outside the standard fonts as "?" (₹ as INR) instead of failing', async () => {
     const lines = [{ item: 'Café ₹ fee ✓', description: '“Fase 2” – año', qty: 1, unit: 'unit', unitPrice: 10, discount: 0 }];
     const text = pdfText(await render(snapshot({}, lines), settings()));
