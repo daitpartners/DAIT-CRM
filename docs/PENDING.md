@@ -73,7 +73,7 @@ Kept here at the owner's request; picked up when the owner says so.
 
 ## Follow-ups from this round (mail follow-ups review, 22 Nov 2026; not fixed yet unless marked)
 - ~~**Important (also on live):** the Email screen crashes ("Invalid time value") when the open message's lead has a
-  next follow-up date.~~ **Fixed (7213e26, not deployed):** GET /api/mail/:id now gives `lead.nextFollowUp` as
+  next follow-up date.~~ **Fixed (1fe84da, not deployed):** GET /api/mail/:id now gives `lead.nextFollowUp` as
   `YYYY-MM-DD` like the lead API, so the reader's day formatter gets a calendar date. The parity mail spec also
   re-unlinks "Website enquiry" (email.spec makes a lead from it earlier in the full run).
 - A mail sync already queued still runs once after a user is deactivated (later syncs stop).
