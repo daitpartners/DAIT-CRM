@@ -31,6 +31,46 @@ Kept here at the owner's request; picked up when the owner says so.
 - **1D public contact form + Enquiries** — "keep contact in pending, i will decide lateron" (22 Nov 2026). Open point:
   daitpartners.com/contact already has its own brief form (contact.php → Mailjet).
 
+## Release 3C — Calendar (22 Nov 2026) — ready on `release-3c-calendar`, not merged, not deployed
+- **Status:** branch `release-3c-calendar` (from main `63cd73e`), all six tasks done and checked side by side against
+  the prototype; unit, API, e2e, build, translations and database checks all green. Two database migrations
+  (`20261201100000_task_kind_time`, `20261201110000_calendar_events`). Needs merge + "deploy" from the owner.
+- **What it adds:** the Calendar page (mini month, Overdue, Day / Week / Month, New follow-up dialog, details of an item
+  without a lead, legend); calls and meetings as timed tasks (call 30 min, meeting 60 min) shown on Tasks and the lead
+  page; a private copy of each user's own Outlook calendar, refreshed every 5 minutes when "Sync calendar" is on in
+  Settings → Email & calendar connections.
+- **Owner decisions recorded:**
+  - The calendar is private: a user's Outlook events are seen only by that user, administrators included — never on
+    the lead timeline, Tasks, dashboard, reports or anyone else's calendar.
+  - **Mine / Everyone** is for Administrators only; Everyone adds the team's CRM tasks (follow-ups, calls, meetings),
+    never anyone's Outlook events. (The prototype shows the switch to everyone.)
+  - Calls and meetings planned in the CRM stay in the CRM: nothing is written to Outlook, no invitations or emails.
+  - **Edit task gains Type and Time** (a deliberate addition beyond the prototype) — on the Tasks page only; the lead
+    page shows the text (e.g. "Call · 10:00–10:30") and you change it on Tasks.
+- **Other differences from the prototype (accepted):** real data instead of demo data; a CRM task without a lead
+  opens the same details box as an Outlook event without a lead (the prototype has no such task); the lead picker's
+  list does not repeat "— choose a lead —" as its first row (same as every other picker in the CRM); the lead page
+  "Calls" count counts logged calls only — a planned call shows in the history but is not counted (the prototype does
+  not show planned calls under Calls at all).
+- **Fixed in the parity check:** "Lead *" spacing on required fields (all forms, as the prototype); the lead picker now
+  starts with 25 open leads (closed ones filtered on the server); no "0 open items" / "Nothing overdue." flash while
+  the calendar loads; Coming up on the lead page shows calls and meetings with the calendar icon, date and time, linking
+  to that week; a done call or meeting no longer pushes its "Done" badge out of the Completed card on Tasks.
+- **Follow-ups (not fixed):**
+  - All-day Outlook events may show one day off for users in UTC+12 to +14 (New Zealand, Tonga, Kiribati).
+  - Check the first live Outlook sync: compare times and all-day events with Outlook for a couple of users.
+  - No "plan a follow-up" link from the lead page to the calendar dialog (the prototype's `?new=1&lead=` link is not
+    built); plan from the Calendar or add a task on the lead.
+  - While a mailbox is in error ("needs reconnecting") its old copied Outlook events keep showing until it is fixed,
+    switched off or disconnected.
+  - If Microsoft sends an event change in an unexpected time format, the old time shows until the daily full re-sync.
+  - The calendar entry written on the lead timeline when a call or meeting is planned is not in the lead's audit log
+    (other notes are).
+  - An impossible date typed into the address bar (e.g. 31 Feb) is accepted, as in the prototype.
+  - Empty calendar days cannot be reached with the keyboard (as the prototype); the New follow-up button can.
+  - On narrow screens the type / time text on the lead page's open tasks can squeeze the title.
+  - Administrators' Everyone view loads every overdue team task at once (fine now, slower with many users).
+
 ## Release 2B-2 follow-ups (from the final review, 22 Nov 2026; live release 8b1a8d9) — fixed on `mail-follow-ups`
 - ~~Mail in a conversation can link to a lead the user can no longer see (thread match skips the visibility check); the
   list may then show that lead's number.~~ Done `63c6e57`.
