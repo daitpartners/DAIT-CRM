@@ -261,8 +261,9 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
         const q = new URL(url, 'http://x').searchParams;
         lists.push(q);
         const page = Number(q.get('page') ?? 1);
+        const size = Number(q.get('pageSize'));
         const rows = q.get('view') === 'inbox' ? all : [];
-        return { items: rows.slice((page - 1) * 50, page * 50), total: rows.length, page, pageSize: 50 };
+        return { items: rows.slice((page - 1) * size, page * size), total: rows.length, page, pageSize: size };
       });
       return lists;
     }
@@ -276,9 +277,17 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       expect(await within(list).findByText('Message 1')).toBeTruthy();
       expect(within(list).getByText(/Inbox/).parentElement!.textContent).toMatch(/Inbox · 120/);
       expect(lists.at(-1)!.get('pageSize')).toBe('50');
+      // The Leads / Companies pager: count, Rows, First / Prev / Page [n] of m / Next / Last.
       const pager = within(list).getByRole('navigation', { name: 'Pagination' });
-      expect(within(pager).getByText('Showing 1–50 of 120')).toBeTruthy();
-      await u.click(within(pager).getByRole('button', { name: 'Next' }));
+      expect(within(pager).getByText('1–50 of 120')).toBeTruthy();
+      expect((within(pager).getByRole('combobox', { name: 'Rows per page' }) as HTMLSelectElement).value).toBe('50');
+      expect(within(pager).getAllByRole('option').map((o) => o.textContent)).toEqual(['25', '50', '100']);
+      expect(within(pager).getByRole('button', { name: '« First' })).toHaveProperty('disabled', true);
+      expect(within(pager).getByRole('button', { name: '‹ Prev' })).toHaveProperty('disabled', true);
+      expect((within(pager).getByRole('spinbutton', { name: 'Go to page' }) as HTMLInputElement).value).toBe('1');
+      expect(pager.textContent).toMatch(/Page\s*of 3/);
+      expect(within(pager).getByRole('button', { name: 'Last »' })).toHaveProperty('disabled', false);
+      await u.click(within(pager).getByRole('button', { name: 'Next ›' }));
       expect(await within(list).findByText('Message 51')).toBeTruthy();
       expect(lists.at(-1)!.get('page')).toBe('2');
       expect(where()).toBe('/email?page=2');
@@ -302,6 +311,31 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       await waitFor(() => expect(lists.at(-1)!.get('page')).toBeNull());
     });
 
+    it('Last and First jump to the ends; Rows asks for that many and goes back to page 1, kept in the URL', async () => {
+      const u = userEvent.setup();
+      const lists = paged();
+      show('/email?page=2');
+      const list = screen.getByRole('region', { name: 'Message list' });
+      expect(await within(list).findByText('Message 51')).toBeTruthy();
+      const pager = () => within(list).getByRole('navigation', { name: 'Pagination' });
+      await u.click(within(pager()).getByRole('button', { name: 'Last »' }));
+      expect(await within(list).findByText('Message 101')).toBeTruthy();
+      expect(where()).toBe('/email?page=3');
+      await u.click(within(pager()).getByRole('button', { name: '« First' }));
+      expect(await within(list).findByText('Message 1')).toBeTruthy();
+      expect(where()).toBe('/email');
+      await u.click(within(pager()).getByRole('button', { name: 'Next ›' }));
+      expect(await within(list).findByText('Message 51')).toBeTruthy();
+      await u.selectOptions(within(pager()).getByRole('combobox', { name: 'Rows per page' }), '25');
+      await waitFor(() => expect(where()).toBe('/email?size=25'));
+      await waitFor(() => expect(within(pager()).getByText('1–25 of 120')).toBeTruthy());
+      expect(lists.at(-1)!.get('pageSize')).toBe('25');
+      expect(lists.at(-1)!.get('page')).toBeNull();
+      // Back to the default: 50 leaves the URL.
+      await u.selectOptions(within(pager()).getByRole('combobox', { name: 'Rows per page' }), '50');
+      await waitFor(() => expect(where()).toBe('/email'));
+    });
+
     it('a search goes back to page 1', async () => {
       const u = userEvent.setup();
       paged();
@@ -318,14 +352,23 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       expect(where()).toBe('/email?page=3');
     });
 
-    it('no pager when everything fits on one page', async () => {
+    it('the pager shows even when everything fits on one page, as Leads; not for an empty list', async () => {
       const a = item();
       stub([a, item({ id: 2 })], { 1: detail(a) });
       show();
       const list = screen.getByRole('region', { name: 'Message list' });
       expect(await within(list).findAllByText('Proposal')).toHaveLength(2);
       expect(within(list).getByText(/Inbox/).parentElement!.textContent).toMatch(/Inbox · 2/);
-      expect(within(list).queryByRole('navigation', { name: 'Pagination' })).toBeNull();
+      const pager = within(list).getByRole('navigation', { name: 'Pagination' });
+      expect(within(pager).getByText('1–2 of 2')).toBeTruthy();
+      expect(within(pager).getByRole('button', { name: 'Next ›' })).toHaveProperty('disabled', true);
+    });
+
+    it('no pager on an empty list', async () => {
+      stub([], {});
+      show();
+      expect(await screen.findByText('Nothing here.')).toBeTruthy();
+      expect(screen.queryByRole('navigation', { name: 'Pagination' })).toBeNull();
     });
 
     it('opening an unread message on page 2 clears its bold at once', async () => {

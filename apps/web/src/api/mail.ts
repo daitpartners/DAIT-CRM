@@ -6,9 +6,10 @@ import { keys } from './queries';
 export const MAIL_VIEWS = ['inbox', 'sent', 'drafts', 'archive', 'unlinked', 'awaiting', 'mine'] as const;
 export type MailView = (typeof MAIL_VIEWS)[number];
 
-export type MailFilter = { view: MailView; company?: number; lead?: number; s?: string; page?: number };
+export type MailFilter = { view: MailView; company?: number; lead?: number; s?: string; page?: number; pageSize?: number };
 
-/** Messages shown a page (owner, 22 Nov 2026: the synced list had grown too long). */
+/** Rows per page offered by the list's pager, as Leads and Companies (owner, 22 Nov 2026: the synced list had grown too long). */
+export const MAIL_PAGE_SIZES = [25, 50, 100] as const;
 export const MAIL_PAGE_SIZE = 50;
 
 /** One page of the list; `total` counts every message the filters leave. */
@@ -64,7 +65,7 @@ const listPath = (f: MailFilter) => {
   if (f.lead) q.set('lead', String(f.lead));
   if (f.s) q.set('s', f.s);
   if (f.page && f.page > 1) q.set('page', String(f.page));
-  q.set('pageSize', String(MAIL_PAGE_SIZE));
+  q.set('pageSize', String(f.pageSize ?? MAIL_PAGE_SIZE));
   return `/api/mail?${q.toString()}`;
 };
 

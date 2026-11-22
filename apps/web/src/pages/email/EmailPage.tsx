@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { MAIL_PAGE_SIZE, MAIL_VIEWS, useMailList, useMailMeta, useSyncNow, type MailFilter, type MailItem, type MailView } from '../../api/mail';
+import { MAIL_PAGE_SIZE, MAIL_PAGE_SIZES, MAIL_VIEWS, useMailList, useMailMeta, useSyncNow, type MailFilter, type MailItem, type MailView } from '../../api/mail';
 import { useTemplates } from '../../api/templates';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Icons } from '../../components/Icons';
@@ -43,7 +43,11 @@ export function EmailPage() {
   const [params, setParams] = useSearchParams();
   const view: MailView = (MAIL_VIEWS as readonly string[]).includes(params.get('folder') ?? '') ? (params.get('folder') as MailView) : 'inbox';
   const page = Math.max(1, num(params.get('page')) ?? 1);
-  const filter: MailFilter = { view, company: num(params.get('company')), lead: num(params.get('lead')), s: params.get('s') ?? undefined, page };
+  const sizeParam = num(params.get('size')) ?? 0;
+  const pageSize = (MAIL_PAGE_SIZES as readonly number[]).includes(sizeParam) ? sizeParam : MAIL_PAGE_SIZE;
+  const filter: MailFilter = {
+    view, company: num(params.get('company')), lead: num(params.get('lead')), s: params.get('s') ?? undefined, page, pageSize,
+  };
   const { data: meta } = useMailMeta();
   const { data: list, isLoading } = useMailList(filter);
   const { data: templates } = useTemplates();
@@ -65,8 +69,8 @@ export function EmailPage() {
   );
 
   /**
-   * Same screen with some query values changed (selection kept only when asked). A change of folder, filter or
-   * search goes back to page 1, as the other lists; a change with nothing in it keeps the page.
+   * Same screen with some query values changed (selection kept only when asked). A change of folder, filter, search
+   * or rows per page goes back to page 1, as the other lists; a change with nothing in it keeps the page.
    */
   const href = (change: Record<string, string | undefined>, keepId = false) => {
     const q = new URLSearchParams(params);
@@ -249,8 +253,8 @@ export function EmailPage() {
               {filter.company || filter.lead ? t('No messages for this filter in {folder}.', { folder: viewLabel(t, view) }) : t('Nothing here.')}
             </div>
           ) : null}
-          {/* Owner request (22 Nov 2026), not in the prototype: the list pages 50 at a time. */}
-          {list && list.total > MAIL_PAGE_SIZE ? (
+          {/* Owner request (22 Nov 2026), not in the prototype: the Leads / Companies pager, 50 rows by default. */}
+          {list && list.total > 0 ? (
             <Pager
               page={list.page}
               pageSize={list.pageSize}
@@ -260,6 +264,8 @@ export function EmailPage() {
                 // The pager sits under 50 rows: show the new page from its top.
                 listRef.current?.scrollIntoView?.({ block: 'start' });
               }}
+              sizes={MAIL_PAGE_SIZES}
+              onPageSize={(size) => setQuery({ size: size === MAIL_PAGE_SIZE ? undefined : String(size) })}
             />
           ) : null}
         </section>
