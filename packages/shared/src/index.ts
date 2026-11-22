@@ -22,3 +22,5 @@ export * from './mergeFields.js';
 export * from './schemas/calendar.js';
 export * from './quotations.js';
 export * from './schemas/quotation.js';
+export * from './projects.js';
+export * from './schemas/project.js';

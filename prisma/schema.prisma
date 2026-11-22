@@ -53,6 +53,8 @@ model User {
   campaigns       EmailCampaign[]  @relation("CampaignSender")
   calendarEvents  CalendarEvent[]
   quotations      Quotation[]
+  managedProjects Project[]        @relation("ProjectManager")
+  createdProjects Project[]        @relation("ProjectCreator")
 
   @@map("users")
 }
@@ -159,6 +161,8 @@ model EmailMessage {
   bccAddresses    Json      @default("[]") @map("bcc_addresses")
   /// The Mailer campaign that sent it (release 2C).
   campaignId      Int?      @map("campaign_id")
+  /// The project the email was tagged with when sent (release 3B); a tag never widens who sees the message.
+  projectId       Int?      @map("project_id")
   subject         String    @db.VarChar(500)
   bodyText        String    @default("") @map("body_text")
   /// Graph immutable id (2B-2 sync); unique per user.
@@ -184,6 +188,7 @@ model EmailMessage {
   company            Company?                 @relation(fields: [companyId], references: [id], onDelete: SetNull)
   replyTo            EmailMessage?            @relation("EmailReplies", fields: [replyToId], references: [id], onDelete: SetNull)
   campaign           EmailCampaign?           @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  project            Project?                 @relation(fields: [projectId], references: [id], onDelete: SetNull)
   campaignRecipients EmailCampaignRecipient[]
   replies            EmailMessage[]           @relation("EmailReplies")
   sendingQuotations  Quotation[]
@@ -192,6 +197,7 @@ model EmailMessage {
   @@index([userId, threadId])
   @@index([userId, leadId])
   @@index([userId, folder, occurredAt])
+  @@index([userId, projectId])
   @@map("email_messages")
 }
 
@@ -377,6 +383,7 @@ model Company {
   emailMessages  EmailMessage[]
   calendarEvents CalendarEvent[]
   quotations     Quotation[]
+  projects       Project[]
 
   @@index([name])
   @@index([nameNormalised, country])
@@ -422,9 +429,10 @@ model Contact {
   company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
   leads   Lead[]
 
-  emailMessages      EmailMessage[]
-  campaignRecipients EmailCampaignRecipient[]
-  quotations         Quotation[]
+  emailMessages       EmailMessage[]
+  campaignRecipients  EmailCampaignRecipient[]
+  quotations          Quotation[]
+  projectStakeholders ProjectStakeholder[]
 
   @@index([businessEmail])
   @@index([phoneNormalised])
@@ -509,6 +517,7 @@ model Lead {
   campaignRecipients EmailCampaignRecipient[]
   calendarEvents     CalendarEvent[]
   quotations         Quotation[]
+  projects           Project[]
 
   @@index([status])
   @@index([assignedToId])
@@ -623,7 +632,7 @@ model Quotation {
   editingNewRevision Boolean   @default(false) @map("editing_new_revision")
   /// The queued email while the quotation shows "Sending…"; cleared when the send job succeeds or finally fails.
   sendingMessageId   Int?      @map("sending_message_id")
-  /// projects does not exist yet (release 3B); plain column until the Projects module adds the relation.
+  /// The project made from or linked to this quotation (set with Project.quotationId, in one transaction).
   projectId          Int?      @map("project_id")
   /// [{ at: ISO datetime, text }], oldest first.
   history            Json      @default("[]")
@@ -635,6 +644,8 @@ model Quotation {
   lead           Lead?               @relation(fields: [leadId], references: [id], onDelete: SetNull)
   owner          User                @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   sendingMessage EmailMessage?       @relation(fields: [sendingMessageId], references: [id], onDelete: SetNull)
+  project        Project?            @relation("QuotationProject", fields: [projectId], references: [id], onDelete: SetNull)
+  linkedProject  Project?            @relation("ProjectQuotation")
   lines          QuotationLine[]
   revisions      QuotationRevision[]
   tasks          Task[]
@@ -644,7 +655,60 @@ model Quotation {
   @@index([ownerId])
   @@index([status])
   @@index([quotationDate])
+  @@index([projectId])
   @@map("quotations")
+}
+
+model Project {
+  id          Int       @id @default(autoincrement())
+  /// PRJ-<n>, sequential (nextProjectNumber, advisory lock).
+  number      String    @unique @db.VarChar(20)
+  companyId   Int       @map("company_id")
+  leadId      Int?      @map("lead_id")
+  /// One project per quotation; Quotation.projectId points back (both set in one transaction).
+  quotationId Int?      @unique @map("quotation_id")
+  name        String    @db.VarChar(200)
+  /// PROJECT_STATUSES: Active | On hold | Completed | Cancelled.
+  status      String    @default("Active") @db.VarChar(20)
+  startDate   DateTime  @map("start_date") @db.Date
+  value       Decimal?  @db.Decimal(14, 2)
+  /// QUOTE_CURRENCIES: USD | CAD | INR.
+  currency    String    @db.VarChar(3)
+  managerId   Int       @map("manager_id")
+  description String?   @db.Text
+  createdById Int       @map("created_by_id")
+  /// Set when the status becomes Completed, cleared when it moves away.
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  company       Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  lead          Lead?                @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  quotation     Quotation?           @relation("ProjectQuotation", fields: [quotationId], references: [id], onDelete: SetNull)
+  manager       User                 @relation("ProjectManager", fields: [managerId], references: [id], onDelete: Restrict)
+  createdBy     User                 @relation("ProjectCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  stakeholders  ProjectStakeholder[]
+  quotations    Quotation[]          @relation("QuotationProject")
+  emailMessages EmailMessage[]
+
+  @@index([companyId])
+  @@index([leadId])
+  @@index([managerId])
+  @@index([status])
+  @@map("projects")
+}
+
+/// Primary stakeholders (prototype): every row is one; copied on every project email.
+model ProjectStakeholder {
+  projectId Int @map("project_id")
+  contactId Int @map("contact_id")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, contactId])
+  @@index([contactId])
+  @@map("project_stakeholders")
 }
 
 /// The working copy's lines, in sortOrder.
