@@ -142,6 +142,14 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     await waitFor(() => expect(posts.map((p) => p.url)).toEqual(['/api/mail/1/log', '/api/mail/1/task']));
   });
 
+  it("the lead's next follow-up (a calendar date from the API) shows as a date in the Follow-up section", async () => {
+    const a = item({ leadId: 5, leadNumber: 'LD-1005' });
+    stub([a], { 1: detail(a, { lead: { id: 5, number: 'LD-1005', status: 'Contacted', priority: 'High', nextFollowUp: '2026-11-25', companyId: 4 } }) });
+    show('/email/1');
+    const line = await screen.findByText(/Next follow-up on this lead/);
+    expect(line.querySelector('strong')?.textContent).toMatch(/25.*2026|2026.*25/);
+  });
+
   it('a draft is view-only', async () => {
     const a = item({ folder: 'drafts', status: 'draft', isRead: true });
     stub([a], { 1: detail(a) });

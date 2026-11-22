@@ -71,10 +71,11 @@ Kept here at the owner's request; picked up when the owner says so.
   reconnecting".~~ Done `a51a424`.
 - Visual parity (Mailer list, campaign page, wizard, Leads bulk bar with Send via mailer at the right) — done `7b7b6c5`.
 
-## Follow-ups from this round (mail follow-ups review, 22 Nov 2026; not fixed yet)
-- **Important (also on live):** the Email screen crashes ("Invalid time value") when the open message's lead has a
-  next follow-up date: the reader passes the full date-time to the day formatter (Reader.tsx `day(l.nextFollowUp)`).
-  Found by the full e2e run (parity/mail.spec.ts fails after other specs give LD-1004 a follow-up). Fix first.
+## Follow-ups from this round (mail follow-ups review, 22 Nov 2026; not fixed yet unless marked)
+- ~~**Important (also on live):** the Email screen crashes ("Invalid time value") when the open message's lead has a
+  next follow-up date.~~ **Fixed (7213e26, not deployed):** GET /api/mail/:id now gives `lead.nextFollowUp` as
+  `YYYY-MM-DD` like the lead API, so the reader's day formatter gets a calendar date. The parity mail spec also
+  re-unlinks "Website enquiry" (email.spec makes a lead from it earlier in the full run).
 - A mail sync already queued still runs once after a user is deactivated (later syncs stop).
 - Opening a message straight from a link (/email/…) may keep its list row bold until the list refreshes.
 - Two incoming mails in a row in a thread both read "reply received".

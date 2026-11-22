@@ -282,6 +282,16 @@ describe('reading mail on the Email screen (2B-2)', () => {
     expect((await call('GET', `/api/mail/${m.id}`, await signIn(app, admin))).statusCode).toBe(404);
   });
 
+  it("the opened message's lead gives its next follow-up as a calendar date (YYYY-MM-DD), like the lead API", async () => {
+    const { rep, box, lead } = await setup();
+    await prisma.lead.update({ where: { id: lead.id }, data: { nextFollowUp: new Date('2026-11-25T00:00:00Z') } });
+    const m = await synced(rep.id, box.id, { leadId: lead.id });
+    const cookie = await signIn(app, rep);
+    expect((await call('GET', `/api/mail/${m.id}`, cookie)).json().lead.nextFollowUp).toBe('2026-11-25');
+    await prisma.lead.update({ where: { id: lead.id }, data: { nextFollowUp: null } });
+    expect((await call('GET', `/api/mail/${m.id}`, cookie)).json().lead.nextFollowUp).toBeNull();
+  });
+
   it('a message alone in its conversation lists itself; other mailboxes in the same conversation stay out', async () => {
     const { rep, admin, box } = await setup();
     // Another user's copy of the same conversation (same Graph conversation id) is theirs only.

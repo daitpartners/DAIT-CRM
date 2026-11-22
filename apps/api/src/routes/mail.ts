@@ -4,7 +4,7 @@ import { LeadCreate, MailCompose, MailLink, MailRead, MailReply, can, checkDomai
 import { audit } from '../audit.js';
 import { enqueue } from '../jobs/queue.js';
 import type { MailActionPayload } from '../jobs/types.js';
-import { dateOnly, todayIn } from '../leads/dates.js';
+import { dateOnly, todayIn, ymd } from '../leads/dates.js';
 import { auditCreatedLead, createLeadWithCompany, RuleError } from '../leads/service.js';
 import { findCompanyMatches } from '../companies/match.js';
 import { isUniqueViolation } from '../prismaErrors.js';
@@ -256,7 +256,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
       return {
         ...listItem({ ...m, lead: lead ? { id: lead.id, number: lead.number } : null }),
         ccAddresses: m.ccAddresses as string[], bodyText: m.bodyText, attachmentNames: m.attachmentNames as string[], loggedAt: m.loggedAt,
-        lead: lead ? { id: lead.id, number: lead.number, status: lead.status, priority: lead.priority, nextFollowUp: lead.nextFollowUp, companyId: lead.companyId } : null,
+        lead: lead ? { id: lead.id, number: lead.number, status: lead.status, priority: lead.priority, nextFollowUp: ymd(lead.nextFollowUp), companyId: lead.companyId } : null,
         contact: contact ? { id: contact.id, name: `${contact.firstName} ${contact.lastName}`.trim() } : null,
         company,
         thread: threadHistory(user, m, thread),
