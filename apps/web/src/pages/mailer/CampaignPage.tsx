@@ -8,7 +8,7 @@ import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
 import { errorText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
-import { Progress, StatusBadge, waitText } from './status';
+import { Progress, StatusBadge, pauseReasonText, waitText } from './status';
 import { zoneSourceText, zoneText } from './zones';
 
 /** One campaign (prototype mailer detail): tiles, recipients with their audit trail, details, the email as queued. */
@@ -49,7 +49,7 @@ export function CampaignPage() {
             <span className="l2line">
               {when}
               {wait ? <><i>|</i>{wait}</> : c.status === 'Sending' && c.next ? <><i>|</i>{t('Next: {who}', { who: c.next })}</> : null}
-              {c.status === 'Paused' && c.pauseReason ? <><i>|</i>{c.pauseReason}</> : null}
+              {c.status === 'Paused' && c.pauseReason ? <><i>|</i>{pauseReasonText(t, c.pauseReason)}</> : null}
             </span>
           </>
         }
@@ -99,7 +99,7 @@ export function CampaignPage() {
               <div className="tbl">
                 <table aria-label={t('Recipients')}>
                   <thead>
-                    <tr><th>{t('Lead')}</th><th>{t('Name')}</th><th>{t('To')}</th><th>{t('Local time')}</th><th>{t('Status')}</th><th>{t('Sent at')}</th></tr>
+                    <tr><th>{t('Lead')}</th><th>{t('Name')}</th><th>{t('To')}</th><th>{t('Local time')}</th><th>{t('Status')}</th><th>{t('Sent at')}</th><th>{t('Message')}</th></tr>
                   </thead>
                   <tbody>
                     {c.recipients.map((r) => (
@@ -113,6 +113,7 @@ export function CampaignPage() {
                           {r.error ? <div className="dim mw-err">{t(r.error)}</div> : null}
                         </td>
                         <td>{r.sentAt ? date(r.sentAt) : <span className="dim">—</span>}</td>
+                        <td><span className="dim">{r.messageId ?? '—'}</span></td>
                       </tr>
                     ))}
                   </tbody>

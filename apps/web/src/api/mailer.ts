@@ -59,6 +59,8 @@ export type CampaignDetail = CampaignSummary & {
     error: string | null;
     timezones: string[];
     timezoneSource: RecipientCheck['source'];
+    /** Internet message id once the Sent Items copy has synced. */
+    messageId: string | null;
   }[];
 };
 
@@ -78,9 +80,11 @@ export type CampaignCreate = {
 const ROOT = ['mailer'] as const;
 const live = (s: CampaignStatus) => s === 'Sending' || s === 'Scheduled';
 
+export type MailerCheckResult = { mailbox: { address: string } | null; rows: RecipientCheck[] };
+
 export function useMailerCheck() {
   return useMutation({
-    mutationFn: (leadIds: number[]) => api<{ mailbox: { address: string } | null; rows: RecipientCheck[] }>('/api/mailer/check', { method: 'POST', body: { leadIds } }),
+    mutationFn: (leadIds: number[]) => api<MailerCheckResult>('/api/mailer/check', { method: 'POST', body: { leadIds } }),
   });
 }
 

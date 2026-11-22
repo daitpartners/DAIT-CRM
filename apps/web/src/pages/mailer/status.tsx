@@ -47,3 +47,13 @@ export function waitText(t: TFn, reason: string | null): string | null {
   if (reason === 'daily_limit') return t('Daily limit reached — continues tomorrow');
   return null;
 }
+
+/** Why a campaign is paused. The server stores the reason in English (no data change); translated here. */
+export function pauseReasonText(t: TFn, reason: string | null): string | null {
+  if (!reason) return null;
+  const by = /^Paused by (.+)$/.exec(reason);
+  if (by) return t('Paused by {name}', { name: by[1]! });
+  if (reason === 'Mailbox disconnected') return t('Mailbox disconnected');
+  if (reason === 'Mailbox needs reconnecting') return t('Mailbox needs reconnecting');
+  return reason;
+}

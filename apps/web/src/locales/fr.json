@@ -1289,5 +1289,8 @@
   "Canada": "Canada",
   "Mexico": "Mexique",
   "Brazil": "Brésil",
-  "Australia": "Australie"
+  "Australia": "Australie",
+  "Paused by {name}": "Mis en pause par {name}",
+  "Mailbox needs reconnecting": "La boîte aux lettres doit être reconnectée",
+  "You can send to at most 500 leads in one run.": "Vous pouvez envoyer à 500 leads au maximum en une seule fois."
 }

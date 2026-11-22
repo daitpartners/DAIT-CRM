@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LAWFUL_BASES, MAILER_INTERVALS, fillTemplate } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
-import { useCreateCampaign, useMailerCheck } from '../../api/mailer';
+import { useCreateCampaign, useMailerCheck, type MailerCheckResult } from '../../api/mailer';
 import { useUsers } from '../../api/queries';
 import { useTemplates } from '../../api/templates';
 import { useCurrentUser } from '../../api/useCurrentUser';
@@ -27,18 +27,57 @@ function nextHour(): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:00`;
 }
 
-type Props = { leadIds: number[]; onClose: () => void; onQueued: () => void };
+/** The Mailer's limit for one run (MailerCheck / campaign create accept at most 500 leads). */
+const MAX_LEADS = 500;
+
+/**
+ * Leads bulk bar "Send via mailer" (prototype V.mailerWizard guard): checks the ticked leads first and only opens
+ * the wizard when at least one can be emailed; otherwise it says why, as the prototype does.
+ */
+export function SendViaMailerButton({ leadIds, disabled, title, onQueued }: { leadIds: number[]; disabled?: boolean; title?: string; onQueued: () => void }) {
+  const t = useT();
+  const toast = useToast();
+  const check = useMailerCheck();
+  const [open, setOpen] = useState<{ leadIds: number[]; check: MailerCheckResult } | null>(null);
+
+  function start() {
+    if (leadIds.length > MAX_LEADS) return toast(t('You can send to at most 500 leads in one run.'), 'warn');
+    const ids = [...leadIds];
+    check.mutate(ids, {
+      onSuccess: (data) => {
+        const rows = data.rows;
+        if (!rows.some((r) => !r.block)) {
+          const reason = rows.length ? t(rows[0]!.block ?? '').toLowerCase() + (rows.length > 1 ? ', …' : '') : '';
+          return toast(reason ? t('None of the selected leads can be emailed ({reason}).', { reason }) : t('None of the selected leads can be emailed.'), 'warn');
+        }
+        setOpen({ leadIds: ids, check: data });
+      },
+      onError: (err) => toast(err instanceof ApiError ? errorText(t, err.code) : t('Something went wrong. Try again.'), 'warn'),
+    });
+  }
+
+  return (
+    <>
+      <button type="button" className="btn sm" disabled={disabled || check.isPending} title={title} onClick={start}>
+        {Icons.send}
+        {t('Send via mailer')}
+      </button>
+      {open ? <MailerWizard leadIds={open.leadIds} check={open.check} onClose={() => setOpen(null)} onQueued={onQueued} /> : null}
+    </>
+  );
+}
+
+type Props = { leadIds: number[]; check: MailerCheckResult; onClose: () => void; onQueued: () => void };
 
 /**
  * Send via mailer (release 2C; prototype views-mailer.js V.mailerWizard): Template → Cc / Bcc → Timing → Review & send.
  * "Working hours" are the client's: Monday–Friday 09:00–18:00 in each recipient's time zone (owner, 22 Nov 2026).
  */
-export function MailerWizard({ leadIds, onClose, onQueued }: Props) {
+export function MailerWizard({ leadIds, check, onClose, onQueued }: Props) {
   const t = useT();
   const toast = useToast();
   const navigate = useNavigate();
   const me = useCurrentUser();
-  const check = useMailerCheck();
   const create = useCreateCampaign();
   const { data: templates } = useTemplates();
   const { data: users } = useUsers();
@@ -50,11 +89,7 @@ export function MailerWizard({ leadIds, onClose, onQueued }: Props) {
   });
   const set = (patch: Partial<typeof st>) => setSt((s) => ({ ...s, ...patch }));
 
-  useEffect(() => {
-    check.mutate(leadIds);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, for the leads ticked when it opened
-  }, []);
-  const rows = check.data?.rows ?? [];
+  const rows = check.rows;
   const okRows = rows.filter((r) => !r.block);
   const sorted = useMemo(
     () => [...(templates ?? [])].sort((a, b) => Number(b.language === me.language) - Number(a.language === me.language)),
@@ -116,7 +151,7 @@ export function MailerWizard({ leadIds, onClose, onQueued }: Props) {
           <button type="button" className="btn" onClick={onClose}>{t('Cancel')}</button>
           <span className="grow" />
           {step ? <button type="button" className="btn" onClick={() => { setError(null); setStep(step - 1); }}>{t('Back')}</button> : null}
-          <button type="button" className="btn primary" disabled={create.isPending || check.isPending || (!check.data && !check.isError)} onClick={next}>
+          <button type="button" className="btn primary" disabled={create.isPending || n === 0} onClick={next}>
             {step === 3 ? <>{Icons.send}{n === 1 ? t('Queue 1 email') : t('Queue {n} emails', { n })}</> : t('Next')}
           </button>
         </>
@@ -131,12 +166,11 @@ export function MailerWizard({ leadIds, onClose, onQueued }: Props) {
             </li>
           ))}
         </ol>
-        {check.isPending ? <div className="empty">{t('Checking the selected leads…')}</div> : null}
-        {check.data && n === 0 ? (
+        {n === 0 ? (
           <div className="note warn">{t('None of the selected leads can be emailed ({reason}).', { reason: t(rows[0]?.block ?? '') })}</div>
         ) : null}
 
-        {check.data && step === 0 ? (
+        {step === 0 ? (
           <>
             <div className="grid2">
               <div>
@@ -162,12 +196,12 @@ export function MailerWizard({ leadIds, onClose, onQueued }: Props) {
               <div className="note warn">{t('No templates yet. Add one under Settings → Email templates.')}</div>
             ) : null}
             <div className="dim mw-help">
-              {t('Each email is filled in per lead: {first_name}, {company}, {me}, {lead_id}. From: {address}.', { address: check.data.mailbox?.address ?? '—' })}
+              {t('Each email is filled in per lead: {first_name}, {company}, {me}, {lead_id}. From: {address}.', { address: check.mailbox?.address ?? '—' })}
             </div>
           </>
         ) : null}
 
-        {check.data && step === 1 ? (
+        {step === 1 ? (
           <>
             {(['cc', 'bcc'] as const).map((f) => (
               <div key={f} role="group" aria-label={f === 'cc' ? t('Cc') : t('Bcc')}>
@@ -189,7 +223,7 @@ export function MailerWizard({ leadIds, onClose, onQueued }: Props) {
           </>
         ) : null}
 
-        {check.data && step === 2 ? (
+        {step === 2 ? (
           <>
             <div className="grid2">
               <div>
@@ -227,11 +261,11 @@ export function MailerWizard({ leadIds, onClose, onQueued }: Props) {
           </>
         ) : null}
 
-        {check.data && step === 3 ? (
+        {step === 3 ? (
           <>
             <dl className="kv mw-kv">
               <dt>{t('Template')}</dt><dd>{tpl?.name ?? '—'}</dd>
-              <dt>{t('From')}</dt><dd>{`${me.name} · ${check.data.mailbox?.address ?? '—'}`}</dd>
+              <dt>{t('From')}</dt><dd>{`${me.name} · ${check.mailbox?.address ?? '—'}`}</dd>
               <dt>{t('Cc')}</dt><dd>{list(st.cc).join(', ') || <span className="dim">—</span>}</dd>
               <dt>{t('Bcc')}</dt><dd>{list(st.bcc).join(', ') || <span className="dim">—</span>}</dd>
               <dt>{t('Timing')}</dt>
@@ -290,7 +324,6 @@ export function MailerWizard({ leadIds, onClose, onQueued }: Props) {
           </>
         ) : null}
         {error ? <div className="note warn" role="alert">{error}</div> : null}
-        {check.isError ? <div className="note warn" role="alert">{t('Something went wrong. Try again.')}</div> : null}
       </div>
     </Modal>
   );

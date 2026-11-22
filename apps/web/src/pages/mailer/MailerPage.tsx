@@ -5,7 +5,7 @@ import { Icons } from '../../components/Icons';
 import { Topbar } from '../../components/Topbar';
 import { useFormatDate } from '../../hooks/useFormatDate';
 import { useT } from '../../i18n/useT';
-import { Progress, StatusBadge, waitText } from './status';
+import { Progress, StatusBadge, pauseReasonText, waitText } from './status';
 
 /** Mailer page (release 2C; prototype views-mailer.js V.mailer): your campaigns (Administrators: everyone's). */
 export function MailerPage() {
@@ -59,6 +59,7 @@ export function MailerPage() {
                     <td>
                       <StatusBadge t={t} status={c.status} />
                       {c.status === 'Sending' && waitText(t, c.waitReason) ? <span className="dim"> {waitText(t, c.waitReason)}</span> : null}
+                      {c.status === 'Paused' && c.pauseReason ? <span className="dim"> {pauseReasonText(t, c.pauseReason)}</span> : null}
                     </td>
                     <td className="dim">{when(c)}</td>
                   </tr>

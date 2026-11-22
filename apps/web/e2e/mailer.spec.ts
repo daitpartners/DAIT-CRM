@@ -19,7 +19,8 @@ test('send via mailer from the Leads list; the campaign is listed for its sender
   await dialog.getByLabel(/Only send in the client's working hours/).check();
   await dialog.getByRole('button', { name: 'Next' }).click();
   const review = dialog.getByRole('table');
-  await expect(review).toContainText('Europe/Berlin');
+  // Local time is the time there now, then the zone.
+  await expect(review).toContainText(/\d{2}:\d{2} · Europe\/Berlin/);
   await dialog.getByLabel(/Lawful basis/).selectOption('Legitimate interest (B2B outreach relevant to their role)');
   await dialog.getByRole('button', { name: /^Queue \d emails?$/ }).click();
 
@@ -27,6 +28,7 @@ test('send via mailer from the Leads list; the campaign is listed for its sender
   await expect(page.getByRole('heading', { name: /MC-\d+ · E2E mailer/ })).toBeVisible();
   const recipients = page.getByRole('table', { name: 'Recipients' });
   await expect(recipients).toContainText('Queued');
+  await expect(recipients.getByRole('columnheader', { name: 'Message' })).toBeVisible();
   const url = page.url();
   await expect(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: /^Mailer\s*1 live$/ })).toBeVisible();
 
