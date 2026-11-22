@@ -18,8 +18,11 @@ import { appendHistory, editableQuotation, loadCompanySettings, quotationSnapsho
 type Tx = Prisma.TransactionClient;
 
 const PDF_LANGS = new Set<string>(['en', 'es', 'fr']);
-/** Graph takes inline attachments up to a 4 MB request (base64 grows a third): the PDF must stay under 3 MB. */
-export const MAX_PDF_BYTES = 3 * 1024 * 1024;
+/**
+ * Graph takes inline attachments in a request of at most 4 MB: the PDF's base64 (a third larger than the file, so a
+ * PDF of about 2.8 MB) must leave room for the rest of the message (body up to 20,000 characters, headers).
+ */
+export const MAX_PDF_BASE64 = 3_750_000;
 /** The lead status a sent quotation moves an earlier lead to (prototype sendQuote). */
 const PROPOSAL_SENT = 'Proposal Sent';
 
@@ -40,21 +43,26 @@ export async function queueQuotationSend(tx: Tx, user: AuthUser, id: number, bod
   if (!account) throw new RuleError('no_mailbox');
 
   const settings = await loadCompanySettings(tx);
-  const snapshot: QuotationSnapshot = {
-    ...(await quotationSnapshot(tx, q.id)),
-    issuer: { legalName: settings.legalName, addressLines: settings.addressLines, email: settings.email, gstin: settings.gstin },
-  };
+  // Sending again with no edits re-sends revision n exactly as it was first sent (its frozen snapshot), so the client
+  // never holds two different "rev n" PDFs; otherwise the working copy, with the issuer frozen now.
+  const sentRow = q.editingNewRevision ? null : q.revisions.find((r) => r.revisionNo === q.revision);
+  const snapshot: QuotationSnapshot = sentRow
+    ? (sentRow.snapshot as unknown as QuotationSnapshot)
+    : {
+      ...(await quotationSnapshot(tx, q.id)),
+      issuer: { legalName: settings.legalName, addressLines: settings.addressLines, email: settings.email, gstin: settings.gstin },
+    };
   const owner = await tx.user.findUniqueOrThrow({ where: { id: q.ownerId }, select: { language: true } });
   const lang = pdfLang(owner.language);
-  const pdf = await renderQuotationPdf(snapshot, settings, lang);
-  if (pdf.length > MAX_PDF_BYTES) throw new RuleError('pdf_too_large');
+  const pdf = (await renderQuotationPdf(snapshot, settings, lang)).toString('base64');
+  if (pdf.length > MAX_PDF_BASE64) throw new RuleError('pdf_too_large');
 
   const lead = q.leadId === null ? null : await tx.lead.findUnique({ where: { id: q.leadId } });
   const msg = await queueOutgoing(tx, user, account, {
     lead, companyId: q.companyId, contactId: q.contactId, to: [to], cc: [],
     subject: `Quotation ${snapshot.number} · ${snapshot.subject}`.slice(0, 500),
     body: body?.trim() || defaultQuotationEmailBody(snapshot, lang),
-    attachments: [{ name: `${snapshot.number}-rev${snapshot.revision}.pdf`, contentType: 'application/pdf', contentBase64: pdf.toString('base64') }],
+    attachments: [{ name: `${snapshot.number}-rev${snapshot.revision}.pdf`, contentType: 'application/pdf', contentBase64: pdf }],
     quotation: { id: q.id, snapshot },
   });
   await tx.quotation.update({ where: { id: q.id }, data: { sendingMessageId: msg.id } });
@@ -107,13 +115,14 @@ export async function onQuotationSent(
   // Nothing locks a quotation while it is sending (edits, accept / reject and expiry all wait); kept as a safeguard.
   const locked = isQuoteLocked(q.status);
   const status = locked || q.status === 'Negotiating' ? q.status : 'Sent';
-  const to = snapshot.contact?.name || sentTo;
+  const name = snapshot.contact?.name || sentTo;
+  // A re-send records its address in the history line (the revision row holds the first send's).
+  const history = fresh
+    ? `Sent · rev ${n} · emailed as PDF to ${name}`
+    : `Sent again · rev ${n} · emailed as PDF to ${name === sentTo ? sentTo : `${name} (${sentTo})`}`;
   await tx.quotation.update({
     where: { id: q.id },
-    data: {
-      status, revision: n, editingNewRevision: false, sendingMessageId: null,
-      history: appendHistory(q, `${fresh ? 'Sent' : 'Sent again'} · rev ${n} · emailed as PDF to ${to}`),
-    },
+    data: { status, revision: n, editingNewRevision: false, sendingMessageId: null, history: appendHistory(q, history) },
   });
 
   if (q.leadId !== null) {
@@ -137,15 +146,58 @@ export async function onQuotationSent(
   });
 }
 
+/** Why a quotation left "Sending…" without its send effects. */
+export type SendOutcome = 'failed' | 'may_have_sent' | 'not_recorded';
+
+/** Owner notifications (stored as text, so written in the owner's language). */
+const NOTICES: Record<Lang, Record<SendOutcome, [string, string]>> = {
+  en: {
+    failed: ['Quotation not sent · {number}', 'The email could not be sent. Send it again from the quotation.'],
+    may_have_sent: ['Quotation may not have been sent · {number}', 'Check Sent Items in Outlook before sending again.'],
+    not_recorded: [
+      'Quotation emailed but not recorded · {number}',
+      'The email was sent, but the quotation and lead could not be updated. Check them before sending again.',
+    ],
+  },
+  es: {
+    failed: ['Presupuesto no enviado · {number}', 'No se pudo enviar el correo. Vuelve a enviarlo desde el presupuesto.'],
+    may_have_sent: ['Puede que el presupuesto no se haya enviado · {number}', 'Revisa Elementos enviados en Outlook antes de volver a enviarlo.'],
+    not_recorded: [
+      'Presupuesto enviado pero no registrado · {number}',
+      'El correo se envió, pero no se pudieron actualizar el presupuesto ni el lead. Revísalos antes de volver a enviarlo.',
+    ],
+  },
+  fr: {
+    failed: ['Devis non envoyé · {number}', "L'e-mail n'a pas pu être envoyé. Renvoyez-le depuis le devis."],
+    may_have_sent: ["Le devis n'a peut-être pas été envoyé · {number}", 'Vérifiez les Éléments envoyés dans Outlook avant de le renvoyer.'],
+    not_recorded: [
+      'Devis envoyé mais non enregistré · {number}',
+      "L'e-mail a été envoyé, mais le devis et le lead n'ont pas pu être mis à jour. Vérifiez-les avant de le renvoyer.",
+    ],
+  },
+};
+
+const HISTORY: Record<SendOutcome, string> = {
+  failed: 'Send failed',
+  may_have_sent: 'Send failed · may not have been sent — check Sent Items before sending again',
+  not_recorded: 'Emailed, but the send could not be recorded — check the status and lead before sending again',
+};
+
 /**
- * The send job gave up on message `messageId` (called in the transaction that marks it failed): the quotation leaves
- * "Sending…" with a history line and its owner is told; status, revision and lead are untouched, so it can be sent
- * again.
+ * The quotation sending message `messageId` leaves "Sending…" without the send effects (status, revision and lead
+ * untouched, so it can be sent again): a history line and a notice to its owner. `failed` — the send job gave up
+ * (called in the transaction that marks the message failed); `may_have_sent` — a send interrupted mid-way;
+ * `not_recorded` — Microsoft took the email but onQuotationSent kept failing on the job's last attempt.
  */
-export async function onQuotationSendFailed(tx: Tx, messageId: number): Promise<void> {
+export async function onQuotationSendFailed(tx: Tx, messageId: number, outcome: SendOutcome = 'failed'): Promise<void> {
   const q = await lockSending(tx, messageId);
   if (!q) return;
-  await tx.quotation.update({ where: { id: q.id }, data: { sendingMessageId: null, history: appendHistory(q, 'Send failed') } });
-  await notifyUser(tx, q.ownerId, `Quotation not sent · ${q.number}`, 'The email could not be sent. Send it again from the quotation.', `/quotations/${q.id}`);
-  await audit(tx, { entityType: 'quotation', entityId: q.id, action: 'update', userId: null, before: { sendingMessageId: messageId }, after: { sendingMessageId: null } });
+  await tx.quotation.update({ where: { id: q.id }, data: { sendingMessageId: null, history: appendHistory(q, HISTORY[outcome]) } });
+  const owner = await tx.user.findUniqueOrThrow({ where: { id: q.ownerId }, select: { language: true } });
+  const [text, detail] = NOTICES[pdfLang(owner.language)][outcome];
+  await notifyUser(tx, q.ownerId, text.replace('{number}', q.number), detail, `/quotations/${q.id}`);
+  await audit(tx, {
+    entityType: 'quotation', entityId: q.id, action: 'update', userId: null,
+    before: { sendingMessageId: messageId }, after: { sendingMessageId: null, outcome },
+  });
 }

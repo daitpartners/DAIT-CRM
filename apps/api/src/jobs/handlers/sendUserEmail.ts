@@ -1,4 +1,4 @@
-import type { Job } from '@prisma/client';
+import type { EmailMessage, Job } from '@prisma/client';
 import { prisma } from '../../db.js';
 import { errorMessage } from '../queue.js';
 import { isAuthFailure } from '../../graph/client.js';
@@ -20,8 +20,25 @@ async function failMessage(id: number, lastError: string): Promise<void> {
   await prisma.$transaction(async (tx) => {
     await tx.emailMessage.update({ where: { id }, data: { status: 'failed', lastError } });
     await tx.leadActivity.deleteMany({ where: { relatedType: 'email_message', relatedId: id } });
-    await onQuotationSendFailed(tx, id);
+    await onQuotationSendFailed(tx, id, lastError === INTERRUPTED ? 'may_have_sent' : 'failed');
   });
+}
+
+const INTERRUPTED = 'interrupted_may_have_sent';
+
+/**
+ * Release 3A: the send effects of the quotation this message sent, in their own transaction after the message is
+ * marked sent (the email has left whatever happens here). A failure is retried with the job — a later run finds the
+ * message sent and the quotation still "Sending…" and applies them then, once (onQuotationSent re-checks under its
+ * lock). On the last attempt the quotation is released with a history line and a notice instead of staying stuck.
+ */
+async function settleQuotation(msg: EmailMessage, quotation: NonNullable<SendUserEmailPayload['quotation']>, lastAttempt: boolean): Promise<void> {
+  try {
+    await prisma.$transaction((tx) => onQuotationSent(tx, msg, quotation.snapshot));
+  } catch (err) {
+    if (lastAttempt) await prisma.$transaction((tx) => onQuotationSendFailed(tx, msg.id, 'not_recorded'));
+    throw err;
+  }
 }
 
 /**
@@ -34,7 +51,10 @@ export async function sendUserEmailHandler(job: Job, ctx: JobContext): Promise<v
   const { emailMessageId, attachments, quotation } = job.payload as unknown as SendUserEmailPayload;
   const msg = await prisma.emailMessage.findUnique({ where: { id: emailMessageId }, include: { account: true } });
   if (!msg) return;
-  if (msg.status === 'sending') return failMessage(msg.id, 'interrupted_may_have_sent');
+  const lastAttempt = job.attempts + 1 >= job.maxAttempts;
+  if (msg.status === 'sending') return failMessage(msg.id, INTERRUPTED);
+  // Sent, but the quotation's effects did not go through on that run (settleQuotation): apply them now.
+  if (msg.status === 'sent' && quotation) return settleQuotation(msg, quotation, lastAttempt);
   if (msg.status !== 'queued') return; // already sent or failed
   const account = msg.account;
   // Only the sender's own, connected personal mailbox.
@@ -44,7 +64,6 @@ export async function sendUserEmailHandler(job: Job, ctx: JobContext): Promise<v
   const claimed = await prisma.emailMessage.updateMany({ where: { id: msg.id, status: 'queued' }, data: { status: 'sending' } });
   if (claimed.count === 0) return; // another run took it
 
-  const lastAttempt = job.attempts + 1 >= job.maxAttempts;
   // A reply goes through Graph reply on the original, so it stays in the conversation in Outlook too.
   const original = msg.replyToId ? await prisma.emailMessage.findUnique({ where: { id: msg.replyToId } }) : null;
   try {
@@ -78,9 +97,14 @@ export async function sendUserEmailHandler(job: Job, ctx: JobContext): Promise<v
     }
     throw err;
   }
-  await prisma.$transaction(async (tx) => {
-    await tx.emailMessage.update({ where: { id: msg.id }, data: { status: 'sent', lastError: null, occurredAt: new Date() } });
-    // Release 3A: the quotation's send effects, only now that Microsoft has accepted the message.
-    if (quotation) await onQuotationSent(tx, msg, quotation.snapshot);
-  });
+  try {
+    await prisma.emailMessage.update({ where: { id: msg.id }, data: { status: 'sent', lastError: null, occurredAt: new Date() } });
+  } catch (err) {
+    // A retry would find it `sending` and fail it; on the last attempt there is no retry, so fail it now (best effort)
+    // rather than leave the message, and a quotation it sends, stuck.
+    if (lastAttempt) await failMessage(msg.id, INTERRUPTED).catch(() => undefined);
+    throw err;
+  }
+  // Release 3A: the quotation's send effects, only now that Microsoft has accepted the message.
+  if (quotation) await settleQuotation(msg, quotation, lastAttempt);
 }

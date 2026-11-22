@@ -11,8 +11,15 @@ const LIST_STATUSES: readonly string[] = [...JOB_STATUSES, 'stale'];
 
 const LIST_LIMIT = 200;
 
+/** Every column but the payload (a queued quotation send carries its PDF there). */
+const LIST_SELECT = {
+  id: true, type: true, status: true, attempts: true, maxAttempts: true, lastError: true, runAt: true, createdAt: true,
+} satisfies Prisma.JobSelect;
+
+type JobView = Pick<Job, 'id' | 'type' | 'status' | 'attempts' | 'maxAttempts' | 'lastError' | 'runAt' | 'createdAt' | 'payload'>;
+
 /** Recipients and subject only: message bodies never leave the queue through the API. */
-function payloadSummary(job: Job): { to: string[]; subject: string } | Record<string, never> {
+function payloadSummary(job: JobView): { to: string[]; subject: string } | Record<string, never> {
   const p = job.payload as { to?: unknown; subject?: unknown } | null;
   if (job.type !== 'send_email' || !p || typeof p !== 'object') return {};
   return {
@@ -21,7 +28,7 @@ function payloadSummary(job: Job): { to: string[]; subject: string } | Record<st
   };
 }
 
-function view(job: Job) {
+function view(job: JobView) {
   return {
     id: job.id,
     type: job.type,
@@ -51,8 +58,15 @@ export const jobRoutes: FastifyPluginAsync = async (app) => {
         ...(status === 'stale' ? staleRunningWhere() : status ? { status: status as JobStatus } : {}),
         ...(type ? { type } : {}),
       };
-      const jobs = await prisma.job.findMany({ where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: LIST_LIMIT });
-      return { items: jobs.map(view) };
+      const jobs = await prisma.job.findMany({ where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: LIST_LIMIT, select: LIST_SELECT });
+      // Payloads are read only for the jobs summarised (system emails), never the 200 rows at once.
+      const summarised = jobs.filter((j) => j.type === 'send_email').map((j) => j.id);
+      const payloads = new Map(
+        summarised.length
+          ? (await prisma.job.findMany({ where: { id: { in: summarised } }, select: { id: true, payload: true } })).map((j) => [j.id, j.payload])
+          : [],
+      );
+      return { items: jobs.map((j) => view({ ...j, payload: payloads.get(j.id) ?? null })) };
     },
   );
 

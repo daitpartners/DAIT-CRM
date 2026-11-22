@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { EmailAccount, User } from '@prisma/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { formatMoney } from '@dait-crm/shared';
 import { prisma } from '../src/db';
 import { buildApp } from '../src/app';
@@ -13,6 +13,33 @@ import type { SendUserEmailPayload } from '../src/jobs/types';
 import { fakeGraph, resetDb, seedLookups } from './helpers';
 import { makeCompany, makeContact, makeLead, makeUser, signIn } from './factory';
 
+/** Test switches: make onQuotationSent throw the next N times; make the PDF this many bytes. */
+const state = vi.hoisted(() => ({ sentFailures: 0, pdfBytes: 0 }));
+vi.mock('../src/quotations/send', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../src/quotations/send')>();
+  return {
+    ...mod,
+    onQuotationSent: async (...args: Parameters<typeof mod.onQuotationSent>) => {
+      if (state.sentFailures > 0) {
+        state.sentFailures -= 1;
+        throw new Error('database unavailable');
+      }
+      return mod.onQuotationSent(...args);
+    },
+  };
+});
+vi.mock('../src/quotations/pdf', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../src/quotations/pdf')>();
+  return {
+    ...mod,
+    renderQuotationPdf: async (...args: Parameters<typeof mod.renderQuotationPdf>) => {
+      if (!state.pdfBytes) return mod.renderQuotationPdf(...args);
+      const real = await mod.renderQuotationPdf(...args);
+      return Buffer.concat([real, Buffer.alloc(Math.max(0, state.pdfBytes - real.length))]);
+    },
+  };
+});
+
 let app: FastifyInstance;
 beforeAll(async () => {
   process.env.TEST_LOGIN = '1';
@@ -20,6 +47,8 @@ beforeAll(async () => {
 });
 afterAll(() => app.close());
 beforeEach(async () => {
+  state.sentFailures = 0;
+  state.pdfBytes = 0;
   await resetDb();
   await seedLookups();
 });
@@ -199,7 +228,7 @@ describe('send a quotation by email (release 3A)', () => {
     const d = await detail(cookie, q.id);
     expect(d).toMatchObject({ status: 'Sent', revision: 1, sending: false });
     expect(await prisma.quotationRevision.count({ where: { quotationId: q.id } })).toBe(1);
-    expect(d.history.at(-1)!.text).toBe('Sent again · rev 1 · emailed as PDF to Priya Rao');
+    expect(d.history.at(-1)!.text).toBe('Sent again · rev 1 · emailed as PDF to Priya Rao (priya@acme.test)');
     expect(await prisma.leadActivity.count({ where: { leadId: lead.id, title: `Quotation sent · ${q.number} rev 1` } })).toBe(2);
   });
 
@@ -294,5 +323,91 @@ describe('send a quotation by email (release 3A)', () => {
     const pdf = await app.inject({ method: 'GET', url: `/api/quotations/${q.id}/pdf?rev=1`, headers: { cookie } });
     expect(pdf.statusCode).toBe(200);
     expect(pdf.headers['content-disposition']).toContain(`${q.number}-rev1.pdf`);
+  });
+  it('a re-send without edits attaches revision n as first sent (frozen snapshot), not the working copy', async () => {
+    const { cookie, q, contact } = await setup();
+    await send(cookie, q.id);
+    await run(recordingGraph());
+    const first = await prisma.quotationRevision.findFirstOrThrow({ where: { quotationId: q.id } });
+    await prisma.companySettings.upsert({
+      where: { id: 1 }, update: { legalName: 'Renamed Partners LLP' },
+      create: { id: 1, legalName: 'Renamed Partners LLP', addressLines: [], email: 'x@y.test' },
+    });
+    await prisma.contact.update({ where: { id: contact.id }, data: { firstName: 'Priyanka' } });
+    expect((await send(cookie, q.id)).statusCode).toBe(202);
+    expect((await payloadOf()).quotation!.snapshot).toEqual(first.snapshot);
+  });
+
+  it('409 pdf_too_large when the PDF would push the Graph request over 4 MB (about 2.8 MB of PDF)', async () => {
+    const { cookie, q } = await setup();
+    state.pdfBytes = 2_900_000;
+    const res = await send(cookie, q.id);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('pdf_too_large');
+    expect(await prisma.job.count()).toBe(0);
+    expect((await detail(cookie, q.id)).sending).toBe(false);
+    state.pdfBytes = 2_700_000;
+    expect((await send(cookie, q.id)).statusCode).toBe(202);
+  });
+
+  it('effects that fail after Microsoft took the email are applied on the next attempt, once, without sending again', async () => {
+    const { cookie, q, lead } = await setup();
+    await send(cookie, q.id);
+    const graph = recordingGraph();
+    state.sentFailures = 1;
+    await run(graph);
+    expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ status: 'sent' });
+    expect((await detail(cookie, q.id))).toMatchObject({ status: 'Draft', sending: true });
+
+    const job = await prisma.job.findFirstOrThrow({ where: { type: 'send_user_email' } });
+    expect(job.status).toBe('queued');
+    await prisma.job.update({ where: { id: job.id }, data: { runAt: new Date() } });
+    await run(graph);
+    expect(graph.calls).toHaveLength(1);
+    expect(await detail(cookie, q.id)).toMatchObject({ status: 'Sent', sending: false, revision: 1 });
+    expect(await prisma.quotationRevision.count({ where: { quotationId: q.id } })).toBe(1);
+    expect(await prisma.leadActivity.count({ where: { leadId: lead.id, title: `Quotation sent · ${q.number} rev 1` } })).toBe(1);
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).status).toBe('Proposal Sent');
+    expect((await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status).toBe('done');
+
+    // A further run of the same job (e.g. an administrator's retry) changes nothing.
+    await prisma.job.update({ where: { id: job.id }, data: { status: 'queued', runAt: new Date() } });
+    await run(graph);
+    expect(await prisma.leadActivity.count({ where: { leadId: lead.id, title: `Quotation sent · ${q.number} rev 1` } })).toBe(1);
+    expect((await detail(cookie, q.id)).history.filter((h) => h.text.startsWith('Sent'))).toHaveLength(1);
+  });
+
+  it('effects that keep failing: on the last attempt the quotation is released and the owner told, never stuck', async () => {
+    const { cookie, q, rep } = await setup();
+    await send(cookie, q.id);
+    state.sentFailures = 99;
+    const graph = recordingGraph();
+    await run(graph);
+    await lastAttempt();
+    await run(graph);
+    expect(graph.calls).toHaveLength(1);
+    const d = await detail(cookie, q.id);
+    expect(d).toMatchObject({ status: 'Draft', sending: false, canEdit: true, revisions: [] });
+    expect(d.history.at(-1)!.text).toBe('Emailed, but the send could not be recorded — check the status and lead before sending again');
+    expect(await prisma.notification.findMany({ where: { userId: rep.id } })).toEqual([
+      expect.objectContaining({ text: `Quotation emailed but not recorded · ${q.number}` }),
+    ]);
+    expect((await prisma.job.findFirstOrThrow({ where: { type: 'send_user_email' } })).status).toBe('failed');
+  });
+
+  it('an interrupted send says it may not have been sent, in the owner\'s language', async () => {
+    const { cookie, q, rep } = await setup({ language: 'es' });
+    await send(cookie, q.id);
+    // The worker stopped after claiming the message (crash, host sleep).
+    await prisma.emailMessage.updateMany({ data: { status: 'sending' } });
+    await run(recordingGraph());
+    const d = await detail(cookie, q.id);
+    expect(d).toMatchObject({ status: 'Draft', sending: false });
+    expect(d.history.at(-1)!.text).toBe('Send failed · may not have been sent — check Sent Items before sending again');
+    expect(await prisma.notification.findMany({ where: { userId: rep.id } })).toEqual([
+      expect.objectContaining({
+        text: `Puede que el presupuesto no se haya enviado · ${q.number}`, detail: 'Revisa Elementos enviados en Outlook antes de volver a enviarlo.',
+      }),
+    ]);
   });
 });
