@@ -18,7 +18,8 @@ import { convertQuotation, createProject, projectRowById, projectRows, updatePro
 const NOT_ACCEPTED = 'Only an accepted quotation can become a project.';
 
 /**
- * 409 `stale`; RuleError `forbidden` → 403, `not_accepted` → 409 with the prototype's message; other rules → 400.
+ * 409 `stale`; RuleError `forbidden` → 403, `not_accepted` → 409 with the prototype's message, `quotation_linked`
+ * (or the one-project-per-quotation key) → 409; other rules → 400.
  * `staleOnNotFound`: a P2025 is a concurrent write only on the update path; elsewhere it stays an error.
  */
 async function guard<T>(reply: FastifyReply, fn: () => Promise<T>, opts: { staleOnNotFound?: boolean } = {}): Promise<T | FastifyReply> {
@@ -29,8 +30,10 @@ async function guard<T>(reply: FastifyReply, fn: () => Promise<T>, opts: { stale
     if (e instanceof RuleError) {
       if (e.code === 'forbidden') return reply.code(403).send({ error: e.code });
       if (e.code === 'not_accepted') return reply.code(409).send({ error: e.code, message: NOT_ACCEPTED });
+      if (e.code === 'quotation_linked') return reply.code(409).send({ error: e.code });
       return reply.code(400).send({ error: e.code });
     }
+    if (isUniqueViolation(e, 'quotation_id')) return reply.code(409).send({ error: 'quotation_linked' });
     throw e;
   }
 }
@@ -96,7 +99,8 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
    * The Create / Edit dialog's choices for one client: its leads the user can see, its Accepted quotations with no
    * project, its active contacts, and active users (Project manager). Open to users who can see the company, a lead
    * of it, or a project of it (a project manager may edit without seeing the lead). `project` (the project being
-   * edited, visible and the client's, else 404) adds back its own lead (even archived or hidden) and quotation.
+   * edited, visible and the client's, else 404) adds back its own lead (even archived or hidden), quotation and
+   * current stakeholders (even deactivated). The lead route in includes archived leads, as GET /companies/:id/projects.
    */
   app.get('/projects/form-options', { preHandler: [requireUser] }, async (request) => {
     const query = parseQuery(projectFormOptionsQuerySchema, request.query);
@@ -106,7 +110,7 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
         id: query.company,
         OR: [
           companyWhere(user),
-          { leads: { some: leadWhere(user) } },
+          { leads: { some: leadWhere(user, { includeArchived: true }) } },
           { projects: { some: projectWhere(user) } },
         ],
       },
@@ -114,10 +118,14 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     if (!company) throw new NotFoundError();
     const project = query.project === undefined
       ? null
-      : await prisma.project.findFirst({ where: { AND: [{ id: query.project, companyId: company.id }, projectWhere(user)] }, select: { leadId: true, quotationId: true } });
+      : await prisma.project.findFirst({
+        where: { AND: [{ id: query.project, companyId: company.id }, projectWhere(user)] },
+        select: { leadId: true, quotationId: true, stakeholders: { select: { contactId: true } } },
+      });
     if (query.project !== undefined && !project) throw new NotFoundError();
     const ownLead = project?.leadId != null ? [{ id: project.leadId }] : [];
     const ownQuotation = project?.quotationId != null ? [{ id: project.quotationId }] : [];
+    const ownStakeholders = project?.stakeholders.length ? [{ id: { in: project.stakeholders.map((s) => s.contactId) } }] : [];
     const [leads, quotations, contacts, users] = await Promise.all([
       prisma.lead.findMany({
         where: { companyId: company.id, OR: [leadWhere(user), ...ownLead] }, orderBy: { id: 'desc' },
@@ -131,13 +139,13 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
         orderBy: { id: 'desc' }, select: { id: true, number: true, status: true, subject: true, currency: true },
       }),
       prisma.contact.findMany({
-        where: { companyId: company.id, isActive: true }, orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+        where: { companyId: company.id, OR: [{ isActive: true }, ...ownStakeholders] }, orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
         select: { id: true, firstName: true, lastName: true, designation: true, contactType: true, businessEmail: true, isPrimary: true },
       }),
       prisma.user.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
     ]);
     return {
-      company: { id: company.id, name: company.name, country: company.country, isClient: company.isClient, defaultCurrency: defaultCurrency(company.country) },
+      company: { id: company.id, name: company.name, legalName: company.legalName, country: company.country, isClient: company.isClient, defaultCurrency: defaultCurrency(company.country) },
       leads: leads.map(({ contact, ...l }) => ({ ...l, contactName: contact ? `${contact.firstName} ${contact.lastName}`.trim() : null })),
       quotations,
       contacts: contacts.map((c) => ({

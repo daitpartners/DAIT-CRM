@@ -16,7 +16,7 @@ export type ProjectRow = {
   startDate: string;
   value: number | null;
   currency: QuoteCurrency;
-  company: { id: number; name: string };
+  company: { id: number; name: string; legalName: string | null };
   lead: { id: number; number: string; visible: boolean } | null;
   quotation: { id: number; number: string } | null;
   manager: { id: number; name: string };
@@ -61,7 +61,7 @@ export function useCompanyProjects(companyId: number, enabled = true) {
 
 /** `GET /api/projects/form-options`: the Create / Edit dialog's choices for one client. */
 export type ProjectFormOptions = {
-  company: { id: number; name: string; country: string | null; isClient: boolean; defaultCurrency: QuoteCurrency };
+  company: { id: number; name: string; legalName: string | null; country: string | null; isClient: boolean; defaultCurrency: QuoteCurrency };
   leads: { id: number; number: string; status: string; leadSource: string | null; contactId: number | null; contactName: string | null }[];
   quotations: { id: number; number: string; status: QuoteStatus; subject: string; currency: QuoteCurrency }[];
   contacts: { id: number; name: string; designation: string | null; contactType: string; email: string | null; isPrimary: boolean }[];
@@ -102,7 +102,10 @@ export function useCreateProject() {
   });
 }
 
-/** A 409 `stale` refetches the projects so a retry carries the fresh `updatedAt`. */
+/**
+ * Any error refetches the projects. On a 409 `stale` the Edit dialog closes (it holds the old `updatedAt`), so the
+ * user reopens it on the refetched row.
+ */
 export function useUpdateProject() {
   const qc = useQueryClient();
   return useMutation({

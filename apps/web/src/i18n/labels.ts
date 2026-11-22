@@ -275,6 +275,12 @@ export function errorText(t: TFn, code: string, vars: Record<string, string | nu
       return t('Please check the highlighted fields');
     case 'stale':
       return t('Someone else changed this record. Reload and try again.');
+    case 'not_accepted':
+      return t('Only an accepted quotation can become a project.');
+    case 'invalid_project':
+      return t("That project can't be used for this email.");
+    case 'quotation_linked':
+      return t('That quotation is already linked to another project.');
     case 'domain_taken':
       return t('A company with this website domain already exists');
     case 'company_inactive':

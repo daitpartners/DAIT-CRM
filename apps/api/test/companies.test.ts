@@ -77,7 +77,7 @@ describe('companies API', () => {
     expect(page1.items[0]).toEqual({
       id: zenith.id, number: zenith.number, name: 'Zenith Works', domain: null, industry: null, country: 'India',
       city: null, status: 'Active', isClient: false, primaryContact: null, contactCount: 0,
-      employeeRange: null, verificationStatus: 'Unverified', leadCount: 0,
+      legalName: null, employeeRange: null, verificationStatus: 'Unverified', leadCount: 0,
       updatedAt: zenith.updatedAt.toISOString(),
     });
     const found = (await req('GET', '/api/companies?q=zen', admin.cookie)).json();

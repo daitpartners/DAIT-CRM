@@ -104,21 +104,26 @@ Kept here at the owner's request; picked up when the owner says so.
 - **Fixed in the parity check:** the converted quotation showed "PRJ-n · name" as a purple link; it is now the
   prototype's green "Project PRJ-n" badge (still a link to the client's projects). The Email screen's client filter and
   the Compose Client picker now mark clients "name · client" as the prototype.
+- **Owner decisions (23 Nov 2026):**
+  - Owner decided 23 Nov: legal name where set, as the prototype — the Projects list (Client column and filter), the
+    Create / Edit project dialog, the Email screen's client filter and the Compose Client picker show the company's
+    legal name when one is set, else its name (Leads and Quotations unchanged).
+  - Owner OK'd 23 Nov: a project manager sees the client's contacts in the project dialog.
+- **Final-review fixes (23 Nov 2026):** a stale Edit project save now closes the dialog (reopen to load the fresh row);
+  the locked Client field keeps normal text; the Email Project filter ends with an ellipsis and a Lead change drops it;
+  clear messages for "not accepted", "quotation already linked to another project" and an unusable project on an email;
+  the quotation page names its project only to users who can see it; Edit project keeps deactivated stakeholders on
+  offer; the dialog's choices load for a rep whose only way in is an archived lead.
 - **Kept different from the prototype (please confirm):**
-  - Client names: the prototype labels clients with the legal name where one is set ("Orbit Fintech GmbH") in the
-    Projects list, the project dialog, the Email filter and Compose; the app shows the company name everywhere, as on
-    Leads and Quotations. Switching all of them to the legal name is a small change if you prefer it.
   - The lead page Status is a select (decided earlier); picking Won opens the prototype's "Mark LD-… as Won?"
     confirmation from its stepper. (The prototype's own Status select on the new lead page marks Won at once, without
     the confirmation.)
-  - In Edit project the locked Client field looks greyed out (the browser's disabled look); the prototype's field is
-    locked too but keeps normal text.
 - **Found during the check, older than 3B (not changed):**
   - The lead page's "Coming up" card lists only follow-ups, calls and meetings; the prototype also lists the lead's
     quotations ("Q-2026-038 · EUR 57,120.00 · Accepted") — release 3A.
   - On the Email screen the prototype shows a quotation chip (Q-…) on mail about a quotation; the app's mail has no
     quotation tag — release 2B-2 / 3A.
-- **Owner to do:** nothing new for 3B beyond merge + "deploy"; answer the client-name question above.
+- **Owner to do:** nothing new for 3B beyond merge + "deploy".
 
 ## Release 3C — Calendar (22 Nov 2026) — ready on `release-3c-calendar`, not merged, not deployed
 - **Status:** branch `release-3c-calendar` (from main `63cd73e`), all six tasks done and checked side by side against

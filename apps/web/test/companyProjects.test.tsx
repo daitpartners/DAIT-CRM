@@ -19,7 +19,7 @@ const seller: Me = { ...rep, rights: [...rep.rights, 'manage_quotes', 'use_email
 function project(o: Partial<ProjectRow>): ProjectRow {
   return {
     id: 1, number: 'PRJ-1', name: 'Meridian · Warehouse automation', status: 'Active', startDate: '2026-11-20', value: 12000, currency: 'USD',
-    company: { id: 4, name: 'Meridian' }, lead: { id: 5, number: 'LD-1005', visible: true }, quotation: { id: 3, number: 'Q-2026-003' },
+    company: { id: 4, name: 'Meridian', legalName: null }, lead: { id: 5, number: 'LD-1005', visible: true }, quotation: { id: 3, number: 'Q-2026-003' },
     manager: { id: 2, name: 'Arjun Mehta' }, stakeholders: [{ id: 9, name: 'Tom Hale', email: 'tom@meridian.in' }, { id: 10, name: 'Priya Nair', email: null }],
     description: null, completedAt: null, createdAt: '2026-11-20T10:00:00.000Z', updatedAt: '2026-11-20T10:00:00.000Z', canEdit: true, ...o,
   };
@@ -32,7 +32,7 @@ const ROWS: ProjectRow[] = [
 ];
 
 const OPTIONS: ProjectFormOptions = {
-  company: { id: 4, name: 'Meridian', country: 'India', isClient: true, defaultCurrency: 'INR' },
+  company: { id: 4, name: 'Meridian', legalName: null, country: 'India', isClient: true, defaultCurrency: 'INR' },
   leads: [
     { id: 8, number: 'LD-1008', status: 'New', leadSource: 'Referral', contactId: null, contactName: null },
     { id: 5, number: 'LD-1005', status: 'Won', leadSource: 'Referral', contactId: 9, contactName: 'Tom Hale' },

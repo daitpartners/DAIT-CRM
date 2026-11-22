@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { PROJECT_STATUSES, QUOTE_CURRENCIES, primaryStakeholderIds, type ProjectStatus, type QuoteCurrency } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
+import { clientName } from '../../api/companies';
 import { useCreateProject, useProjectFormOptions, useUpdateProject, type ProjectRow } from '../../api/projects';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { CompanyPicker } from '../../components/CompanyPicker';
@@ -75,7 +76,10 @@ export function ProjectModal({ preset = {}, existing, onClose }: Props) {
   const pending = create.isPending || update.isPending;
 
   function onError(err: unknown) {
-    toast(errorText(t, err instanceof ApiError ? err.code : 'unknown'), 'warn');
+    const code = err instanceof ApiError ? err.code : 'unknown';
+    toast(errorText(t, code), 'warn');
+    // Stale: the dialog holds the old updatedAt, so every retry would fail; closing it means reopening loads the fresh row.
+    if (code === 'stale' && editing) onClose();
   }
 
   function save() {
@@ -140,8 +144,8 @@ export function ProjectModal({ preset = {}, existing, onClose }: Props) {
       <div className="grid2">
         {existing ? (
           <FormField id="pj-company" label={t('Client')} required>
-            <select id="pj-company" className="in" disabled value={existing.company.id}>
-              <option value={existing.company.id}>{clientLabel(existing.company.name)}</option>
+            <select id="pj-company" className="in pj-locked" disabled value={existing.company.id}>
+              <option value={existing.company.id}>{clientLabel(clientName(existing.company))}</option>
             </select>
           </FormField>
         ) : (
@@ -150,10 +154,10 @@ export function ProjectModal({ preset = {}, existing, onClose }: Props) {
             label={t('Client')}
             required
             clientsOnly
-            optionLabel={(c) => clientLabel(c.name)}
+            optionLabel={(c) => clientLabel(clientName(c))}
             placeholder={t('— choose client —')}
             value={companyId}
-            selected={current ? { value: String(current.company.id), label: clientLabel(current.company.name, current.company.isClient) } : null}
+            selected={current ? { value: String(current.company.id), label: clientLabel(clientName(current.company), current.company.isClient) } : null}
             onChange={chooseClient}
           />
         )}

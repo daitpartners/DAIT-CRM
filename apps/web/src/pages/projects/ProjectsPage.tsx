@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { PROJECT_STATUSES, formatMoney, projectBadge, type ProjectStatus, type QuoteCurrency } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
+import { clientName } from '../../api/companies';
 import { useProjects, type ProjectRow } from '../../api/projects';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { CompanyPicker } from '../../components/CompanyPicker';
@@ -53,7 +54,8 @@ export function ProjectsPage() {
 
   const tiles = data?.tiles;
   const rows = data?.items;
-  const filteredName = company ? rows?.find((p) => p.company.id === company)?.company.name : undefined;
+  const filteredCompany = company ? rows?.find((p) => p.company.id === company)?.company : undefined;
+  const filteredName = filteredCompany ? clientName(filteredCompany) : undefined;
   const head = [t('Project'), t('Client'), t('From lead'), t('Status'), t('Start'), t('Value'), t('Project manager'), t('Primary stakeholders'), t('Quotation'), ''];
 
   return (
@@ -91,6 +93,7 @@ export function ProjectsPage() {
                 hideLabel
                 clientsOnly
                 emptyLabel={t('Client: all')}
+                optionLabel={clientName}
                 value={company}
                 selected={company && filteredName ? { value: String(company), label: filteredName } : null}
                 onChange={(id) => setFilter('company', String(id))}
@@ -150,7 +153,7 @@ function ProjectTableRow({ p, canMail, onEdit }: { p: ProjectRow; canMail: boole
       </td>
       <td>
         <Link to={`/companies/${p.company.id}#projects`} className="pj-client">
-          {p.company.name}
+          {clientName(p.company)}
         </Link>
       </td>
       <td>{p.lead ? p.lead.visible ? <Link to={`/leads/${p.lead.id}`}>{p.lead.number}</Link> : p.lead.number : dim}</td>

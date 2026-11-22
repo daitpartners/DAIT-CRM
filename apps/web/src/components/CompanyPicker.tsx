@@ -24,7 +24,7 @@ type Props = {
   /** Offers only companies with the Client flag (Projects). */
   clientsOnly?: boolean;
   /** Labels options with this instead of the name (e.g. "name · client"). */
-  optionLabel?: (c: { number: string; name: string; isClient: boolean }) => string;
+  optionLabel?: (c: { number: string; name: string; legalName: string | null; isClient: boolean }) => string;
   /** Keeps the label for screen readers only (a filter chip). */
   hideLabel?: boolean;
   placeholder?: string;

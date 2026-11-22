@@ -42,6 +42,8 @@ type ListRow = Prisma.CompanyGetPayload<{ include: ReturnType<typeof companyList
 export function companyListRow(c: ListRow) {
   return {
     ...companySummary(c),
+    // Pickers that follow the prototype's `legalName || name` (Projects, Compose) need it.
+    legalName: c.legalName,
     employeeRange: c.employeeRange,
     verificationStatus: c.verificationStatus,
     leadCount: c._count.leads,

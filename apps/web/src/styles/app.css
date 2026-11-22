@@ -602,7 +602,7 @@ td.nowrap{white-space:nowrap}
 /* Email screen (release 2B-2; prototype .mail, .folders, .fold, .msglist, .msg, .reader, .mailside). */
 .mail-filters{background:var(--surface);padding:10px 28px;border-bottom:1px solid var(--line)}
 .mail-for{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-right:4px}
-.mail-pick{width:240px;max-width:100%}
+.mail-pick{width:240px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mail-search{height:34px;width:300px}
 .mail-search input{border:0;outline:0;background:none;flex:1;min-width:0;font:inherit;font-size:13px}
 .mail{display:flex;flex-wrap:wrap;align-items:stretch;flex-grow:1}
@@ -787,6 +787,8 @@ a.strong{font-weight:600}
 .pj-stakeholders{display:flex;flex-direction:column;gap:6px}
 .pj-stakeholders .muted{color:var(--muted)}
 .pj-none{font-size:12.5px;color:var(--muted)}
+/* Edit project: the locked Client keeps normal text, as the prototype (not the global disabled-select dimming). */
+select.in.pj-locked:disabled{opacity:1;color:var(--text);-webkit-text-fill-color:var(--text);background-color:var(--surface)}
 .link.pj-mine{border-color:#822CDB;background:var(--tint)}
 .pj-card-main{min-width:0}
 .pj-card-sub{display:block;color:var(--muted);font-size:12px}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { MAIL_PAGE_SIZE, MAIL_PAGE_SIZES, MAIL_VIEWS, useMailList, useMailMeta, useSyncNow, type MailFilter, type MailItem, type MailView } from '../../api/mail';
+import { clientName } from '../../api/companies';
 import { useTemplates } from '../../api/templates';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Icons } from '../../components/Icons';
@@ -113,7 +114,8 @@ export function EmailPage() {
     </Link>
   );
 
-  const companyName = meta?.companies.find((c) => c.id === filter.company)?.name;
+  const metaCompany = meta?.companies.find((c) => c.id === filter.company);
+  const companyName = metaCompany ? clientName(metaCompany) : undefined;
   const leadOptions = (meta?.leads ?? []).filter((l) => !filter.company || l.companyId === filter.company);
   const leadNumber = meta?.leads.find((l) => l.id === filter.lead)?.number;
   const projectOptions = (meta?.projects ?? []).filter((p) => !filter.company || p.companyId === filter.company);
@@ -180,7 +182,7 @@ export function EmailPage() {
         >
           <option value="">{t('Client: all')}</option>
           {(meta?.companies ?? []).map((c) => (
-            <option key={c.id} value={c.id}>{c.isClient ? `${c.name} · ${t('client|project')}` : c.name}</option>
+            <option key={c.id} value={c.id}>{c.isClient ? `${clientName(c)} · ${t('client|project')}` : clientName(c)}</option>
           ))}
         </select>
         <select
@@ -189,7 +191,8 @@ export function EmailPage() {
           value={filter.lead ?? ''}
           onChange={(e) => {
             const l = meta?.leads.find((x) => x.id === Number(e.target.value));
-            setQuery({ lead: e.target.value || undefined, company: l?.companyId ? String(l.companyId) : params.get('company') ?? undefined });
+            // As the prototype's fLead change: the project filter is dropped.
+            setQuery({ lead: e.target.value || undefined, company: l?.companyId ? String(l.companyId) : params.get('company') ?? undefined, project: undefined });
           }}
         >
           <option value="">{filter.company ? t('Lead: all for this client') : t('Lead: all')}</option>

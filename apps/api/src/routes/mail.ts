@@ -254,7 +254,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
       prisma.emailMessage.findMany({ where: { userId: user.id, leadId: { not: null } }, distinct: ['leadId'], select: { leadId: true } }),
     ]);
     const [companies, leads, projects] = await Promise.all([
-      prisma.company.findMany({ where: { id: { in: companyIds.map((c) => c.companyId!) } }, select: { id: true, name: true, isClient: true }, orderBy: { name: 'asc' } }),
+      prisma.company.findMany({ where: { id: { in: companyIds.map((c) => c.companyId!) } }, select: { id: true, name: true, legalName: true, isClient: true }, orderBy: { name: 'asc' } }),
       prisma.lead.findMany({
         where: { AND: [{ id: { in: leadIds.map((l) => l.leadId!) } }, leadWhere(user, { includeArchived: true })] },
         select: { id: true, number: true, companyId: true, companyName: true, status: true }, orderBy: { id: 'desc' },

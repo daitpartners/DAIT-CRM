@@ -22,7 +22,8 @@ const fullName = (c: { firstName: string; lastName: string }) => `${c.firstName}
 /* ------------------------------------------------------------------ serializer */
 
 export const projectInclude = {
-  company: { select: { id: true, name: true } },
+  // legalName: the screens show it where set, as the prototype (legalName || name).
+  company: { select: { id: true, name: true, legalName: true } },
   lead: { select: { id: true, number: true, assignedToId: true } },
   quotation: { select: { id: true, number: true } },
   manager: { select: { id: true, name: true } },
@@ -101,8 +102,9 @@ async function assertStakeholders(tx: Tx, companyId: number, ids: number[], keep
 }
 
 /**
- * The quotation to link, locked FOR UPDATE: visible to the user, the client's, Accepted, and not linked to another
- * project (400 otherwise). `projectId` is the project being edited (its own quotation is fine).
+ * The quotation to link, locked FOR UPDATE: visible to the user, the client's and Accepted (400 otherwise), and not
+ * linked to another project (409 `quotation_linked`: e.g. another dialog or a convert got there first). `projectId`
+ * is the project being edited (its own quotation is fine).
  */
 async function lockLinkableQuotation(tx: Tx, user: AuthUser, companyId: number, quotationId: number, projectId: number | null) {
   const visible = await tx.quotation.findFirst({ where: { AND: [{ id: quotationId }, quotationWhere(user)] }, select: { id: true } });
@@ -111,9 +113,10 @@ async function lockLinkableQuotation(tx: Tx, user: AuthUser, companyId: number, 
     ? await tx.quotation.findUnique({ where: { id: quotationId }, include: { linkedProject: { select: { id: true } } } })
     : null;
   const free = (id: number | null | undefined) => id == null || id === projectId;
-  if (!q || q.companyId !== companyId || q.status !== 'Accepted' || !free(q.projectId) || !free(q.linkedProject?.id)) {
-    throw new ValidationError([{ path: ['quotationId'], message: 'Quotation must be an accepted quotation of the client with no project' }]);
+  if (!q || q.companyId !== companyId || q.status !== 'Accepted') {
+    throw new ValidationError([{ path: ['quotationId'], message: 'Quotation must be an accepted quotation of the client' }]);
   }
+  if (!free(q.projectId) || !free(q.linkedProject?.id)) throw new RuleError('quotation_linked');
   return q;
 }
 

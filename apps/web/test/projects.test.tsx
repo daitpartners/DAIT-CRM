@@ -23,14 +23,14 @@ const researcher: Me = { ...rep, id: 7, name: 'Dev Rao', role: 'Data Research Us
 function project(o: Partial<ProjectRow>): ProjectRow {
   return {
     id: 1, number: 'PRJ-1', name: 'Meridian · Warehouse automation', status: 'Active', startDate: '2026-11-20', value: 12000, currency: 'USD',
-    company: { id: 4, name: 'Meridian' }, lead: { id: 5, number: 'LD-1005', visible: true }, quotation: { id: 3, number: 'Q-2026-003' },
+    company: { id: 4, name: 'Meridian', legalName: null }, lead: { id: 5, number: 'LD-1005', visible: true }, quotation: { id: 3, number: 'Q-2026-003' },
     manager: { id: 2, name: 'Arjun Mehta' }, stakeholders: [{ id: 9, name: 'Tom Hale', email: 'tom@meridian.in' }, { id: 10, name: 'Priya Nair', email: null }],
     description: 'Scope', completedAt: null, createdAt: '2026-11-20T10:00:00.000Z', updatedAt: '2026-11-20T10:00:00.000Z', canEdit: true, ...o,
   };
 }
 
 const ROWS: ProjectRow[] = [
-  project({ id: 2, number: 'PRJ-2', name: 'Orbit · Advisory', status: 'On hold', value: 450000, currency: 'INR', company: { id: 6, name: 'Orbit Labs' },
+  project({ id: 2, number: 'PRJ-2', name: 'Orbit · Advisory', status: 'On hold', value: 450000, currency: 'INR', company: { id: 6, name: 'Orbit Labs', legalName: 'Orbit Fintech GmbH' },
     lead: { id: 8, number: 'LD-1008', visible: false }, quotation: null, stakeholders: [], canEdit: false }),
   project({}),
 ];
@@ -42,7 +42,7 @@ const LIST: ProjectList = {
 };
 
 const OPTIONS: ProjectFormOptions = {
-  company: { id: 4, name: 'Meridian', country: 'India', isClient: true, defaultCurrency: 'INR' },
+  company: { id: 4, name: 'Meridian', legalName: null, country: 'India', isClient: true, defaultCurrency: 'INR' },
   leads: [
     { id: 8, number: 'LD-1008', status: 'New', leadSource: 'Referral', contactId: null, contactName: null },
     { id: 5, number: 'LD-1005', status: 'Won', leadSource: 'Referral', contactId: 9, contactName: 'Tom Hale' },
@@ -58,15 +58,18 @@ const OPTIONS: ProjectFormOptions = {
 };
 
 const CLIENTS = {
-  items: [{ id: 4, number: 'CO-0245', name: 'Meridian', status: 'Active', isClient: true }, { id: 6, number: 'CO-0300', name: 'Orbit Labs', status: 'Active', isClient: true }],
+  items: [
+    { id: 4, number: 'CO-0245', name: 'Meridian', legalName: null, status: 'Active', isClient: true },
+    { id: 6, number: 'CO-0300', name: 'Orbit Labs', legalName: 'Orbit Fintech GmbH', status: 'Active', isClient: true },
+  ],
   total: 2, page: 1, pageSize: 100,
 };
 
 let signedIn: Me = seller;
 type Call = { method: string; url: string; body?: Record<string, unknown> };
 
-/** `patchStatus`: what PATCH answers (409 → stale). */
-function stub({ list = LIST, patchStatus = 200 }: { list?: ProjectList; patchStatus?: number } = {}) {
+/** `patch`: what PATCH answers (`stale` → 409 stale, `linked` → 409 quotation_linked, a lost quotation race). */
+function stub({ list = LIST, patch = 'ok' }: { list?: ProjectList; patch?: 'ok' | 'stale' | 'linked' } = {}) {
   const calls: Call[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
@@ -75,7 +78,9 @@ function stub({ list = LIST, patchStatus = 200 }: { list?: ProjectList; patchSta
     if (url.startsWith('/api/projects/form-options')) return Response.json(OPTIONS);
     if (url === '/api/projects' && method === 'POST') return Response.json(project({ id: 7, number: 'PRJ-7' }), { status: 201 });
     if (url.startsWith('/api/projects/') && method === 'PATCH') {
-      return patchStatus === 409 ? Response.json({ error: 'stale' }, { status: 409 }) : Response.json(project({ status: 'On hold' }));
+      if (patch === 'stale') return Response.json({ error: 'stale' }, { status: 409 });
+      if (patch === 'linked') return Response.json({ error: 'quotation_linked' }, { status: 409 });
+      return Response.json(project({ status: 'On hold' }));
     }
     if (url.startsWith('/api/projects')) return Response.json(list);
     if (url.startsWith('/api/companies?')) return Response.json(CLIENTS);
@@ -152,6 +157,8 @@ describe('Projects list (prototype V.projects)', () => {
     expect(within(meridian).getByRole('link', { name: 'Email' })).toHaveAttribute('href', '/email?compose=1&company=4&lead=5&project=1');
     expect(within(meridian).getByRole('button', { name: 'Edit' })).toBeTruthy();
 
+    // The legal name where set (prototype `legalName || name`).
+    expect(within(orbit).getByRole('link', { name: 'Orbit Fintech GmbH' })).toHaveAttribute('href', '/companies/6#projects');
     expect(within(orbit).getByText('On hold')).toHaveClass('badge', 'b-warn');
     expect(within(orbit).getByText('LD-1008').closest('a')).toBeNull();
     expect(within(orbit).getByRole('link', { name: 'Email' })).toHaveAttribute('href', '/email?compose=1&company=6&project=2');
@@ -177,6 +184,7 @@ describe('Projects list (prototype V.projects)', () => {
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/projects?status=On+hold'));
     await waitFor(() => expect(calls.some((c) => c.url === '/api/projects?status=On+hold')).toBe(true));
     await u.click(screen.getByRole('combobox', { name: 'Client' }));
+    expect(await screen.findByRole('option', { name: 'Orbit Fintech GmbH' })).toBeTruthy();
     await u.click(await screen.findByRole('option', { name: 'Meridian' }));
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/projects?status=On+hold&company=4'));
     await waitFor(() => expect(calls.some((c) => c.url === '/api/projects?company=4&status=On+hold')).toBe(true));
@@ -207,6 +215,7 @@ describe('Create / Edit project dialog (prototype V.projectModal)', () => {
     await u.click(within(dialog).getByRole('button', { name: 'Create project' }));
     expect(await screen.findByText('Choose a client first')).toBeTruthy();
     await u.click(within(dialog).getByRole('combobox', { name: /Client/ }));
+    expect(await within(dialog).findByRole('option', { name: 'Orbit Fintech GmbH · client' })).toBeTruthy();
     await u.click(await within(dialog).findByRole('option', { name: 'Meridian · client' }));
     const name = within(dialog).getByRole('textbox', { name: /Project name/ });
     await waitFor(() => expect(name).toHaveValue('Meridian · '));
@@ -253,10 +262,11 @@ describe('Create / Edit project dialog (prototype V.projectModal)', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('edit: Client locked, values loaded, PATCH carries updatedAt; a stale save shows the stale toast', async () => {
-    const calls = stub({ patchStatus: 409 });
+  it('edit: Client locked, values loaded, PATCH carries updatedAt; a stale save shows the stale toast and closes', async () => {
+    const calls = stub({ patch: 'stale' });
+    const onClose = vi.fn();
     const u = userEvent.setup();
-    mount(<ProjectModal existing={project({})} onClose={() => {}} />, { at: '/projects' });
+    mount(<ProjectModal existing={project({})} onClose={onClose} />, { at: '/projects' });
     const dialog = await screen.findByRole('dialog', { name: 'Edit project' });
     expect(within(dialog).getByRole('combobox', { name: /Client/ })).toBeDisabled();
     await waitFor(() => expect(within(dialog).getByRole('checkbox', { name: /Tom Hale/ })).toBeChecked());
@@ -272,6 +282,27 @@ describe('Create / Edit project dialog (prototype V.projectModal)', () => {
       body: { status: 'On hold', leadId: 5, quotationId: 3, value: 12000, currency: 'USD', updatedAt: '2026-11-20T10:00:00.000Z', stakeholderIds: [10, 9] },
     });
     expect(calls.some((c) => c.url === '/api/projects/form-options?company=4&project=1')).toBe(true);
+    // The dialog closes, so reopening it loads the fresh row (a retry from here would carry the old updatedAt).
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('edit: any other error keeps the dialog open with its message', async () => {
+    stub({ patch: 'linked' });
+    const onClose = vi.fn();
+    const u = userEvent.setup();
+    mount(<ProjectModal existing={project({})} onClose={onClose} />);
+    const dialog = await screen.findByRole('dialog', { name: 'Edit project' });
+    await waitFor(() => expect(within(dialog).getByRole('checkbox', { name: /Tom Hale/ })).toBeChecked());
+    await u.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText('That quotation is already linked to another project.')).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('edit: the locked Client shows the legal name where set', async () => {
+    stub();
+    mount(<ProjectModal existing={project({ company: { id: 4, name: 'Meridian', legalName: 'Meridian Logistics Pvt Ltd' } })} onClose={() => {}} />);
+    const dialog = await screen.findByRole('dialog', { name: 'Edit project' });
+    expect(within(dialog).getByRole('combobox', { name: /Client/ })).toHaveDisplayValue('Meridian Logistics Pvt Ltd · client');
   });
 
   it('edit saves: "Project updated"', async () => {

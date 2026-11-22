@@ -12,6 +12,9 @@ export type CompanySort = (typeof COMPANY_SORTS)[number];
 export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
 export type SortDir = 'asc' | 'desc';
 
+/** A client as the prototype names it on the Projects, Email and Compose screens: the legal name where set. */
+export const clientName = (c: { name: string; legalName?: string | null }): string => c.legalName || c.name;
+
 /** A row in `GET /api/companies`. */
 export type CompanySummary = {
   id: number;
@@ -94,6 +97,7 @@ export type CompanyListQuery = {
 
 /** A list row: the summary plus the prototype's columns. `leadCount` counts only leads the user may see. */
 export type CompanyListRow = CompanySummary & {
+  legalName: string | null;
   employeeRange: string | null;
   verificationStatus: VerificationStatus;
   leadCount: number;

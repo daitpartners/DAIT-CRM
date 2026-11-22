@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError } from '../../api/client';
+import { clientName } from '../../api/companies';
 import { useContacts } from '../../api/contacts';
 import { useLeads } from '../../api/leads';
 import { useComposeMail, useReplyMail } from '../../api/mail';
@@ -79,8 +80,10 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
   const ccValue = ccTouched ? cc : projectCc.join(', ');
   const ccList = splitList(ccValue);
   const companyLabel = lead?.company?.name ?? contacts[0]?.company.name ?? project?.company.name ?? null;
-  // The client's name for the picker when Compose opens on one (a project link may name a client outside your mail).
-  const startCompanyName = start.companyName ?? companyProjects?.items[0]?.company.name ?? contacts[0]?.company.name;
+  // The client's name for the picker when Compose opens on one (a project link may name a client outside your mail);
+  // the legal name where set, as the prototype.
+  const startProjectCompany = companyProjects?.items[0]?.company;
+  const startCompanyName = start.companyName ?? (startProjectCompany ? clientName(startProjectCompany) : contacts[0]?.company.name);
   // Clients are marked "name · client" in the picker, as in the prototype.
   const clientLabel = (name: string, isClient: boolean | undefined) => (isClient ? `${name} · ${t('client|project')}` : name);
   const sortedTemplates = useMemo(
@@ -174,7 +177,7 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
             label={t('Client')}
             value={companyId}
             selected={companyId === start.companyId && startCompanyName ? { value: String(start.companyId), label: clientLabel(startCompanyName, companyProjects?.isClient) } : null}
-            optionLabel={(c) => clientLabel(c.name, c.isClient)}
+            optionLabel={(c) => clientLabel(clientName(c), c.isClient)}
             onChange={(id) => changeCompany(id)}
             emptyLabel={t('— choose client / company —')}
             onClear={() => changeCompany(undefined)}

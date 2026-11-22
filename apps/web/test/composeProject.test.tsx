@@ -17,7 +17,7 @@ const me = { ...rep, rights: [...rep.rights, 'use_email' as const] };
 
 const META: MailMeta = {
   mailbox: { id: 7, address: 'arjun@daitpartners.com', status: 'connected', lastSyncAt: '2026-11-22T09:00:00.000Z' },
-  unread: 0, unlinked: 0, companies: [{ id: 4, name: 'Acme', isClient: true }], leads: [{ id: 5, number: 'LD-1005', companyId: 4, companyName: 'Acme', status: 'Won' }],
+  unread: 0, unlinked: 0, companies: [{ id: 4, name: 'Acme', legalName: null, isClient: true }], leads: [{ id: 5, number: 'LD-1005', companyId: 4, companyName: 'Acme', status: 'Won' }],
   projects: [{ id: 3, number: 'PRJ-3', name: 'Website rebuild', companyId: 4 }],
 };
 
@@ -29,7 +29,7 @@ const contact = (id: number, first: string, email: string, isPrimary = false) =>
 
 const project = (over: Partial<ProjectRow> = {}): ProjectRow => ({
   id: 3, number: 'PRJ-3', name: 'Website rebuild', status: 'Active', startDate: '2026-11-01', value: 1000, currency: 'USD',
-  company: { id: 4, name: 'Acme' }, lead: { id: 5, number: 'LD-1005', visible: true }, quotation: null, manager: { id: 2, name: 'Arjun Mehta' },
+  company: { id: 4, name: 'Acme', legalName: null }, lead: { id: 5, number: 'LD-1005', visible: true }, quotation: null, manager: { id: 2, name: 'Arjun Mehta' },
   // Ana is the To address (primary contact): she is not copied. Carl has no email: skipped.
   stakeholders: [
     { id: 11, name: 'Ana Ruiz', email: 'ANA@acme.com' },
@@ -45,7 +45,7 @@ const leadRow = {
   nextFollowUp: null, isOverdue: false, archivedAt: null, createdAt: '', updatedAt: '',
 };
 
-function stub(companyProjects: { items: ProjectRow[]; isClient: boolean } = { items: [project()], isClient: true }) {
+function stub(companyProjects: { items: ProjectRow[]; isClient: boolean } = { items: [project()], isClient: true }, meta: MailMeta = META) {
   const posts: { url: string; body: unknown }[] = [];
   const gets: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
@@ -55,7 +55,7 @@ function stub(companyProjects: { items: ProjectRow[]; isClient: boolean } = { it
     }
     gets.push(url);
     if (url.startsWith('/api/mail?')) return Response.json({ items: [], total: 0, page: 1, pageSize: 50 });
-    if (url === '/api/mail/meta') return Response.json(META);
+    if (url === '/api/mail/meta') return Response.json(meta);
     if (url === '/api/me') return Response.json(me);
     if (url === '/api/companies/4/projects') return Response.json(companyProjects);
     if (url.startsWith('/api/leads')) return Response.json({ items: [leadRow], total: 1, page: 1, pageSize: 100 });
@@ -161,5 +161,19 @@ describe('Compose: Client → Lead → Project (release 3B, prototype V.compose)
     await waitFor(() => expect(within(dialog).getByLabelText(/^Cc/)).toHaveValue('ben@acme.com'));
     // The one-off open is not kept in the address (a refresh or Back does not reopen it); the filters stay.
     await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/email?company=4&lead=5&project=3'));
+  });
+
+  it('the Client picker shows the legal name where set, as the prototype (from the mail clients or the client projects)', async () => {
+    const u = userEvent.setup();
+    stub(undefined, { ...META, companies: [{ id: 4, name: 'Acme', legalName: 'Acme Holdings Pvt Ltd', isClient: true }] });
+    const view = show('/email?company=4');
+    await u.click(await screen.findByRole('button', { name: '+ Compose' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Compose email' });
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Client' })).toHaveValue('Acme Holdings Pvt Ltd · client'));
+    view.unmount();
+    stub({ items: [project({ company: { id: 4, name: 'Acme', legalName: 'Acme Holdings Pvt Ltd' } })], isClient: true }, { ...META, companies: [] });
+    show('/email?compose=1&company=4');
+    const again = await screen.findByRole('dialog', { name: 'Compose email' });
+    await waitFor(() => expect(within(again).getByRole('combobox', { name: 'Client' })).toHaveValue('Acme Holdings Pvt Ltd · client'));
   });
 });

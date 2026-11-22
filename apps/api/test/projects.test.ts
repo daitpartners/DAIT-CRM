@@ -31,7 +31,7 @@ const today = () => todayIn('Europe/London');
 
 type Row = {
   id: number; number: string; name: string; status: string; startDate: string; value: number | null; currency: string;
-  company: { id: number; name: string }; lead: { id: number; number: string } | null; quotation: { id: number; number: string } | null;
+  company: { id: number; name: string; legalName: string | null }; lead: { id: number; number: string } | null; quotation: { id: number; number: string } | null;
   manager: { id: number; name: string }; stakeholders: { id: number; name: string; email: string | null }[];
   description: string | null; updatedAt: string; canEdit: boolean;
 };
@@ -294,7 +294,7 @@ describe('projects API — convert', () => {
 });
 
 describe('projects API — linked quotation', () => {
-  it('refuses a Draft, another client’s or an already linked quotation (400)', async () => {
+  it('refuses a Draft or another client’s quotation (400); an already linked one is 409 quotation_linked', async () => {
     const admin = await as('ADMINISTRATOR');
     const s = await setup(null);
     const t = await setup(null, 'Canada');
@@ -305,8 +305,31 @@ describe('projects API — linked quotation', () => {
     expect((await post(draft.id)).statusCode).toBe(400);
     expect((await post(foreign.id)).statusCode).toBe(400);
     expect((await post(ok.id)).statusCode).toBe(201);
-    expect((await post(ok.id)).statusCode).toBe(400);
+    const again = await post(ok.id);
+    expect(again.statusCode).toBe(409);
+    expect(again.json()).toEqual({ error: 'quotation_linked' });
     expect(await prisma.project.count()).toBe(1);
+    // The Edit dialog losing the same race.
+    const other = await create(admin.cookie, body(s.company.id, admin.user.id));
+    const lost = await edit(admin.cookie, other, { quotationId: ok.id });
+    expect(lost.statusCode).toBe(409);
+    expect(lost.json()).toEqual({ error: 'quotation_linked' });
+  });
+
+  it('M2: the quotation detail names its project only when the viewer can see it; Convert stays blocked either way', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const rep = await as('SALES_REPRESENTATIVE');
+    const other = await as('SALES_REPRESENTATIVE');
+    const s = await setup(rep.user.id);
+    const otherLead = await makeLead({ companyId: s.company.id, assignedToId: other.user.id });
+    const q = await makeQuote({ companyId: s.company.id, leadId: s.lead.id, ownerId: rep.user.id, status: 'Accepted' });
+    const p = await create(admin.cookie, body(s.company.id, admin.user.id, { leadId: otherLead.id, quotationId: q.id }));
+    const byAdmin = (await req('GET', `/api/quotations/${q.id}`, admin.cookie)).json();
+    expect(byAdmin.project).toEqual({ id: p.id, number: p.number, name: p.name });
+    const byRep = await req('GET', `/api/quotations/${q.id}`, rep.cookie);
+    expect(byRep.statusCode, byRep.body).toBe(200);
+    expect(byRep.json().project).toBeNull();
+    expect(byRep.json().canConvert).toBe(false);
   });
 
   it('Review Focus 3: swapping the quotation clears the old link; history on both; value unchanged', async () => {
@@ -508,5 +531,36 @@ describe('projects API — list, company tab, form options', () => {
     expect((await req('GET', '/api/projects/form-options', rep.cookie)).statusCode).toBe(400);
     const hidden = await setup(other.user.id, 'Canada');
     expect((await req('GET', `/api/projects/form-options?company=${hidden.company.id}`, rep.cookie)).statusCode).toBe(404);
+  });
+
+  it('client names: the project row, form options and the companies list carry the legal name', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const s = await setup(null);
+    await prisma.company.update({ where: { id: s.company.id }, data: { legalName: 'Acme Holdings Pvt Ltd' } });
+    const p = await create(admin.cookie, body(s.company.id, admin.user.id));
+    expect(p.company).toEqual({ id: s.company.id, name: s.company.name, legalName: 'Acme Holdings Pvt Ltd' });
+    const opts = (await req('GET', `/api/projects/form-options?company=${s.company.id}`, admin.cookie)).json();
+    expect(opts.company).toMatchObject({ name: s.company.name, legalName: 'Acme Holdings Pvt Ltd' });
+    const list = (await req('GET', '/api/companies?isClient=true', admin.cookie)).json();
+    expect(list.items).toEqual([expect.objectContaining({ id: s.company.id, legalName: 'Acme Holdings Pvt Ltd' })]);
+  });
+
+  it('M3: editing offers the project’s current stakeholders back even when deactivated', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const s = await setup(null);
+    const p = await create(admin.cookie, body(s.company.id, admin.user.id, { stakeholderIds: [s.dev] }));
+    await prisma.contact.update({ where: { id: s.dev }, data: { isActive: false } });
+    const ids = async (url: string) => (await req('GET', url, admin.cookie)).json().contacts.map((c: { id: number }) => c.id);
+    expect(await ids(`/api/projects/form-options?company=${s.company.id}`)).not.toContain(s.dev);
+    expect(await ids(`/api/projects/form-options?company=${s.company.id}&project=${p.id}`)).toEqual([s.asha, s.bina, s.chetan, s.dev]);
+  });
+
+  it('M4: a rep whose only way in is an archived lead loads the options, as the company Projects tab does', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const s = await setup(null);
+    await prisma.lead.update({ where: { id: s.lead.id }, data: { archivedAt: new Date() } });
+    expect((await req('GET', `/api/companies/${s.company.id}/projects`, rep.cookie)).statusCode).toBe(200);
+    const res = await req('GET', `/api/projects/form-options?company=${s.company.id}`, rep.cookie);
+    expect(res.statusCode, res.body).toBe(200);
   });
 });

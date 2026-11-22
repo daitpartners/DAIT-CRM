@@ -296,7 +296,7 @@ describe('reading mail on the Email screen (2B-2)', () => {
     expect(meta).toMatchObject({
       mailbox: { address: 'maya@daitpartners.com', status: 'connected', lastSyncAt: null },
       unread: 1, unlinked: 1,
-      companies: [{ id: company.id, name: 'Acme', isClient: false }],
+      companies: [{ id: company.id, name: 'Acme', legalName: null, isClient: false }],
       leads: [{ id: lead.id, number: lead.number, companyId: company.id, companyName: lead.companyName, status: 'New' }],
     });
   });
@@ -522,6 +522,14 @@ describe('project-tagged email (3B)', () => {
     const res = await call('POST', `/api/mail/${original.id}/reply`, await signIn(app, rep), { cc: [], body: 'Thanks' });
     expect(res.statusCode).toBe(201);
     expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: res.json().id } })).projectId).toBe(project.id);
+  });
+
+  it('meta gives each client its legal name (the Email filter shows it where set, as the prototype)', async () => {
+    const { rep, box, company } = await setup();
+    await prisma.company.update({ where: { id: company.id }, data: { legalName: 'Acme Holdings Pvt Ltd' } });
+    await synced(rep.id, box.id, { companyId: company.id });
+    const meta = (await call('GET', '/api/mail/meta', await signIn(app, rep))).json();
+    expect(meta.companies).toEqual([{ id: company.id, name: 'Acme', legalName: 'Acme Holdings Pvt Ltd', isClient: false }]);
   });
 
   it('meta lists the projects you can see (id, number, name, client)', async () => {

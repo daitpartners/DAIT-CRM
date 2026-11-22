@@ -1491,5 +1491,8 @@
   "Project {project} created from {quotation}": "Proyecto {project} creado a partir de {quotation}",
   "Mark {number} as Won?": "¿Marcar {number} como ganado?",
   "The lead closes as Won and {company} is flagged as a client. The follow-up date and open tasks on this lead are closed. A client can have several projects, so the project is created as a separate step.": "El lead se cierra como Ganado y {company} se marca como cliente. Se cierran la fecha de seguimiento y las tareas abiertas de este lead. Un cliente puede tener varios proyectos, así que el proyecto se crea en un paso aparte.",
-  "{number} won · {company} is now a client": "{number} ganado · {company} ya es cliente"
+  "{number} won · {company} is now a client": "{number} ganado · {company} ya es cliente",
+  "Only an accepted quotation can become a project.": "Solo un presupuesto aceptado puede convertirse en proyecto.",
+  "That project can't be used for this email.": "Ese proyecto no se puede usar para este correo.",
+  "That quotation is already linked to another project.": "Ese presupuesto ya está vinculado a otro proyecto."
 }

@@ -7,6 +7,7 @@ import { StaleError, isNotFound } from '../prismaErrors.js';
 import { RuleError } from '../leads/service.js';
 import { todayIn } from '../leads/dates.js';
 import { quotationWhere } from '../quotations/visibility.js';
+import { projectWhere } from '../projects/visibility.js';
 import { renderQuotationPdf } from '../quotations/pdf.js';
 import { pdfLang, queueQuotationSend } from '../quotations/send.js';
 import {
@@ -42,6 +43,8 @@ const TABS: Record<QuoteTab, (status: string) => boolean> = {
 async function detailOf(id: number, user: AuthUser) {
   const q = await prisma.quotation.findFirst({ where: { AND: [{ id }, quotationWhere(user)] }, include: quotationInclude });
   if (!q) throw new NotFoundError();
+  // Its project is named only when the viewer can see it (canConvert still reads projectId, so Convert stays blocked).
+  if (q.project && (await prisma.project.count({ where: { AND: [{ id: q.project.id }, projectWhere(user)] } })) === 0) q.project = null;
   // The GST each currency starts with (Company details), so the editor shows it at once on a currency change.
   const settings = await loadCompanySettings(prisma);
   return { ...quotationDetail(q, user), taxDefaults: { INR: settings.taxInr, USD: settings.taxUsd, CAD: settings.taxCad } };

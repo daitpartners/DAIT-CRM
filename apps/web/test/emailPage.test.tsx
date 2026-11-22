@@ -29,7 +29,7 @@ const detail = (m: MailItem, over: Partial<MailDetail> = {}): MailDetail => ({
 });
 const META: MailMeta = {
   mailbox: { id: 7, address: 'arjun@daitpartners.com', status: 'connected', lastSyncAt: '2026-11-22T09:00:00.000Z' },
-  unread: 3, unlinked: 2, companies: [{ id: 4, name: 'Acme', isClient: true }, { id: 6, name: 'Bolt', isClient: false }], leads: [{ id: 5, number: 'LD-1005', companyId: 4, companyName: 'Acme', status: 'New' }],
+  unread: 3, unlinked: 2, companies: [{ id: 4, name: 'Acme', legalName: null, isClient: true }, { id: 6, name: 'Bolt', legalName: 'Bolt Industries Ltd', isClient: false }], leads: [{ id: 5, number: 'LD-1005', companyId: 4, companyName: 'Acme', status: 'New' }],
   projects: [{ id: 3, number: 'PRJ-3', name: 'Website rebuild', companyId: 4 }, { id: 8, number: 'PRJ-8', name: 'Brand refresh', companyId: 6 }],
 };
 
@@ -149,9 +149,20 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     const client = await screen.findByRole('combobox', { name: 'Client / company' });
     // Clients are marked as in the prototype ("name · client").
     await within(client).findByRole('option', { name: 'Acme · client' });
-    expect(within(client).getByRole('option', { name: 'Bolt' })).toBeTruthy();
+    // The legal name where set, as the prototype (legalName || name).
+    expect(within(client).getByRole('option', { name: 'Bolt Industries Ltd' })).toBeTruthy();
     await u.selectOptions(client, '');
     await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/email'));
+  });
+
+  it('changing the lead drops the project filter (prototype fLead change)', async () => {
+    const u = userEvent.setup();
+    stub([], {});
+    show('/email?company=4&project=3');
+    const lead = await screen.findByRole('combobox', { name: 'Lead' });
+    await within(lead).findByRole('option', { name: 'LD-1005 · Acme' });
+    await u.selectOptions(lead, '5');
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/email?company=4&lead=5'));
   });
 
   it('an unlinked message offers Link to lead / create lead; Log as activity waits for a lead', async () => {
