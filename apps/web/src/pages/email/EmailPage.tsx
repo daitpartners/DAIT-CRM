@@ -256,6 +256,7 @@ export function EmailPage() {
 function MessageRow({ m, on, to }: { m: MailItem; on: boolean; to: string }) {
   const t = useT();
   const { relative } = useFormatDate();
+  // Prototype list row: rel(e.at).replace(/, /, ' ') — "Today 09:05", no comma.
   const outbound = m.status !== 'received';
   const who = outbound ? t('To: {to}', { to: m.toAddresses.join(', ') }) : m.fromName || m.fromAddress;
   return (
@@ -263,7 +264,7 @@ function MessageRow({ m, on, to }: { m: MailItem; on: boolean; to: string }) {
       <span className="av" aria-hidden="true">{initials(m.fromName || m.fromAddress)}</span>
       <span className="msg-main">
         <span className="who">
-          <span className="msg-who">{who}</span> <span className="t">{relative(m.occurredAt)}</span>
+          <span className="msg-who">{who}</span> <span className="t">{relative(m.occurredAt).replace(', ', ' ')}</span>
         </span>
         <span className="sub">{m.subject || t('(no subject)')}</span>
         <span className="pre">{m.preview}</span>

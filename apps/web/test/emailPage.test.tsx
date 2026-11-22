@@ -178,17 +178,36 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       item({ id: 1, occurredAt: '2026-11-22T09:05:00.000Z', isRead: true }),
       item({ id: 2, occurredAt: '2026-11-21T17:00:00.000Z', isRead: true }),
       item({ id: 3, occurredAt: '2026-11-01T08:00:00.000Z', isRead: true }),
-    ], { 1: detail(item({ id: 1 })) });
+    ], { 1: detail(item({ id: 1 })) }, META, (url) => (url === '/api/me' ? london : undefined));
     show('/email', london);
     const list = screen.getByRole('region', { name: 'Message list' });
-    expect(await within(list).findByText('Today, 09:05')).toBeTruthy();
-    expect(within(list).getByText('Yesterday, 17:00')).toBeTruthy();
-    expect(within(list).getByText('01/11/2026, 08:00')).toBeTruthy();
+    // Prototype row: rel(e.at).replace(/, /, ' ').
+    expect(await within(list).findByText('Today 09:05')).toBeTruthy();
+    expect(within(list).getByText('Yesterday 17:00')).toBeTruthy();
+    expect(within(list).getByText('01/11/2026 08:00')).toBeTruthy();
+  });
+
+  it('list row days and times follow the user time zone (Asia/Kolkata, UTC+5:30)', async () => {
+    at1200();
+    const kolkata: Me = { ...me, timezone: 'Asia/Kolkata' };
+    stub([
+      // 2026-11-22 20:00 in Kolkata is still "today" there (12:00Z is 17:30 local).
+      item({ id: 1, occurredAt: '2026-11-22T14:30:00.000Z', isRead: true }),
+      // 2026-11-21T19:00Z is 2026-11-22 00:30 in Kolkata: today there, yesterday in UTC.
+      item({ id: 2, occurredAt: '2026-11-21T19:00:00.000Z', isRead: true }),
+      // 2026-11-20T20:00Z is 2026-11-21 01:30 in Kolkata: yesterday.
+      item({ id: 3, occurredAt: '2026-11-20T20:00:00.000Z', isRead: true }),
+    ], { 1: detail(item({ id: 1 })) }, META, (url) => (url === '/api/me' ? kolkata : undefined));
+    show('/email', kolkata);
+    const list = screen.getByRole('region', { name: 'Message list' });
+    expect(await within(list).findByText('Today 20:00')).toBeTruthy();
+    expect(within(list).getByText('Today 00:30')).toBeTruthy();
+    expect(within(list).getByText('Yesterday 01:30')).toBeTruthy();
   });
 
   it('synced line shows a relative time', async () => {
     at1200();
-    stub([], {}, { ...META, mailbox: { ...META.mailbox!, lastSyncAt: '2026-11-22T11:55:00.000Z' } });
+    stub([], {}, { ...META, mailbox: { ...META.mailbox!, lastSyncAt: '2026-11-22T11:55:00.000Z' } }, (url) => (url === '/api/me' ? london : undefined));
     show('/email', london);
     expect(await screen.findByText(/synced Today, 11:55/)).toBeTruthy();
   });
