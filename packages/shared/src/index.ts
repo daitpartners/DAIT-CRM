@@ -20,3 +20,5 @@ export * from './outreach.js';
 export * from './timezones.js';
 export * from './mergeFields.js';
 export * from './schemas/calendar.js';
+export * from './quotations.js';
+export * from './schemas/quotation.js';

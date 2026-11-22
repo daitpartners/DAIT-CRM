@@ -52,6 +52,7 @@ model User {
   tasks           Task[]
   campaigns       EmailCampaign[]  @relation("CampaignSender")
   calendarEvents  CalendarEvent[]
+  quotations      Quotation[]
 
   @@map("users")
 }
@@ -185,6 +186,7 @@ model EmailMessage {
   campaign           EmailCampaign?           @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   campaignRecipients EmailCampaignRecipient[]
   replies            EmailMessage[]           @relation("EmailReplies")
+  sendingQuotations  Quotation[]
 
   @@unique([userId, graphId])
   @@index([userId, threadId])
@@ -374,6 +376,7 @@ model Company {
 
   emailMessages  EmailMessage[]
   calendarEvents CalendarEvent[]
+  quotations     Quotation[]
 
   @@index([name])
   @@index([nameNormalised, country])
@@ -421,6 +424,7 @@ model Contact {
 
   emailMessages      EmailMessage[]
   campaignRecipients EmailCampaignRecipient[]
+  quotations         Quotation[]
 
   @@index([businessEmail])
   @@index([phoneNormalised])
@@ -504,6 +508,7 @@ model Lead {
   emailMessages      EmailMessage[]
   campaignRecipients EmailCampaignRecipient[]
   calendarEvents     CalendarEvent[]
+  quotations         Quotation[]
 
   @@index([status])
   @@index([assignedToId])
@@ -563,7 +568,6 @@ model LeadAssignment {
 model Task {
   id              Int       @id @default(autoincrement())
   leadId          Int?      @map("lead_id")
-  /// quotations does not exist yet; plain column until the Quotations module adds the relation.
   quotationId     Int?      @map("quotation_id")
   title           String
   dueDate         DateTime  @map("due_date") @db.Date
@@ -582,12 +586,125 @@ model Task {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  lead       Lead? @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  assignedTo User  @relation(fields: [assignedToId], references: [id], onDelete: Restrict)
+  lead       Lead?      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  quotation  Quotation? @relation(fields: [quotationId], references: [id], onDelete: SetNull)
+  assignedTo User       @relation(fields: [assignedToId], references: [id], onDelete: Restrict)
 
   @@index([assignedToId, isDone, dueDate])
   @@index([leadId, origin, isDone])
+  @@index([quotationId])
   @@map("tasks")
+}
+
+/// Release 3A: a priced quotation for a company (and optionally its lead). `quotation_lines` hold the working copy;
+/// each send freezes a `quotation_revisions` snapshot, from which its PDF is drawn again on demand.
+model Quotation {
+  id                 Int       @id @default(autoincrement())
+  /// Q-YYYY-NNN, sequential per calendar year of quotationDate (nextQuotationNumber, advisory lock per year).
+  number             String    @unique @db.VarChar(20)
+  companyId          Int       @map("company_id")
+  contactId          Int?      @map("contact_id")
+  leadId             Int?      @map("lead_id")
+  ownerId            Int       @map("owner_id")
+  quotationDate      DateTime  @map("quotation_date") @db.Date
+  validUntil         DateTime? @map("valid_until") @db.Date
+  /// QUOTE_CURRENCIES: USD | CAD | INR.
+  currency           String    @db.VarChar(3)
+  subject            String    @db.VarChar(300)
+  /// GST %.
+  taxRate            Decimal   @default(0) @map("tax_rate") @db.Decimal(5, 2)
+  overallDiscount    Decimal   @default(0) @map("overall_discount") @db.Decimal(5, 2)
+  notes              String    @default("") @db.Text
+  /// QUOTE_STATUSES: Draft | Sent | Negotiating | Accepted | Rejected | Expired.
+  status             String    @default("Draft") @db.VarChar(20)
+  /// The revision being worked on (the last sent one unless editingNewRevision).
+  revision           Int       @default(1)
+  /// Set when a sent quotation is edited: `revision` is the unsent n+1 until the next send.
+  editingNewRevision Boolean   @default(false) @map("editing_new_revision")
+  /// The queued email while the quotation shows "Sending…"; cleared when the send job succeeds or finally fails.
+  sendingMessageId   Int?      @map("sending_message_id")
+  /// projects does not exist yet (release 3B); plain column until the Projects module adds the relation.
+  projectId          Int?      @map("project_id")
+  /// [{ at: ISO datetime, text }], oldest first.
+  history            Json      @default("[]")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  company        Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  contact        Contact?            @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  lead           Lead?               @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  owner          User                @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  sendingMessage EmailMessage?       @relation(fields: [sendingMessageId], references: [id], onDelete: SetNull)
+  lines          QuotationLine[]
+  revisions      QuotationRevision[]
+  tasks          Task[]
+
+  @@index([companyId])
+  @@index([leadId])
+  @@index([ownerId])
+  @@index([status])
+  @@index([quotationDate])
+  @@map("quotations")
+}
+
+/// The working copy's lines, in sortOrder.
+model QuotationLine {
+  id          Int     @id @default(autoincrement())
+  quotationId Int     @map("quotation_id")
+  sortOrder   Int     @map("sort_order")
+  item        String  @db.VarChar(300)
+  description String? @db.Text
+  qty         Decimal @db.Decimal(12, 2)
+  unit        String  @db.VarChar(30)
+  unitPrice   Decimal @map("unit_price") @db.Decimal(14, 2)
+  /// Line discount %.
+  discount    Decimal @default(0) @db.Decimal(5, 2)
+
+  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  @@index([quotationId, sortOrder])
+  @@map("quotation_lines")
+}
+
+/// A sent revision, frozen when the send job succeeds. A re-send without edits adds no row.
+model QuotationRevision {
+  id            Int      @id @default(autoincrement())
+  quotationId   Int      @map("quotation_id")
+  revisionNo    Int      @map("revision_no")
+  sentAt        DateTime @map("sent_at")
+  /// The contact address it was emailed to.
+  sentTo        String   @map("sent_to") @db.VarChar(320)
+  subtotal      Decimal  @db.Decimal(14, 2)
+  discountTotal Decimal  @map("discount_total") @db.Decimal(14, 2)
+  taxTotal      Decimal  @map("tax_total") @db.Decimal(14, 2)
+  grandTotal    Decimal  @map("grand_total") @db.Decimal(14, 2)
+  note          String   @default("") @db.Text
+  /// QuotationSnapshot: header + lines + totals + company/contact display fields, as printed.
+  snapshot      Json
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  @@unique([quotationId, revisionNo])
+  @@map("quotation_revisions")
+}
+
+/// Settings → Company details (release 3A): one row, id = 1 (CHECK in the migration SQL), seeded with the issuer.
+model CompanySettings {
+  id           Int      @id @default(1)
+  legalName    String   @map("legal_name") @db.VarChar(200)
+  /// string[], printed one per line under the legal name.
+  addressLines Json     @default("[]") @map("address_lines")
+  email        String   @db.VarChar(255)
+  /// Printed only on INR quotations, and only when set.
+  gstin        String?  @db.VarChar(15)
+  taxInr       Decimal  @default(18) @map("tax_inr") @db.Decimal(5, 2)
+  taxUsd       Decimal  @default(0) @map("tax_usd") @db.Decimal(5, 2)
+  taxCad       Decimal  @default(0) @map("tax_cad") @db.Decimal(5, 2)
+  defaultNotes String   @default("") @map("default_notes") @db.Text
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("company_settings")
 }
 
 /// Release 2C Mailer: a personalised template sent to selected leads, one by one, from the sender's mailbox.
