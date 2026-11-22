@@ -13,7 +13,8 @@ test('a call planned from an empty day shows on the calendar, the lead timeline 
   const title = `Call about the proposal ${Date.now()}`;
   await signInAs(page, ARJUN);
   const me = (await (await page.request.get('/api/me')).json()) as { id: number };
-  const created = await page.request.post('/api/leads', { data: { companyName: company, country: 'India', leadSource: 'Referral', assignedToId: me.id } });
+  // No company row: companies.spec (next in the run) expects Arjun to see only the seeded Northwind company.
+  const created = await page.request.post('/api/leads', { data: { companyName: company, country: 'India', leadSource: 'Referral', assignedToId: me.id, createCompany: false } });
   expect(created.status()).toBe(201);
   const lead = (await created.json()) as { id: number; number: string };
 
