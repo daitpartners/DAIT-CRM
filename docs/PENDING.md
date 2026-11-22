@@ -90,6 +90,36 @@ Kept here at the owner's request; picked up when the owner says so.
   - Pre-existing (not 3A): on the company Leads tab the lead number is dark text, not a purple link as in the
     prototype (the whole row opens the lead).
 
+## Release 3B — Projects (22 Nov 2026) — ready on `release-3b-projects`, not merged, not deployed
+- **Status:** branch `release-3b-projects` (from main `436dc98`), all seven tasks done and checked side by side against
+  the prototype (screenshots and `parity-report.md` in `parity-screenshots-3b-projects/` next to the repo); unit, API,
+  e2e, build, translations and database checks green. One database migration (`20261203100000_projects`). Needs merge
+  + "deploy" from the owner.
+- **What it adds:** the Projects page (tiles, Client / Status filters, Email a project, Create project) and the Create /
+  Edit project dialog; "Projects" in the sidebar after Quotations; the Projects card on the lead page and the company
+  Overview; the company Projects tab ("How projects work"); "Mark Won and create project" in the Won confirmation;
+  Convert to project on an accepted quotation (value = net before GST), which then shows the green "Project PRJ-n"
+  badge; a Project picker in Compose and in the lead page email form (stakeholders copied), the Project filter on the
+  Email screen, and the project tag on sent mail and its replies.
+- **Fixed in the parity check:** the converted quotation showed "PRJ-n · name" as a purple link; it is now the
+  prototype's green "Project PRJ-n" badge (still a link to the client's projects). The Email screen's client filter and
+  the Compose Client picker now mark clients "name · client" as the prototype.
+- **Kept different from the prototype (please confirm):**
+  - Client names: the prototype labels clients with the legal name where one is set ("Orbit Fintech GmbH") in the
+    Projects list, the project dialog, the Email filter and Compose; the app shows the company name everywhere, as on
+    Leads and Quotations. Switching all of them to the legal name is a small change if you prefer it.
+  - The lead page Status is a select (decided earlier); picking Won opens the prototype's "Mark LD-… as Won?"
+    confirmation from its stepper. (The prototype's own Status select on the new lead page marks Won at once, without
+    the confirmation.)
+  - In Edit project the locked Client field looks greyed out (the browser's disabled look); the prototype's field is
+    locked too but keeps normal text.
+- **Found during the check, older than 3B (not changed):**
+  - The lead page's "Coming up" card lists only follow-ups, calls and meetings; the prototype also lists the lead's
+    quotations ("Q-2026-038 · EUR 57,120.00 · Accepted") — release 3A.
+  - On the Email screen the prototype shows a quotation chip (Q-…) on mail about a quotation; the app's mail has no
+    quotation tag — release 2B-2 / 3A.
+- **Owner to do:** nothing new for 3B beyond merge + "deploy"; answer the client-name question above.
+
 ## Release 3C — Calendar (22 Nov 2026) — ready on `release-3c-calendar`, not merged, not deployed
 - **Status:** branch `release-3c-calendar` (from main `63cd73e`), all six tasks done and checked side by side against
   the prototype; unit, API, e2e, build, translations and database checks all green. Two database migrations
