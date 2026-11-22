@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { US_ZONES, inWorkingHours, resolveTimezones } from '../src/timezones';
+import { US_ZONES, inWorkingHours, nextWorkingStart, resolveTimezones } from '../src/timezones';
 
 const SENDER = 'Asia/Kolkata';
 
@@ -66,5 +66,58 @@ describe('working hours: Monday–Friday 09:00–18:00 in every zone', () => {
     expect(inWorkingHours(US_ZONES, new Date('2026-11-25T17:00:00Z'))).toBe(true);
     expect(inWorkingHours(US_ZONES, new Date('2026-11-25T22:59:00Z'))).toBe(true);
     expect(inWorkingHours(US_ZONES, new Date('2026-11-25T23:00:00Z'))).toBe(false);
+  });
+});
+
+describe('next working time', () => {
+  test('Chicago on Saturday: Monday 09:00 Chicago', () => {
+    expect(nextWorkingStart(['America/Chicago'], new Date('2026-11-21T20:00:00Z')).toISOString()).toBe('2026-11-23T15:00:00.000Z');
+  });
+
+  test('inside working hours it is the given time', () => {
+    const from = new Date('2026-11-25T10:07:13Z');
+    expect(nextWorkingStart(['Europe/London'], from).toISOString()).toBe(from.toISOString());
+  });
+
+  test('India on Friday afternoon: Monday 09:00 IST', () => {
+    expect(nextWorkingStart(['Asia/Kolkata'], new Date('2026-11-20T13:00:00Z')).toISOString()).toBe('2026-11-23T03:30:00.000Z');
+  });
+
+  test('all US zones on Saturday: Monday 09:00 Los Angeles, when all are open', () => {
+    expect(nextWorkingStart(US_ZONES, new Date('2026-11-21T20:00:00Z')).toISOString()).toBe('2026-11-23T17:00:00.000Z');
+  });
+
+  test('zones that never share working hours fall back to five minutes later', () => {
+    const from = new Date('2026-11-25T10:00:00Z');
+    expect(nextWorkingStart(['Asia/Kolkata', 'America/Los_Angeles'], from).toISOString()).toBe(new Date(from.getTime() + 5 * 60_000).toISOString());
+  });
+});
+
+describe('every Mexican and Brazilian state', () => {
+  const zone = (country: string, state: string) => resolveTimezones({ country, state }, 'UTC');
+
+  test('Mexico', () => {
+    expect(zone('Mexico', 'Jalisco')).toEqual({ zones: ['America/Mexico_City'], source: 'address' });
+    expect(zone('Mexico', 'Nuevo León')).toEqual({ zones: ['America/Monterrey'], source: 'address' });
+    expect(zone('Mexico', 'Yucatán')).toEqual({ zones: ['America/Merida'], source: 'address' });
+    expect(zone('México', 'Ciudad de México').zones).toEqual(['America/Mexico_City']);
+    expect(zone('Mexico', 'CDMX').zones).toEqual(['America/Mexico_City']);
+    expect(zone('Mexico', 'Estado de México').zones).toEqual(['America/Mexico_City']);
+    expect(zone('Mexico', 'Tamaulipas').zones).toEqual(['America/Monterrey']);
+    expect(zone('Mexico', 'Campeche').zones).toEqual(['America/Merida']);
+    expect(zone('Mexico', 'Baja California').zones).toEqual(['America/Tijuana']);
+  });
+
+  test('Brazil by name or code', () => {
+    expect(zone('Brazil', 'São Paulo')).toEqual({ zones: ['America/Sao_Paulo'], source: 'address' });
+    expect(zone('Brasil', 'SP')).toEqual({ zones: ['America/Sao_Paulo'], source: 'address' });
+    expect(zone('Brazil', 'Bahia')).toEqual({ zones: ['America/Bahia'], source: 'address' });
+    expect(zone('Brazil', 'Pernambuco')).toEqual({ zones: ['America/Recife'], source: 'address' });
+    expect(zone('Brazil', 'Pará')).toEqual({ zones: ['America/Belem'], source: 'address' });
+    expect(zone('Brazil', 'Paraná').zones).toEqual(['America/Sao_Paulo']);
+    expect(zone('Brazil', 'Ceará').zones).toEqual(['America/Fortaleza']);
+    expect(zone('Brazil', 'AL').zones).toEqual(['America/Maceio']);
+    expect(zone('Brazil', 'Tocantins').zones).toEqual(['America/Araguaina']);
+    expect(zone('Brazil', 'Amazonas').zones).toEqual(['America/Manaus']);
   });
 });

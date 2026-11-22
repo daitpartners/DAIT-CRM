@@ -74,6 +74,9 @@ const MX_STATES: Record<string, string> = Object.fromEntries(
     ['America/Hermosillo', 'sonora'],
     ['America/Cancun', 'quintana roo'],
     ['America/Chihuahua', 'chihuahua'],
+    ['America/Monterrey', 'coahuila|durango|nuevo leon|tamaulipas'],
+    ['America/Merida', 'campeche|yucatan'],
+    ['America/Mexico_City', 'aguascalientes|chiapas|ciudad de mexico|cdmx|colima|estado de mexico|mexico|guanajuato|guerrero|hidalgo|jalisco|michoacan|morelos|oaxaca|puebla|queretaro|san luis potosi|tabasco|tlaxcala|veracruz|zacatecas'],
   ] as const).flatMap(([zone, list]) => list.split('|').map((c) => [c, zone])),
 );
 const MX_CITIES: Record<string, string> = {
@@ -88,6 +91,13 @@ const BR_STATES: Record<string, string> = Object.fromEntries(
     ['America/Manaus', 'amazonas|am|roraima|rr|rondonia|ro'],
     ['America/Cuiaba', 'mato grosso|mt|mato grosso do sul|ms'],
     ['America/Rio_Branco', 'acre|ac'],
+    ['America/Sao_Paulo', 'sao paulo|sp|rio de janeiro|rj|minas gerais|mg|espirito santo|es|parana|pr|santa catarina|sc|rio grande do sul|rs|goias|go|distrito federal|df'],
+    ['America/Bahia', 'bahia|ba'],
+    ['America/Recife', 'pernambuco|pe'],
+    ['America/Maceio', 'alagoas|al|sergipe|se'],
+    ['America/Fortaleza', 'ceara|ce|maranhao|ma|piaui|pi|rio grande do norte|rn|paraiba|pb'],
+    ['America/Belem', 'para|pa|amapa|ap'],
+    ['America/Araguaina', 'tocantins|to'],
   ] as const).flatMap(([zone, list]) => list.split('|').map((c) => [c, zone])),
 );
 const AU_STATES: Record<string, string> = Object.fromEntries(
@@ -176,6 +186,22 @@ export function inWorkingHours(zones: string[], at: Date): boolean {
     const hour = Number(parts.find((p) => p.type === 'hour')?.value);
     return weekday !== 'Sat' && weekday !== 'Sun' && hour >= WORK_START_HOUR && hour < WORK_END_HOUR;
   });
+}
+
+const QUARTER_HOUR_MS = 15 * 60_000;
+const SEARCH_MS = 8 * 24 * 3600_000;
+
+/**
+ * The earliest instant at or after `from` that is working time in every one of `zones`, searched in 15-minute steps
+ * for 8 days; zones that never share working hours give `from` plus 5 minutes.
+ */
+export function nextWorkingStart(zones: string[], from: Date): Date {
+  if (inWorkingHours(zones, from)) return from;
+  const end = from.getTime() + SEARCH_MS;
+  for (let t = Math.ceil(from.getTime() / QUARTER_HOUR_MS) * QUARTER_HOUR_MS; t <= end; t += QUARTER_HOUR_MS) {
+    if (inWorkingHours(zones, new Date(t))) return new Date(t);
+  }
+  return new Date(from.getTime() + 5 * 60_000);
 }
 
 /** The country whose main zones these are, when a recipient's zone is "all zones of a country" (for labels). */

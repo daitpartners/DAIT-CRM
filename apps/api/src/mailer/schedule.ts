@@ -13,11 +13,31 @@ function offsetMs(timeZone: string, at: Date): number {
   return Date.UTC(+p.year!, +p.month! - 1, +p.day!, +p.hour!, +p.minute!, +p.second!) - Math.floor(at.getTime() / 1000) * 1000;
 }
 
-/** The instant the current day began in `timeZone`. */
+const DAY_MS = 24 * 3600_000;
+/** `at`'s local calendar day in `timeZone`, as whole days since 1970-01-01. */
+const localDay = (timeZone: string, at: number): number => Math.floor((at + offsetMs(timeZone, new Date(at))) / DAY_MS);
+
+/**
+ * The instant the current day began in `timeZone`: the first instant whose local date is today's, exact on
+ * daylight-saving days (a local midnight that does not exist begins the day at the change; one that happens twice
+ * begins it at whichever is followed only by today's date).
+ */
 export function startOfDayIn(timeZone: string, at = new Date()): Date {
-  const local = new Date(at.getTime() + offsetMs(timeZone, at));
-  const midnightLocal = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate());
-  return new Date(midnightLocal - offsetMs(timeZone, new Date(midnightLocal)));
+  const midnightLocal = localDay(timeZone, at.getTime()) * DAY_MS;
+  let t = midnightLocal - offsetMs(timeZone, at);
+  for (let i = 0; i < 3; i += 1) {
+    const next = midnightLocal - offsetMs(timeZone, new Date(t));
+    if (next === t) break;
+    t = next;
+  }
+  // Midnight fell in a daylight-saving gap: t is still yesterday, short of midnight by the clocks' jump.
+  for (let i = 0; i < 3 && localDay(timeZone, t) * DAY_MS < midnightLocal; i += 1) t += midnightLocal - (t + offsetMs(timeZone, new Date(t)));
+  // Clocks went back just after midnight (Havana, 01:00 → 00:00): today's first midnight was the earlier one.
+  if (localDay(timeZone, t - 1) * DAY_MS === midnightLocal) {
+    const earlier = midnightLocal - offsetMs(timeZone, new Date(t - 1));
+    if (earlier < t && localDay(timeZone, earlier) * DAY_MS === midnightLocal) t = earlier;
+  }
+  return new Date(t);
 }
 
 /** The instant the next day begins in `timeZone`. */
