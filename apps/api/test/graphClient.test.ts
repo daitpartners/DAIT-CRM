@@ -90,6 +90,17 @@ describe('graph client', () => {
     expect(msalState.scopes[0]).toContain('https://graph.microsoft.com/Mail.Send.Shared');
   });
 
+  test('sends attachments as Graph file attachments (release 3A quotation PDF)', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 202 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const acc = await account();
+    await createGraphClient(env).sendMail(acc, { ...msg, attachments: [{ name: 'Q-2026-001-rev1.pdf', contentType: 'application/pdf', contentBase64: 'JVBERi0=' }] });
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string).message.attachments).toEqual([
+      { '@odata.type': '#microsoft.graph.fileAttachment', name: 'Q-2026-001-rev1.pdf', contentType: 'application/pdf', contentBytes: 'JVBERi0=' },
+    ]);
+  });
+
   test('leaves the stored token alone when MSAL does not rotate it', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 202 })));
     msalState.rotated = undefined;

@@ -1,3 +1,6 @@
+import type { MailAttachment } from '../graph/client.js';
+import type { QuotationSnapshot } from '../quotations/service.js';
+
 export type JobType = 'send_email' | 'send_user_email' | 'sync_mailbox' | 'mail_action' | 'campaign_step' | 'sync_calendar';
 
 export const JOB_TYPES: readonly JobType[] = ['send_email', 'send_user_email', 'sync_mailbox', 'mail_action', 'campaign_step', 'sync_calendar'];
@@ -17,6 +20,10 @@ export interface SendEmailPayload {
 /** `send_user_email` (release 2B-1): a message a user sent from the CRM, through their own mailbox. */
 export interface SendUserEmailPayload {
   emailMessageId: number;
+  /** Release 3A: files sent with it (the quotation PDF, drawn when the send was queued). */
+  attachments?: MailAttachment[];
+  /** Release 3A: the quotation it sends and the snapshot printed on the PDF (frozen as the revision when it is sent). */
+  quotation?: { id: number; snapshot: QuotationSnapshot };
 }
 
 /** `sync_mailbox` (release 2B-2): read new mail from a personal mailbox. */

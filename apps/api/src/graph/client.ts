@@ -5,6 +5,13 @@ import { decrypt, encrypt } from '../crypto/tokens.js';
 import { readRefreshToken, type MsEnv } from '../auth/microsoft.js';
 import { nearestUtcMidnight } from '../leads/dates.js';
 
+/** A file sent with a message (Graph fileAttachment, inline in the request: keep the message under 3 MB). */
+export interface MailAttachment {
+  name: string;
+  contentType: string;
+  contentBase64: string;
+}
+
 export interface MailMessage {
   to: string[];
   cc?: string[];
@@ -13,6 +20,8 @@ export interface MailMessage {
   subject: string;
   html: string;
   text: string;
+  /** Release 3A: the quotation PDF. */
+  attachments?: MailAttachment[];
 }
 
 /** Folders mail sync reads (Graph well-known names). */
@@ -323,6 +332,13 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
             toRecipients: recipients(msg.to),
             ccRecipients: recipients(msg.cc),
             ...(msg.bcc?.length ? { bccRecipients: recipients(msg.bcc) } : {}),
+            ...(msg.attachments?.length
+              ? {
+                attachments: msg.attachments.map((a) => ({
+                  '@odata.type': '#microsoft.graph.fileAttachment', name: a.name, contentType: a.contentType, contentBytes: a.contentBase64,
+                })),
+              }
+              : {}),
           },
           saveToSentItems: true,
         },

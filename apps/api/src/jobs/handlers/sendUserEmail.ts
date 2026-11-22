@@ -4,6 +4,7 @@ import { errorMessage } from '../queue.js';
 import { isAuthFailure } from '../../graph/client.js';
 import type { SendUserEmailPayload } from '../types.js';
 import type { JobContext } from '../runner.js';
+import { onQuotationSendFailed, onQuotationSent } from '../../quotations/send.js';
 
 /** Plain text as simple HTML: escaped, line breaks kept. */
 export function textToHtml(text: string): string {
@@ -13,13 +14,14 @@ export function textToHtml(text: string): string {
 
 /**
  * A message that will not be sent: marked `failed`, and its "Email sent" history line removed (it never left; the
- * sender still sees it as Failed in their Emails tab).
+ * sender still sees it as Failed in their Emails tab). A quotation it was sending leaves "Sending…" (release 3A).
  */
 async function failMessage(id: number, lastError: string): Promise<void> {
-  await prisma.$transaction([
-    prisma.emailMessage.update({ where: { id }, data: { status: 'failed', lastError } }),
-    prisma.leadActivity.deleteMany({ where: { relatedType: 'email_message', relatedId: id } }),
-  ]);
+  await prisma.$transaction(async (tx) => {
+    await tx.emailMessage.update({ where: { id }, data: { status: 'failed', lastError } });
+    await tx.leadActivity.deleteMany({ where: { relatedType: 'email_message', relatedId: id } });
+    await onQuotationSendFailed(tx, id);
+  });
 }
 
 /**
@@ -29,7 +31,7 @@ async function failMessage(id: number, lastError: string): Promise<void> {
  * other errors put it back in the queue, and the last attempt fails it.
  */
 export async function sendUserEmailHandler(job: Job, ctx: JobContext): Promise<void> {
-  const { emailMessageId } = job.payload as unknown as SendUserEmailPayload;
+  const { emailMessageId, attachments, quotation } = job.payload as unknown as SendUserEmailPayload;
   const msg = await prisma.emailMessage.findUnique({ where: { id: emailMessageId }, include: { account: true } });
   if (!msg) return;
   if (msg.status === 'sending') return failMessage(msg.id, 'interrupted_may_have_sent');
@@ -56,6 +58,7 @@ export async function sendUserEmailHandler(job: Job, ctx: JobContext): Promise<v
         subject: msg.subject,
         html: textToHtml(msg.bodyText),
         text: msg.bodyText,
+        ...(attachments?.length ? { attachments } : {}),
       });
     }
   } catch (err) {
@@ -75,5 +78,9 @@ export async function sendUserEmailHandler(job: Job, ctx: JobContext): Promise<v
     }
     throw err;
   }
-  await prisma.emailMessage.update({ where: { id: msg.id }, data: { status: 'sent', lastError: null, occurredAt: new Date() } });
+  await prisma.$transaction(async (tx) => {
+    await tx.emailMessage.update({ where: { id: msg.id }, data: { status: 'sent', lastError: null, occurredAt: new Date() } });
+    // Release 3A: the quotation's send effects, only now that Microsoft has accepted the message.
+    if (quotation) await onQuotationSent(tx, msg, quotation.snapshot);
+  });
 }

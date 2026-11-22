@@ -99,7 +99,14 @@ export interface QuotationSnapshot {
   contact: { name: string; email: string | null } | null;
   lines: SnapshotLine[];
   totals: QuoteTotals;
+  /**
+   * The issuer block (Company details) as it stood when the revision was sent; absent on a working copy, whose PDF
+   * uses the current Company details.
+   */
+  issuer?: SnapshotIssuer;
 }
+
+export type SnapshotIssuer = Pick<CompanySettingsValues, 'legalName' | 'addressLines' | 'email' | 'gstin'>;
 
 type LineLike = { qty: Prisma.Decimal | number; unitPrice: Prisma.Decimal | number; discount: Prisma.Decimal | number };
 

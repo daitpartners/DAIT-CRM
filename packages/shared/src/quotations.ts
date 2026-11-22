@@ -1,5 +1,7 @@
 /* Quotations (release 3A): currencies, statuses, defaults, the one totals function and money formatting. */
 
+import { formatDate, type Lang } from './i18n.js';
+
 export const QUOTE_CURRENCIES = ['USD', 'CAD', 'INR'] as const;
 export type QuoteCurrency = (typeof QUOTE_CURRENCIES)[number];
 
@@ -115,3 +117,28 @@ export const COMPANY_SETTINGS_DEFAULTS = {
   legalName: string; addressLines: readonly string[]; email: string; gstin: string | null;
   taxInr: number; taxUsd: number; taxCad: number; defaultNotes: string;
 };
+
+const SEND_BODY: Record<Lang, { dated: string; undated: string }> = {
+  en: {
+    dated: 'Please find attached quotation {number} (revision {revision}), valid until {date}.',
+    undated: 'Please find attached quotation {number} (revision {revision}).',
+  },
+  es: {
+    dated: 'Adjuntamos el presupuesto {number} (revisión {revision}), válido hasta el {date}.',
+    undated: 'Adjuntamos el presupuesto {number} (revisión {revision}).',
+  },
+  fr: {
+    dated: "Veuillez trouver ci-joint le devis {number} (révision {revision}), valable jusqu'au {date}.",
+    undated: 'Veuillez trouver ci-joint le devis {number} (révision {revision}).',
+  },
+};
+
+/**
+ * The default message of "Send by email" (prototype sendQuote), in `lang` (the quotation owner's, like the PDF); the
+ * user may edit it in the send dialog. `validUntil` is YYYY-MM-DD, printed as on the PDF.
+ */
+export function defaultQuotationEmailBody(q: { number: string; revision: number; validUntil: string | null }, lang: Lang): string {
+  const t = SEND_BODY[lang] ?? SEND_BODY.en;
+  const date = q.validUntil ? formatDate(`${q.validUntil}T00:00:00Z`, { locale: lang, timezone: 'UTC', dateFormat: 'DD MMM YYYY' }) : '';
+  return (q.validUntil ? t.dated : t.undated).replace('{number}', q.number).replace('{revision}', String(q.revision)).replace('{date}', date);
+}

@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
-import { QuotationCreate, QuotationDecision, QuotationListQuery, QuotationUpdate, type QuoteTab } from '@dait-crm/shared';
+import { QuotationCreate, QuotationDecision, QuotationListQuery, QuotationSend, QuotationUpdate, type QuoteTab } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { NotFoundError, parseBody, parseQuery } from '../validate.js';
 import { requireRight, requireUser, type AuthUser } from '../plugins/auth.js';
@@ -8,13 +8,14 @@ import { RuleError } from '../leads/service.js';
 import { todayIn } from '../leads/dates.js';
 import { quotationWhere } from '../quotations/visibility.js';
 import { renderQuotationPdf } from '../quotations/pdf.js';
+import { pdfLang, queueQuotationSend } from '../quotations/send.js';
 import {
   createQuotation, decideQuotation, duplicateQuotation, loadCompanySettings, markNegotiating, quotationDetail, quotationInclude,
   quotationListInclude, quotationListItem, quotationSnapshot, sumsByCurrency, updateQuotation, type QuotationSnapshot,
 } from '../quotations/service.js';
 
 /** RuleError codes answered with 409; `forbidden` is a 403; any other rule refusal is a 400. */
-const CONFLICT_CODES = new Set(['locked', 'sending', 'unsent_changes', 'invalid_transition']);
+const CONFLICT_CODES = new Set(['locked', 'sending', 'unsent_changes', 'invalid_transition', 'no_contact_email', 'no_mailbox', 'pdf_too_large']);
 
 async function guard<T>(reply: FastifyReply, fn: () => Promise<T>): Promise<T | FastifyReply> {
   try {
@@ -45,8 +46,6 @@ async function detailOf(id: number, user: AuthUser) {
 }
 
 const idOf = (raw: string) => Number(raw);
-
-const PDF_LANGS = new Set(['en', 'es', 'fr']);
 
 export const quotationRoutes: FastifyPluginAsync = async (app) => {
   /**
@@ -123,8 +122,8 @@ export const quotationRoutes: FastifyPluginAsync = async (app) => {
       if (!r) throw new NotFoundError();
       snap = r.snapshot as unknown as QuotationSnapshot;
     }
-    const lang = PDF_LANGS.has(q.owner.language) ? (q.owner.language as 'en' | 'es' | 'fr') : 'en';
-    const pdf = await renderQuotationPdf(snap, await loadCompanySettings(prisma), lang);
+    // A sent revision prints the issuer frozen in its snapshot; the working copy the current Company details.
+    const pdf = await renderQuotationPdf(snap, await loadCompanySettings(prisma), pdfLang(q.owner.language));
     return reply
       .header('content-type', 'application/pdf')
       .header('content-disposition', `inline; filename="${snap.number}-rev${rev ?? snap.revision}.pdf"`)
@@ -161,6 +160,20 @@ export const quotationRoutes: FastifyPluginAsync = async (app) => {
       });
     });
   }
+
+  /**
+   * Send by email: queues the PDF of the revision being worked on to the quotation's contact from the user's own
+   * mailbox (202 with `sending: true`). The revision, status and lead change only when the send job succeeds.
+   */
+  app.post<{ Params: { id: string } }>('/quotations/:id/send', { preHandler: [requireRight('use_email')] }, async (request, reply) => {
+    const body = parseBody(QuotationSend, request.body ?? {});
+    const user = request.user!;
+    const id = idOf(request.params.id);
+    return guard(reply, async () => {
+      await prisma.$transaction((tx) => queueQuotationSend(tx, user, id, body.body));
+      return reply.code(202).send(await detailOf(id, user));
+    });
+  });
 
   app.post<{ Params: { id: string } }>('/quotations/:id/duplicate', { preHandler: [requireRight('manage_quotes')] }, async (request, reply) => {
     const user = request.user!;

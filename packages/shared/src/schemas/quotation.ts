@@ -88,3 +88,7 @@ export type QuotationListQuery = z.infer<typeof QuotationListQuery>;
  */
 export const QuotationDecision = z.object({ discardUnsent: z.boolean().optional() });
 export type QuotationDecision = z.infer<typeof QuotationDecision>;
+
+/** `POST /quotations/:id/send`: the message the user edited in the send dialog (empty or absent = the default). */
+export const QuotationSend = z.object({ body: z.string().trim().max(20000).optional() });
+export type QuotationSend = z.infer<typeof QuotationSend>;

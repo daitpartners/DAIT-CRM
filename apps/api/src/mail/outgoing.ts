@@ -1,6 +1,8 @@
 import type { EmailAccount, EmailMessage, Lead, Prisma } from '@prisma/client';
 import { isClosedStatus } from '@dait-crm/shared';
 import type { AuthUser } from '../plugins/auth.js';
+import type { MailAttachment } from '../graph/client.js';
+import type { SendUserEmailPayload } from '../jobs/types.js';
 import { enqueue } from '../jobs/queue.js';
 import { audit } from '../audit.js';
 import { dateOnly, todayIn } from '../leads/dates.js';
@@ -27,6 +29,13 @@ export interface Outgoing {
   threadId?: string | null;
   /** "Set follow-up in N days" (prototype): an open lead only. */
   followUpDays?: number | null;
+  /** Files sent with it (release 3A: the quotation PDF), kept on the queued job. */
+  attachments?: MailAttachment[];
+  /**
+   * Release 3A: a quotation sent by email. The message keeps the quotation's own contact and company, and the lead
+   * gets no "Email sent" line or status change now: the quotation writes "Quotation sent" when the send succeeds.
+   */
+  quotation?: SendUserEmailPayload['quotation'];
 }
 
 /**
@@ -36,16 +45,22 @@ export interface Outgoing {
  */
 export async function queueOutgoing(tx: Tx, user: AuthUser, account: EmailAccount, o: Outgoing): Promise<EmailMessage> {
   const lead = o.lead;
+  const links = lead && !o.quotation
+    ? { contactId: lead.contactId, companyId: lead.companyId }
+    : { contactId: o.contactId ?? null, companyId: o.companyId ?? null };
   const msg = await tx.emailMessage.create({
     data: {
-      userId: user.id, accountId: account.id, leadId: lead?.id ?? null,
-      contactId: lead ? lead.contactId : (o.contactId ?? null), companyId: lead ? lead.companyId : (o.companyId ?? null),
+      userId: user.id, accountId: account.id, leadId: lead?.id ?? null, ...links,
       folder: 'sent', status: 'queued', source: 'crm', fromAddress: account.address, toAddresses: o.to, ccAddresses: o.cc,
       subject: o.subject, bodyText: o.body, replyToId: o.replyToId ?? null, threadId: o.threadId ?? null,
+      attachmentNames: (o.attachments ?? []).map((a) => a.name),
     },
   });
-  await enqueue(tx, 'send_user_email', { emailMessageId: msg.id }, { maxAttempts: SEND_ATTEMPTS });
-  if (lead) await recordOnLead(tx, user, lead, msg, o.subject, o.followUpDays);
+  const payload: SendUserEmailPayload = {
+    emailMessageId: msg.id, ...(o.attachments?.length ? { attachments: o.attachments } : {}), ...(o.quotation ? { quotation: o.quotation } : {}),
+  };
+  await enqueue(tx, 'send_user_email', payload, { maxAttempts: SEND_ATTEMPTS });
+  if (lead && !o.quotation) await recordOnLead(tx, user, lead, msg, o.subject, o.followUpDays);
   return msg;
 }
 

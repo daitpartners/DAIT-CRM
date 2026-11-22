@@ -81,6 +81,17 @@ describe('renderQuotationPdf', () => {
     expect(pdfText(await render(snapshot(), settings({ gstin: null })))).not.toContain('GSTIN');
   });
 
+  it('a sent revision prints the issuer frozen in its snapshot, not the current Company details', async () => {
+    const frozen = { legalName: 'DAIT Partners LLP', addressLines: ['Old address 1'], email: 'old@daitpartners.com', gstin: '07AAAFD1234A1Z5' };
+    const text = pdfText(await render(snapshot({ issuer: frozen }), settings({ legalName: 'Renamed LLP', addressLines: ['New address'], email: 'new@x.test', gstin: null })));
+    expect(text).toContain('DAIT Partners LLP');
+    expect(text).toContain('Old address 1');
+    expect(text).toContain('old@daitpartners.com');
+    expect(text).toContain('GSTIN 07AAAFD1234A1Z5');
+    expect(text).not.toContain('Renamed LLP');
+    expect(text).not.toContain('New address');
+  });
+
   it('uses Spanish labels for a Spanish owner, user text as typed', async () => {
     const text = pdfText(await render(snapshot(), settings(), 'es'));
     expect(text).toContain('Presupuesto Q-2026-007');

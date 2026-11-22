@@ -75,10 +75,15 @@ function printable(s: string): string {
 
 const num = (n: number) => String(Number(n.toFixed(4)));
 
+/**
+ * The PDF for `snap`. The issuer block comes from the snapshot when it carries one (a sent revision, frozen at send
+ * time so its PDF never changes), else from the current Company details `settings` (working copy).
+ */
 export async function renderQuotationPdf(
   snap: QuotationSnapshot, settings: CompanySettingsValues, lang: Lang,
   opts: { compress?: boolean } = {},
 ): Promise<Buffer> {
+  const from = snap.issuer ?? settings;
   const L = (phrase: string, vars?: Record<string, string | number>) => t(lang === 'en' ? {} : LABELS[lang], phrase, vars);
   const date = (ymdDate: string | null) => (ymdDate ? formatDate(`${ymdDate}T00:00:00Z`, { locale: lang, timezone: 'UTC', dateFormat: 'DD MMM YYYY' }) : '—');
   const money = (amount: number) => formatMoney(amount, snap.currency);
@@ -88,7 +93,7 @@ export async function renderQuotationPdf(
     margins: { top: 48, left: 48, right: 48, bottom: 64 },
     bufferPages: true,
     compress: opts.compress ?? true,
-    info: { Title: L('Quotation {number}', { number: snap.number }), Author: printable(settings.legalName) },
+    info: { Title: L('Quotation {number}', { number: snap.number }), Author: printable(from.legalName) },
   });
   const chunks: Buffer[] = [];
   doc.on('data', (c: Buffer) => chunks.push(c));
@@ -107,12 +112,12 @@ export async function renderQuotationPdf(
   const logoH = 48;
   if (existsSync(LOGO)) doc.image(LOGO, left, top, { height: logoH });
   const issuer = [
-    ...settings.addressLines.filter((l) => l.trim()),
-    settings.email,
-    ...(snap.currency === 'INR' && settings.gstin ? [`GSTIN ${settings.gstin}`] : []),
+    ...from.addressLines.filter((l) => l.trim()),
+    from.email,
+    ...(snap.currency === 'INR' && from.gstin ? [`GSTIN ${from.gstin}`] : []),
   ].map(printable);
   const issuerW = 220;
-  doc.font(BOLD).fontSize(10).fillColor(INK).text(printable(settings.legalName), right - issuerW, top, { width: issuerW, align: 'right' });
+  doc.font(BOLD).fontSize(10).fillColor(INK).text(printable(from.legalName), right - issuerW, top, { width: issuerW, align: 'right' });
   doc.font(REGULAR).fontSize(9).fillColor(MUTED);
   for (const l of issuer) doc.text(l, right - issuerW, doc.y + 1, { width: issuerW, align: 'right' });
   let y = Math.max(top + logoH, doc.y) + 18;

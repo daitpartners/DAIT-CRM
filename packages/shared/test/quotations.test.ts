@@ -1,6 +1,6 @@
 import {
   QUOTE_CURRENCIES, QUOTE_STATUSES, QUOTE_LOCKED, defaultCurrency, defaultTaxRate, quoteTotals, formatMoney, isQuoteLocked,
-  COMPANY_SETTINGS_DEFAULTS,
+  COMPANY_SETTINGS_DEFAULTS, defaultQuotationEmailBody,
 } from '../src/quotations';
 import { CompanySettingsUpdate, QuotationCreate, QuotationUpdate } from '../src/schemas/quotation';
 
@@ -165,5 +165,15 @@ describe('quotation schemas', () => {
     expect(CompanySettingsUpdate.safeParse({ ...s, email: 'nope' }).success).toBe(false);
     expect(CompanySettingsUpdate.safeParse({ ...s, taxInr: 120 }).success).toBe(false);
     expect(CompanySettingsUpdate.safeParse({ ...s, gstin: '07AAAAA0000A1Z5' }).success).toBe(true);
+  });
+});
+
+describe('defaultQuotationEmailBody', () => {
+  it('names the quotation, revision and validity in the owner\'s language', () => {
+    const q = { number: 'Q-2026-007', revision: 2, validUntil: '2026-12-22' };
+    expect(defaultQuotationEmailBody(q, 'en')).toBe('Please find attached quotation Q-2026-007 (revision 2), valid until 22 Dec 2026.');
+    expect(defaultQuotationEmailBody(q, 'es')).toMatch(/^Adjuntamos el presupuesto Q-2026-007 \(revisión 2\), válido hasta el 22 /);
+    expect(defaultQuotationEmailBody(q, 'fr')).toMatch(/^Veuillez trouver ci-joint le devis Q-2026-007 \(révision 2\), valable jusqu'au 22 /);
+    expect(defaultQuotationEmailBody({ ...q, validUntil: null }, 'en')).toBe('Please find attached quotation Q-2026-007 (revision 2).');
   });
 });
