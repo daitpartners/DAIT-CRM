@@ -59,6 +59,8 @@ export function CalendarPage() {
     return m;
   }, [cal.data]);
   const overdue = cal.data?.overdue ?? [];
+  // Until the first answer arrives the counts are unknown: say nothing rather than "0 open items" / "Nothing overdue.".
+  const loading = !cal.data && !cal.error;
 
   const [adding, setAdding] = useState<string | null>(null);
   const [info, setInfo] = useState<CalendarItem | null>(null);
@@ -136,7 +138,7 @@ export function CalendarPage() {
             <span>{[x.company, shortDay(x.date, names) + (x.time ? `, ${x.time}` : '')].filter(Boolean).join(', ')}</span>
           </Link>
         ))
-      ) : (
+      ) : loading ? null : (
         <div className="con">{t('Nothing overdue.')}</div>
       )}
     </div>
@@ -275,7 +277,7 @@ export function CalendarPage() {
               {errorText(t, cal.error instanceof ApiError ? cal.error.code : 'unknown')}
             </div>
           ) : (
-            <div className="csum">{summary()}</div>
+            <div className="csum">{loading ? '\u00a0' : summary()}</div>
           )}
           {body}
           <div className="cleg">

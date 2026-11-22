@@ -171,6 +171,8 @@ describe('Calendar page', () => {
     // Closed leads are not offered.
     expect(await within(dialog).findByRole('option', { name: 'LD-1005 · Meridian Textiles · Tom Hale' })).toBeTruthy();
     expect(within(dialog).queryByRole('option', { name: /Closed Co/ })).toBeNull();
+    // The server filters too, so the first page is all open leads.
+    expect(calls.some((c) => c.url.startsWith('/api/leads?') && new URLSearchParams(c.url.split('?')[1]).get('open') === '1')).toBe(true);
     await u.click(within(dialog).getByRole('option', { name: 'LD-1005 · Meridian Textiles · Tom Hale' }));
     await u.click(go);
     expect(await screen.findByText('Say what needs doing')).toBeTruthy();
@@ -216,6 +218,21 @@ describe('Calendar page', () => {
     expect(within(dialog).getByText('internal')).toBeTruthy();
     await u.click(within(dialog).getByRole('button', { name: 'Close' }));
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('says nothing about counts until the calendar has loaded', async () => {
+    let answer: (r: Response) => void = () => undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/calendar')) return new Promise<Response>((res) => { answer = res; });
+      if (url === '/api/me') return Response.json(rep);
+      return Response.json({});
+    }));
+    renderPage('/calendar?d=2026-11-15');
+    expect(screen.queryByText(/open items? in this month/)).toBeNull();
+    expect(screen.queryByText('Nothing overdue.')).toBeNull();
+    answer(Response.json({ items: [], overdue: [], outlook: { syncOn: false } }));
+    expect(await screen.findByText(/^0 open items in this month\./)).toBeTruthy();
+    expect(screen.getByText('Nothing overdue.')).toBeTruthy();
   });
 
   it('is in Spanish for a Spanish user', async () => {
