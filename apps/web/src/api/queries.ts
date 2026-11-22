@@ -122,6 +122,8 @@ export const keys = {
   quotationsAll: ['quotations'] as const,
   quotations: (query: QuotationListQuery) => ['quotations', 'list', query] as const,
   quotation: (id: number) => ['quotations', 'detail', id] as const,
+  /** Settings → Company details (the issuer and the defaults for new quotations). */
+  companySettings: ['settings', 'company'] as const,
   /** Prefix of every notification query. */
   notificationsAll: ['notifications'] as const,
   notifications: (page: number) => ['notifications', 'list', page] as const,

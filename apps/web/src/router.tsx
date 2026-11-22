@@ -19,6 +19,7 @@ import { ReportsPage } from './pages/reports/ReportsPage';
 import { SignIn } from './pages/SignIn';
 import { TasksList } from './pages/tasks/TasksList';
 import { AllocationRules } from './pages/settings/AllocationRules';
+import { CompanyDetails } from './pages/settings/CompanyDetails';
 import { Connections } from './pages/settings/Connections';
 import { EmailTemplates } from './pages/settings/Templates';
 import { Lookups } from './pages/settings/Lookups';
@@ -65,6 +66,7 @@ export const router = createBrowserRouter([
           { path: 'lookups', element: <Lookups /> },
           { path: 'allocation', element: <AllocationRules /> },
           { path: 'users', element: <Users /> },
+          { path: 'company', element: <CompanyDetails /> },
           { path: 'mailbox', element: <MailboxRedirect /> },
         ],
       },

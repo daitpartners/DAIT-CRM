@@ -6,7 +6,8 @@ import { useT } from '../../i18n/useT';
 /**
  * Settings (prototype app.js settings() + views-settings.js), one tab per prototype card in the prototype's order:
  * Preferences, Email & calendar connections, Email templates (everyone), then Dropdown configuration, Lead allocation
- * rules and Users, each shown only with view_admin_settings and the right the page needs (as in 1A).
+ * rules, Users and Company details (release 3A), each shown only with view_admin_settings and the right the page needs
+ * (as in 1A).
  */
 export function SettingsLayout() {
   const t = useT();
@@ -20,6 +21,7 @@ export function SettingsLayout() {
     { to: '/settings/lookups', label: t('Dropdown configuration'), show: admin && me.can('manage_lookups') },
     { to: '/settings/allocation', label: t('Lead allocation rules'), show: admin },
     { to: '/settings/users', label: t('Users'), show: admin && me.can('manage_users') },
+    { to: '/settings/company', label: t('Company details'), show: admin && me.can('manage_users') },
   ].filter((l) => l.show);
 
   return (

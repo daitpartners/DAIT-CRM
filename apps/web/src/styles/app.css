@@ -752,3 +752,22 @@ a.strong{font-weight:600}
 .q-num{font-weight:600}
 .q-exp{color:var(--bad-fg);font-weight:600}
 .q-act{font-size:12.5px;font-weight:600}.q-convert{color:var(--orange)}
+/* Quotation editor (prototype V.quoteEditor; its inline styles as classes) */
+.cell{height:34px;padding:0 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);font-size:13px;color:var(--text)}
+.totals{display:grid;grid-template-columns:1fr auto;gap:8px 16px;font-size:13px;align-content:start}
+.totals .big{font-weight:800;font-size:15px;border-top:1px solid var(--line);padding-top:8px}
+.q-m{color:var(--muted)}
+.q-hint{font-size:12.5px;color:var(--muted)}
+.q-foot{display:flex;flex-wrap:wrap;gap:20px;padding:16px 20px;border-top:1px solid var(--line)}
+.q-notes{flex:1 1 320px;min-width:0}
+.cell.q-pct{width:60px;height:28px;margin-left:6px}
+.q-steps{display:flex;flex-direction:column;gap:10px}
+.step .d.q-bad{background:var(--bad-fg)}
+.q-btns{display:flex;gap:8px;flex-wrap:wrap}
+.q-revs{font-size:13px;display:flex;flex-direction:column;gap:10px}
+.q-rev{padding:10px 12px;border:1px solid var(--line);border-radius:8px}.q-rev.on{border-color:#822CDB;background:var(--tint)}
+.q-rev .m{color:var(--body);font-size:12.5px;margin-top:2px}
+.q-small{font-size:12px;color:var(--muted)}
+.q-hist{font-size:12.5px;color:var(--body);display:flex;flex-direction:column;gap:6px}
+.q-accept{font-size:13px;color:var(--body);line-height:1.5}
+.q-pdf{width:100%;height:70vh;border:1px solid var(--line);border-radius:8px;background:var(--surface)}

@@ -311,6 +311,18 @@ export function errorText(t: TFn, code: string, vars: Record<string, string | nu
       return t('Enter a time for a call or meeting');
     case 'follow_up_kind':
       return t('The follow-up from the lead stays a follow-up');
+    case 'locked':
+      return t('This quotation is closed and can no longer be changed');
+    case 'sending':
+      return t('This quotation is being sent. Try again when it has gone.');
+    case 'unsent_changes':
+      return t('This quotation has unsent changes. Reload and try again.');
+    case 'no_contact_email':
+      return t('Choose a contact with an email address before sending');
+    case 'pdf_too_large':
+      return t('The PDF is too large to email. Shorten the quotation and try again.');
+    case 'invalid_transition':
+      return t('That status change is not available');
     default:
       return t('Something went wrong. Please try again.');
   }

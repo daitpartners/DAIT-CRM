@@ -9,7 +9,7 @@ test('settings: prototype cards as tabs, in prototype order', async ({ page }) =
   await expect(page.locator('.topbar .sub')).toHaveText('Configuration the CRM reads at runtime; nothing here is hard-coded in forms');
   const nav = page.getByRole('navigation', { name: 'Settings sections' });
   expect(await nav.getByRole('link').allTextContents()).toEqual([
-    'Preferences', 'Email & calendar connections', 'Email templates', 'Dropdown configuration', 'Lead allocation rules', 'Users',
+    'Preferences', 'Email & calendar connections', 'Email templates', 'Dropdown configuration', 'Lead allocation rules', 'Users', 'Company details',
   ]);
 
   // Preferences: Language, Date format, Time zone (prototype order).
