@@ -7,9 +7,10 @@ import { StaleError, isNotFound } from '../prismaErrors.js';
 import { RuleError } from '../leads/service.js';
 import { todayIn } from '../leads/dates.js';
 import { quotationWhere } from '../quotations/visibility.js';
+import { renderQuotationPdf } from '../quotations/pdf.js';
 import {
-  createQuotation, decideQuotation, duplicateQuotation, markNegotiating, quotationDetail, quotationInclude, quotationListInclude,
-  quotationListItem, sumsByCurrency, updateQuotation,
+  createQuotation, decideQuotation, duplicateQuotation, loadCompanySettings, markNegotiating, quotationDetail, quotationInclude,
+  quotationListInclude, quotationListItem, quotationSnapshot, sumsByCurrency, updateQuotation, type QuotationSnapshot,
 } from '../quotations/service.js';
 
 /** RuleError codes answered with 409; `forbidden` is a 403; any other rule refusal is a 400. */
@@ -44,6 +45,8 @@ async function detailOf(id: number, user: AuthUser) {
 }
 
 const idOf = (raw: string) => Number(raw);
+
+const PDF_LANGS = new Set(['en', 'es', 'fr']);
 
 export const quotationRoutes: FastifyPluginAsync = async (app) => {
   /**
@@ -96,6 +99,36 @@ export const quotationRoutes: FastifyPluginAsync = async (app) => {
     const id = idOf(request.params.id);
     if (!Number.isInteger(id)) throw new NotFoundError();
     return detailOf(id, request.user!);
+  });
+
+  /**
+   * The quotation as a PDF, in its owner's language: the working copy (Draft, or revision n+1 being edited), or sent
+   * revision `rev` drawn from its frozen snapshot. 404 when the quotation is hidden or the revision does not exist.
+   */
+  app.get<{ Params: { id: string }; Querystring: { rev?: string } }>('/quotations/:id/pdf', { preHandler: [requireUser] }, async (request, reply) => {
+    const id = idOf(request.params.id);
+    const rawRev = request.query.rev;
+    const rev = rawRev === undefined ? null : Number(rawRev);
+    if (!Number.isInteger(id) || (rev !== null && !Number.isInteger(rev))) throw new NotFoundError();
+    const q = await prisma.quotation.findFirst({
+      where: { AND: [{ id }, quotationWhere(request.user!)] },
+      select: { id: true, owner: { select: { language: true } } },
+    });
+    if (!q) throw new NotFoundError();
+    let snap: QuotationSnapshot;
+    if (rev === null) {
+      snap = await quotationSnapshot(prisma, q.id);
+    } else {
+      const r = await prisma.quotationRevision.findUnique({ where: { quotationId_revisionNo: { quotationId: q.id, revisionNo: rev } } });
+      if (!r) throw new NotFoundError();
+      snap = r.snapshot as unknown as QuotationSnapshot;
+    }
+    const lang = PDF_LANGS.has(q.owner.language) ? (q.owner.language as 'en' | 'es' | 'fr') : 'en';
+    const pdf = await renderQuotationPdf(snap, await loadCompanySettings(prisma), lang);
+    return reply
+      .header('content-type', 'application/pdf')
+      .header('content-disposition', `inline; filename="${snap.number}-rev${rev ?? snap.revision}.pdf"`)
+      .send(pdf);
   });
 
   app.patch<{ Params: { id: string } }>('/quotations/:id', { preHandler: [requireUser] }, async (request, reply) => {
