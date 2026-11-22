@@ -13,6 +13,12 @@ export type ClosedStatus = (typeof CLOSED_STATUSES)[number];
 export const TASK_ORIGINS = ['follow_up', 'new_assignment', 'transfer', 'manual', 'quotation'] as const;
 export type TaskOrigin = (typeof TASK_ORIGINS)[number];
 
+/** A task is a follow-up (default), or a call or meeting, which always has a time of day. */
+export const TASK_KINDS = ['followup', 'call', 'meeting'] as const;
+export type TaskKind = (typeof TASK_KINDS)[number];
+/** Minutes a call or meeting lasts (set when the type is chosen). */
+export const TASK_DURATION: Record<'call' | 'meeting', number> = { call: 30, meeting: 60 };
+
 export const ACTIVITY_TYPES = [
   'call', 'email', 'meeting', 'note', 'research', 'status', 'assign', 'transfer', 'ai', 'created', 'quote',
 ] as const;

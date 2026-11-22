@@ -326,3 +326,87 @@ describe('task edit permission', () => {
   });
 });
 
+
+describe('timed tasks (calls and meetings)', () => {
+  const setup = async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const assignee = await prisma.user.update({ where: { id: rep.user.id }, data: { name: 'Neha Kapoor' } });
+    const lead = await makeLead({ assignedToId: rep.user.id });
+    return { rep, assignee, lead };
+  };
+  const create = (cookie: string, body: object) => req('POST', '/api/tasks', cookie, body);
+  const activities = (leadId: number) =>
+    prisma.leadActivity.findMany({ where: { leadId }, orderBy: { id: 'asc' }, select: { activityType: true, title: true, body: true, byUserId: true } });
+
+  it('existing rows read as untimed follow-ups', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    await task(rep.user.id, todayIn('UTC'));
+    const [row] = (await req('GET', '/api/tasks?tab=today', rep.cookie)).json().items;
+    expect(row).toMatchObject({ kind: 'followup', dueTime: null, durationMinutes: null });
+  });
+
+  it('a call or meeting needs a time; a meeting lasts 60 minutes', async () => {
+    const { rep, lead } = await setup();
+    const base = { leadId: lead.id, title: 'Intro', dueDate: '2026-11-23', assignedToId: rep.user.id };
+    expect((await create(rep.cookie, { ...base, kind: 'call' })).statusCode).toBe(400);
+    expect(await prisma.task.count()).toBe(0);
+
+    const meeting = await create(rep.cookie, { ...base, kind: 'meeting', dueTime: '10:00' });
+    expect(meeting.statusCode).toBe(201);
+    expect(meeting.json()).toMatchObject({ kind: 'meeting', dueTime: '10:00', durationMinutes: 60, origin: 'manual' });
+    const call = await create(rep.cookie, { ...base, kind: 'call', dueTime: '09:15' });
+    expect(call.json()).toMatchObject({ kind: 'call', dueTime: '09:15', durationMinutes: 30 });
+    const timedFollowUp = await create(rep.cookie, { ...base, dueTime: '08:00' });
+    expect(timedFollowUp.json()).toMatchObject({ kind: 'followup', dueTime: '08:00', durationMinutes: null });
+    // Without `timeline` (the existing Add task dialogs) no lead activity is written.
+    expect(await activities(lead.id)).toEqual([]);
+  });
+
+  it('planned from the calendar, the lead timeline gets an entry', async () => {
+    const { rep, lead } = await setup();
+    const base = { leadId: lead.id, dueDate: '2026-11-23', assignedToId: rep.user.id, timeline: true };
+    expect((await create(rep.cookie, { ...base, title: 'Pricing call', kind: 'call', dueTime: '23:30' })).statusCode).toBe(201);
+    expect((await create(rep.cookie, { ...base, title: 'Demo', kind: 'meeting', dueTime: '10:00' })).statusCode).toBe(201);
+    expect((await create(rep.cookie, { ...base, title: 'Send deck' })).statusCode).toBe(201);
+    expect((await create(rep.cookie, { ...base, title: 'Chase reply', dueTime: '16:45' })).statusCode).toBe(201);
+    expect(await activities(lead.id)).toEqual([
+      // The end is capped at 23:59, never past midnight.
+      { activityType: 'meeting', title: 'Call scheduled · Pricing call', body: '2026-11-23 23:30–23:59 · Phone', byUserId: rep.user.id },
+      { activityType: 'meeting', title: 'Meeting scheduled · Demo', body: '2026-11-23 10:00–11:00 · Microsoft Teams', byUserId: rep.user.id },
+      { activityType: 'note', title: 'Follow-up planned · Send deck', body: '2026-11-23 · Neha Kapoor', byUserId: rep.user.id },
+      { activityType: 'note', title: 'Follow-up planned · Chase reply', body: '2026-11-23 16:45 · Neha Kapoor', byUserId: rep.user.id },
+    ]);
+    // A personal task (no lead) has no timeline.
+    expect((await create(rep.cookie, { title: 'Expenses', dueDate: '2026-11-23', assignedToId: rep.user.id, timeline: true })).statusCode).toBe(201);
+    expect(await prisma.leadActivity.count()).toBe(4);
+  });
+
+  it('editing the type keeps a time and sets the duration', async () => {
+    const { rep, lead } = await setup();
+    const t = await task(rep.user.id, '2026-11-23', { leadId: lead.id });
+    const noTime = await req('PATCH', `/api/tasks/${t.id}`, rep.cookie, { kind: 'call', updatedAt: stamp(t) });
+    expect(noTime.statusCode).toBe(400);
+    expect(noTime.json()).toEqual({ error: 'time_required' });
+
+    const call = await req('PATCH', `/api/tasks/${t.id}`, rep.cookie, { kind: 'call', dueTime: '11:00', updatedAt: stamp(t) });
+    expect(call.statusCode).toBe(200);
+    expect(call.json()).toMatchObject({ kind: 'call', dueTime: '11:00', durationMinutes: 30 });
+    // Clearing the time of a call is refused (merged result).
+    const cleared = await req('PATCH', `/api/tasks/${t.id}`, rep.cookie, { dueTime: null, updatedAt: call.json().updatedAt });
+    expect(cleared.json()).toEqual({ error: 'time_required' });
+
+    const meeting = await req('PATCH', `/api/tasks/${t.id}`, rep.cookie, { kind: 'meeting', updatedAt: call.json().updatedAt });
+    expect(meeting.json()).toMatchObject({ kind: 'meeting', dueTime: '11:00', durationMinutes: 60 });
+    const back = await req('PATCH', `/api/tasks/${t.id}`, rep.cookie, { kind: 'followup', updatedAt: meeting.json().updatedAt });
+    expect(back.json()).toMatchObject({ kind: 'followup', dueTime: '11:00', durationMinutes: null });
+    const untimed = await req('PATCH', `/api/tasks/${t.id}`, rep.cookie, { dueTime: null, updatedAt: back.json().updatedAt });
+    expect(untimed.json()).toMatchObject({ kind: 'followup', dueTime: null });
+
+    // Snooze moves the date and keeps the time; editing writes no timeline entry.
+    const timed = await req('PATCH', `/api/tasks/${t.id}`, rep.cookie, { kind: 'call', dueTime: '09:00', updatedAt: untimed.json().updatedAt });
+    const snoozed = await req('POST', `/api/tasks/${t.id}/snooze`, rep.cookie, { updatedAt: timed.json().updatedAt });
+    expect(snoozed.statusCode).toBe(200);
+    expect(snoozed.json()).toMatchObject({ kind: 'call', dueTime: '09:00', durationMinutes: 30, dueDate: shift(todayIn('UTC'), 1) });
+    expect(await activities(lead.id)).toEqual([]);
+  });
+});

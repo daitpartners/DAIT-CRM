@@ -2,7 +2,7 @@ import {
   LeadBulk, LeadCreate, LeadListQuery, LeadStatusChange, LeadTransfer, LeadUnassign, LeadUpdate, LogCall, MeetingNote, SwitchContact,
 } from '../src/schemas/lead';
 import { TaskCreate, TaskListQuery, TaskUpdate } from '../src/schemas/task';
-import { CLOSED_STATUSES, isClosedStatus, LEAD_TYPES, PRIORITIES, TASK_ORIGINS, ACTIVITY_TYPES } from '../src/leads';
+import { CLOSED_STATUSES, isClosedStatus, LEAD_TYPES, PRIORITIES, TASK_ORIGINS, ACTIVITY_TYPES, TASK_KINDS, TASK_DURATION } from '../src/leads';
 
 const base = { companyName: 'Acme', country: 'United Kingdom', leadSource: 'Website' };
 const updatedAt = '2026-11-21T10:00:00.000Z';
@@ -172,5 +172,27 @@ describe('tasks', () => {
   test('TaskUpdate requires updatedAt', () => {
     expect(TaskUpdate.safeParse({ isDone: true }).success).toBe(false);
     expect(TaskUpdate.safeParse({ isDone: true, updatedAt }).success).toBe(true);
+  });
+  test('TaskCreate kind defaults to followup; calls and meetings need a time', () => {
+    const base = { title: 'Call back', dueDate: '2026-11-23', assignedToId: 1 };
+    expect(TaskCreate.parse(base).kind).toBe('followup');
+    expect(TaskCreate.parse({ ...base, dueTime: '09:30' })).toMatchObject({ kind: 'followup', dueTime: '09:30' });
+    expect(TaskCreate.safeParse({ ...base, kind: 'call' }).success).toBe(false);
+    expect(TaskCreate.safeParse({ ...base, kind: 'meeting' }).success).toBe(false);
+    expect(TaskCreate.parse({ ...base, kind: 'meeting', dueTime: '10:00', timeline: true })).toMatchObject({ kind: 'meeting', dueTime: '10:00', timeline: true });
+    expect(TaskCreate.safeParse({ ...base, kind: 'visit', dueTime: '10:00' }).success).toBe(false);
+    for (const bad of ['24:00', '9:30', '12:60', '12:3', '']) expect(TaskCreate.safeParse({ ...base, dueTime: bad }).success).toBe(false);
+    expect(TaskCreate.safeParse({ ...base, dueTime: '23:59' }).success).toBe(true);
+  });
+  test('TaskUpdate accepts kind and a nullable time', () => {
+    expect(TaskUpdate.parse({ kind: 'call', dueTime: '08:00', updatedAt })).toMatchObject({ kind: 'call', dueTime: '08:00' });
+    expect(TaskUpdate.parse({ dueTime: null, updatedAt }).dueTime).toBeNull();
+    expect(TaskUpdate.parse({ updatedAt }).kind).toBeUndefined();
+    expect(TaskUpdate.safeParse({ dueTime: '25:00', updatedAt }).success).toBe(false);
+    expect(TaskUpdate.safeParse({ kind: 'visit', updatedAt }).success).toBe(false);
+  });
+  test('TASK_KINDS and durations', () => {
+    expect(TASK_KINDS).toEqual(['followup', 'call', 'meeting']);
+    expect(TASK_DURATION).toEqual({ call: 30, meeting: 60 });
   });
 });

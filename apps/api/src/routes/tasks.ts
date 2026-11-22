@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { Lead, Prisma, Task } from '@prisma/client';
-import { TaskCreate, TaskListQuery, TaskUpdate, UpdatedAtOnly, can, isClosedStatus, pageArgs, type TaskListQuery as Query } from '@dait-crm/shared';
+import type { Lead, Prisma, Task, User } from '@prisma/client';
+import { TASK_DURATION, TaskCreate, TaskListQuery, TaskUpdate, UpdatedAtOnly, can, isClosedStatus, pageArgs, type TaskListQuery as Query } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { audit } from '../audit.js';
 import { NotFoundError, parseBody, parseQuery } from '../validate.js';
@@ -90,6 +90,33 @@ async function mirrorFollowUp(tx: Tx, user: AuthUser, lead: Lead, next: Date | n
   });
 }
 
+/** Minutes a task of this kind lasts: calls and meetings have a fixed length, follow-ups none. */
+const durationOf = (kind: string): number | null => (kind === 'call' || kind === 'meeting' ? TASK_DURATION[kind] : null);
+
+/** `HH:MM` plus `minutes`, capped at 23:59 (an entry never runs past midnight). */
+function endTime(start: string, minutes: number): string {
+  const [h, m] = start.split(':').map(Number) as [number, number];
+  const end = Math.min(h * 60 + m + minutes, 23 * 60 + 59);
+  return `${String(Math.floor(end / 60)).padStart(2, '0')}:${String(end % 60).padStart(2, '0')}`;
+}
+
+/**
+ * The lead timeline entry for a task planned from the Calendar (as the prototype's createFollowUp /
+ * createEvent): a follow-up is a note with date, optional time and assignee; a call or meeting is a
+ * meeting entry with date, start–end and where.
+ */
+async function plannedActivity(tx: Tx, user: AuthUser, task: Task, assignee: Pick<User, 'name'>): Promise<void> {
+  const date = ymd(task.dueDate)!;
+  const data = task.kind === 'followup'
+    ? { activityType: 'note', title: `Follow-up planned · ${task.title}`, body: `${date}${task.dueTime ? ` ${task.dueTime}` : ''} · ${assignee.name}` }
+    : {
+      activityType: 'meeting',
+      title: `${task.kind === 'call' ? 'Call' : 'Meeting'} scheduled · ${task.title}`,
+      body: `${date} ${task.dueTime}–${endTime(task.dueTime!, task.durationMinutes!)} · ${task.kind === 'call' ? 'Phone' : 'Microsoft Teams'}`,
+    };
+  await tx.leadActivity.create({ data: { leadId: task.leadId!, ...data, byUserId: user.id } });
+}
+
 async function rowOf(id: number, user: AuthUser) {
   const row = await prisma.task.findUniqueOrThrow({ where: { id }, include: taskInclude });
   return taskRow(row, todayIn(user.timezone));
@@ -145,9 +172,14 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
         const leadId = body.leadId ?? null;
         if (leadId !== null) await assertLeadVisible(tx, user, leadId);
         await assertTaskAssignee(tx, body.assignedToId, leadId);
-        const task = await tx.task.create({
-          data: { leadId, title: body.title, dueDate: dateOnly(body.dueDate), assignedToId: body.assignedToId, origin: 'manual' },
+        const { assignedTo, ...task } = await tx.task.create({
+          data: {
+            leadId, title: body.title, dueDate: dateOnly(body.dueDate), assignedToId: body.assignedToId, origin: 'manual',
+            kind: body.kind, dueTime: body.dueTime ?? null, durationMinutes: durationOf(body.kind),
+          },
+          include: { assignedTo: { select: { name: true } } },
         });
+        if (body.timeline && leadId !== null) await plannedActivity(tx, user, task, assignedTo);
         if (task.assignedToId !== user.id) await notifyAssignee(tx, task);
         await audit(tx, { entityType: 'task', entityId: task.id, action: 'create', userId: user.id, after: task });
         return task.id;
@@ -166,6 +198,15 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
         const data: Prisma.TaskUncheckedUpdateInput = {};
         if (body.title !== undefined) data.title = body.title;
         if (body.dueDate !== undefined) data.dueDate = dateOnly(body.dueDate);
+        if (body.dueTime !== undefined) data.dueTime = body.dueTime;
+        if (body.kind !== undefined && body.kind !== before.kind) {
+          data.kind = body.kind;
+          data.durationMinutes = durationOf(body.kind);
+        }
+        // Checked on the merged result: a call or meeting always has a time.
+        const kind = body.kind ?? before.kind;
+        const dueTime = body.dueTime !== undefined ? body.dueTime : before.dueTime;
+        if (kind !== 'followup' && dueTime === null) throw new RuleError('time_required');
         if (body.isDone !== undefined && body.isDone !== before.isDone) {
           data.isDone = body.isDone;
           data.doneAt = body.isDone ? new Date() : null;

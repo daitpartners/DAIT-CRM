@@ -1,13 +1,24 @@
 import { z } from 'zod';
 import { isoDate } from './common.js';
 import { PagingQuery } from './paging.js';
+import { TASK_KINDS } from '../leads.js';
 
+/** Wall-clock time of day `HH:MM`, stored as entered (no time-zone shift). */
+const dueTime = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+
+/**
+ * `timeline: true` (planned from the Calendar) also writes a lead timeline entry; the Add task dialogs
+ * leave it off. Calls and meetings need a time.
+ */
 export const TaskCreate = z.object({
   leadId: z.number().int().positive().optional(),
   title: z.string().trim().min(1).max(200),
   dueDate: isoDate,
   assignedToId: z.number().int().positive(),
-});
+  kind: z.enum(TASK_KINDS).default('followup'),
+  dueTime: dueTime.optional(),
+  timeline: z.boolean().optional(),
+}).refine((t) => t.kind === 'followup' || t.dueTime !== undefined, { path: ['dueTime'], message: 'time_required' });
 export type TaskCreate = z.infer<typeof TaskCreate>;
 
 export const TaskUpdate = z.object({
@@ -15,6 +26,8 @@ export const TaskUpdate = z.object({
   dueDate: isoDate.optional(),
   assignedToId: z.number().int().positive().optional(),
   isDone: z.boolean().optional(),
+  kind: z.enum(TASK_KINDS).optional(),
+  dueTime: dueTime.nullable().optional(),
   updatedAt: z.string().datetime(),
 });
 export type TaskUpdate = z.infer<typeof TaskUpdate>;

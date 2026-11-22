@@ -516,20 +516,26 @@ model LeadAssignment {
 }
 
 model Task {
-  id           Int       @id @default(autoincrement())
-  leadId       Int?      @map("lead_id")
+  id              Int       @id @default(autoincrement())
+  leadId          Int?      @map("lead_id")
   /// quotations does not exist yet; plain column until the Quotations module adds the relation.
-  quotationId  Int?      @map("quotation_id")
-  title        String
-  dueDate      DateTime  @map("due_date") @db.Date
-  assignedToId Int       @map("assigned_to_id")
-  isDone       Boolean   @default(false) @map("is_done")
-  doneAt       DateTime? @map("done_at")
+  quotationId     Int?      @map("quotation_id")
+  title           String
+  dueDate         DateTime  @map("due_date") @db.Date
+  /// TASK_KINDS: followup | call | meeting.
+  kind            String    @default("followup")
+  /// Wall-clock HH:MM as entered (assignee's local time, no tz shift); required for call and meeting.
+  dueTime         String?   @map("due_time") @db.VarChar(5)
+  /// TASK_DURATION for a call or meeting; null for a follow-up.
+  durationMinutes Int?      @map("duration_minutes")
+  assignedToId    Int       @map("assigned_to_id")
+  isDone          Boolean   @default(false) @map("is_done")
+  doneAt          DateTime? @map("done_at")
   /// TASK_ORIGINS.
-  origin       String
-  closedReason String?   @map("closed_reason")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
+  origin          String
+  closedReason    String?   @map("closed_reason")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
   lead       Lead? @relation(fields: [leadId], references: [id], onDelete: Cascade)
   assignedTo User  @relation(fields: [assignedToId], references: [id], onDelete: Restrict)
