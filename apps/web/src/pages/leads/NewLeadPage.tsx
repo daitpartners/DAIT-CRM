@@ -239,7 +239,7 @@ function NewLeadForm() {
           <section className="card" aria-labelledby="nl-type-title">
             <div>
               <h2 id="nl-type-title">
-                {t('Lead type')}
+                {t('Lead type')}{' '}
                 <span className="req" aria-hidden="true">*</span>
               </h2>
               <div className="nl-sub">{t('Both types live in this module. A prospect can be saved with company name and country alone.')}</div>

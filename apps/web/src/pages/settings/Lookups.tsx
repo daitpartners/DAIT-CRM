@@ -182,14 +182,14 @@ function AddValueForm({ group, onAdded }: { group: LookupGroup; onAdded: () => P
     <form className="inline-form" onSubmit={submit} noValidate aria-label={t('Add value')}>
       <div>
         <label className="lbl" htmlFor="new-value">
-          {t('Value')}
+          {t('Value')}{' '}
           <span className="req" aria-hidden="true">*</span>
         </label>
         <input id="new-value" className="in" value={value} onChange={(e) => setValue(e.target.value)} required />
       </div>
       <div>
         <label className="lbl" htmlFor="new-label">
-          {t('Label (English)')}
+          {t('Label (English)')}{' '}
           <span className="req" aria-hidden="true">*</span>
         </label>
         <input id="new-label" className="in" value={label} onChange={(e) => setLabel(e.target.value)} required />

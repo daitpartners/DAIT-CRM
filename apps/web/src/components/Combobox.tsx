@@ -44,7 +44,7 @@ export function Combobox(props: ComboboxProps) {
     <div>
       <label htmlFor={id} className={hideLabel ? 'sr' : 'lbl'}>
         {label}
-        {required && !hideLabel ? <span className="req" aria-hidden="true">*</span> : null}
+        {required && !hideLabel ? <>{' '}<span className="req" aria-hidden="true">*</span></> : null}
       </label>
       {props.options.length < COMBO_MIN && !props.searchable ? <PlainSelect {...props} /> : <SearchBox {...props} />}
     </div>

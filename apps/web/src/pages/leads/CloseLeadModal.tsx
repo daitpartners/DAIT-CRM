@@ -76,7 +76,7 @@ export function CloseLeadModal({ lead, onClose, initialStatus }: { lead: LeadFul
     >
       <fieldset className="radio-group" aria-describedby={statusError ? 'cl-status-err' : undefined}>
         <legend className="lbl">
-          {t('Outcome')}
+          {t('Outcome')}{' '}
           <span className="req" aria-hidden="true">
             *
           </span>

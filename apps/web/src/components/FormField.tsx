@@ -8,7 +8,7 @@ export function FormField({ id, label, required, error, children, className }: F
     <div className={className}>
       <label htmlFor={id} className="lbl">
         {label}
-        {required ? <span className="req" aria-hidden="true">*</span> : null}
+        {required ? <>{' '}<span className="req" aria-hidden="true">*</span></> : null}
       </label>
       {children}
       {error ? (
