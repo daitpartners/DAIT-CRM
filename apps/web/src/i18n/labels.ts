@@ -283,6 +283,8 @@ export function errorText(t: TFn, code: string, vars: Record<string, string | nu
       return t('This task is already done');
     case 'time_required':
       return t('Enter a time for a call or meeting');
+    case 'follow_up_kind':
+      return t('The follow-up from the lead stays a follow-up');
     default:
       return t('Something went wrong. Please try again.');
   }

@@ -263,6 +263,18 @@ describe('follow-up tasks stay in step with the lead', () => {
     expect((await prisma.task.findUniqueOrThrow({ where: { id: t.id } })).assignedToId).toBe(manager.id);
   });
 
+  it('the automatic follow-up task keeps its type (400); its time may be set', async () => {
+    const { rep, t } = await setup();
+    const res = await req('PATCH', `/api/tasks/${t.id}`, rep.cookie, { kind: 'call', dueTime: '10:00', updatedAt: stamp(t) });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'follow_up_kind' });
+    expect((await prisma.task.findUniqueOrThrow({ where: { id: t.id } })).kind).toBe('followup');
+    // Sending its own type (the edit dialog does) and a time is fine.
+    const timed = await req('PATCH', `/api/tasks/${t.id}`, rep.cookie, { kind: 'followup', dueTime: '10:00', updatedAt: stamp(t) });
+    expect(timed.statusCode).toBe(200);
+    expect(timed.json()).toMatchObject({ kind: 'followup', dueTime: '10:00' });
+  });
+
   it('ticking a follow-up task clears the lead follow-up', async () => {
     const { rep, lead, t } = await setup();
     const res = await req('PATCH', `/api/tasks/${t.id}`, rep.cookie, { isDone: true, updatedAt: stamp(t) });

@@ -194,6 +194,8 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
         if (body.dueDate !== undefined) data.dueDate = dateOnly(body.dueDate);
         if (body.dueTime !== undefined) data.dueTime = body.dueTime;
         if (body.kind !== undefined && body.kind !== before.kind) {
+          // The automatic follow-up task is managed from the lead (syncFollowUpTask): it stays a follow-up.
+          if (before.origin === 'follow_up') throw new RuleError('follow_up_kind');
           data.kind = body.kind;
           data.durationMinutes = durationOf(body.kind);
         }

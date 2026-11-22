@@ -141,6 +141,26 @@ describe('Edit task: Type and Time', () => {
     expect(err).toBeTruthy();
   });
 
+  it('the automatic follow-up task keeps its type (Type disabled); its time can still be set', async () => {
+    const u = userEvent.setup();
+    const calls = stubTasks();
+    const onClose = vi.fn();
+    render(
+      <Wrap qc={makeClient()}>
+        <TaskModal task={task({ origin: 'follow_up' })} onClose={onClose} />
+      </Wrap>,
+    );
+    expect(screen.getByLabelText('Type')).toBeDisabled();
+    expect(screen.getByLabelText('Time')).toBeEnabled();
+    await u.type(screen.getByLabelText('Time'), '09:30');
+    await u.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(calls[0]!.body.kind ?? 'followup').toBe('followup');
+    expect(calls[0]!.body).toMatchObject({ dueTime: '09:30' });
+    expect(errorText(en, 'follow_up_kind')).toBe('The follow-up from the lead stays a follow-up');
+    expect(errorText(esT, 'follow_up_kind')).not.toBe(errorText(esT, 'unknown'));
+  });
+
   it('the Add task dialog stays without Type and Time and sends neither', async () => {
     const u = userEvent.setup();
     const calls = stubTasks();

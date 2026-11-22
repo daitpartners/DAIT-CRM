@@ -14,7 +14,7 @@ import { Modal } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
 import { applyServerIssues } from '../../forms/applyServerIssues';
 import { useDebounce } from '../../hooks/useDebounce';
-import { taskKindText } from '../../i18n/labels';
+import { errorText, taskKindText } from '../../i18n/labels';
 import { useT, type TFn } from '../../i18n/useT';
 
 type Values = { title: string; dueDate: string; assignedToId: string; leadId: string; kind: TaskKind; dueTime: string; updatedAt?: string };
@@ -56,6 +56,8 @@ export function TaskModal({ task, lead, onClose }: { task?: TaskRow; lead?: Pick
   const save = useSaveTask();
   const [formError, setFormError] = useState<string | null>(null);
   const editing = Boolean(task);
+  // The automatic follow-up task is managed from the lead: it stays a follow-up (the server refuses another type).
+  const fixedKind = task?.origin === 'follow_up';
   const fixedLead = task ? task.lead : lead;
 
   const resolver = useMemo<Resolver<Values>>(() => {
@@ -73,8 +75,8 @@ export function TaskModal({ task, lead, onClose }: { task?: TaskRow; lead?: Pick
         ctx,
         opts,
       );
-      // As the server checks it: a call or meeting always has a time.
-      if (editing && values.kind !== 'followup' && !values.dueTime) {
+      // As the server checks it: a call or meeting always has a time. A disabled Type reads as undefined.
+      if (editing && (values.kind ?? 'followup') !== 'followup' && !values.dueTime) {
         return { values: {}, errors: { ...result.errors, dueTime: { type: 'required', message: '' } } };
       }
       return result;
@@ -114,6 +116,10 @@ export function TaskModal({ task, lead, onClose }: { task?: TaskRow; lead?: Pick
           if (code === 'stale') void qc.invalidateQueries({ queryKey: keys.tasksAll });
           if (code === 'cannot_assign_hidden') {
             setError('assignedToId', { type: 'server', message: t('That person cannot see this lead') });
+            return;
+          }
+          if (code === 'follow_up_kind') {
+            setError('kind', { type: 'server', message: errorText(t, code) });
             return;
           }
           if (code === 'time_required') {
@@ -165,7 +171,7 @@ export function TaskModal({ task, lead, onClose }: { task?: TaskRow; lead?: Pick
               <input id="tk-dueTime" type="time" className={errors.dueTime ? 'in err' : 'in'} {...aria('dueTime')} {...register('dueTime')} />
             </FormField>
             <FormField id="tk-kind" label={t('Type')} error={err('kind')}>
-              <select id="tk-kind" className={errors.kind ? 'in err' : 'in'} {...aria('kind')} {...register('kind')}>
+              <select id="tk-kind" className={errors.kind ? 'in err' : 'in'} disabled={fixedKind} {...aria('kind')} {...register('kind')}>
                 {TASK_KINDS.map((k) => (
                   <option key={k} value={k}>
                     {taskKindText(t, k)}
