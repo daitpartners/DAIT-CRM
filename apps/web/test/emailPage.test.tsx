@@ -7,9 +7,15 @@ import { EmailPage } from '../src/pages/email/EmailPage';
 import type { MailDetail, MailItem, MailMeta } from '../src/api/mail';
 import { ToastProvider } from '../src/components/Toast';
 import { ConfirmProvider } from '../src/components/ConfirmDialog';
-import { makeClient, rep } from './leadFixture';
+import { I18nProvider } from '../src/i18n';
+import { keys, type Me } from '../src/api/queries';
+import es from '../src/locales/es.json';
+import { lookup, makeClient, rep } from './leadFixture';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 const me = { ...rep, rights: [...rep.rights, 'use_email' as const] };
 
@@ -26,9 +32,14 @@ const META: MailMeta = {
   unread: 3, unlinked: 2, companies: [{ id: 4, name: 'Acme' }], leads: [{ id: 5, number: 'LD-1005', companyId: 4, companyName: 'Acme', status: 'New' }],
 };
 
-function stub(items: MailItem[], details: Record<number, MailDetail>, meta: MailMeta = META) {
+/** `extra` answers a GET first (stateful or filtered responses); anything it leaves undefined falls through. */
+function stub(items: MailItem[], details: Record<number, MailDetail>, meta: MailMeta = META, extra?: (url: string) => unknown) {
   const posts: { url: string; body: unknown }[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method !== 'POST' && extra) {
+      const r = extra(url);
+      if (r !== undefined) return Response.json(r);
+    }
     if (init?.method === 'POST') {
       posts.push({ url, body: init.body ? JSON.parse(String(init.body)) : undefined });
       return Response.json({ id: 99, leadId: 5 }, { status: 201 });
@@ -47,23 +58,39 @@ function stub(items: MailItem[], details: Record<number, MailDetail>, meta: Mail
   return posts;
 }
 
-function show(path = '/email') {
-  const qc = makeClient(me);
+function show(path = '/email', user: Me = me, setup?: (qc: ReturnType<typeof makeClient>) => void) {
+  const qc = makeClient(user);
+  setup?.(qc);
   return render(
     <QueryClientProvider client={qc}>
-      <ToastProvider>
-        <ConfirmProvider>
-          <MemoryRouter initialEntries={[path]}>
-            <Routes>
-              <Route path="/email" element={<EmailPage />} />
-              <Route path="/email/:id" element={<EmailPage />} />
-            </Routes>
-          </MemoryRouter>
-        </ConfirmProvider>
-      </ToastProvider>
+      <I18nProvider>
+        <ToastProvider>
+          <ConfirmProvider>
+            <MemoryRouter initialEntries={[path]}>
+              <Routes>
+                <Route path="/email" element={<EmailPage />} />
+                <Route path="/email/:id" element={<EmailPage />} />
+              </Routes>
+            </MemoryRouter>
+          </ConfirmProvider>
+        </ToastProvider>
+      </I18nProvider>
     </QueryClientProvider>,
   );
 }
+
+/** A Europe/London user at 2026-11-22 12:00 (only Date is faked: timers stay real for the queries). */
+const london: Me = { ...me, timezone: 'Europe/London' };
+function at1200() {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-11-22T12:00:00.000Z'));
+}
+
+const leadRow = (id: number, number: string, over: Record<string, unknown> = {}) => ({
+  id, number, leadType: 'Lead', companyName: 'Acme', companyId: 4, company: { id: 4, number: 'CO-0004', name: 'Acme' }, contact: null,
+  country: 'India', outreachLanguage: 'en', city: null, leadSource: 'Referral', status: 'New', priority: 'Medium', assignedTo: null,
+  nextFollowUp: null, isOverdue: false, archivedAt: null, createdAt: '', updatedAt: '', ...over,
+});
 
 describe('Email screen (release 2B-2, prototype V.email)', () => {
   it('shows the mailbox, the folders with counts, smart views and templates', async () => {
@@ -143,5 +170,105 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     await u.type(within(dialog).getByLabelText('To'), 'ana@acme.com');
     await u.click(within(dialog).getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(posts[0]).toMatchObject({ url: '/api/mail', body: { to: 'ana@acme.com', cc: [], subject: `Hello from ${me.name}` } }));
+  });
+
+  it('list row shows time of day for today', async () => {
+    at1200();
+    stub([
+      item({ id: 1, occurredAt: '2026-11-22T09:05:00.000Z', isRead: true }),
+      item({ id: 2, occurredAt: '2026-11-21T17:00:00.000Z', isRead: true }),
+      item({ id: 3, occurredAt: '2026-11-01T08:00:00.000Z', isRead: true }),
+    ], { 1: detail(item({ id: 1 })) });
+    show('/email', london);
+    const list = screen.getByRole('region', { name: 'Message list' });
+    expect(await within(list).findByText('Today, 09:05')).toBeTruthy();
+    expect(within(list).getByText('Yesterday, 17:00')).toBeTruthy();
+    expect(within(list).getByText('01/11/2026, 08:00')).toBeTruthy();
+  });
+
+  it('synced line shows a relative time', async () => {
+    at1200();
+    stub([], {}, { ...META, mailbox: { ...META.mailbox!, lastSyncAt: '2026-11-22T11:55:00.000Z' } });
+    show('/email', london);
+    expect(await screen.findByText(/synced Today, 11:55/)).toBeTruthy();
+  });
+
+  it('opening an unread message clears its bold at once', async () => {
+    const u = userEvent.setup();
+    const first = item({ id: 1, isRead: true });
+    const a = item({ id: 7, subject: 'Unread one', isRead: false });
+    let opened = false;
+    // The list endpoint keeps answering "unread" (no refetch happened yet); the server's count drops once it is opened.
+    stub([first, a], { 1: detail(first) }, META, (url) => {
+      if (url === '/api/mail/7') {
+        opened = true;
+        return detail({ ...a, isRead: true });
+      }
+      if (url === '/api/mail/meta') return opened ? { ...META, unread: 2 } : META;
+      return undefined;
+    });
+    show();
+    const list = screen.getByRole('region', { name: 'Message list' });
+    const row = (await within(list).findByText('Unread one')).closest('a')!;
+    expect(row.className).toMatch(/\bunread\b/);
+    await u.click(row);
+    await waitFor(() => expect(row.className).not.toMatch(/\bunread\b/));
+    const folders = screen.getByRole('navigation', { name: 'Mail folders' });
+    await waitFor(() => expect(within(folders).getByRole('link', { name: /Inbox\s*2/ })).toBeTruthy());
+  });
+
+  it('compose lead option shows translated status and source', async () => {
+    const u = userEvent.setup();
+    const spanish: Me = { ...me, language: 'es' };
+    stub([], {}, META, (url) => {
+      if (url === '/api/me') return spanish;
+      if (url.startsWith('/api/leads')) return { items: [leadRow(5, 'LD-1005', { status: 'Contacted', leadSource: 'Referral' })], total: 1, page: 1, pageSize: 100 };
+      if (url.startsWith('/api/contacts')) {
+        return {
+          items: [{
+            id: 9, companyId: 4, company: { id: 4, number: 'CO-0004', name: 'Acme' }, firstName: 'Ana', lastName: 'Ruiz', designation: null,
+            department: null, businessEmail: 'ana@acme.com', phone: null, mobile: null, linkedinUrl: null, contactType: 'Decision Maker',
+            isPrimary: true, isActive: true, updatedAt: '',
+          }],
+          total: 1, page: 1, pageSize: 100,
+        };
+      }
+      return undefined;
+    });
+    show('/email?company=4', spanish, (qc) =>
+      qc.setQueryData(keys.lookups, {
+        lead_source: [{ ...lookup('lead_source', 'Referral', 2), labelEs: 'Recomendación' }],
+        contact_type: [{ ...lookup('contact_type', 'Decision Maker', 3), labelEs: 'Decisor' }],
+      }),
+    );
+    await u.click(await screen.findByRole('button', { name: es['+ Compose'] }));
+    const dialog = await screen.findByRole('dialog', { name: es['Compose email'] });
+    expect(await within(dialog).findByRole('option', { name: `LD-1005 · Recomendación · ${es['Contacted|lead']}` })).toBeTruthy();
+    expect(await within(dialog).findByText(/· Decisor/)).toBeTruthy();
+  });
+
+  it('link modal keeps the chosen lead when the search hides it', async () => {
+    const u = userEvent.setup();
+    const a = item();
+    const posts = stub([a], { 1: detail(a) }, META, (url) => {
+      if (!url.startsWith('/api/leads')) return undefined;
+      const q = new URL(url, 'http://x').searchParams.get('q');
+      // The first page shows LD-1 only; the search "zeta" finds LD-2 only.
+      const items = q ? [leadRow(2, 'LD-2', { companyName: 'Zeta' })] : [leadRow(1, 'LD-1')];
+      return { items, total: items.length, page: 1, pageSize: 25 };
+    });
+    show('/email/1');
+    const reader = await screen.findByRole('article');
+    await u.click(await within(reader).findByRole('button', { name: 'Link to lead / create lead' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Link email to a lead' });
+    const select = within(dialog).getByLabelText('Existing lead') as HTMLSelectElement;
+    await within(dialog).findByRole('option', { name: 'LD-1 · Acme' });
+    await u.selectOptions(select, '1');
+    await u.type(within(dialog).getByLabelText('Find a lead'), 'zeta');
+    await waitFor(() => expect(within(dialog).getByRole('option', { name: 'LD-2 · Zeta' })).toBeTruthy());
+    expect(select.value).toBe('1');
+    expect(within(dialog).getByRole('option', { name: 'LD-1 · Acme' })).toBeTruthy();
+    await u.click(within(dialog).getByRole('button', { name: 'Link' }));
+    await waitFor(() => expect(posts).toEqual([{ url: '/api/mail/1/link', body: { leadId: 1 } }]));
   });
 });

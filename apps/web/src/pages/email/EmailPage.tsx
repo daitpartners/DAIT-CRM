@@ -37,7 +37,7 @@ export function EmailPage() {
   const toast = useToast();
   const me = useCurrentUser();
   const navigate = useNavigate();
-  const { date } = useFormatDate();
+  const { relative } = useFormatDate();
   const { id } = useParams();
   const [params, setParams] = useSearchParams();
   const view: MailView = (MAIL_VIEWS as readonly string[]).includes(params.get('folder') ?? '') ? (params.get('folder') as MailView) : 'inbox';
@@ -87,7 +87,7 @@ export function EmailPage() {
     <>
       {t('{address} · Microsoft 365', { address: mailbox.address })}{' '}
       {connected ? <span className="badge b-ok">{t('Connected')}</span> : <span className="badge b-warn">{t('Needs reconnecting')}</span>} ·{' '}
-      {mailbox.lastSyncAt ? t('synced {when}', { when: date(mailbox.lastSyncAt) }) : t('synced never')} ·{' '}
+      {mailbox.lastSyncAt ? t('synced {when}', { when: relative(mailbox.lastSyncAt) }) : t('synced never')} ·{' '}
       {t('every thread links to a Lead, Contact and Company')}
     </>
   ) : (
@@ -255,7 +255,7 @@ export function EmailPage() {
 
 function MessageRow({ m, on, to }: { m: MailItem; on: boolean; to: string }) {
   const t = useT();
-  const { date } = useFormatDate();
+  const { relative } = useFormatDate();
   const outbound = m.status !== 'received';
   const who = outbound ? t('To: {to}', { to: m.toAddresses.join(', ') }) : m.fromName || m.fromAddress;
   return (
@@ -263,7 +263,7 @@ function MessageRow({ m, on, to }: { m: MailItem; on: boolean; to: string }) {
       <span className="av" aria-hidden="true">{initials(m.fromName || m.fromAddress)}</span>
       <span className="msg-main">
         <span className="who">
-          <span className="msg-who">{who}</span> <span className="t">{date(m.occurredAt)}</span>
+          <span className="msg-who">{who}</span> <span className="t">{relative(m.occurredAt)}</span>
         </span>
         <span className="sub">{m.subject || t('(no subject)')}</span>
         <span className="pre">{m.preview}</span>

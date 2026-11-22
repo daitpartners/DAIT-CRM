@@ -25,7 +25,7 @@ export function Reader({ id, peek = false, connected, onReply, onArchived }: Pro
   const t = useT();
   const toast = useToast();
   const navigate = useNavigate();
-  const { date, day } = useFormatDate();
+  const { dateTime, relative, day } = useFormatDate();
   const { data: m, isError } = useMailMessage(id, peek);
   const action = useMailAction();
   const [linking, setLinking] = useState(false);
@@ -62,7 +62,7 @@ export function Reader({ id, peek = false, connected, onReply, onArchived }: Pro
             <h2>{m.subject || t('(no subject)')}</h2>
             <div className="reader-meta">
               {m.fromName ? `${m.fromName} <${m.fromAddress}>` : m.fromAddress} {t('to')} {m.toAddresses.join(', ')}
-              {m.ccAddresses.length ? ` · ${t('cc {cc}', { cc: m.ccAddresses.join(', ') })}` : ''} · {date(m.occurredAt)}
+              {m.ccAddresses.length ? ` · ${t('cc {cc}', { cc: m.ccAddresses.join(', ') })}` : ''} · {dateTime(m.occurredAt)}
             </div>
           </div>
           {draft ? null : (
@@ -124,7 +124,7 @@ export function Reader({ id, peek = false, connected, onReply, onArchived }: Pro
           )}
         </div>
       </article>
-      <MailSide m={m} day={day} date={date} />
+      <MailSide m={m} day={day} relative={relative} />
       {linking ? (
         <LinkLeadModal
           message={m}
@@ -140,7 +140,7 @@ export function Reader({ id, peek = false, connected, onReply, onArchived }: Pro
   );
 }
 
-function MailSide({ m, day, date }: { m: MailDetail; day: (ymd: string) => string; date: (iso: string) => string }) {
+function MailSide({ m, day, relative }: { m: MailDetail; day: (ymd: string) => string; relative: (iso: string) => string }) {
   const t = useT();
   const l = m.lead;
   return (
@@ -180,7 +180,7 @@ function MailSide({ m, day, date }: { m: MailDetail; day: (ymd: string) => strin
         {m.thread.length
           ? m.thread.map((h) => (
               <div key={h.id}>
-                {date(h.occurredAt)} · {h.direction === 'in' ? t('Received from {who}', { who: h.who }) : t('Sent to {who}', { who: h.who })}
+                {relative(h.occurredAt)} · {h.direction === 'in' ? t('Received from {who}', { who: h.who }) : t('Sent to {who}', { who: h.who })}
               </div>
             ))
           : <div className="dim">{t('No earlier messages.')}</div>}

@@ -4,13 +4,14 @@ import { ApiError } from '../../api/client';
 import { useContacts } from '../../api/contacts';
 import { useLeads } from '../../api/leads';
 import { useComposeMail, useReplyMail } from '../../api/mail';
+import { useLookupText } from '../../api/queries';
 import { useTemplates } from '../../api/templates';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { CompanyPicker } from '../../components/CompanyPicker';
 import { Modal } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
-import { errorText } from '../../i18n/labels';
-import { useT } from '../../i18n/useT';
+import { errorText, leadStatusText } from '../../i18n/labels';
+import { useLang, useT } from '../../i18n/useT';
 import { fillTemplate } from '../../lib/mergeFields';
 
 /** What Compose opens with: a client / lead context, a filled template, or a reply to one of your messages. */
@@ -37,6 +38,7 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
   const t = useT();
   const toast = useToast();
   const me = useCurrentUser();
+  const lookup = useLookupText(useLang());
   const reply = start.replyTo !== undefined;
   const [companyId, setCompanyId] = useState<number | undefined>(start.companyId);
   const [leadId, setLeadId] = useState<number | undefined>(start.leadId);
@@ -151,7 +153,7 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
             >
               <option value="">{companyId === undefined ? t('choose client first') : t('— no lead —')}</option>
               {leads.map((l) => (
-                <option key={l.id} value={l.id}>{`${l.number} · ${l.contact?.name ?? l.leadSource} · ${l.status}`}</option>
+                <option key={l.id} value={l.id}>{`${l.number} · ${l.contact?.name ?? lookup('lead_source', l.leadSource)} · ${leadStatusText(t, l.status)}`}</option>
               ))}
             </select>
           </div>
@@ -195,7 +197,7 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
               return (
                 <label key={c.id} className="sw">
                   <input type="checkbox" checked={isTo || ccList.includes(email)} disabled={isTo} onChange={(e) => toggleLoop(email, e.target.checked)} />{' '}
-                  {`${c.firstName} ${c.lastName}`.trim()} <span className="dim">· {c.designation || c.contactType}{c.isPrimary ? ` · ${t('primary')}` : ''}</span>
+                  {`${c.firstName} ${c.lastName}`.trim()} <span className="dim">· {c.designation || lookup('contact_type', c.contactType)}{c.isPrimary ? ` · ${t('primary')}` : ''}</span>
                 </label>
               );
             })}

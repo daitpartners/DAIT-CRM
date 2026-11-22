@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ApiError } from '../../api/client';
-import { useLeads } from '../../api/leads';
+import { useLeads, type LeadSummary } from '../../api/leads';
 import { useMailAction, type MailDetail } from '../../api/mail';
 import { Modal } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
@@ -21,13 +21,14 @@ export function LinkLeadModal({ message, onClose, onLinked, onCreated }: Props) 
   const toast = useToast();
   const action = useMailAction();
   const [q, setQ] = useState('');
-  const [leadId, setLeadId] = useState('');
+  // The chosen lead is kept as is: a later search that no longer finds it does not drop the choice.
+  const [chosen, setChosen] = useState<LeadSummary | null>(null);
   const debounced = useDebounce(q, 250);
   const { data } = useLeads({ q: debounced || undefined, pageSize: 25, tab: 'all' });
-  const leads = (data?.items ?? []).filter((l) => !l.archivedAt);
+  const found = (data?.items ?? []).filter((l) => !l.archivedAt);
+  const leads = chosen && !found.some((l) => l.id === chosen.id) ? [chosen, ...found] : found;
 
   function go() {
-    const chosen = leads.find((l) => String(l.id) === leadId);
     const onError = (err: unknown) => toast(err instanceof ApiError ? errorText(t, err.code) : t('Something went wrong. Try again.'), 'warn');
     if (chosen) {
       action.mutate({ id: message.id, action: 'link', body: { leadId: chosen.id } }, { onSuccess: () => { onLinked(chosen.number); onClose(); }, onError });
@@ -59,7 +60,7 @@ export function LinkLeadModal({ message, onClose, onLinked, onCreated }: Props) 
       </div>
       <div>
         <label className="lbl" htmlFor="link-lead">{t('Existing lead')}</label>
-        <select id="link-lead" className="in" value={leadId} onChange={(e) => setLeadId(e.target.value)}>
+        <select id="link-lead" className="in" value={chosen?.id ?? ''} onChange={(e) => setChosen(leads.find((l) => String(l.id) === e.target.value) ?? null)}>
           <option value="">{t('— create a new lead from this email —')}</option>
           {leads.map((l) => (
             <option key={l.id} value={l.id}>{`${l.number} · ${l.companyName}`}</option>

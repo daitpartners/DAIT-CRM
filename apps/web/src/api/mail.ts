@@ -78,7 +78,12 @@ export function useMailMessage(id: number | null, peek = false) {
     queryKey: [...ROOT, 'message', id, peek],
     queryFn: async () => {
       const m = await api<MailDetail>(`/api/mail/${id}${peek ? '?peek=1' : ''}`);
-      // Opening marks it read: the counts and the list change.
+      // Opening marks it read: the row loses its bold at once (no list refetch), the counts change.
+      if (!peek) {
+        qc.setQueriesData<MailItem[]>({ queryKey: [...ROOT, 'list'] }, (items) =>
+          items?.some((x) => x.id === id && !x.isRead) ? items.map((x) => (x.id === id ? { ...x, isRead: true } : x)) : items,
+        );
+      }
       void qc.invalidateQueries({ queryKey: [...ROOT, 'meta'] });
       void qc.invalidateQueries({ queryKey: keys.navCounts });
       return m;
