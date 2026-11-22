@@ -27,11 +27,12 @@ export function NewFollowUpModal({ date, names, onClose }: { date: string; names
   const save = useSaveTask();
   const { data: users } = useUsers();
 
-  // Lead: open, non-archived leads the user can see, searched on the server; the chosen one stays chosen.
+  // Lead: open, non-archived leads the user can see, searched and filtered on the server (so the first 25 are all
+  // choosable); the chosen one stays chosen.
   const [q, setQ] = useState('');
   const [chosen, setChosen] = useState<LeadSummary | null>(null);
   const debounced = useDebounce(q.trim(), 250);
-  const { data } = useLeads({ q: debounced || undefined, pageSize: 25, tab: 'all' });
+  const { data } = useLeads({ q: debounced || undefined, pageSize: 25, tab: 'all', open: '1' });
   const found = (data?.items ?? []).filter((l) => !l.archivedAt && !isClosedStatus(l.status));
   const leads = !q.trim() && chosen && !found.some((l) => l.id === chosen.id) ? [chosen, ...found] : found;
 

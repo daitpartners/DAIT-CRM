@@ -132,6 +132,7 @@ function filterWhere(query: LeadListQuery): Prisma.LeadWhereInput[] {
   const and: Prisma.LeadWhereInput[] = [];
   if (query.companyId !== undefined) and.push({ companyId: query.companyId });
   if (query.status) and.push({ status: query.status });
+  if (query.open === '1') and.push({ status: { notIn: [...CLOSED_STATUSES] } });
   if (query.source) and.push({ leadSource: query.source });
   if (query.country) and.push({ country: { equals: query.country, mode: 'insensitive' } });
   if (query.assignedTo !== undefined) and.push({ assignedToId: query.assignedTo === 'none' ? null : query.assignedTo });

@@ -141,6 +141,11 @@ describe('leads API', () => {
     expect(await ids(`q=${encodeURIComponent(due.number.toLowerCase())}`)).toEqual([due.id]);
     expect(await ids(`assignedTo=${other.id}`)).toEqual([due.id]);
     expect((await ids('archived=1')).length).toBe(5);
+    // open=1 leaves out closed leads (and archived ones, as every live list).
+    const won = await makeLead({ status: 'Won', assignedToId: other.id });
+    expect(await ids('open=1')).not.toContain(won.id);
+    expect((await ids('open=1')).length).toBe(4);
+    expect(await ids('')).toContain(won.id);
 
     // A rep sees only own + unassigned in tiles too, and may not ask for archived leads.
     const rep = await as('SALES_REPRESENTATIVE');

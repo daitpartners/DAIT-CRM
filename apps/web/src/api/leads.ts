@@ -81,6 +81,8 @@ export type LeadListQuery = {
   to?: string;
   /** Leads of this company. */
   companyId?: number;
+  /** '1' keeps open leads only (not Won, Lost or Not Relevant). */
+  open?: '1';
 };
 
 export type LeadTiles = {

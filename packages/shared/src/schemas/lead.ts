@@ -134,6 +134,8 @@ export const LeadListQuery = PagingQuery.extend({
   companyId: z.coerce.number().int().positive().optional(),
   /** `1` includes archived leads (view_all_leads only). */
   archived: z.enum(['0', '1']).optional(),
+  /** `1` keeps open leads only (not Won, Lost or Not Relevant), e.g. the calendar's lead picker. */
+  open: z.literal('1').optional(),
 });
 export type LeadListQuery = z.infer<typeof LeadListQuery>;
 
