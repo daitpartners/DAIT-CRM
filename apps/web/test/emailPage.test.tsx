@@ -22,7 +22,7 @@ const me = { ...rep, rights: [...rep.rights, 'use_email' as const] };
 const item = (over: Partial<MailItem> = {}): MailItem => ({
   id: 1, folder: 'inbox', status: 'received', fromAddress: 'ana@acme.com', fromName: 'Ana Ruiz', toAddresses: ['arjun@daitpartners.com'],
   subject: 'Proposal', preview: 'Looks good', occurredAt: '2026-11-20T10:00:00.000Z', isRead: false, leadId: null, leadNumber: null,
-  companyId: null, hasAttachments: false, ...over,
+  companyId: null, hasAttachments: false, projectId: null, projectNumber: null, ...over,
 });
 const detail = (m: MailItem, over: Partial<MailDetail> = {}): MailDetail => ({
   ...m, ccAddresses: [], bodyText: 'Looks good', attachmentNames: [], loggedAt: null, lead: null, contact: null, company: null, thread: [], ...over,
@@ -30,6 +30,7 @@ const detail = (m: MailItem, over: Partial<MailDetail> = {}): MailDetail => ({
 const META: MailMeta = {
   mailbox: { id: 7, address: 'arjun@daitpartners.com', status: 'connected', lastSyncAt: '2026-11-22T09:00:00.000Z' },
   unread: 3, unlinked: 2, companies: [{ id: 4, name: 'Acme' }], leads: [{ id: 5, number: 'LD-1005', companyId: 4, companyName: 'Acme', status: 'New' }],
+  projects: [{ id: 3, number: 'PRJ-3', name: 'Website rebuild', companyId: 4 }, { id: 8, number: 'PRJ-8', name: 'Brand refresh', companyId: 6 }],
 };
 
 /** `extra` answers a GET first (stateful or filtered responses); anything it leaves undefined falls through. */
@@ -113,7 +114,42 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     const list = screen.getByRole('region', { name: 'Message list' });
     expect(await within(list).findByText('Unlinked · create lead?')).toBeTruthy();
     expect(within(list).getByText('LD-1005')).toBeTruthy();
-    expect(screen.getByRole('combobox', { name: 'Project' })).toHaveProperty('disabled', true);
+  });
+
+  it('Project filter (release 3B): projects you can see, narrowed by the client; choosing one sets client and project and asks for them', async () => {
+    const u = userEvent.setup();
+    const asked: string[] = [];
+    stub([item({ id: 2, leadId: 5, leadNumber: 'LD-1005', projectId: 3, projectNumber: 'PRJ-3' })], {}, META, (url) => {
+      if (url.startsWith('/api/mail?')) asked.push(url);
+      return undefined;
+    });
+    show('/email');
+    const pick = screen.getByRole('combobox', { name: 'Project' }) as HTMLSelectElement;
+    expect(await within(pick).findByRole('option', { name: 'PRJ-8 · Brand refresh' })).toBeTruthy();
+    expect(pick.disabled).toBe(false);
+    expect(pick.selectedOptions[0]!.textContent).toBe('Project: all');
+    // The message row carries its project tag (prototype badge b-ok).
+    const list = screen.getByRole('region', { name: 'Message list' });
+    expect((await within(list).findByText('PRJ-3')).className).toBe('badge b-ok');
+    await u.selectOptions(pick, '3');
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/email?project=3&company=4'));
+    await waitFor(() => expect(asked.some((x) => x.includes('company=4') && x.includes('project=3'))).toBe(true));
+    // Narrowed by the client now chosen; the Clear link drops the project too.
+    expect(within(pick).queryByRole('option', { name: 'PRJ-8 · Brand refresh' })).toBeNull();
+    expect(pick.selectedOptions[0]!.textContent).toBe('PRJ-3 · Website rebuild');
+    expect(within(pick).getByRole('option', { name: 'Project: all for this client' })).toBeTruthy();
+    await u.click(screen.getByRole('link', { name: '✕ Clear' }));
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/email'));
+  });
+
+  it('changing the client drops the project filter', async () => {
+    const u = userEvent.setup();
+    stub([], {});
+    show('/email?company=4&project=3');
+    const client = await screen.findByRole('combobox', { name: 'Client / company' });
+    await within(client).findByRole('option', { name: 'Acme' });
+    await u.selectOptions(client, '');
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/email'));
   });
 
   it('an unlinked message offers Link to lead / create lead; Log as activity waits for a lead', async () => {

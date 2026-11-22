@@ -6,7 +6,7 @@ import { keys } from './queries';
 export const MAIL_VIEWS = ['inbox', 'sent', 'drafts', 'archive', 'unlinked', 'awaiting', 'mine'] as const;
 export type MailView = (typeof MAIL_VIEWS)[number];
 
-export type MailFilter = { view: MailView; company?: number; lead?: number; s?: string; page?: number; pageSize?: number };
+export type MailFilter = { view: MailView; company?: number; lead?: number; project?: number; s?: string; page?: number; pageSize?: number };
 
 /** Rows per page offered by the list's pager, as Leads and Companies (owner, 22 Nov 2026: the synced list had grown too long). */
 export const MAIL_PAGE_SIZES = [25, 50, 100] as const;
@@ -31,6 +31,9 @@ export type MailItem = {
   leadNumber: string | null;
   companyId: number | null;
   hasAttachments: boolean;
+  /** Release 3B: the project the message is tagged with (null when none, or one the viewer cannot see). */
+  projectId: number | null;
+  projectNumber: string | null;
 };
 
 export type MailDetail = MailItem & {
@@ -54,15 +57,20 @@ export type MailMeta = {
   unlinked: number;
   companies: { id: number; name: string }[];
   leads: { id: number; number: string; companyId: number | null; companyName: string; status: string }[];
+  /** Release 3B: every project the user can see (the Project filter). */
+  projects: { id: number; number: string; name: string; companyId: number }[];
 };
 
-export type MailCompose = { to: string; cc: string[]; subject: string; body: string; leadId?: number | null; companyId?: number | null };
+export type MailCompose = {
+  to: string; cc: string[]; subject: string; body: string; leadId?: number | null; companyId?: number | null; projectId?: number | null;
+};
 
 const ROOT = ['mail'] as const;
 const listPath = (f: MailFilter) => {
   const q = new URLSearchParams({ view: f.view });
   if (f.company) q.set('company', String(f.company));
   if (f.lead) q.set('lead', String(f.lead));
+  if (f.project) q.set('project', String(f.project));
   if (f.s) q.set('s', f.s);
   if (f.page && f.page > 1) q.set('page', String(f.page));
   q.set('pageSize', String(f.pageSize ?? MAIL_PAGE_SIZE));

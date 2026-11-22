@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { expect, test } from '@playwright/test';
 import { ARJUN, signInAs } from './fixtures';
+import { captureParity } from './parity/_shared';
 
 const DB = process.env.E2E_DATABASE_URL ?? 'postgresql://mac@localhost:5432/dait_crm_e2e';
 const sql = (q: string) => execFileSync('psql', [DB, '-Atc', q], { encoding: 'utf8' }).trim();
@@ -129,6 +130,12 @@ test('Convert an accepted quotation: the project at net value, on the list, the 
   await expect(item).toContainText(`${project.number} · from ${lead.number} · INR 2,000 · Arjun Mehta`);
   await expect(item).toHaveClass(/pj-mine/);
   await expect(card.getByRole('button', { name: '+ Create project' })).toBeVisible();
+  // Email form (Task 6): the client's projects, defaulting to the one from this lead.
+  const emailForm = page.getByRole('region', { name: 'Compose' }).getByRole('form', { name: 'Email' });
+  await expect(emailForm.getByLabel('Project')).toBeEnabled();
+  await expect(emailForm.getByLabel('Project')).toHaveValue(String(project.id));
+  await emailForm.scrollIntoViewIfNeeded();
+  await captureParity(page, 'lead-email-project');
 
   // Company profile: the Projects tab with its count and the row.
   await page.goto(`/companies/${lead.companyId}#projects`);
@@ -138,4 +145,13 @@ test('Convert an accepted quotation: the project at net value, on the list, the 
   await expect(tabRow).toContainText('INR 2,000.00');
   await expect(tabRow.getByRole('link', { name: lead.number })).toHaveAttribute('href', `/leads/${lead.id}`);
   await expect(page.getByRole('region', { name: 'How projects work' })).toBeVisible();
+
+  // The row's Email button opens Compose preset with the client, lead and project; the filters keep the project.
+  await tabRow.getByRole('link', { name: 'Email' }).click();
+  const compose = page.getByRole('dialog', { name: 'Compose email' });
+  await expect(compose.getByLabel('Project')).toHaveValue(String(project.id));
+  await expect(compose.getByLabel('Lead')).toHaveValue(String(lead.id));
+  await expect(compose.getByText(`${company} · ${lead.number} · ${project.name}`)).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/email\\?company=${lead.companyId}&lead=${lead.id}&project=${project.id}$`));
+  await captureParity(page, 'compose-project');
 });

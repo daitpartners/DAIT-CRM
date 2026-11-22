@@ -5,6 +5,7 @@ import { useSendLeadEmail } from '../../api/leadEmails';
 import type { LeadFull } from '../../api/leads';
 import { useMailboxes } from '../../api/mailboxes';
 import { useContacts } from '../../api/contacts';
+import { useCompanyProjects, type ProjectRow } from '../../api/projects';
 import { useUsers } from '../../api/queries';
 import { useTemplates } from '../../api/templates';
 import { useCurrentUser } from '../../api/useCurrentUser';
@@ -39,8 +40,10 @@ type Person = { email: string; name: string; sub: string };
 
 /**
  * The prototype's Email panel (views-lead-detail.js `data-cpanel="email"`, laid out by views-leads2.js):
- * To | Cc stakeholders, Project | Template, Subject, Message, "Set follow-up in", Send email. Sending arrives in
- * release 2: Send keeps the draft and says so.
+ * To | Cc stakeholders, Project | Template, Subject, Message, "Set follow-up in", Send email.
+ * Project (release 3B): offered once the company is a client, defaulting to the project from this lead. A project's
+ * stakeholders (with an email, not the To address) are added to Cc; switching removes the previous project's and keeps
+ * the addresses the user added by hand.
  */
 export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boolean }) {
   const t = useT();
@@ -56,6 +59,38 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
   const [body, setBody] = useState(opening.body);
   const [follow, setFollow] = useState(true);
   const [cc, setCc] = useState<string[]>([]);
+  const { data: companyProjects } = useCompanyProjects(lead.companyId ?? NaN, lead.companyId !== null);
+  const isClient = companyProjects?.isClient ?? lead.company?.isClient ?? false;
+  const projects = isClient ? companyProjects?.items ?? [] : [];
+  const [projectId, setProjectId] = useState<number | undefined>(undefined);
+  // The addresses the current project put in Cc (and the user did not already have): the ones a switch removes.
+  const projectAdded = useRef<string[]>([]);
+  const lc = (e: string) => e.toLowerCase();
+
+  /** Swaps the previous project's stakeholders in Cc for `next`'s, keeping everything else. */
+  function applyProject(next: ProjectRow | undefined, base: string[] = cc, toAddr: string = to) {
+    const gone = new Set(projectAdded.current.map(lc));
+    const kept = base.filter((e) => !gone.has(lc(e)));
+    const have = new Set(kept.map(lc));
+    const added: string[] = [];
+    for (const s of next?.stakeholders ?? []) {
+      if (!s.email || lc(s.email) === lc(toAddr.trim()) || have.has(lc(s.email))) continue;
+      have.add(lc(s.email));
+      added.push(s.email.toLowerCase());
+    }
+    projectAdded.current = added;
+    setProjectId(next?.id);
+    setCc([...kept, ...added]);
+  }
+
+  // On first load: the project from this lead, its stakeholders ticked.
+  const defaulted = useRef(false);
+  useEffect(() => {
+    if (defaulted.current || !companyProjects) return;
+    defaulted.current = true;
+    const own = projects.find((p) => p.lead?.id === lead.id);
+    if (own) applyProject(own);
+  }, [companyProjects]);
   const send = useSendLeadEmail(lead.id);
   const { data: mailboxes } = useMailboxes();
   // Release 2B-1: sending goes through your own connected mailbox.
@@ -94,13 +129,18 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
         if (noMailbox || send.isPending) return;
         if (!to.trim()) return toast(t('Enter who the email goes to'), 'warn');
         send.mutate(
-          { to: to.trim(), cc, subject, body, followUpDays: follow ? (days as 2 | 3 | 7) : null, updatedAt: lead.updatedAt },
+          {
+            to: to.trim(), cc, subject, body, followUpDays: follow ? (days as 2 | 3 | 7) : null, projectId: projectId ?? null,
+            updatedAt: lead.updatedAt,
+          },
           {
             onSuccess: (sent) => {
               toast(t('Email queued — it is sent from {address}', { address: sent.fromAddress }));
               // Back to an empty draft: no recipient, the intro text again.
               setTo('');
-              setCc([]);
+              // Cc starts again from the chosen project's stakeholders.
+              projectAdded.current = [];
+              applyProject(projects.find((p) => p.id === projectId), [], '');
               setTemplateId('');
               setSubject(intro.subject);
               setBody(intro.body);
@@ -130,8 +170,17 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
           <label className="lbl" htmlFor="em-project">
             {t('Project')}
           </label>
-          <select id="em-project" className="in" disabled>
-            <option>{t('available once the lead is Won')}</option>
+          <select
+            id="em-project"
+            className="in"
+            disabled={disabled || !isClient}
+            value={projectId ?? ''}
+            onChange={(e) => applyProject(projects.find((p) => p.id === Number(e.target.value)))}
+          >
+            <option value="">{isClient ? (projects.length ? t('— no project —') : t('no projects yet')) : t('available once the lead is Won')}</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>{`${p.number} · ${p.name}`}</option>
+            ))}
           </select>
         </div>
         <div>

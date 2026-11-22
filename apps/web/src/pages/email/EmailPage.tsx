@@ -30,8 +30,9 @@ function viewLabel(t: TFn, v: MailView): string {
 
 /**
  * The Email screen (release 2B-2; prototype views-work.js V.email): the user's own mailbox, synced every 5 minutes.
- * Folders and smart views, "Show mail for" Client / Lead (Project arrives with projects in release 3), search, the
- * message list, the reader with its linked records. Nobody sees anyone else's mail.
+ * Folders and smart views, "Show mail for" Client / Lead / Project, search, the message list, the reader with its
+ * linked records. Nobody sees anyone else's mail: the Project filter only narrows your own.
+ * `?compose=1` (with `company`, `lead`, `project`) opens Compose preset (the Projects list's Email buttons).
  */
 export function EmailPage() {
   const t = useT();
@@ -46,7 +47,8 @@ export function EmailPage() {
   const sizeParam = num(params.get('size')) ?? 0;
   const pageSize = (MAIL_PAGE_SIZES as readonly number[]).includes(sizeParam) ? sizeParam : MAIL_PAGE_SIZE;
   const filter: MailFilter = {
-    view, company: num(params.get('company')), lead: num(params.get('lead')), s: params.get('s') ?? undefined, page, pageSize,
+    view, company: num(params.get('company')), lead: num(params.get('lead')), project: num(params.get('project')), s: params.get('s') ?? undefined,
+    page, pageSize,
   };
   const { data: meta } = useMailMeta();
   const { data: list, isLoading } = useMailList(filter);
@@ -84,6 +86,18 @@ export function EmailPage() {
   };
   const setQuery = (change: Record<string, string | undefined>) => navigate(href(change));
 
+  // A Compose link (`?compose=1&company=…&lead=…&project=…`) opens Compose once; the filters stay in the address.
+  const composeLink = params.get('compose') === '1';
+  useEffect(() => {
+    if (!composeLink) return;
+    setCompose({ companyId: filter.company, leadId: filter.lead, projectId: filter.project });
+    const q = new URLSearchParams(params);
+    q.delete('compose');
+    const s = q.toString();
+    navigate(`/email${id ? `/${id}` : ''}${s ? `?${s}` : ''}`, { replace: true });
+    // Only the link's arrival should trigger this.
+  }, [composeLink]);
+
   // A page past the end (old link, or the last messages archived): go to the last page that has messages.
   useEffect(() => {
     if (!list || list.items.length > 0 || list.total === 0) return;
@@ -102,6 +116,7 @@ export function EmailPage() {
   const companyName = meta?.companies.find((c) => c.id === filter.company)?.name;
   const leadOptions = (meta?.leads ?? []).filter((l) => !filter.company || l.companyId === filter.company);
   const leadNumber = meta?.leads.find((l) => l.id === filter.lead)?.number;
+  const projectOptions = (meta?.projects ?? []).filter((p) => !filter.company || p.companyId === filter.company);
 
   const sub = !meta ? null : mailbox ? (
     <>
@@ -133,7 +148,11 @@ export function EmailPage() {
             {t('Connect Microsoft 365')}
           </Link>
         )}
-        <button type="button" className="btn primary" onClick={() => setCompose({ companyId: filter.company, companyName, leadId: filter.lead })}>
+        <button
+          type="button"
+          className="btn primary"
+          onClick={() => setCompose({ companyId: filter.company, companyName, leadId: filter.lead, projectId: filter.project })}
+        >
           {t('+ Compose')}
         </button>
       </Topbar>
@@ -157,7 +176,7 @@ export function EmailPage() {
           className="chip mail-pick"
           aria-label={t('Client / company')}
           value={filter.company ?? ''}
-          onChange={(e) => setQuery({ company: e.target.value || undefined, lead: undefined })}
+          onChange={(e) => setQuery({ company: e.target.value || undefined, lead: undefined, project: undefined })}
         >
           <option value="">{t('Client: all')}</option>
           {(meta?.companies ?? []).map((c) => (
@@ -178,11 +197,22 @@ export function EmailPage() {
             <option key={l.id} value={l.id}>{`${l.number} · ${l.companyName}`}</option>
           ))}
         </select>
-        <select className="chip mail-pick" aria-label={t('Project')} disabled title={t('Projects arrive in release 3')}>
-          <option>{t('Project: all')}</option>
+        <select
+          className="chip mail-pick"
+          aria-label={t('Project')}
+          value={filter.project ?? ''}
+          onChange={(e) => {
+            const p = meta?.projects.find((x) => x.id === Number(e.target.value));
+            setQuery({ project: e.target.value || undefined, company: p ? String(p.companyId) : params.get('company') ?? undefined });
+          }}
+        >
+          <option value="">{filter.company ? t('Project: all for this client') : t('Project: all')}</option>
+          {projectOptions.map((p) => (
+            <option key={p.id} value={p.id}>{`${p.number} · ${p.name}`}</option>
+          ))}
         </select>
-        {filter.company || filter.lead ? (
-          <Link className="btn sm" to={href({ company: undefined, lead: undefined })}>
+        {filter.company || filter.lead || filter.project ? (
+          <Link className="btn sm" to={href({ company: undefined, lead: undefined, project: undefined })}>
             {t('✕ Clear')}
           </Link>
         ) : null}
@@ -250,7 +280,7 @@ export function EmailPage() {
           ))}
           {!isLoading && items.length === 0 ? (
             <div className="empty">
-              {filter.company || filter.lead ? t('No messages for this filter in {folder}.', { folder: viewLabel(t, view) }) : t('Nothing here.')}
+              {filter.company || filter.lead || filter.project ? t('No messages for this filter in {folder}.', { folder: viewLabel(t, view) }) : t('Nothing here.')}
             </div>
           ) : null}
           {/* Owner request (22 Nov 2026), not in the prototype: the Leads / Companies pager, 50 rows by default. */}
@@ -305,6 +335,7 @@ function MessageRow({ m, on, to }: { m: MailItem; on: boolean; to: string }) {
         <span className="pre">{m.preview}</span>
         <span className="msg-tags">
           {m.leadNumber ? <span className="badge b-purple">{m.leadNumber}</span> : <span className="badge b-warn">{t('Unlinked · create lead?')}</span>}
+          {m.projectNumber ? <span className="badge b-ok">{m.projectNumber}</span> : null}
           {m.status === 'failed' ? <span className="badge b-bad">{t('Failed')}</span> : null}
           {m.status === 'queued' || m.status === 'sending' ? <span className="badge b-grey">{t('Sending')}</span> : null}
         </span>

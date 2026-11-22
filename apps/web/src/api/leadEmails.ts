@@ -22,6 +22,8 @@ export type LeadEmailSend = {
   subject: string;
   body: string;
   followUpDays: 2 | 3 | 7 | null;
+  /** Release 3B: tag it with one of the company's projects. */
+  projectId?: number | null;
   updatedAt: string;
 };
 

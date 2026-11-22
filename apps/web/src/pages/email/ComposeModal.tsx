@@ -4,6 +4,7 @@ import { ApiError } from '../../api/client';
 import { useContacts } from '../../api/contacts';
 import { useLeads } from '../../api/leads';
 import { useComposeMail, useReplyMail } from '../../api/mail';
+import { useCompanyProjects } from '../../api/projects';
 import { useLookupText } from '../../api/queries';
 import { useTemplates } from '../../api/templates';
 import { useCurrentUser } from '../../api/useCurrentUser';
@@ -20,6 +21,8 @@ export type ComposeStart = {
   /** The client's name, so the Client picker shows it at once (before, or without, a companies search). */
   companyName?: string;
   leadId?: number;
+  /** Release 3B: a project of the client (the Projects list's and company tab's Email buttons). */
+  projectId?: number;
   subject?: string;
   body?: string;
   /** Reply mode: the message answered (To and Subject are fixed, Graph keeps the conversation). */
@@ -35,6 +38,8 @@ type Props = { start: ComposeStart; connected: boolean; from: string | null; onC
 /**
  * The prototype's Compose email dialog (views-projects.js V.compose): Client, Lead, Project (release 3), To, Cc,
  * Keep in the loop, Template, Context saved on, Subject, Message. Sent through the user's own mailbox.
+ * Choosing a project fills its lead when none is chosen and sets Cc to its stakeholders with an email (not the To
+ * address), until the user edits Cc; without a project Cc starts empty, as before release 3B.
  */
 export function ComposeModal({ start, connected, from, onClose }: Props) {
   const t = useT();
@@ -46,7 +51,10 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
   const [leadId, setLeadId] = useState<number | undefined>(start.leadId);
   const [to, setTo] = useState(start.to ?? '');
   const [toTouched, setToTouched] = useState(!!start.to);
+  const [projectId, setProjectId] = useState<number | undefined>(start.projectId);
   const [cc, setCc] = useState('');
+  // Cc follows the project's stakeholders until the user edits it (types, or ticks Keep in the loop).
+  const [ccTouched, setCcTouched] = useState(false);
   const [subject, setSubject] = useState(start.subject ?? '');
   const [body, setBody] = useState(start.body ?? `${t('Hi,')}\n\n\n\n${t('Best regards,')}\n${me.name}`);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +63,9 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
   const { data: templates } = useTemplates();
   const { data: leadPage } = useLeads({ companyId, pageSize: 100, tab: 'all' }, !reply && companyId !== undefined);
   const { data: contactPage } = useContacts({ companyId, pageSize: 100 }, !reply && companyId !== undefined);
+  const { data: companyProjects } = useCompanyProjects(companyId ?? NaN, !reply && companyId !== undefined);
+  const projects = companyId !== undefined ? companyProjects?.items ?? [] : [];
+  const project = projects.find((p) => p.id === projectId);
   const leads = (leadPage?.items ?? []).filter((l) => !l.archivedAt);
   const contacts = (contactPage?.items ?? []).filter((c) => c.businessEmail && c.isActive);
   const lead = leads.find((l) => l.id === leadId);
@@ -62,8 +73,14 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
   // To follows the lead's contact (else the client's primary contact) until the user types their own.
   const suggestedTo = lead?.contact?.email ?? primary?.businessEmail ?? '';
   const toValue = toTouched ? to : suggestedTo;
-  const ccList = splitList(cc);
-  const companyLabel = lead?.company?.name ?? contacts[0]?.company.name ?? null;
+  const projectCc = project
+    ? [...new Set(project.stakeholders.map((s) => s.email?.toLowerCase()).filter((e): e is string => !!e && e !== toValue.trim().toLowerCase()))]
+    : [];
+  const ccValue = ccTouched ? cc : projectCc.join(', ');
+  const ccList = splitList(ccValue);
+  const companyLabel = lead?.company?.name ?? contacts[0]?.company.name ?? project?.company.name ?? null;
+  // The client's name for the picker when Compose opens on one (a project link may name a client outside your mail).
+  const startCompanyName = start.companyName ?? companyProjects?.items[0]?.company.name ?? contacts[0]?.company.name;
   const sortedTemplates = useMemo(
     () => [...(templates ?? [])].sort((a, b) => Number(b.language === me.language) - Number(a.language === me.language)),
     [templates, me.language],
@@ -72,6 +89,27 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
   function toggleLoop(email: string, on: boolean) {
     const next = on ? [...new Set([...ccList, email])] : ccList.filter((x) => x !== email);
     setCc(next.join(', '));
+    setCcTouched(true);
+  }
+
+  function pickProject(id: number | undefined) {
+    setProjectId(id);
+    setCcTouched(false);
+    const p = projects.find((x) => x.id === id);
+    if (p?.lead?.visible && leadId === undefined) {
+      setLeadId(p.lead.id);
+      setToTouched(false);
+    }
+  }
+
+  function changeCompany(id: number | undefined) {
+    setCompanyId(id);
+    setLeadId(undefined);
+    setToTouched(false);
+    if (projectId !== undefined) {
+      setProjectId(undefined);
+      setCcTouched(false);
+    }
   }
 
   function applyTemplate(id: string) {
@@ -99,7 +137,10 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
       answer.mutate({ id: start.replyTo!, cc: ccList, body: body.trim() }, { onSuccess: done, onError: fail });
     } else {
       compose.mutate(
-        { to: target, cc: ccList, subject: subject.trim(), body: body.trim(), leadId: leadId ?? null, companyId: companyId ?? null },
+        {
+          to: target, cc: ccList, subject: subject.trim(), body: body.trim(), leadId: leadId ?? null, companyId: companyId ?? null,
+          projectId: projectId ?? null,
+        },
         { onSuccess: done, onError: fail },
       );
     }
@@ -130,18 +171,10 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
             id="cm-company"
             label={t('Client')}
             value={companyId}
-            selected={companyId === start.companyId && start.companyName ? { value: String(start.companyId), label: start.companyName } : null}
-            onChange={(id) => {
-              setCompanyId(id);
-              setLeadId(undefined);
-              setToTouched(false);
-            }}
+            selected={companyId === start.companyId && startCompanyName ? { value: String(start.companyId), label: startCompanyName } : null}
+            onChange={(id) => changeCompany(id)}
             emptyLabel={t('— choose client / company —')}
-            onClear={() => {
-              setCompanyId(undefined);
-              setLeadId(undefined);
-              setToTouched(false);
-            }}
+            onClear={() => changeCompany(undefined)}
           />
           <div>
             <label className="lbl" htmlFor="cm-lead">{t('Lead')}</label>
@@ -163,8 +196,17 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
           </div>
           <div>
             <label className="lbl" htmlFor="cm-project">{t('Project')}</label>
-            <select id="cm-project" className="in" disabled title={t('Projects arrive in release 3')}>
-              <option>{t('Projects arrive in release 3')}</option>
+            <select
+              id="cm-project"
+              className="in"
+              value={projectId ?? ''}
+              disabled={companyId === undefined}
+              onChange={(e) => pickProject(e.target.value ? Number(e.target.value) : undefined)}
+            >
+              <option value="">{companyId === undefined ? t('choose client first') : projects.length ? t('— no project —') : t('no projects yet')}</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>{`${p.number} · ${p.name}`}</option>
+              ))}
             </select>
           </div>
         </div>
@@ -188,7 +230,15 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
           <label className="lbl" htmlFor="cm-cc">
             {t('Cc')} <span className="lbl-note">{t('(stakeholders)')}</span>
           </label>
-          <input id="cm-cc" className="in" value={cc} onChange={(e) => setCc(e.target.value)} />
+          <input
+            id="cm-cc"
+            className="in"
+            value={ccValue}
+            onChange={(e) => {
+              setCc(e.target.value);
+              setCcTouched(true);
+            }}
+          />
         </div>
       </div>
       {!reply && contacts.length ? (
@@ -223,7 +273,7 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
         {reply ? null : (
           <div>
             <div className="lbl">{t('Context saved on')}</div>
-            <div className="mail-context">{companyLabel ?? <span className="dim">—</span>}{lead ? ` · ${lead.number}` : ''}</div>
+            <div className="mail-context">{companyLabel ?? <span className="dim">—</span>}{lead ? ` · ${lead.number}` : ''}{project ? ` · ${project.name}` : ''}</div>
           </div>
         )}
         <div className="span2">

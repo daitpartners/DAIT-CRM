@@ -8,6 +8,8 @@ import { keys, type LookupValue, type Me } from '../src/api/queries';
 import { ToastProvider } from '../src/components/Toast';
 import { LeadModal } from '../src/pages/leads/LeadModal';
 import { LeadPage } from '../src/pages/leads/LeadPage';
+import { EmailForm } from '../src/pages/leads/EmailForm';
+import { Wrap, makeLead } from './leadFixture';
 
 const rep: Me = {
   id: 2, email: 'arjun@daitpartners.com', name: 'Arjun Mehta', role: 'Sales Representative', language: 'en',
@@ -150,5 +152,76 @@ describe('lead page conflicts', () => {
     await u.click(screen.getByRole('button', { name: 'Hide' }));
     await u.click(screen.getByRole('tab', { name: 'Meeting' }));
     expect(screen.getByRole('textbox', { name: /Title/ })).toHaveValue('Kick-off with ops');
+  });
+});
+
+describe('lead email form: Project picker (release 3B)', () => {
+  const stakeholder = (id: number, name: string, email: string | null) => ({ id, name, email });
+  const prj = (id: number, name: string, leadId: number | null, stakeholders: { id: number; name: string; email: string | null }[]) => ({
+    id, number: `PRJ-${id}`, name, status: 'Active', startDate: '2026-11-01', value: null, currency: 'USD', company: { id: 4, name: 'Meridian Textiles' },
+    lead: leadId ? { id: leadId, number: `LD-${1000 + leadId}`, visible: true } : null, quotation: null, manager: { id: 2, name: 'Arjun Mehta' },
+    stakeholders, description: null, completedAt: null, createdAt: '', updatedAt: '', canEdit: true,
+  });
+  const client = { ...baseLead, contact: { ...makeLead().contact!, email: 'tom@meridian.in' }, company: { ...baseLead.company!, isClient: true } };
+
+  function renderForm(lead: LeadFull, projects: { items: unknown[]; isClient: boolean }) {
+    const posts: { url: string; body: Record<string, unknown> }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        posts.push({ url, body: JSON.parse(String(init.body)) });
+        return Response.json({ id: 1, fromAddress: 'arjun@daitpartners.com' }, { status: 201 });
+      }
+      if (url === '/api/companies/4/projects') return Response.json(projects);
+      if (url === '/api/mailboxes') return Response.json({ mine: { id: 7, address: 'arjun@daitpartners.com', status: 'connected' } });
+      return Response.json({ items: [], total: 0, page: 1, pageSize: 100 });
+    }));
+    render(
+      <Wrap qc={setup()}>
+        <EmailForm lead={lead} />
+      </Wrap>,
+    );
+    return posts;
+  }
+  const chips = () => [...document.querySelectorAll('.cchip')].map((x) => x.getAttribute('title'));
+
+  it('not a client: disabled, "available once the lead is Won"', async () => {
+    renderForm(baseLead, { items: [], isClient: false });
+    const pick = screen.getByRole('combobox', { name: 'Project' }) as HTMLSelectElement;
+    expect(pick.disabled).toBe(true);
+    expect(pick.selectedOptions[0]!.textContent).toBe('available once the lead is Won');
+  });
+
+  it('a client with no projects: "no projects yet"', async () => {
+    renderForm(client, { items: [], isClient: true });
+    const pick = screen.getByRole('combobox', { name: 'Project' }) as HTMLSelectElement;
+    await waitFor(() => expect(pick.selectedOptions[0]!.textContent).toBe('no projects yet'));
+  });
+
+  it("defaults to this lead's project with its stakeholders ticked; switching swaps them and keeps hand-added Cc; sends projectId", async () => {
+    const u = userEvent.setup();
+    const posts = renderForm(client, {
+      isClient: true,
+      items: [
+        prj(9, 'Other site', null, [stakeholder(31, 'Cleo', 'cleo@meridian.in'), stakeholder(32, 'Tom Hale', 'TOM@meridian.in')]),
+        prj(3, 'Website', 5, [stakeholder(21, 'Ava', 'ava@meridian.in'), stakeholder(22, 'No Mail', null), stakeholder(23, 'Bo', 'bo@meridian.in')]),
+      ],
+    });
+    const pick = screen.getByRole('combobox', { name: 'Project' }) as HTMLSelectElement;
+    await waitFor(() => expect(pick).toHaveValue('3'));
+    expect(pick.disabled).toBe(false);
+    expect(within(pick).getByRole('option', { name: '— no project —' })).toBeTruthy();
+    expect(within(pick).getByRole('option', { name: 'PRJ-9 · Other site' })).toBeTruthy();
+    expect(chips()).toEqual(['ava@meridian.in', 'bo@meridian.in']);
+    const cc = screen.getByRole('combobox', { name: 'Cc stakeholders' });
+    await u.type(cc, 'hand@meridian.in{Enter}');
+    expect(chips()).toEqual(['ava@meridian.in', 'bo@meridian.in', 'hand@meridian.in']);
+    // Tom is the To address: not copied.
+    await u.selectOptions(pick, '9');
+    expect(chips()).toEqual(['hand@meridian.in', 'cleo@meridian.in']);
+    await u.selectOptions(pick, '');
+    expect(chips()).toEqual(['hand@meridian.in']);
+    await u.selectOptions(pick, '9');
+    await u.click(screen.getByRole('button', { name: 'Send email' }));
+    await waitFor(() => expect(posts[0]).toMatchObject({ url: '/api/leads/5/emails', body: { projectId: 9, cc: ['hand@meridian.in', 'cleo@meridian.in'] } }));
   });
 });
