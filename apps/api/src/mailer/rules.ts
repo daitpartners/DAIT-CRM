@@ -60,10 +60,12 @@ export async function checkRecipients(db: Db, user: AuthUser, leadIds: number[])
       if (seen.has(to)) block = 'Same address as another selected lead';
       else seen.add(to);
     }
+    // A company with no time zone, state or city (often only a country) leaves the lead's own city to place it.
+    const co = l.company;
     const tz = resolveTimezones(
-      l.company
-        ? { companyTimezone: l.company.timezone, country: l.company.country, state: l.company.state, city: l.company.city }
-        : { country: l.country, city: l.city },
+      co && (co.timezone || co.state || co.city)
+        ? { companyTimezone: co.timezone, country: co.country, state: co.state, city: co.city }
+        : { country: co?.country ?? l.country, state: null, city: l.city },
       user.timezone,
     );
     return {

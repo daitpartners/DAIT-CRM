@@ -546,6 +546,8 @@ model EmailCampaign {
   templateId        Int?      @map("template_id")
   templateName      String    @map("template_name") @db.VarChar(150)
   templateUpdatedAt DateTime? @map("template_updated_at")
+  /// The template's language at queueing (for the opt-out line), kept if the template is deleted.
+  language          String    @default("en") @db.VarChar(5)
   /// The template as queued, so later edits do not change the record.
   subject           String    @db.VarChar(500)
   body              String

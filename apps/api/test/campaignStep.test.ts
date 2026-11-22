@@ -116,7 +116,8 @@ describe('Mailer step: one email per step from the sender’s mailbox (release 2
     expect(sent).toHaveLength(1);
     const after = await prisma.emailCampaign.findUniqueOrThrow({ where: { id: c.id } });
     expect(after).toMatchObject({ status: 'Sending', waitReason: 'working_hours' });
-    expect(after.nextSendAt!.getTime()).toBe(WED_NOON_SANTIAGO.getTime() + 5 * 60_000);
+    // It looks again when Tokyo opens: Thursday 09:00 JST = Thursday 00:00 UTC.
+    expect(after.nextSendAt!.toISOString()).toBe('2026-11-26T00:00:00.000Z');
   });
 
   test('the daily limit of 200 per mailbox makes the campaign wait until the sender’s next day', async () => {
@@ -212,6 +213,64 @@ describe('Mailer step: one email per step from the sender’s mailbox (release 2
     await campaignStepHandler(job(c.id), { graph });
     expect((await prisma.emailCampaign.findUniqueOrThrow({ where: { id: c.id } })).status).toBe('Completed');
     expect(await prisma.notification.findFirst({ where: { userId: sender.id, text: 'Mailer finished · Chile' } })).toMatchObject({ detail: '1 sent · 0 skipped · 0 failed' });
+  });
+
+  test('over a weekend the next step waits for Monday', async () => {
+    // Saturday 28 Nov 2026 12:00 UTC: Chicago and Kolkata both closed; Kolkata opens first, Monday 09:00 IST = 03:30 UTC.
+    const SAT_NOON = new Date('2026-11-28T12:00:00Z');
+    at(SAT_NOON);
+    const { c } = await campaign({ workingHoursOnly: true });
+    await prisma.emailCampaignRecipient.update({ where: { id: c.recipients[0]!.id }, data: { timezones: ['America/Chicago'] } });
+    await prisma.emailCampaignRecipient.update({ where: { id: c.recipients[1]!.id }, data: { timezones: ['Asia/Kolkata'] } });
+    const { sent, graph } = recording();
+    await campaignStepHandler(job(c.id), { graph });
+    expect(sent).toHaveLength(0);
+    const after = await prisma.emailCampaign.findUniqueOrThrow({ where: { id: c.id } });
+    expect(after.waitReason).toBe('working_hours');
+    expect(after.nextSendAt!.toISOString()).toBe('2026-11-30T03:30:00.000Z');
+    expect(after.nextSendAt!.getTime()).toBeGreaterThan(SAT_NOON.getTime());
+    expect((await prisma.job.findFirstOrThrow({ where: { type: 'campaign_step', status: 'queued' } })).runAt.toISOString()).toBe('2026-11-30T03:30:00.000Z');
+  });
+
+  test("deleted template keeps the campaign's language for the opt-out line", async () => {
+    at(WED_NOON_SANTIAGO);
+    const { c } = await campaign({ leads: 1 });
+    const tpl = await prisma.emailTemplate.create({ data: { name: 'Intro ES', language: 'es', subject: 'Hola', body: 'Hola', sourceType: 'manual' } });
+    await prisma.emailCampaign.update({ where: { id: c.id }, data: { templateId: tpl.id, language: 'es' } });
+    await prisma.emailTemplate.delete({ where: { id: tpl.id } });
+    const { sent, graph } = recording();
+    await campaignStepHandler(job(c.id), { graph });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text.endsWith('Si prefiere no recibir correos de DAIT Partners, responda con «baja» y no volveremos a contactarle.')).toBe(true);
+  });
+
+  test('a mailbox put in error by sync pauses with "needs reconnecting"', async () => {
+    at(WED_NOON_SANTIAGO);
+    const { sender, account, c } = await campaign();
+    await prisma.emailAccount.update({ where: { id: account.id }, data: { status: 'error', lastError: 'invalid_grant' } });
+    const { sent, graph } = recording();
+    await campaignStepHandler(job(c.id), { graph });
+    expect(sent).toHaveLength(0);
+    expect(await prisma.emailCampaign.findUniqueOrThrow({ where: { id: c.id } })).toMatchObject({ status: 'Paused', pauseReason: 'Mailbox needs reconnecting' });
+    expect(await prisma.notification.findFirst({ where: { userId: sender.id, text: 'Mailer paused · Chile' } })).toMatchObject({ detail: 'Your Microsoft 365 mailbox needs reconnecting in Settings.' });
+
+    // No account at all: disconnected.
+    await prisma.emailAccount.delete({ where: { id: account.id } });
+    const other = await campaign();
+    await prisma.emailAccount.delete({ where: { id: other.account.id } });
+    await campaignStepHandler(job(other.c.id), { graph });
+    expect(await prisma.emailCampaign.findUniqueOrThrow({ where: { id: other.c.id } })).toMatchObject({ status: 'Paused', pauseReason: 'Mailbox disconnected' });
+  });
+
+  test('two steps at once send one email', async () => {
+    at(WED_NOON_SANTIAGO);
+    const { c } = await campaign({ leads: 2 });
+    const a = await prisma.job.create({ data: { type: 'campaign_step', payload: { campaignId: c.id }, status: 'queued', runAt: new Date() } });
+    const b = await prisma.job.create({ data: { type: 'campaign_step', payload: { campaignId: c.id }, status: 'queued', runAt: new Date() } });
+    const { sent, graph } = recording();
+    await Promise.all([campaignStepHandler(a, { graph }), campaignStepHandler(b, { graph })]);
+    expect(sent).toHaveLength(1);
+    expect((await recipients(c.id)).map((r) => r.status)).toEqual(['Sent', 'Queued']);
   });
 });
 

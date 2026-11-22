@@ -106,7 +106,7 @@ export const mailerRoutes: FastifyPluginAsync = async (app) => {
       const id = await prisma.$transaction(async (tx) => {
         const c = await tx.emailCampaign.create({
           data: {
-            name: body.name || `Mailer · ${template.name}`, templateId: template.id, templateName: template.name, templateUpdatedAt: template.updatedAt,
+            name: body.name || `Mailer · ${template.name}`, templateId: template.id, templateName: template.name, templateUpdatedAt: template.updatedAt, language: template.language,
             subject: template.subject, body: template.body, senderId: user.id, accountId: account.id, senderAddress: account.address,
             cc: body.cc, bcc: body.bcc, startAt, intervalMinutes: body.intervalMinutes, workingHoursOnly: body.workingHoursOnly,
             unsubscribeLine: body.unsubscribeLine, lawfulBasis: body.lawfulBasis, status: startAt ? 'Scheduled' : 'Sending', nextSendAt: startAt ?? new Date(),

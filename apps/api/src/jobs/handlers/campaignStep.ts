@@ -1,5 +1,5 @@
 import type { Job } from '@prisma/client';
-import { MAILER_DAILY_LIMIT, fillTemplate, inWorkingHours } from '@dait-crm/shared';
+import { MAILER_DAILY_LIMIT, fillTemplate, inWorkingHours, nextWorkingStart } from '@dait-crm/shared';
 import { prisma } from '../../db.js';
 import { errorMessage } from '../queue.js';
 import { isAuthFailure } from '../../graph/client.js';
@@ -11,10 +11,10 @@ import { queueStep, startOfDayIn, startOfNextDayIn } from '../../mailer/schedule
 import { textToHtml } from './sendUserEmail.js';
 import type { JobContext } from '../runner.js';
 
-/** Nobody can be sent now (working hours): look again this soon. */
-const RECHECK_MS = 5 * 60_000;
+/** Nobody can be sent now (working hours): never look again sooner than this. */
+const MIN_WAIT_MS = 60_000;
 
-/** The prototype's opt-out line, in the template's language (the prototype has English only). */
+/** The prototype's opt-out line, in the campaign's (template's) language (the prototype has English only). */
 const UNSUBSCRIBE: Record<string, string> = {
   en: '\n\n—\nIf you would prefer not to receive emails from DAIT Partners, reply with "unsubscribe" and we will not contact you again.',
   es: '\n\n—\nSi prefiere no recibir correos de DAIT Partners, responda con «baja» y no volveremos a contactarle.',
@@ -41,8 +41,13 @@ export async function campaignStepHandler(job: Job, ctx: JobContext): Promise<vo
     const user = await mailUser(tx, c.senderId);
     const account = await tx.emailAccount.findFirst({ where: { kind: 'personal', userId: c.senderId, status: 'connected' } });
     if (!user || !account) {
-      await tx.emailCampaign.update({ where: { id: c.id }, data: { status: 'Paused', pauseReason: 'Mailbox disconnected', waitReason: null } });
-      await notifyUser(tx, c.senderId, `Mailer paused · ${c.name}`, "The sender's mailbox is no longer connected.", `/mailer/${c.id}`);
+      // A mailbox that sync (or an earlier send) found revoked needs reconnecting, not a new connection.
+      const broken = user && (await tx.emailAccount.findFirst({ where: { kind: 'personal', userId: c.senderId, status: 'error' }, select: { id: true } }));
+      await tx.emailCampaign.update({ where: { id: c.id }, data: { status: 'Paused', pauseReason: broken ? 'Mailbox needs reconnecting' : 'Mailbox disconnected', waitReason: null } });
+      await notifyUser(
+        tx, c.senderId, `Mailer paused · ${c.name}`,
+        broken ? 'Your Microsoft 365 mailbox needs reconnecting in Settings.' : "The sender's mailbox is no longer connected.", `/mailer/${c.id}`,
+      );
       return null;
     }
     const sentToday = await tx.emailMessage.count({ where: { userId: c.senderId, campaignId: { not: null }, occurredAt: { gte: startOfDayIn(user.timezone, now) } } });
@@ -51,7 +56,8 @@ export async function campaignStepHandler(job: Job, ctx: JobContext): Promise<vo
       return { wait: true, c, user } as const;
     }
     const queued = await tx.emailCampaignRecipient.findMany({ where: { campaignId, status: 'Queued' }, orderBy: { position: 'asc' } });
-    let waiting = false;
+    // Recipients outside their working hours, by zone set: when the first of them opens (worked out once per zone set).
+    const waits = new Map<string, Date>();
     for (const r of queued) {
       const block = await sendBlock(tx, user, r.leadId, c.createdAt, { toAddress: r.toAddress, contactId: r.contactId });
       if (block) {
@@ -59,15 +65,17 @@ export async function campaignStepHandler(job: Job, ctx: JobContext): Promise<vo
         continue;
       }
       if (c.workingHoursOnly && !inWorkingHours(r.timezones, now)) {
-        waiting = true;
+        const key = r.timezones.join(',');
+        if (!waits.has(key)) waits.set(key, nextWorkingStart(r.timezones, now));
         continue;
       }
       await tx.emailCampaignRecipient.update({ where: { id: r.id }, data: { status: 'Sending' } });
       await tx.emailCampaign.update({ where: { id: c.id }, data: { waitReason: null, nextSendAt: new Date(now.getTime() + c.intervalMinutes * 60_000), accountId: account.id } });
       return { wait: false, c, user, account, r } as const;
     }
-    if (waiting) {
-      await tx.emailCampaign.update({ where: { id: c.id }, data: { waitReason: 'working_hours', nextSendAt: new Date(now.getTime() + RECHECK_MS) } });
+    if (waits.size) {
+      const first = Math.min(...[...waits.values()].map((d) => d.getTime()));
+      await tx.emailCampaign.update({ where: { id: c.id }, data: { waitReason: 'working_hours', nextSendAt: new Date(Math.max(now.getTime() + MIN_WAIT_MS, first)) } });
       return { wait: true, c, user } as const;
     }
     return { wait: true, c, user, done: true } as const;
@@ -83,9 +91,8 @@ export async function campaignStepHandler(job: Job, ctx: JobContext): Promise<vo
   const { c, user, account, r } = claimed;
   const lead = await prisma.lead.findUniqueOrThrow({ where: { id: r.leadId! }, include: { contact: { select: { firstName: true } } } });
   const ctxFill = { firstName: lead.contact?.firstName || 'there', company: lead.companyName, me: user.name, leadNumber: lead.number };
-  const language = (await prisma.emailTemplate.findUnique({ where: { id: c.templateId ?? -1 }, select: { language: true } }))?.language ?? 'en';
   const subject = fillTemplate(c.subject, ctxFill).slice(0, 500);
-  const text = fillTemplate(c.body, ctxFill) + (c.unsubscribeLine ? (UNSUBSCRIBE[language] ?? UNSUBSCRIBE.en) : '');
+  const text = fillTemplate(c.body, ctxFill) + (c.unsubscribeLine ? (UNSUBSCRIBE[c.language] ?? UNSUBSCRIBE.en) : '');
   try {
     await ctx.graph.sendMail(account, {
       to: [r.toAddress], ...(c.cc.length ? { cc: c.cc } : {}), ...(c.bcc.length ? { bcc: c.bcc } : {}), subject, html: textToHtml(text), text,

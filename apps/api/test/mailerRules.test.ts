@@ -50,6 +50,16 @@ describe('who the Mailer may email (release 2C, prototype mailBlock / mailerChec
     expect(rows[1]).toMatchObject({ zones: ['America/Santiago'], source: 'country' });
   });
 
+  it('company with only a country uses the lead\'s city', async () => {
+    const user = await rep();
+    const co = await makeCompany({ name: 'Rainier', country: 'United States' });
+    await prisma.company.update({ where: { id: co.id }, data: { state: null, city: null, timezone: null } });
+    const contact = await makeContact({ companyId: co.id, firstName: 'Lee', businessEmail: 'lee@rainier.com' });
+    const lead = await makeLead({ companyId: co.id, contactId: contact.id, assignedToId: user.id, companyName: 'Rainier', city: 'Seattle' });
+    const [row] = await checkRecipients(prisma, user, [lead.id]);
+    expect(row).toMatchObject({ zones: ['America/Los_Angeles'], source: 'address' });
+  });
+
   it('at send time a lead that replied after the campaign was created is skipped', async () => {
     const user = await rep();
     const lead = await makeLead({ companyId: null, contactId: null, assignedToId: user.id, businessEmail: 'r@y.com' });

@@ -61,6 +61,8 @@ describe('Mailer campaigns (release 2C)', () => {
     expect(c.recipients.map((r: { status: string; error: string | null }) => [r.status, r.error])).toEqual([['Queued', null], ['Skipped', 'No email address']]);
     const row = await prisma.emailCampaign.findUniqueOrThrow({ where: { id: c.id } });
     expect(row.nextSendAt!.getTime()).toBeLessThanOrEqual(Date.now());
+    // The template's language stays with the campaign (for the opt-out line), even if the template is deleted.
+    expect(row.language).toBe('es');
     expect(await prisma.notification.findFirst({ where: { userId: seba.id } })).toMatchObject({ text: 'Mailer queued · Chile · Nov', detail: '1 email · sending now', link: `/mailer/${c.id}` });
   });
 
