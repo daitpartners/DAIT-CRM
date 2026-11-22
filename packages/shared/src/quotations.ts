@@ -38,8 +38,11 @@ export function defaultTaxRate(currency: QuoteCurrency, settings?: { taxInr: Num
   return num(currency === 'INR' ? settings.taxInr : currency === 'CAD' ? settings.taxCad : settings.taxUsd);
 }
 
-/** Half-up to 2 decimals, without the 1.005 → 1.00 binary surprise. */
-const round2 = (n: number): number => Math.sign(n) * Math.round((Math.abs(n) + Number.EPSILON) * 100) / 100;
+/**
+ * Half-up to 2 decimals, as Postgres rounds into a Decimal(…, 2) column, without the binary surprise
+ * (1.005 → 1.01, not 1.00): the ×100 product is trimmed to 15 significant digits before rounding.
+ */
+export const round2 = (n: number): number => Math.sign(n) * Math.round(Number((Math.abs(n) * 100).toPrecision(15))) / 100;
 
 export interface QuoteTotals {
   /** Σ qty × price */
@@ -93,3 +96,22 @@ const MONEY_FORMATS: Record<QuoteCurrency, Intl.NumberFormat> = {
 export function formatMoney(amount: number, currency: QuoteCurrency): string {
   return `${currency} ${MONEY_FORMATS[currency].format(amount)}`;
 }
+
+/**
+ * Settings → Company details as seeded by migration 20261202100000_quotations (the owner's issuer values; default
+ * terms = the prototype's with VAT → GST). The migration's INSERT must match; the API falls back to these when the
+ * row is missing (e.g. after a test reset).
+ */
+export const COMPANY_SETTINGS_DEFAULTS = {
+  legalName: 'DAIT Partners LLP',
+  addressLines: ['D-303, Sagar Sadan', 'IP Extension', 'Delhi 110092', 'India'],
+  email: 'info@daitpartners.com',
+  gstin: null,
+  taxInr: 18,
+  taxUsd: 0,
+  taxCad: 0,
+  defaultNotes: 'Payment: 40% on acceptance, 40% at milestone, 20% on completion. Prices exclude GST where applicable.',
+} as const satisfies {
+  legalName: string; addressLines: readonly string[]; email: string; gstin: string | null;
+  taxInr: number; taxUsd: number; taxCad: number; defaultNotes: string;
+};

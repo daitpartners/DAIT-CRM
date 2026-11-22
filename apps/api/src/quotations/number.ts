@@ -10,6 +10,7 @@ const LOCK_NAMESPACE = 3001;
  * counts from 001, zero-padded to 3 and growing past 999. Takes a transaction-scoped advisory lock for that year, so
  * call it inside the transaction that inserts the quotation; concurrent creates for the same year then queue on the
  * lock and each sees the previous one's number.
+ * Relies on READ COMMITTED (Postgres' default): the MAX read after the lock sees rows committed by earlier holders.
  */
 export async function nextQuotationNumber(tx: Tx, quotationDate: Date): Promise<string> {
   const year = quotationDate.getUTCFullYear();

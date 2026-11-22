@@ -1,5 +1,6 @@
 import {
   QUOTE_CURRENCIES, QUOTE_STATUSES, QUOTE_LOCKED, defaultCurrency, defaultTaxRate, quoteTotals, formatMoney, isQuoteLocked,
+  COMPANY_SETTINGS_DEFAULTS,
 } from '../src/quotations';
 import { CompanySettingsUpdate, QuotationCreate, QuotationUpdate } from '../src/schemas/quotation';
 
@@ -107,6 +108,23 @@ describe('quotation schemas', () => {
     expect(QuotationUpdate.parse({ contactId: null, validUntil: null, updatedAt })).toMatchObject({ contactId: null, validUntil: null });
   });
 
+  test('QuotationUpdate: the lead can be changed or cleared', () => {
+    expect(QuotationUpdate.parse({ leadId: 9, updatedAt })).toMatchObject({ leadId: 9 });
+    expect(QuotationUpdate.parse({ leadId: null, updatedAt })).toMatchObject({ leadId: null });
+    expect(QuotationUpdate.safeParse({ leadId: 0, updatedAt }).success).toBe(false);
+  });
+
+  test('QuotationUpdate rounds amounts and percentages to 2 decimals (as stored)', () => {
+    const p = QuotationUpdate.parse({
+      taxRate: 18.005, overallDiscount: 4.444,
+      lines: [{ item: 'X', qty: 1.005, unit: 'h', unitPrice: 99.999, discount: 7.555 }],
+      updatedAt,
+    });
+    expect(p).toMatchObject({ taxRate: 18.01, overallDiscount: 4.44 });
+    expect(p.lines![0]).toMatchObject({ qty: 1.01, unitPrice: 100, discount: 7.56 });
+    expect(CompanySettingsUpdate.parse({ ...COMPANY_SETTINGS_DEFAULTS, taxInr: 12.345 }).taxInr).toBe(12.35);
+  });
+
   test('QuotationUpdate rejects bad values', () => {
     const bad = (o: object) => QuotationUpdate.safeParse({ ...o, updatedAt }).success;
     expect(QuotationUpdate.safeParse({}).success).toBe(false); // updatedAt required
@@ -121,6 +139,20 @@ describe('quotation schemas', () => {
     expect(bad({ lines: [{ item: '', qty: 1, unit: 'project', unitPrice: 1, discount: 0 }] })).toBe(false);
     expect(bad({ status: 'Accepted' })).toBe(true); // unknown keys are stripped, never applied
     expect('status' in QuotationUpdate.parse({ status: 'Accepted', updatedAt })).toBe(false);
+  });
+
+  test('COMPANY_SETTINGS_DEFAULTS: the issuer seeded by the migration, and valid Company details', () => {
+    expect(COMPANY_SETTINGS_DEFAULTS).toEqual({
+      legalName: 'DAIT Partners LLP',
+      addressLines: ['D-303, Sagar Sadan', 'IP Extension', 'Delhi 110092', 'India'],
+      email: 'info@daitpartners.com',
+      gstin: null,
+      taxInr: 18,
+      taxUsd: 0,
+      taxCad: 0,
+      defaultNotes: 'Payment: 40% on acceptance, 40% at milestone, 20% on completion. Prices exclude GST where applicable.',
+    });
+    expect(CompanySettingsUpdate.parse(COMPANY_SETTINGS_DEFAULTS)).toEqual(COMPANY_SETTINGS_DEFAULTS);
   });
 
   test('CompanySettingsUpdate', () => {

@@ -1,13 +1,16 @@
 import { z } from 'zod';
 import { isoDate, optionalText } from './common.js';
-import { QUOTE_CURRENCIES } from '../quotations.js';
+import { QUOTE_CURRENCIES, round2 } from '../quotations.js';
 
 /** Largest amount the money columns (Decimal(14,2)) hold. */
 export const QUOTE_MAX_AMOUNT = 999_999_999_999.99;
 export const QUOTE_MAX_LINES = 100;
 const NOTES_MAX = 10_000;
 
-const percent = z.number().min(0).max(100);
+/** Amounts and percentages are rounded to 2 decimals here, as the Decimal(…, 2) columns store them, so the totals the
+ * editor shows and the totals computed from the stored row cannot differ by a cent. */
+const twoDp = (min: number, max: number) => z.number().min(min).max(max).transform(round2);
+const percent = twoDp(0, 100);
 const id = z.number().int().positive();
 
 /** "New quotation": the company, and optionally its lead and contact; everything else comes from the defaults. */
@@ -22,9 +25,9 @@ export type QuotationCreate = z.infer<typeof QuotationCreate>;
 export const LineInput = z.object({
   item: z.string().trim().min(1).max(300),
   description: optionalText(NOTES_MAX),
-  qty: z.number().min(0).max(9_999_999_999.99),
+  qty: twoDp(0, 9_999_999_999.99),
   unit: z.string().trim().max(30),
-  unitPrice: z.number().min(0).max(QUOTE_MAX_AMOUNT),
+  unitPrice: twoDp(0, QUOTE_MAX_AMOUNT),
   discount: percent,
 });
 export type LineInput = z.infer<typeof LineInput>;
@@ -34,6 +37,8 @@ export type LineInput = z.infer<typeof LineInput>;
  * working copy). `updatedAt` is the version the editor loaded (409 when stale). Status changes have their own routes.
  */
 export const QuotationUpdate = z.object({
+  /** One of the company's leads, or null to clear (the API checks it belongs to the quotation's company). */
+  leadId: id.nullable().optional(),
   contactId: id.nullable().optional(),
   quotationDate: isoDate.optional(),
   validUntil: isoDate.nullable().optional(),

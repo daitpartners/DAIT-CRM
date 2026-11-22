@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { test, expect, beforeAll, afterAll } from 'vitest';
+import { COMPANY_SETTINGS_DEFAULTS } from '@dait-crm/shared';
 import type { Company, User } from '@prisma/client';
 import { prisma } from '../src/db';
 import { nextQuotationNumber } from '../src/quotations/number';
@@ -57,4 +59,16 @@ test('the sequence grows past 999 instead of truncating', async () => {
   expect(next.number).toBe('Q-2028-1000');
   const after = await create('2028-04-02');
   expect(after.number).toBe('Q-2028-1001');
+});
+
+test('the migration seeds Company details with exactly COMPANY_SETTINGS_DEFAULTS', async () => {
+  // resetDb empties the table, so run the migration's own INSERT again and compare the row.
+  const sql = readFileSync(new URL('../../../prisma/migrations/20261202100000_quotations/migration.sql', import.meta.url), 'utf8');
+  const insert = sql.slice(sql.indexOf('INSERT INTO "company_settings"'), sql.indexOf('DO NOTHING;') + 'DO NOTHING'.length);
+  await prisma.$executeRawUnsafe(insert);
+  const row = await prisma.companySettings.findUniqueOrThrow({ where: { id: 1 } });
+  expect({
+    legalName: row.legalName, addressLines: row.addressLines, email: row.email, gstin: row.gstin,
+    taxInr: Number(row.taxInr), taxUsd: Number(row.taxUsd), taxCad: Number(row.taxCad), defaultNotes: row.defaultNotes,
+  }).toEqual(COMPANY_SETTINGS_DEFAULTS);
 });
