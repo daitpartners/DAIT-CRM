@@ -119,6 +119,51 @@ describe('Mailer campaigns (release 2C)', () => {
     expect((await call('POST', `/api/mailer/${id}/resume`, cookie)).statusCode).toBe(409);
   });
 
+  it('list returns the same stats without loading recipients', async () => {
+    const { seba, deepak, company, good, skip, tpl } = await setup();
+    const cookie = await signIn(app, seba);
+    const lead = async (first: string, email: string) => {
+      const c = await makeContact({ companyId: company.id, firstName: first, lastName: 'X', businessEmail: email });
+      return makeLead({ companyId: company.id, contactId: c.id, assignedToId: seba.id, companyName: 'Andino' });
+    };
+    const [late, early, failed, queued] = [good, await lead('Bea', 'bea@andino.cl'), await lead('Cris', 'cris@andino.cl'), await lead('Dani', 'dani@andino.cl')];
+    const id = (await call('POST', '/api/mailer', cookie, create(tpl.id, [late.id, early.id, failed.id, skip.id, queued.id]))).json().id;
+    // A second campaign so per-campaign counts cannot bleed into each other.
+    const other = (await call('POST', '/api/mailer', cookie, create(tpl.id, [queued.id]))).json().id;
+    const sentAt = new Date(Date.now() - 3600_000);
+    const set = (leadId: number, data: Record<string, unknown>) => prisma.emailCampaignRecipient.updateMany({ where: { campaignId: id, leadId }, data });
+    await set(late.id, { status: 'Sent', sentAt });
+    await set(early.id, { status: 'Sent', sentAt });
+    await set(failed.id, { status: 'Failed', error: 'Graph 500' });
+    const msg = (userId: number, leadId: number, occurredAt: Date) =>
+      prisma.emailMessage.create({ data: { userId, leadId, folder: 'inbox', status: 'received', fromAddress: 'x@andino.cl', subject: 'Re', occurredAt } });
+    await msg(seba.id, late.id, new Date()); // replied after the email: counts
+    await msg(seba.id, early.id, new Date(sentAt.getTime() - 60_000)); // before the email: does not
+    await msg(deepak.id, early.id, new Date()); // in someone else's mail: does not
+    const items = (await call('GET', '/api/mailer', cookie)).json().items as { id: number; stats: unknown; next: string | null }[];
+    const detail = (await call('GET', `/api/mailer/${id}`, cookie)).json();
+    const item = items.find((c) => c.id === id)!;
+    expect(detail.stats).toEqual({ total: 5, queued: 1, sending: 0, sent: 2, failed: 1, skipped: 1, toSend: 4, replied: 1 });
+    expect(item.stats).toEqual(detail.stats);
+    expect(item.next).toBe(detail.next);
+    expect(item.next).toBe(detail.recipients.find((r: { status: string }) => r.status === 'Queued').name);
+    expect(item.next).toMatch(/^Dani/);
+    const second = items.find((c) => c.id === other)!;
+    expect(second.stats).toEqual({ total: 1, queued: 1, sending: 0, sent: 0, failed: 0, skipped: 0, toSend: 1, replied: 0 });
+  });
+
+  it('detail shows the message id once synced', async () => {
+    const { seba, company, good, tpl } = await setup();
+    const cookie = await signIn(app, seba);
+    const c2 = await makeContact({ companyId: company.id, firstName: 'Bea', lastName: 'X', businessEmail: 'bea@andino.cl' });
+    const second = await makeLead({ companyId: company.id, contactId: c2.id, assignedToId: seba.id, companyName: 'Andino' });
+    const id = (await call('POST', '/api/mailer', cookie, create(tpl.id, [good.id, second.id]))).json().id;
+    const m = await prisma.emailMessage.create({ data: { userId: seba.id, leadId: good.id, folder: 'sent', status: 'sent', fromAddress: 'seba@daitpartners.com', subject: 'Hola', messageId: '<abc@x>', campaignId: id } });
+    await prisma.emailCampaignRecipient.updateMany({ where: { campaignId: id, leadId: good.id }, data: { status: 'Sent', sentAt: new Date(), emailMessageId: m.id } });
+    const recipients = (await call('GET', `/api/mailer/${id}`, cookie)).json().recipients;
+    expect(recipients.map((r: { status: string; messageId: string | null }) => [r.status, r.messageId])).toEqual([['Sent', '<abc@x>'], ['Queued', null]]);
+  });
+
   it('the sidebar shows your live campaigns', async () => {
     const { seba, good, tpl } = await setup();
     const cookie = await signIn(app, seba);

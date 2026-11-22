@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { EmailCampaign, EmailCampaignRecipient, Prisma } from '@prisma/client';
+import { Prisma, type EmailCampaign, type EmailCampaignRecipient } from '@prisma/client';
 import { MailerCheck, MailerCreate } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { audit } from '../audit.js';
@@ -32,33 +32,72 @@ async function repliedIds(c: Pick<EmailCampaign, 'senderId'>, recipients: Pick<E
   return new Set(sent.filter((r) => replies.some((m) => m.leadId === r.leadId && m.occurredAt > r.sentAt!)).map((r) => r.id));
 }
 
-function statsOf(recipients: Pick<EmailCampaignRecipient, 'status'>[], replied: number): Stats {
-  const n = (s: string) => recipients.filter((r) => r.status === s).length;
-  const skipped = n('Skipped');
-  return { total: recipients.length, queued: n('Queued'), sending: n('Sending'), sent: n('Sent'), failed: n('Failed'), skipped, toSend: recipients.length - skipped, replied };
+/** Stats from per-status counts (the list counts in the database; the detail counts its loaded recipients). */
+function statsOf(counts: Record<string, number>, replied: number): Stats {
+  const n = (s: string) => counts[s] ?? 0;
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  return { total, queued: n('Queued'), sending: n('Sending'), sent: n('Sent'), failed: n('Failed'), skipped: n('Skipped'), toSend: total - n('Skipped'), replied };
 }
 
-const campaignInclude = { sender: { select: { id: true, name: true } }, recipients: { orderBy: { position: 'asc' }, include: { lead: { select: { number: true } } } } } satisfies Prisma.EmailCampaignInclude;
-type FullCampaign = Prisma.EmailCampaignGetPayload<{ include: typeof campaignInclude }>;
+function countBy(recipients: Pick<EmailCampaignRecipient, 'status'>[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const r of recipients) counts[r.status] = (counts[r.status] ?? 0) + 1;
+  return counts;
+}
 
-function summary(c: FullCampaign, replied: Set<number>) {
+const senderInclude = { sender: { select: { id: true, name: true } } } satisfies Prisma.EmailCampaignInclude;
+const campaignInclude = {
+  ...senderInclude,
+  recipients: { orderBy: { position: 'asc' }, include: { lead: { select: { number: true } }, emailMessage: { select: { messageId: true } } } },
+} satisfies Prisma.EmailCampaignInclude;
+type FullCampaign = Prisma.EmailCampaignGetPayload<{ include: typeof campaignInclude }>;
+type ListCampaign = Prisma.EmailCampaignGetPayload<{ include: typeof senderInclude }>;
+
+/** The first Queued recipient's name, else company. */
+const nextOf = (r: Pick<EmailCampaignRecipient, 'name' | 'company'> | undefined) => r?.name || r?.company || null;
+
+function summary(c: ListCampaign, stats: Stats, next: string | null) {
   return {
     id: c.id, number: campaignNumber(c.id), name: c.name, templateName: c.templateName, sender: c.sender, status: c.status,
     pauseReason: c.pauseReason, waitReason: c.waitReason, startAt: c.startAt, nextSendAt: c.nextSendAt, createdAt: c.createdAt,
-    completedAt: c.completedAt, intervalMinutes: c.intervalMinutes, workingHoursOnly: c.workingHoursOnly,
-    stats: statsOf(c.recipients, replied.size),
-    next: c.recipients.find((r) => r.status === 'Queued')?.name || c.recipients.find((r) => r.status === 'Queued')?.company || null,
+    completedAt: c.completedAt, intervalMinutes: c.intervalMinutes, workingHoursOnly: c.workingHoursOnly, stats, next,
   };
+}
+
+/**
+ * The list page's stats and next recipient in three queries for all its campaigns, without loading recipients. `replied`
+ * follows repliedIds exactly: a Sent recipient whose lead has a received message in the sender's mail after sent_at.
+ */
+async function listSummaries(rows: ListCampaign[]) {
+  const ids = rows.map((c) => c.id);
+  if (ids.length === 0) return [];
+  const [groups, firsts, replies] = await Promise.all([
+    prisma.emailCampaignRecipient.groupBy({ by: ['campaignId', 'status'], where: { campaignId: { in: ids } }, _count: { _all: true } }),
+    prisma.$queryRaw<{ campaign_id: number; name: string; company: string }[]>`
+      SELECT DISTINCT ON (campaign_id) campaign_id, name, company FROM email_campaign_recipients
+      WHERE campaign_id IN (${Prisma.join(ids)}) AND status = 'Queued' ORDER BY campaign_id, position`,
+    prisma.$queryRaw<{ campaign_id: number; n: number }[]>`
+      SELECT r.campaign_id, COUNT(*)::int AS n FROM email_campaign_recipients r JOIN email_campaigns c ON c.id = r.campaign_id
+      WHERE r.campaign_id IN (${Prisma.join(ids)}) AND r.status = 'Sent' AND r.lead_id IS NOT NULL AND r.sent_at IS NOT NULL
+        AND EXISTS (SELECT 1 FROM email_messages m WHERE m.user_id = c.sender_id AND m.status = 'received' AND m.lead_id = r.lead_id AND m.occurred_at > r.sent_at)
+      GROUP BY r.campaign_id`,
+  ]);
+  const counts = new Map<number, Record<string, number>>();
+  for (const g of groups) counts.set(g.campaignId, { ...counts.get(g.campaignId), [g.status]: g._count._all });
+  const next = new Map(firsts.map((r) => [r.campaign_id, nextOf(r)]));
+  const replied = new Map(replies.map((r) => [r.campaign_id, r.n]));
+  return rows.map((c) => summary(c, statsOf(counts.get(c.id) ?? {}, replied.get(c.id) ?? 0), next.get(c.id) ?? null));
 }
 
 function detail(c: FullCampaign, replied: Set<number>, viewer: AuthUser) {
   return {
-    ...summary(c, replied),
+    ...summary(c, statsOf(countBy(c.recipients), replied.size), nextOf(c.recipients.find((r) => r.status === 'Queued'))),
     templateUpdatedAt: c.templateUpdatedAt, subject: c.subject, body: c.body, senderAddress: c.senderAddress, cc: c.cc, bcc: c.bcc,
     unsubscribeLine: c.unsubscribeLine, lawfulBasis: c.lawfulBasis, isSender: c.senderId === viewer.id,
     recipients: c.recipients.map((r) => ({
       id: r.id, leadId: r.leadId, leadNumber: r.lead?.number ?? null, name: r.name, company: r.company, to: r.toAddress,
       status: replied.has(r.id) ? 'Replied' : r.status, sentAt: r.sentAt, error: r.error, timezones: r.timezones, timezoneSource: r.timezoneSource,
+      messageId: r.emailMessage?.messageId ?? null,
     })),
   };
 }
@@ -129,8 +168,8 @@ export const mailerRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/mailer', pre, async (request) => {
     const user = request.user!;
-    const rows = await prisma.emailCampaign.findMany({ where: visibleWhere(user), include: campaignInclude, orderBy: { id: 'desc' }, take: 200 });
-    return { items: await Promise.all(rows.map(async (c) => summary(c, await repliedIds(c, c.recipients)))) };
+    const rows = await prisma.emailCampaign.findMany({ where: visibleWhere(user), include: senderInclude, orderBy: { id: 'desc' }, take: 200 });
+    return { items: await listSummaries(rows) };
   });
 
   app.get<{ Params: { id: string } }>('/mailer/:id', pre, async (request, reply) => guard(reply, async () => {
