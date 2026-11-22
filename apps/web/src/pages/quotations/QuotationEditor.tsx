@@ -5,6 +5,7 @@ import { QUOTE_CURRENCIES, defaultTaxRate, formatMoney, quoteTotals, type Quotat
 import { ApiError } from '../../api/client';
 import { useContacts } from '../../api/contacts';
 import { useLeads } from '../../api/leads';
+import { useConvertQuotation } from '../../api/projects';
 import { keys } from '../../api/queries';
 import {
   invalidateAfterQuotationWrite, patchQuotation, useQuotation, useQuotationAction, type QuotationDetail,
@@ -126,6 +127,7 @@ function Editor({ q, crumb, refetch }: { q: QuotationDetail; crumb: React.ReactN
   const navigate = useNavigate();
   const { date, relative } = useFormatDate();
   const action = useQuotationAction(q.id);
+  const convert = useConvertQuotation();
   const [draft, setDraftState] = useState<Draft>(() => draftOf(q));
   const [dialog, setDialog] = useState<'send' | 'pdf' | null>(null);
 
@@ -318,6 +320,13 @@ function Editor({ q, crumb, refetch }: { q: QuotationDetail; crumb: React.ReactN
         toast(errorText(t, err instanceof ApiError ? err.code : 'unknown'), 'warn');
         void reload();
       },
+    });
+  }
+
+  function convertToProject() {
+    convert.mutate(q.id, {
+      onSuccess: (p) => toast(t('Project {project} created from {quotation}', { project: p.number, quotation: q.number })),
+      onError: (err) => toast(errorText(t, err instanceof ApiError ? err.code : 'unknown'), 'warn'),
     });
   }
 
@@ -540,8 +549,12 @@ function Editor({ q, crumb, refetch }: { q: QuotationDetail; crumb: React.ReactN
             </div>
             <div className="q-btns">
               {q.locked ? (
-                q.status === 'Accepted' && !q.projectId ? (
-                  <button type="button" className="btn sm primary" disabled title={t('Available in release 3B')}>
+                q.project ? (
+                  <Link className="q-project" to={`/projects?company=${q.company.id}`}>
+                    {`${q.project.number} · ${q.project.name}`}
+                  </Link>
+                ) : q.status === 'Accepted' && q.canConvert ? (
+                  <button type="button" className="btn sm primary" disabled={convert.isPending} onClick={convertToProject}>
                     {t('Convert to project')}
                   </button>
                 ) : null

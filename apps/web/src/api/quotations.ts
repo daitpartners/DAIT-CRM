@@ -105,6 +105,10 @@ export type QuotationDetail = Pick<QuotationListItem, 'id' | 'number' | 'status'
   overallDiscount: number;
   notes: string;
   projectId: number | null;
+  /** The project made from (or linked to) this quotation. */
+  project: { id: number; number: string; name: string } | null;
+  /** Convert to project: Accepted, no project, and the user may edit it (a locked quotation's `canEdit` is false). */
+  canConvert: boolean;
   lines: QuotationLine[];
   totals: QuoteTotals;
   displayTotals: QuoteTotals & { currency: QuoteCurrency };

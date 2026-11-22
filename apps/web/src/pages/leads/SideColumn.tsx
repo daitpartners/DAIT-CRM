@@ -9,6 +9,7 @@ import { useFormatDate } from '../../hooks/useFormatDate';
 import { verificationBadge, verificationText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
 import { ContactModal } from '../companies/ContactModal';
+import { ProjectsCard } from '../projects/ProjectsCard';
 
 
 /**
@@ -45,14 +46,7 @@ export function SideColumn({ lead, live, onEditSkills }: { lead: LeadFull; live:
           </div>
         </section>
       ) : null}
-      <section className="card side-card" aria-labelledby="lead-pr-title">
-        <h2 id="lead-pr-title">
-          {t('Projects')} <span className="n">0</span>
-        </h2>
-        <div className="dim side-hint">
-          {t('Projects unlock when a lead at this company is marked')} <b>{t('Won|status')}</b> {t('or a quotation is accepted.')}
-        </div>
-      </section>
+      {lead.companyId !== null ? <ProjectsCard companyId={lead.companyId} leadId={lead.id} /> : null}
       <ComingUp lead={lead} />
     </aside>
   );

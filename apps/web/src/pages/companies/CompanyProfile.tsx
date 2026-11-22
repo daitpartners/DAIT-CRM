@@ -5,6 +5,7 @@ import { ApiError } from '../../api/client';
 import { useCompany, useCompanyPipeline } from '../../api/companies';
 import { useCompanyActivities } from '../../api/leads';
 import { useLocations } from '../../api/locations';
+import { useCompanyProjects } from '../../api/projects';
 import { useLookupText } from '../../api/queries';
 import { useCreateQuotationForCompany } from '../../api/quotations';
 import { useCurrentUser } from '../../api/useCurrentUser';
@@ -21,14 +22,16 @@ import { ContactsTab } from './tabs/ContactsTab';
 import { LeadsTab } from './tabs/LeadsTab';
 import { LocationsTab } from './tabs/LocationsTab';
 import { OverviewTab } from './tabs/OverviewTab';
+import { ProjectsTab } from './tabs/ProjectsTab';
+import { ProjectModal } from '../projects/ProjectModal';
 
-const TAB_IDS = ['overview', 'contacts', 'locations', 'leads', 'activities', 'ai', 'sources'] as const;
+const TAB_IDS = ['overview', 'contacts', 'locations', 'leads', 'projects', 'activities', 'ai', 'sources'] as const;
 type TabId = (typeof TAB_IDS)[number];
 const isTab = (v: string): v is TabId => (TAB_IDS as readonly string[]).includes(v);
 
 /**
  * `/companies/:id` (prototype views-companies.js): logo, legal name, badges, a facts line and the header actions,
- * then seven tabs; the active tab lives in the URL hash (`#contacts`).
+ * then eight tabs; the active tab lives in the URL hash (`#contacts`).
  */
 export function CompanyProfile() {
   const t = useT();
@@ -44,10 +47,11 @@ export function CompanyProfile() {
   const { data: pipeline } = useCompanyPipeline(id);
   const leadTotal = pipeline?.byStatus.reduce((n, g) => n + g.count, 0);
   const { data: activities } = useCompanyActivities(id, 1);
+  const { data: projects } = useCompanyProjects(id);
   const lookupText = useLookupText(lang);
   // undefined = closed; null = whole form (header Edit); a section = that group's Edit button.
   const [editing, setEditing] = useState<CompanySection | null | undefined>(undefined);
-  const [adding, setAdding] = useState<'contact' | null>(null);
+  const [adding, setAdding] = useState<'contact' | 'project' | null>(null);
   const toast = useToast();
   const newQuote = useCreateQuotationForCompany();
 
@@ -81,6 +85,7 @@ export function CompanyProfile() {
     { id: 'contacts', label: t('Contacts'), count: company.contactCount },
     { id: 'locations', label: t('Locations'), ...count(locations?.length) },
     { id: 'leads', label: t('Leads & Prospects'), ...count(leadTotal) },
+    { id: 'projects', label: t('Projects'), ...count(projects?.items.length) },
     { id: 'activities', label: t('Activities'), ...count(activities?.total) },
     { id: 'ai', label: t('AI Intelligence') },
     { id: 'sources', label: t('Research Sources') },
@@ -99,6 +104,9 @@ export function CompanyProfile() {
       break;
     case 'leads':
       panel = <LeadsTab company={company} canManage={me.can('manage_leads')} />;
+      break;
+    case 'projects':
+      panel = <ProjectsTab company={company} />;
       break;
     case 'activities':
       panel = <ActivitiesTab company={company} />;
@@ -192,8 +200,8 @@ export function CompanyProfile() {
               {t('New quotation')}
             </button>
           ) : null}
-          {company.isClient ? (
-            <button type="button" className="btn" disabled title={later('3')}>
+          {(projects?.isClient ?? company.isClient) && me.can('manage_quotes') ? (
+            <button type="button" className="btn" onClick={() => setAdding('project')}>
               {t('Create project')}
             </button>
           ) : null}
@@ -211,6 +219,7 @@ export function CompanyProfile() {
         <CompanyModal company={company} section={editing ?? undefined} onClose={() => setEditing(undefined)} />
       ) : null}
       {adding === 'contact' ? <ContactModal companyId={company.id} onClose={() => setAdding(null)} /> : null}
+      {adding === 'project' ? <ProjectModal preset={{ companyId: company.id }} onClose={() => setAdding(null)} /> : null}
     </>
   );
 }

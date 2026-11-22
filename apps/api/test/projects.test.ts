@@ -253,6 +253,7 @@ describe('projects API — convert', () => {
     // The quotation's detail carries the project.
     const detail = await req('GET', `/api/quotations/${q.id}`, rep.cookie);
     expect(detail.json().project).toEqual({ id: p.id, number: 'PRJ-1', name: 'Warehouse automation advisory' });
+    expect(detail.json().canConvert).toBe(false);
   });
 
   it('Review Focus 2: a second (or concurrent) convert returns the same project, one row', async () => {
@@ -281,6 +282,11 @@ describe('projects API — convert', () => {
     // The lead is unassigned, so the other rep sees the quotation but neither owns it nor the lead.
     expect((await req('POST', `/api/quotations/${q.id}/convert`, other.cookie)).statusCode).toBe(403);
     expect((await req('POST', `/api/quotations/${q.id}/convert`, research.cookie)).statusCode).toBe(403);
+    // The editor's Convert button: only for those who may convert it (a locked quotation's canEdit is always false).
+    expect((await req('GET', `/api/quotations/${q.id}`, owner.cookie)).json()).toMatchObject({ canEdit: false, canConvert: true, project: null });
+    expect((await req('GET', `/api/quotations/${q.id}`, other.cookie)).json()).toMatchObject({ canConvert: false });
+    const sent = await makeQuote({ companyId: open.company.id, leadId: open.lead.id, ownerId: owner.user.id, status: 'Sent' });
+    expect((await req('GET', `/api/quotations/${sent.id}`, owner.cookie)).json()).toMatchObject({ canConvert: false });
     const hidden = await setup(owner.user.id);
     const hq = await accepted(owner.user.id, hidden);
     expect((await req('POST', `/api/quotations/${hq.id}/convert`, other.cookie)).statusCode).toBe(404);
@@ -436,7 +442,32 @@ describe('projects API — list, company tab, form options', () => {
     expect(res.isClient).toBe(true);
     expect(res.items.map((r: Row) => r.id)).toEqual([p.id]);
     const rep = await as('SALES_REPRESENTATIVE');
-    expect((await req('GET', `/api/companies/${s.company.id}/projects`, rep.cookie)).statusCode).toBe(404);
+    const other = await as('SALES_REPRESENTATIVE');
+    const hidden = await setup(other.user.id, 'Canada');
+    expect((await req('GET', `/api/companies/${hidden.company.id}/projects`, rep.cookie)).statusCode).toBe(404);
+  });
+
+  it('company projects: a rep on an unassigned lead (company hidden) sees only the projects visible to them', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const rep = await as('SALES_REPRESENTATIVE');
+    const other = await as('SALES_REPRESENTATIVE');
+    const s = await setup(null);
+    const otherLead = await makeLead({ companyId: s.company.id, assignedToId: other.user.id });
+    const onOpenLead = await create(admin.cookie, body(s.company.id, admin.user.id, { leadId: s.lead.id, name: 'Open lead project' }));
+    await create(admin.cookie, body(s.company.id, admin.user.id, { leadId: otherLead.id, name: 'Other rep project' }));
+    await create(admin.cookie, body(s.company.id, admin.user.id, { name: 'No lead project' }));
+    // The rep can open the unassigned lead but not the company.
+    expect((await req('GET', `/api/companies/${s.company.id}`, rep.cookie)).statusCode).toBe(404);
+    const res = await req('GET', `/api/companies/${s.company.id}/projects`, rep.cookie);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().isClient).toBe(true);
+    expect(res.json().items.map((r: Row) => r.id)).toEqual([onOpenLead.id]);
+    // A manager made of a project on a hidden company sees that project only.
+    const mgr = await as('SALES_REPRESENTATIVE');
+    const t = await setup(other.user.id, 'Canada');
+    const managed = await create(admin.cookie, body(t.company.id, mgr.user.id, { name: 'Managed' }));
+    await create(admin.cookie, body(t.company.id, admin.user.id, { name: 'Not mine' }));
+    expect((await req('GET', `/api/companies/${t.company.id}/projects`, mgr.cookie)).json().items.map((r: Row) => r.id)).toEqual([managed.id]);
   });
 
   it('form options: visible leads, Accepted unlinked quotations, contacts, active users', async () => {

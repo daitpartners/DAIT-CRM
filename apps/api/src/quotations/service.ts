@@ -206,6 +206,8 @@ export function quotationDetail(q: QuotationRow, user: AuthUser) {
     locked,
     sending,
     canEdit: !locked && !sending && canEditQuotation(user, q),
+    /** Convert to project: an Accepted quotation with no project, for those who may edit it. */
+    canConvert: q.status === 'Accepted' && q.projectId === null && canEditQuotation(user, q),
     company: q.company,
     contact: contactRef(q.contact),
     lead: leadRef(q.lead),

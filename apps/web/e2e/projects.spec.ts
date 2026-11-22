@@ -77,3 +77,65 @@ test('Projects: sidebar, create a project for a client from the list, edit it to
   await page.getByRole('link', { name: '✕ Clear' }).click();
   await expect(page).toHaveURL(/\/projects$/);
 });
+
+test('Convert an accepted quotation: the project at net value, on the list, the lead page card and the company Projects tab', async ({ page }) => {
+  const company = `Convertco ${Date.now()}`;
+  await signInAs(page, ARJUN);
+  const me = (await (await page.request.get('/api/me')).json()) as { id: number };
+  const created = await page.request.post('/api/leads', { data: { companyName: company, country: 'India', leadSource: 'Referral', assignedToId: me.id } });
+  expect(created.status()).toBe(201);
+  const lead = (await created.json()) as { id: number; number: string; companyId: number };
+  const q = (await (await page.request.post('/api/quotations', { data: { companyId: lead.companyId, leadId: lead.id } })).json()) as { id: number; number: string };
+  type Detail = { status: string; lines: { item: string }[]; project: { id: number; number: string; name: string } | null };
+  const api = async () => (await (await page.request.get(`/api/quotations/${q.id}`)).json()) as Detail;
+
+  // One line of 2 × 1,000 with 18 % GST: total 2,360, net 2,000.
+  await page.goto(`/quotations/${q.id}`);
+  const first = page.getByRole('row').nth(1);
+  await first.getByRole('textbox', { name: 'Item' }).fill('Strategy workshop');
+  await first.getByRole('spinbutton', { name: 'Qty' }).fill('2');
+  await first.getByRole('spinbutton', { name: 'Unit price' }).fill('1000');
+  await expect(page.locator('.totals')).toContainText('Total INR2,360.00');
+  await expect.poll(async () => (await api()).lines.map((l) => l.item)).toEqual(['Strategy workshop']);
+  await expect(page.getByRole('button', { name: 'Convert to project' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Mark accepted' }).click();
+  await expect(page.locator('.topbar .badge').first()).toHaveText('Accepted');
+
+  // Convert: the toast, then the editor shows the project instead of the button.
+  await page.getByRole('button', { name: 'Convert to project' }).click();
+  await expect(page.getByText(new RegExp(`^Project PRJ-\\d+ created from ${q.number}$`))).toBeVisible();
+  const project = (await api()).project!;
+  expect(project.name).toBe(`Advisory services for ${company}`);
+  const link = page.getByRole('link', { name: `${project.number} · ${project.name}` });
+  await expect(link).toHaveAttribute('href', `/projects?company=${lead.companyId}`);
+  await expect(page.getByRole('button', { name: 'Convert to project' })).toHaveCount(0);
+
+  // The Projects list (filtered to the client): net value before GST, lead and quotation.
+  await link.click();
+  await expect(page).toHaveURL(new RegExp(`/projects\\?company=${lead.companyId}$`));
+  const row = page.getByRole('row').filter({ hasText: project.number });
+  await expect(row).toContainText(project.name);
+  await expect(row).toContainText('INR 2,000');
+  await expect(row).not.toContainText('2,360');
+  await expect(row).toContainText(lead.number);
+  await expect(row).toContainText(q.number);
+  await expect(row).toContainText('Arjun Mehta');
+
+  // Lead page: the Projects card lists it, highlighted as this lead's.
+  await page.goto(`/leads/${lead.id}`);
+  const card = page.getByRole('region', { name: /^Projects/ });
+  await expect(card.getByRole('heading')).toHaveText('Projects 1');
+  const item = card.getByRole('link', { name: new RegExp(project.name) });
+  await expect(item).toContainText(`${project.number} · from ${lead.number} · INR 2,000 · Arjun Mehta`);
+  await expect(item).toHaveClass(/pj-mine/);
+  await expect(card.getByRole('button', { name: '+ Create project' })).toBeVisible();
+
+  // Company profile: the Projects tab with its count and the row.
+  await page.goto(`/companies/${lead.companyId}#projects`);
+  await expect(page.getByRole('tab', { name: /^Projects/ })).toHaveText('Projects 1');
+  await expect(page.getByRole('heading', { name: `Projects at ${company}` })).toBeVisible();
+  const tabRow = page.getByRole('row').filter({ hasText: `${project.number} · ${q.number}` });
+  await expect(tabRow).toContainText('INR 2,000.00');
+  await expect(tabRow.getByRole('link', { name: lead.number })).toHaveAttribute('href', `/leads/${lead.id}`);
+  await expect(page.getByRole('region', { name: 'How projects work' })).toBeVisible();
+});

@@ -37,7 +37,7 @@ function detail(o: Partial<QuotationDetail> = {}): QuotationDetail {
     lead: { id: 5, number: 'LD-1005', status: 'Qualified' },
     owner: { id: 2, name: 'Arjun Mehta' },
     quotationDate: '2026-11-20', validUntil: '2026-12-20', currency: 'INR', subject: 'Advisory services for Meridian',
-    taxRate: 18, overallDiscount: 0, notes: 'Payment: 40% on acceptance.', projectId: null,
+    taxRate: 18, overallDiscount: 0, notes: 'Payment: 40% on acceptance.', projectId: null, project: null, canConvert: false,
     lines: [line()],
     totals: quoteTotals({ lines: [{ qty: 1, price: 1000 }], taxRate: 18 }),
     displayTotals: { ...quoteTotals({ lines: [{ qty: 1, price: 1000 }], taxRate: 18 }), currency: 'INR' },
@@ -246,7 +246,7 @@ describe('Quotation editor (prototype V.quoteEditor)', () => {
     await waitFor(() => expect(screen.getByLabelText('Subject')).toHaveValue('Advisory services for Meridian'));
   });
 
-  it('a locked quotation hides Send by email and editing; Duplicate stays; Convert to project waits for 3B', async () => {
+  it('a locked quotation hides Send by email and editing; Duplicate stays; no Convert for those who may not', async () => {
     stub(detail({ status: 'Accepted', locked: true, canEdit: false }));
     mount();
     await screen.findByDisplayValue('Consulting services');
@@ -258,9 +258,39 @@ describe('Quotation editor (prototype V.quoteEditor)', () => {
     expect(screen.getByLabelText('GST %')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Duplicate' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: 'Mark accepted' })).toBeNull();
-    const convert = screen.getByRole('button', { name: 'Convert to project' });
-    expect(convert).toBeDisabled();
-    expect(convert).toHaveAttribute('title', 'Available in release 3B');
+    expect(screen.queryByRole('button', { name: 'Convert to project' })).toBeNull();
+  });
+
+  it('Convert to project: enabled on an Accepted quotation without a project, then the project link', async () => {
+    const created = { id: 4, number: 'PRJ-4', name: 'Advisory services for Meridian', company: { id: 4, name: 'Meridian' } };
+    const calls = stub(detail({ status: 'Accepted', locked: true, canEdit: false, canConvert: true }), (c) =>
+      c.url === '/api/quotations/7/convert' ? Response.json(created, { status: 201 }) : undefined);
+    mount();
+    const convert = await screen.findByRole('button', { name: 'Convert to project' });
+    expect(convert).toBeEnabled();
+    expect(convert).not.toHaveAttribute('title');
+    // The next fetch of the quotation carries its project.
+    vi.mocked(fetch).mockImplementation(async (url: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ method: init?.method ?? 'GET', url: String(url) });
+      if (String(url) === '/api/quotations/7/convert') return Response.json(created, { status: 201 });
+      if (String(url) === '/api/quotations/7') {
+        return Response.json(detail({ status: 'Accepted', locked: true, canEdit: false, projectId: 4, project: { id: 4, number: 'PRJ-4', name: created.name } }));
+      }
+      return Response.json({ items: [], total: 0, page: 1, pageSize: 100 });
+    });
+    await userEvent.click(convert);
+    expect(await screen.findByText('Project PRJ-4 created from Q-2026-007')).toBeTruthy();
+    const link = await screen.findByRole('link', { name: 'PRJ-4 · Advisory services for Meridian' });
+    expect(link).toHaveAttribute('href', '/projects?company=4');
+    expect(screen.queryByRole('button', { name: 'Convert to project' })).toBeNull();
+    expect(calls.filter((c) => c.method === 'POST' && c.url === '/api/quotations/7/convert')).toHaveLength(1);
+  });
+
+  it('a quotation with a project shows the project, not the button', async () => {
+    stub(detail({ status: 'Accepted', locked: true, canEdit: false, projectId: 4, project: { id: 4, number: 'PRJ-4', name: 'Advisory' } }));
+    mount();
+    expect(await screen.findByRole('link', { name: 'PRJ-4 · Advisory' })).toHaveAttribute('href', '/projects?company=4');
+    expect(screen.queryByRole('button', { name: 'Convert to project' })).toBeNull();
   });
 
   it('Duplicate opens the new Draft', async () => {

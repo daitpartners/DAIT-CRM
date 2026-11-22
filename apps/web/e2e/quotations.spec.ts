@@ -177,8 +177,7 @@ test('Quotation editor: lines and live totals, send (fake Graph), revision, acce
   await confirm.getByRole('button', { name: 'Mark accepted' }).click();
   await expect(topbar.locator('.badge')).toHaveText(['Accepted', 'Revision 1']);
   await expect(page.getByRole('button', { name: 'Send by email' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Convert to project' })).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Convert to project' })).toHaveAttribute('title', 'Available in release 3B');
+  await expect(page.getByRole('button', { name: 'Convert to project' })).toBeEnabled();
   await expect(first.getByRole('textbox', { name: 'Item' })).toBeDisabled();
   await expect(totals).toContainText('Total INR2,950.00');
   const won = (await (await page.request.get(`/api/leads/${lead.id}`)).json()) as { status: string };

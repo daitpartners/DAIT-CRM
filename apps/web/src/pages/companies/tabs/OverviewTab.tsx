@@ -11,6 +11,7 @@ import { useFormatDate } from '../../../hooks/useFormatDate';
 import { companyStatusText, researchStatusText } from '../../../i18n/labels';
 import { useLang, useT } from '../../../i18n/useT';
 import type { CompanySection } from '../CompanyModal';
+import { ProjectsCard } from '../../projects/ProjectsCard';
 
 type Props = { company: CompanyDetail; canManage: boolean; onEdit: (section: CompanySection) => void };
 
@@ -37,7 +38,7 @@ const pills = (items: string[]) => (items.length ? items.map((x) => <span key={x
 
 /**
  * Overview in the prototype's layout: the legend bar, sections A–E (definition lists, each with its own Edit
- * button) in a two-column grid, and the side column: AI business intelligence and Projects (later releases),
+ * button) in a two-column grid, and the side column: AI business intelligence (a later release), Projects,
  * Leads & prospects and Contacts.
  */
 export function OverviewTab({ company: c, canManage, onEdit }: Props) {
@@ -130,7 +131,7 @@ export function OverviewTab({ company: c, canManage, onEdit }: Props) {
             release="4"
             hint={t('Opportunity score, confidence and an AI company summary built from approved sources.')}
           />
-          <PlaceholderCard title={t('Projects')} release="3" hint={t('Projects unlock when a lead at this company is won or a quotation is accepted.')} />
+          <ProjectsCard companyId={c.id} />
           <LeadsCard companyId={c.id} />
           <ContactsCard companyId={c.id} />
         </aside>

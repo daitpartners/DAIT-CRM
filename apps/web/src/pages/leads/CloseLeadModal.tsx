@@ -1,20 +1,25 @@
 import { useState } from 'react';
 import { CLOSED_STATUSES, type ClosedStatus } from '@dait-crm/shared';
 import { useLeadAction, type LeadFull } from '../../api/leads';
+import { useCurrentUser } from '../../api/useCurrentUser';
 import { FormField } from '../../components/FormField';
 import { Modal } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
 import { errorText, leadStatusText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
+import { ProjectModal } from '../projects/ProjectModal';
 import { useActionError } from './staleToast';
 
 /**
  * Close a lead as Won (confirm: the company becomes a client), Lost or Not Relevant (reason
  * required). Closing clears the follow-up and closes the lead's open tasks. `initialStatus` preselects the
- * status picked in the Follow-up tab's Status select.
+ * status picked in the Follow-up tab's Status select. Won offers the prototype's "Mark Won" and "Mark Won and create
+ * project": the latter marks the lead Won the same way, then opens Create project preset with this client and lead
+ * (nothing opens when marking Won fails).
  */
 export function CloseLeadModal({ lead, onClose, initialStatus }: { lead: LeadFull; onClose: () => void; initialStatus?: ClosedStatus }) {
   const t = useT();
+  const me = useCurrentUser();
   const toast = useToast();
   const onFail = useActionError();
   const action = useLeadAction();
@@ -23,7 +28,9 @@ export function CloseLeadModal({ lead, onClose, initialStatus }: { lead: LeadFul
   const [statusError, setStatusError] = useState(false);
   const [reasonError, setReasonError] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [projectNext, setProjectNext] = useState(false);
   const needsReason = status === 'Lost' || status === 'Not Relevant';
+  const canCreateProject = lead.companyId !== null && me.can('manage_quotes');
 
   const hint: Record<ClosedStatus, string> = {
     Won: lead.company
@@ -33,7 +40,7 @@ export function CloseLeadModal({ lead, onClose, initialStatus }: { lead: LeadFul
     'Not Relevant': t('Not a fit for our services.'),
   };
 
-  function submit() {
+  function submit(withProject = false) {
     setProblem(null);
     if (!status) {
       setStatusError(true);
@@ -48,7 +55,8 @@ export function CloseLeadModal({ lead, onClose, initialStatus }: { lead: LeadFul
       {
         onSuccess: () => {
           toast(t('Lead closed as {status}', { status: leadStatusText(t, status) }));
-          onClose();
+          if (withProject) setProjectNext(true);
+          else onClose();
         },
         onError: (err) => {
           const code = onFail(err);
@@ -57,6 +65,10 @@ export function CloseLeadModal({ lead, onClose, initialStatus }: { lead: LeadFul
         },
       },
     );
+  }
+
+  if (projectNext && lead.companyId !== null) {
+    return <ProjectModal preset={{ companyId: lead.companyId, leadId: lead.id }} onClose={onClose} />;
   }
 
   return (
@@ -68,9 +80,22 @@ export function CloseLeadModal({ lead, onClose, initialStatus }: { lead: LeadFul
           <button type="button" className="btn" onClick={onClose}>
             {t('Cancel')}
           </button>
-          <button type="button" className={status === 'Won' ? 'btn primary' : 'btn danger'} disabled={action.isPending} onClick={submit}>
-            {t('Close lead')}
-          </button>
+          {status === 'Won' ? (
+            <>
+              <button type="button" className={canCreateProject ? 'btn' : 'btn primary'} disabled={action.isPending} onClick={() => submit()}>
+                {t('Mark Won')}
+              </button>
+              {canCreateProject ? (
+                <button type="button" className="btn primary" disabled={action.isPending} onClick={() => submit(true)}>
+                  {t('Mark Won and create project')}
+                </button>
+              ) : null}
+            </>
+          ) : (
+            <button type="button" className="btn danger" disabled={action.isPending} onClick={() => submit()}>
+              {t('Close lead')}
+            </button>
+          )}
         </>
       }
     >
@@ -123,7 +148,12 @@ export function CloseLeadModal({ lead, onClose, initialStatus }: { lead: LeadFul
           />
         </FormField>
       ) : null}
-      {status ? <div className="note info">{t('The follow-up date is cleared and open tasks are closed.')}</div> : null}
+      {status ? (
+        <div className="note info">
+          {t('The follow-up date is cleared and open tasks are closed.')}
+          {status === 'Won' ? ` ${t('A client can have several projects, so the project is created as a separate step.')}` : null}
+        </div>
+      ) : null}
       {problem ? (
         <div className="note warn" role="alert">
           {problem}

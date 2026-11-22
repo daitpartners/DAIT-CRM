@@ -4,6 +4,7 @@ import { formatMoney } from '@dait-crm/shared';
 import { ApiError } from '../../../api/client';
 import { useCompanyPipeline, type CompanyDetail } from '../../../api/companies';
 import { useLeads } from '../../../api/leads';
+import { useCompanyProjects } from '../../../api/projects';
 import { useQuotations, type QuotationListItem } from '../../../api/quotations';
 import { Icons } from '../../../components/Icons';
 import { Pager } from '../../../components/Pager';
@@ -143,11 +144,12 @@ export function LeadsTab({ company, canManage }: { company: CompanyDetail; canMa
 /**
  * Prototype "Pipeline at this company": open leads and Won / Lost among the leads the user may see, from one
  * company-scoped request; the open quotation value lists each Draft / Sent / Negotiating total joined " + ", as the
- * prototype. Projects arrive in release 3B.
+ * prototype; Projects counts the company's projects the user can see.
  */
 function PipelineCard({ companyId, quotes }: { companyId: number; quotes: QuotationListItem[] | undefined }) {
   const t = useT();
   const { data } = useCompanyPipeline(companyId);
+  const { data: projects } = useCompanyProjects(companyId);
   const dim = <span className="dim">—</span>;
   return (
     <section className="card side-card" aria-labelledby="co-pipeline-title">
@@ -160,7 +162,7 @@ function PipelineCard({ companyId, quotes }: { companyId: number; quotes: Quotat
         <dt>{t('Won / Lost')}</dt>
         <dd>{data ? `${data.won} / ${data.lost}` : dim}</dd>
         <dt>{t('Projects')}</dt>
-        <dd className="null">—</dd>
+        <dd>{projects ? projects.items.length : dim}</dd>
       </dl>
     </section>
   );

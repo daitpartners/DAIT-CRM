@@ -9,7 +9,7 @@ import { StaleError, isNotFound, isUniqueViolation } from '../prismaErrors.js';
 import { RuleError } from '../leads/service.js';
 import { leadWhere } from '../leads/visibility.js';
 import { todayIn } from '../leads/dates.js';
-import { assertCompanyVisible, companyWhere } from '../companies/visibility.js';
+import { companyWhere } from '../companies/visibility.js';
 import { quotationWhere } from '../quotations/visibility.js';
 import { projectWhere } from '../projects/visibility.js';
 import { sumsByCurrency } from '../quotations/service.js';
@@ -68,10 +68,27 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
-  /** The company profile's Projects tab. */
+  /**
+   * The company profile's Projects tab and the lead page's Projects card: the company's projects the user can see.
+   * Open to users who can see the company, a lead of it, or a project of it (a rep on an unassigned lead sees the
+   * lead but not its company).
+   */
   app.get<{ Params: { id: string } }>('/companies/:id/projects', { preHandler: [requireUser] }, async (request) => {
     const user = request.user!;
-    const company = await assertCompanyVisible(prisma, user, idOf(request.params.id));
+    const id = idOf(request.params.id);
+    // As form-options: the company, a lead of it (archived included: its page still shows the card) or a project of it.
+    const company = await prisma.company.findFirst({
+      where: {
+        id,
+        OR: [
+          companyWhere(user),
+          { leads: { some: leadWhere(user, { includeArchived: true }) } },
+          { projects: { some: projectWhere(user) } },
+        ],
+      },
+      select: { id: true, isClient: true },
+    });
+    if (!company) throw new NotFoundError();
     return { items: await projectRows(prisma, user, { companyId: company.id }), isClient: company.isClient };
   });
 

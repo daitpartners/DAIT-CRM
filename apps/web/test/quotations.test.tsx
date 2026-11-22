@@ -84,6 +84,7 @@ function stub(list: QuotationList = LIST, leads = COMPANY_LEADS, fixed: Record<s
     }
     if (url.startsWith('/api/leads')) return Response.json({ items: leads, total: leads.length, page: 1, pageSize: 100 });
     if (url.endsWith('/locations')) return Response.json({ items: [] });
+    if (url.endsWith('/projects')) return Response.json({ items: [], isClient: false });
     if (url.endsWith('/pipeline')) return Response.json({ byStatus: [], open: 2, won: 0, lost: 0 });
     if (url.includes('/activities')) return Response.json({ items: [], total: 0, page: 1, pageSize: 20, summary: null });
     if (url === '/api/nav-counts') return Response.json({ leads: 0, overdueTasks: 0, unread: 0, mailUnread: 0, mailerLive: 0 });

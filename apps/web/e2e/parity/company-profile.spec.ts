@@ -37,7 +37,7 @@ test('company profile: prototype header, tabs and section headings', async ({ pa
   await expect(page.getByRole('button', { name: 'New quotation' })).toBeEnabled();
 
   const tabs = await page.getByRole('tab').evaluateAll((els) => els.map((el) => (el.textContent ?? '').replace(/\s*\d+$/, '').trim()));
-  expect(tabs).toEqual(['Overview', 'Contacts', 'Locations', 'Leads & Prospects', 'Activities', 'AI Intelligence', 'Research Sources']);
+  expect(tabs).toEqual(['Overview', 'Contacts', 'Locations', 'Leads & Prospects', 'Projects', 'Activities', 'AI Intelligence', 'Research Sources']);
 
   // Overview: legend, sections A–E, then the side column.
   await expect(page.locator('.legend')).toContainText('Legend');
@@ -54,6 +54,7 @@ test('company profile: prototype header, tabs and section headings', async ({ pa
     ['Contacts', ['Contacts at Northwind Logistics']],
     ['Locations', ['Office & branch locations']],
     ['Leads & Prospects', ['Leads & prospects linked to this company', 'Pipeline at this company', 'Rules enforced here']],
+    ['Projects', ['Projects at Northwind Logistics', 'How projects work']],
     ['Activities', ['All interactions with this company', 'Activity summary', 'Where this comes from']],
     ['AI Intelligence', ['AI business intelligence', 'Suggestions awaiting review', 'Enrichment history', 'AI classification', 'Enrichment engine']],
     ['Research Sources', ['Research sources']],
