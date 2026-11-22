@@ -183,7 +183,7 @@ function Person({ lead, p, children }: { lead: LeadFull; p: Contact; children?: 
             {p.contactType ? <span className="badge b-purple">{lookup('contact_type', p.contactType)}</span> : null}
             {p.isPrimary ? <span className="badge b-purple2">{t('Primary contact')}</span> : null}
             {p.isActive ? null : <span className="badge b-grey">{t('Inactive|contact')}</span>}
-            {lead.doNotEmail ? <span className="badge b-bad">{t('Do not email')}</span> : null}
+            {lead.doNotEmail || lead.contactUnsubscribed ? <span className="badge b-bad">{t('Do not email')}</span> : null}
           </div>
           {headline ? <div className="phead">{headline}</div> : null}
           <div className="pmeta">

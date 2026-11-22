@@ -4,6 +4,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { prisma } from '../src/db';
 import { buildApp } from '../src/app';
 import { todayIn } from '../src/leads/dates';
+import { mailUser } from '../src/mail/match';
+import { sendBlock } from '../src/mailer/rules';
 import { resetDb, seedLookups } from './helpers';
 import { makeCompany, makeContact, makeLead, makeUser, signIn } from './factory';
 
@@ -544,5 +546,46 @@ describe('leads API', () => {
       title: 'X', occurredAt: '2026-11-20T10:30:00.000Z', updatedAt: stamp(hidden),
     });
     expect(denied.statusCode).toBe(404);
+  });
+
+  // Do not email follows the contact: unsubscribing through one lead shows on, and can be cleared from, another.
+  async function twoLeadsOneContact() {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const company = await makeCompany();
+    const contact = await makeContact({ companyId: company.id, businessEmail: 'c@x.com' });
+    const a = await makeLead({ companyId: company.id, contactId: contact.id, assignedToId: rep.user.id });
+    const b = await makeLead({ companyId: company.id, contactId: contact.id, assignedToId: rep.user.id });
+    return { rep, contact, a, b };
+  }
+
+  it('lead shows contactUnsubscribed when its contact unsubscribed through another lead', async () => {
+    const { rep, a, b } = await twoLeadsOneContact();
+    expect((await req('GET', `/api/leads/${b.id}`, rep.cookie)).json()).toMatchObject({ doNotEmail: false, contactUnsubscribed: false });
+    const marked = await req('POST', `/api/leads/${a.id}/do-not-email`, rep.cookie, { doNotEmail: true, updatedAt: stamp(a) });
+    expect(marked.json()).toMatchObject({ doNotEmail: true, contactUnsubscribed: true });
+    expect((await req('GET', `/api/leads/${b.id}`, rep.cookie)).json()).toMatchObject({ doNotEmail: false, contactUnsubscribed: true });
+  });
+
+  it('unticking on the other lead clears the contact\'s unsubscribe', async () => {
+    const { rep, contact, a, b } = await twoLeadsOneContact();
+    await req('POST', `/api/leads/${a.id}/do-not-email`, rep.cookie, { doNotEmail: true, updatedAt: stamp(a) });
+    const since = new Date();
+    const mailer = (await mailUser(prisma, rep.user.id))!;
+    expect(await sendBlock(prisma, mailer, b.id, since)).toBe('Unsubscribed');
+    const off = await req('POST', `/api/leads/${b.id}/do-not-email`, rep.cookie, { doNotEmail: false, updatedAt: stamp(await reload(b.id)) });
+    expect(off.statusCode).toBe(200);
+    expect(off.json()).toMatchObject({ doNotEmail: false, contactUnsubscribed: false });
+    expect((await prisma.contact.findUniqueOrThrow({ where: { id: contact.id } })).unsubscribedAt).toBeNull();
+    expect(await prisma.leadActivity.findFirst({ where: { leadId: b.id, title: 'Do not email removed' } })).not.toBeNull();
+    expect((await reload(a.id)).doNotEmail).toBe(true);
+    expect(await sendBlock(prisma, mailer, b.id, since)).toBeNull();
+    // Ticking B again marks it and stamps the contact.
+    const again = await req('POST', `/api/leads/${b.id}/do-not-email`, rep.cookie, { doNotEmail: true, updatedAt: off.json().updatedAt });
+    expect(again.json()).toMatchObject({ doNotEmail: true, contactUnsubscribed: true });
+    // Equal to the effective state: no change, no extra history note.
+    const notes = await prisma.leadActivity.count({ where: { leadId: b.id } });
+    const same = await req('POST', `/api/leads/${b.id}/do-not-email`, rep.cookie, { doNotEmail: true, updatedAt: again.json().updatedAt });
+    expect(same.statusCode).toBe(200);
+    expect(await prisma.leadActivity.count({ where: { leadId: b.id } })).toBe(notes);
   });
 });

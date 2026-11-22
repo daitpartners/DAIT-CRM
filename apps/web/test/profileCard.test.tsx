@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ComposeContext } from '../src/pages/leads/ComposePanel';
+import { EditProfileModal } from '../src/pages/leads/EditProfileModal';
 import { ProfileCard } from '../src/pages/leads/ProfileCard';
 import { Wrap, makeClient, makeLead } from './leadFixture';
 
@@ -101,5 +102,59 @@ describe('ProfileCard', () => {
     await u.click(screen.getByRole('button', { name: /Focus on email/ }));
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(openEmail).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Do not email follows the contact', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('the badge shows when only the contact unsubscribed (through another lead)', () => {
+    const { rerender } = render(
+      <Wrap qc={makeClient()}>
+        <ProfileCard lead={makeLead({ doNotEmail: false, contactUnsubscribed: false })} />
+      </Wrap>,
+    );
+    const card = screen.getByRole('region', { name: 'Profile' });
+    expect(within(card).queryByText('Do not email')).toBeNull();
+    rerender(
+      <Wrap qc={makeClient()}>
+        <ProfileCard lead={makeLead({ doNotEmail: false, contactUnsubscribed: true })} />
+      </Wrap>,
+    );
+    expect(within(screen.getByRole('region', { name: 'Profile' })).getByText('Do not email')).toHaveClass('badge');
+  });
+
+  it('Edit profile starts ticked when only the contact unsubscribed, and unticking sends doNotEmail false', async () => {
+    const u = userEvent.setup();
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({}));
+    vi.stubGlobal('fetch', fetchMock);
+    const lead = makeLead({ doNotEmail: false, contactUnsubscribed: true });
+    render(
+      <Wrap qc={makeClient()}>
+        <EditProfileModal contact={lead.contact!} lead={lead} onClose={vi.fn()} />
+      </Wrap>,
+    );
+    const box = screen.getByRole('checkbox', { name: /Do not email/ });
+    expect(box).toBeChecked();
+    await u.click(box);
+    await u.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/leads/5/do-not-email')).toBe(true));
+    const call = fetchMock.mock.calls.find(([url]) => url === '/api/leads/5/do-not-email')! as unknown as [string, RequestInit];
+    expect(JSON.parse(String(call[1].body))).toMatchObject({ doNotEmail: false });
+  });
+
+  it('Edit profile does not send Do not email when the tick matches the contact\'s unsubscribe', async () => {
+    const u = userEvent.setup();
+    const fetchMock = vi.fn(async () => Response.json({}));
+    vi.stubGlobal('fetch', fetchMock);
+    const lead = makeLead({ doNotEmail: false, contactUnsubscribed: true });
+    render(
+      <Wrap qc={makeClient()}>
+        <EditProfileModal contact={lead.contact!} lead={lead} onClose={vi.fn()} />
+      </Wrap>,
+    );
+    await u.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect((fetchMock.mock.calls as unknown as [string][]).some(([url]) => url.includes('do-not-email'))).toBe(false);
   });
 });

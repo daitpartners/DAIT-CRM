@@ -46,6 +46,8 @@ export type LeadDetail = Omit<LeadSummary, 'company' | 'contact'> & {
   notes: string | null;
   /** Release 2C: opted out; the Mailer skips this lead. */
   doNotEmail?: boolean;
+  /** The contact unsubscribed (through this or another lead); Do not email shows when this or `doNotEmail` is set. */
+  contactUnsubscribed?: boolean;
   contactId: number | null;
   assignedToId: number | null;
   company: {

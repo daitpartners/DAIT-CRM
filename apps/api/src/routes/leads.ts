@@ -359,7 +359,11 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
     return guard(reply, async () => {
       await prisma.$transaction(async (tx) => {
         const { lead } = await lockFresh(tx, user, id, body.updatedAt);
-        if (lead.doNotEmail === body.doNotEmail) return;
+        // Compared with the state shown (the lead's flag or its contact unsubscribed through any lead); unticking
+        // clears both, so a contact unsubscribed through another lead can be emailed from this one again.
+        const contact = lead.contactId ? await tx.contact.findUnique({ where: { id: lead.contactId }, select: { unsubscribedAt: true } }) : null;
+        const shown = lead.doNotEmail || !!contact?.unsubscribedAt;
+        if (shown === body.doNotEmail) return;
         await tx.lead.update({ where: { id }, data: { doNotEmail: body.doNotEmail } });
         if (lead.contactId) await tx.contact.update({ where: { id: lead.contactId }, data: { unsubscribedAt: body.doNotEmail ? new Date() : null } });
         await tx.leadActivity.create({
@@ -367,7 +371,7 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
             ? { leadId: id, activityType: 'note', title: 'Marked do not email', body: 'The mailer will skip this lead.', byUserId: user.id }
             : { leadId: id, activityType: 'note', title: 'Do not email removed', body: 'The mailer may email this lead again.', byUserId: user.id },
         });
-        await audit(tx, { entityType: 'lead', entityId: id, action: 'update', userId: user.id, before: { doNotEmail: lead.doNotEmail }, after: { doNotEmail: body.doNotEmail } });
+        await audit(tx, { entityType: 'lead', entityId: id, action: 'update', userId: user.id, before: { doNotEmail: lead.doNotEmail, contactUnsubscribed: !!contact?.unsubscribedAt }, after: { doNotEmail: body.doNotEmail } });
       });
       return detailOf(prisma, id, user);
     });

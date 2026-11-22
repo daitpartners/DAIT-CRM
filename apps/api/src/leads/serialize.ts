@@ -105,6 +105,8 @@ export function leadDetail(l: LeadDetailRow, today: string) {
       : null,
     // The full contact profile; `name` and `email` kept for the existing lead screens.
     contact: contact ? { ...contactProfile(contact), name: fullName(contact), email: contact.businessEmail } : null,
+    // The contact unsubscribed (through this or another lead): Do not email shows as ticked = doNotEmail || this.
+    contactUnsubscribed: !!contact?.unsubscribedAt,
     assignedTo: ref(assignedTo),
     createdBy: ref(createdBy),
   };

@@ -28,7 +28,7 @@ const filled = (o: Record<string, string>) => Object.values(o).some((v) => v.tri
 export function EditProfileModal({ contact, lead, onClose, footer }: {
   contact: Contact;
   /** Release 2C: the lead whose Do not email box this dialog shows (prototype Edit profile). */
-  lead?: { id: number; doNotEmail?: boolean; updatedAt: string };
+  lead?: { id: number; doNotEmail?: boolean; contactUnsubscribed?: boolean; updatedAt: string };
   onClose: () => void;
   footer?: ReactNode;
 }) {
@@ -36,7 +36,9 @@ export function EditProfileModal({ contact, lead, onClose, footer }: {
   const toast = useToast();
   const save = useUpdateContactProfile();
   const optOut = useDoNotEmail(lead?.id ?? 0);
-  const [doNotEmail, setDoNotEmail] = useState(!!lead?.doNotEmail);
+  // Ticked when the lead is marked or its contact unsubscribed through any lead; unticking clears both.
+  const shownDoNotEmail = !!lead?.doNotEmail || !!lead?.contactUnsubscribed;
+  const [doNotEmail, setDoNotEmail] = useState(shownDoNotEmail);
   const [formError, setFormError] = useState<string | null>(null);
   const { register, control, handleSubmit, formState } = useForm<Values>({
     defaultValues: {
@@ -72,7 +74,7 @@ export function EditProfileModal({ contact, lead, onClose, footer }: {
       },
       {
         onSuccess: () => {
-          if (lead && doNotEmail !== !!lead.doNotEmail) {
+          if (lead && doNotEmail !== shownDoNotEmail) {
             optOut.mutate(
               { doNotEmail, updatedAt: lead.updatedAt },
               { onError: (err) => toast(errorText(t, err instanceof ApiError ? err.code : 'unknown'), 'warn') },
