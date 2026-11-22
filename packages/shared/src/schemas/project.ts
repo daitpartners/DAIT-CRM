@@ -30,7 +30,10 @@ const projectFields = {
 export const projectCreateSchema = z.object({ companyId: id, ...projectFields });
 export type ProjectCreate = z.infer<typeof projectCreateSchema>;
 
-/** `PATCH /projects/:id`: every field but the client; `updatedAt` is the version the dialog loaded (409 when stale). */
+/**
+ * `PATCH /projects/:id`: every field but the client; `updatedAt` is the version the dialog loaded (409 when stale).
+ * An omitted `leadId` / `quotationId` leaves it unchanged; null clears it.
+ */
 export const projectUpdateSchema = z.object({ ...projectFields, updatedAt: z.string().datetime() });
 export type ProjectUpdate = z.infer<typeof projectUpdateSchema>;
 
@@ -41,5 +44,11 @@ export const projectListQuerySchema = z.object({
 });
 export type ProjectListQuery = z.infer<typeof projectListQuerySchema>;
 
-/** `GET /projects/form-options?company=`: the Create / Edit dialog's choices for one client. */
-export const projectFormOptionsQuerySchema = z.object({ company: z.coerce.number().int().positive() });
+/**
+ * `GET /projects/form-options?company=&project=`: the Create / Edit dialog's choices for one client; `project` (the
+ * project being edited) adds back its own lead and quotation.
+ */
+export const projectFormOptionsQuerySchema = z.object({
+  company: z.coerce.number().int().positive(),
+  project: z.coerce.number().int().positive().optional(),
+});

@@ -83,6 +83,10 @@ describe('projectUpdateSchema', () => {
     expect(projectUpdateSchema.safeParse({ ...edit, updatedAt, status: 'Paused' }).success).toBe(false);
     expect(projectUpdateSchema.safeParse({ ...edit, updatedAt, value: -0.01 }).success).toBe(false);
     expect(projectUpdateSchema.safeParse({ ...edit, updatedAt, leadId: null, quotationId: null }).success).toBe(true);
+    // Omitted lead / quotation stay undefined (unchanged), distinct from null (cleared).
+    const omitted = projectUpdateSchema.parse({ ...edit, updatedAt });
+    expect(omitted.leadId).toBeUndefined();
+    expect(omitted.quotationId).toBeUndefined();
   });
 });
 
@@ -95,6 +99,7 @@ describe('project list / form-options queries', () => {
   });
   test('form-options needs the company', () => {
     expect(projectFormOptionsQuerySchema.parse({ company: '7' })).toEqual({ company: 7 });
+    expect(projectFormOptionsQuerySchema.parse({ company: '7', project: '3' })).toEqual({ company: 7, project: 3 });
     expect(projectFormOptionsQuerySchema.safeParse({}).success).toBe(false);
   });
 });

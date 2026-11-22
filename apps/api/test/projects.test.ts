@@ -155,6 +155,11 @@ describe('projects API — create', () => {
     expect((await post(body(mine.company.id, inactive.id))).statusCode).toBe(400);
     // Hidden company without a lead.
     expect((await post(body(theirs.company.id, rep.user.id))).statusCode).toBe(404);
+    // A company the rep sees only through an unassigned lead: its dialog choices load.
+    const unassigned = await setup(null, 'Mexico');
+    const fo = await req('GET', `/api/projects/form-options?company=${unassigned.company.id}`, rep.cookie);
+    expect(fo.statusCode, fo.body).toBe(200);
+    expect(fo.json().leads.map((l: { id: number }) => l.id)).toEqual([unassigned.lead.id]);
     // An unassigned lead the rep can see: allowed only as the manager.
     const open = await makeLead({ companyId: mine.company.id, assignedToId: null });
     expect((await post(body(mine.company.id, other.user.id, { leadId: open.id }))).statusCode).toBe(403);
@@ -180,6 +185,15 @@ describe('projects API — create', () => {
     expect(res.statusCode, res.body).toBe(200);
     expect(res.json().name).toBe('Renamed');
     expect((await req('GET', `/api/leads/${s.lead.id}`, mgr.cookie)).statusCode).toBe(404);
+    // The row shows the lead's number without a link for the manager; the assignee and admins may open it.
+    expect(res.json().lead).toEqual({ id: s.lead.id, number: s.lead.number, visible: false });
+    expect(p.lead).toEqual({ id: s.lead.id, number: s.lead.number, visible: true });
+    // The Edit dialog's choices load for the manager, with the project's own (hidden) lead offered back.
+    const opts = await req('GET', `/api/projects/form-options?company=${s.company.id}&project=${p.id}`, mgr.cookie);
+    expect(opts.statusCode, opts.body).toBe(200);
+    expect(opts.json().leads.map((l: { id: number }) => l.id)).toEqual([s.lead.id]);
+    expect((await req('GET', `/api/projects/form-options?company=${s.company.id}`, mgr.cookie)).statusCode).toBe(200);
+    expect((await req('GET', `/api/projects/form-options?company=${s.company.id}&project=${p.id}`, stranger.cookie)).statusCode).toBe(404);
 
     expect((await req('GET', '/api/projects', stranger.cookie)).json().items).toEqual([]);
     expect((await req('GET', '/api/nav-counts', stranger.cookie)).json().projects).toBe(0);
@@ -294,10 +308,20 @@ describe('projects API — linked quotation', () => {
     const s = await setup(null);
     const qa = await makeQuote({ companyId: s.company.id, ownerId: admin.user.id, status: 'Accepted', currency: 'USD' });
     const qb = await makeQuote({ companyId: s.company.id, ownerId: admin.user.id, status: 'Accepted', currency: 'USD' });
-    const p = await create(admin.cookie, body(s.company.id, admin.user.id, { quotationId: qa.id, value: 500, currency: 'INR' }));
+    let p = await create(admin.cookie, body(s.company.id, admin.user.id, { quotationId: qa.id, value: 500, currency: 'INR' }));
     expect(p).toMatchObject({ quotation: { id: qa.id }, value: 500, currency: 'INR' });
     expect((await prisma.quotation.findUniqueOrThrow({ where: { id: qa.id } })).projectId).toBe(p.id);
     expect(await historyOf(qa.id)).toEqual(['Linked to project PRJ-1']);
+
+    // Omitting quotationId / leadId leaves them as they are.
+    const keep = await req('PATCH', `/api/projects/${p.id}`, admin.cookie, {
+      name: 'Kept link', status: p.status, startDate: p.startDate, value: p.value, currency: p.currency, managerId: p.manager.id,
+      stakeholderIds: [], updatedAt: p.updatedAt,
+    });
+    expect(keep.statusCode, keep.body).toBe(200);
+    expect(keep.json()).toMatchObject({ name: 'Kept link', quotation: { id: qa.id } });
+    expect(await historyOf(qa.id)).toEqual(['Linked to project PRJ-1']);
+    p = keep.json();
 
     const res = await edit(admin.cookie, p, { quotationId: qb.id });
     expect(res.statusCode, res.body).toBe(200);
@@ -440,6 +464,16 @@ describe('projects API — list, company tab, form options', () => {
     expect(o.users.map((u: { name: string }) => u.name)).toContain('Ravi Rep');
     expect(o.users.map((u: { name: string }) => u.name)).not.toContain('Gone');
     expect(o.company).toMatchObject({ id: s.company.id, isClient: true, defaultCurrency: 'INR' });
+    // Edit dialog: the project's own quotation and lead come back, even when the lead is archived.
+    const proj = await prisma.project.findFirstOrThrow({ where: { quotationId: linked.id } });
+    const archivedLead = await makeLead({ companyId: s.company.id, assignedToId: rep.user.id, archivedAt: new Date() });
+    await prisma.project.update({ where: { id: proj.id }, data: { leadId: archivedLead.id } });
+    const withProject = (await req('GET', `/api/projects/form-options?company=${s.company.id}&project=${proj.id}`, rep.cookie)).json();
+    expect(withProject.quotations.map((q: { id: number }) => q.id).sort()).toEqual([acc.id, linked.id].sort());
+    expect(withProject.leads.map((l: { id: number }) => l.id).sort()).toEqual([s.lead.id, archivedLead.id].sort());
+    // A project of another client is not used.
+    const t2 = await setup(rep.user.id, 'Canada');
+    expect((await req('GET', `/api/projects/form-options?company=${t2.company.id}&project=${proj.id}`, rep.cookie)).statusCode).toBe(404);
     expect((await req('GET', '/api/projects/form-options', rep.cookie)).statusCode).toBe(400);
     const hidden = await setup(other.user.id, 'Canada');
     expect((await req('GET', `/api/projects/form-options?company=${hidden.company.id}`, rep.cookie)).statusCode).toBe(404);

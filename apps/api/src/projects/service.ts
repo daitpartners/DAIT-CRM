@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient, Project } from '@prisma/client';
-import { primaryStakeholderIds, quoteTotals, round2, type ProjectCreate, type ProjectUpdate } from '@dait-crm/shared';
+import { can, primaryStakeholderIds, quoteTotals, round2, type ProjectCreate, type ProjectUpdate } from '@dait-crm/shared';
 import type { AuthUser } from '../plugins/auth.js';
 import { audit } from '../audit.js';
 import { NotFoundError, ValidationError } from '../validate.js';
@@ -34,8 +34,11 @@ export const projectInclude = {
 
 type ProjectRowData = Prisma.ProjectGetPayload<{ include: typeof projectInclude }>;
 
-/** A project as the list, the company tab and the dialog see it. */
-export function projectRow(p: ProjectRowData, user: AuthUser) {
+/**
+ * A project as the list, the company tab and the dialog see it. `lead.visible` is false when the viewer cannot open
+ * the lead (e.g. they only manage the project): the web shows its number as plain text.
+ */
+export function projectRow(p: ProjectRowData, user: AuthUser, visibleLeadIds: ReadonlySet<number>) {
   return {
     id: p.id,
     number: p.number,
@@ -45,7 +48,7 @@ export function projectRow(p: ProjectRowData, user: AuthUser) {
     value: p.value === null ? null : Number(p.value),
     currency: p.currency,
     company: p.company,
-    lead: p.lead ? { id: p.lead.id, number: p.lead.number } : null,
+    lead: p.lead ? { id: p.lead.id, number: p.lead.number, visible: visibleLeadIds.has(p.lead.id) } : null,
     quotation: p.quotation,
     manager: p.manager,
     stakeholders: p.stakeholders.map(({ contact: c }) => ({ id: c.id, name: fullName(c), email: c.businessEmail })),
@@ -58,19 +61,28 @@ export function projectRow(p: ProjectRowData, user: AuthUser) {
 }
 export type ProjectRow = ReturnType<typeof projectRow>;
 
+/** Of the rows' leads, those the user may open (archived included); no query for `view_all_leads`. */
+async function visibleLeadIdsOf(db: Db, user: AuthUser, rows: ProjectRowData[]): Promise<Set<number>> {
+  const ids = [...new Set(rows.flatMap((r) => (r.lead ? [r.lead.id] : [])))];
+  if (ids.length === 0 || can(user.role, 'view_all_leads')) return new Set(ids);
+  const seen = await db.lead.findMany({ where: { AND: [{ id: { in: ids } }, leadWhere(user, { includeArchived: true })] }, select: { id: true } });
+  return new Set(seen.map((l) => l.id));
+}
+
 /** Visible projects matching `where`, newest first, as rows. */
 export async function projectRows(db: Db, user: AuthUser, where: Prisma.ProjectWhereInput = {}): Promise<ProjectRow[]> {
   const rows = await db.project.findMany({
     where: { AND: [projectWhere(user), where] }, include: projectInclude, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
   });
-  return rows.map((r) => projectRow(r, user));
+  const visibleLeads = await visibleLeadIdsOf(db, user, rows);
+  return rows.map((r) => projectRow(r, user, visibleLeads));
 }
 
 /** One visible project as a row (NotFoundError when hidden). */
 export async function projectRowById(db: Db, user: AuthUser, id: number): Promise<ProjectRow> {
   const p = await db.project.findFirst({ where: { AND: [{ id }, projectWhere(user)] }, include: projectInclude });
   if (!p) throw new NotFoundError();
-  return projectRow(p, user);
+  return projectRow(p, user, await visibleLeadIdsOf(db, user, [p]));
 }
 
 /* ------------------------------------------------------------------ checks */
@@ -221,7 +233,8 @@ export async function convertQuotation(tx: Tx, user: AuthUser, quotationId: numb
 
 /**
  * `PATCH /projects/:id` (Edit project dialog): every field but the client, in any status, by those who may edit
- * (403). A new lead must be one of the client's leads the user can see (400); changing it writes no timeline entry.
+ * (403); an omitted lead or quotation is left as it is. A new lead must be one of the client's leads the user can
+ * see (400); changing it writes no timeline entry.
  * Swapping or clearing the quotation unlinks the old one (history "Unlinked from project PRJ-n"). Completed sets
  * completedAt; any other status clears it. 409 `stale` when `updatedAt` has moved on.
  */
@@ -235,7 +248,8 @@ export async function updateProject(tx: Tx, user: AuthUser, id: number, input: P
   if (!canEditProject(user, p)) throw new RuleError('forbidden');
   if (new Date(input.updatedAt).getTime() !== p.updatedAt.getTime()) throw new StaleError();
 
-  const leadId = input.leadId ?? null;
+  // Omitted = unchanged; null = cleared.
+  const leadId = input.leadId === undefined ? p.leadId : input.leadId;
   if (leadId !== null && leadId !== p.leadId) {
     const ok = await tx.lead.count({ where: { AND: [{ id: leadId, companyId: p.companyId }, leadWhere(user)] } });
     if (!ok) throw new ValidationError([{ path: ['leadId'], message: 'Lead must be a visible lead of the client' }]);
@@ -244,7 +258,7 @@ export async function updateProject(tx: Tx, user: AuthUser, id: number, input: P
   const current = p.stakeholders.map((s) => s.contactId);
   await assertStakeholders(tx, p.companyId, input.stakeholderIds, current);
 
-  const quotationId = input.quotationId ?? null;
+  const quotationId = input.quotationId === undefined ? p.quotationId : input.quotationId;
   const swapQuotation = quotationId !== p.quotationId;
   const newQuotation = swapQuotation && quotationId !== null ? await lockLinkableQuotation(tx, user, p.companyId, quotationId, p.id) : null;
   if (swapQuotation && p.quotationId !== null) {

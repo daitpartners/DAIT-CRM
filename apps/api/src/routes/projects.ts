@@ -11,17 +11,21 @@ import { leadWhere } from '../leads/visibility.js';
 import { todayIn } from '../leads/dates.js';
 import { assertCompanyVisible, companyWhere } from '../companies/visibility.js';
 import { quotationWhere } from '../quotations/visibility.js';
+import { projectWhere } from '../projects/visibility.js';
 import { sumsByCurrency } from '../quotations/service.js';
 import { convertQuotation, createProject, projectRowById, projectRows, updateProject } from '../projects/service.js';
 
 const NOT_ACCEPTED = 'Only an accepted quotation can become a project.';
 
-/** 409 `stale`; RuleError `forbidden` → 403, `not_accepted` → 409 with the prototype's message; other rules → 400. */
-async function guard<T>(reply: FastifyReply, fn: () => Promise<T>): Promise<T | FastifyReply> {
+/**
+ * 409 `stale`; RuleError `forbidden` → 403, `not_accepted` → 409 with the prototype's message; other rules → 400.
+ * `staleOnNotFound`: a P2025 is a concurrent write only on the update path; elsewhere it stays an error.
+ */
+async function guard<T>(reply: FastifyReply, fn: () => Promise<T>, opts: { staleOnNotFound?: boolean } = {}): Promise<T | FastifyReply> {
   try {
     return await fn();
   } catch (e) {
-    if (e instanceof StaleError || isNotFound(e)) return reply.code(409).send({ error: 'stale' });
+    if (e instanceof StaleError || (opts.staleOnNotFound && isNotFound(e))) return reply.code(409).send({ error: 'stale' });
     if (e instanceof RuleError) {
       if (e.code === 'forbidden') return reply.code(403).send({ error: e.code });
       if (e.code === 'not_accepted') return reply.code(409).send({ error: e.code, message: NOT_ACCEPTED });
@@ -73,19 +77,40 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
 
   /**
    * The Create / Edit dialog's choices for one client: its leads the user can see, its Accepted quotations with no
-   * project, its active contacts, and active users (Project manager).
+   * project, its active contacts, and active users (Project manager). Open to users who can see the company, a lead
+   * of it, or a project of it (a project manager may edit without seeing the lead). `project` (the project being
+   * edited, visible and the client's, else 404) adds back its own lead (even archived or hidden) and quotation.
    */
   app.get('/projects/form-options', { preHandler: [requireUser] }, async (request) => {
     const query = parseQuery(projectFormOptionsQuerySchema, request.query);
     const user = request.user!;
-    const company = await assertCompanyVisible(prisma, user, query.company);
+    const company = await prisma.company.findFirst({
+      where: {
+        id: query.company,
+        OR: [
+          companyWhere(user),
+          { leads: { some: leadWhere(user) } },
+          { projects: { some: projectWhere(user) } },
+        ],
+      },
+    });
+    if (!company) throw new NotFoundError();
+    const project = query.project === undefined
+      ? null
+      : await prisma.project.findFirst({ where: { AND: [{ id: query.project, companyId: company.id }, projectWhere(user)] }, select: { leadId: true, quotationId: true } });
+    if (query.project !== undefined && !project) throw new NotFoundError();
+    const ownLead = project?.leadId != null ? [{ id: project.leadId }] : [];
+    const ownQuotation = project?.quotationId != null ? [{ id: project.quotationId }] : [];
     const [leads, quotations, contacts, users] = await Promise.all([
       prisma.lead.findMany({
-        where: { AND: [{ companyId: company.id }, leadWhere(user)] }, orderBy: { id: 'desc' },
+        where: { companyId: company.id, OR: [leadWhere(user), ...ownLead] }, orderBy: { id: 'desc' },
         select: { id: true, number: true, status: true, leadSource: true, contactId: true, contact: { select: { firstName: true, lastName: true } } },
       }),
       prisma.quotation.findMany({
-        where: { AND: [{ companyId: company.id, status: 'Accepted', projectId: null, linkedProject: { is: null } }, quotationWhere(user)] },
+        where: {
+          companyId: company.id,
+          OR: [{ AND: [{ status: 'Accepted', projectId: null, linkedProject: { is: null } }, quotationWhere(user)] }, ...ownQuotation],
+        },
         orderBy: { id: 'desc' }, select: { id: true, number: true, status: true, subject: true, currency: true },
       }),
       prisma.contact.findMany({
@@ -122,7 +147,7 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     return guard(reply, async () => {
       await prisma.$transaction((tx) => updateProject(tx, user, id, body));
       return projectRowById(prisma, user, id);
-    });
+    }, { staleOnNotFound: true });
   });
 
   /**
