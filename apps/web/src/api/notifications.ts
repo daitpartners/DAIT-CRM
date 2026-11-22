@@ -30,7 +30,7 @@ export function useNotifications(page: number, unreadOnly = false) {
 export function useNavCounts() {
   return useQuery({
     queryKey: keys.navCounts,
-    queryFn: () => api<{ leads: number; overdueTasks: number; unread: number; mailUnread: number; mailerLive: number }>('/api/nav-counts'),
+    queryFn: () => api<{ leads: number; overdueTasks: number; unread: number; mailUnread: number; mailerLive: number; projects: number }>('/api/nav-counts'),
     refetchInterval: 60_000,
   });
 }

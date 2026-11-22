@@ -122,6 +122,11 @@ export const keys = {
   quotationsAll: ['quotations'] as const,
   quotations: (query: QuotationListQuery) => ['quotations', 'list', query] as const,
   quotation: (id: number) => ['quotations', 'detail', id] as const,
+  /** Prefix of every project query (the list, a company's projects, the dialog's options): invalidate after a write. */
+  projectsAll: ['projects'] as const,
+  projects: (query: { company?: number; status?: string }) => ['projects', 'list', query] as const,
+  companyProjects: (companyId: number) => ['projects', 'company', companyId] as const,
+  projectFormOptions: (company: number, project?: number) => ['projects', 'form-options', company, project ?? null] as const,
   /** Settings → Company details (the issuer and the defaults for new quotations). */
   companySettings: ['settings', 'company'] as const,
   /** Prefix of every notification query. */

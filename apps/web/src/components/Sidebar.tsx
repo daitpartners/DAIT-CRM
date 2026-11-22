@@ -56,6 +56,7 @@ export function Sidebar({ me, open, onNavigate }: SidebarProps) {
       {me.rights.includes('use_email') ? item('/mailer', t('Mailer'), 'send', false, badge(counts?.mailerLive, t('{n} live', { n: counts?.mailerLive ?? 0 }), true)) : null}
       {item('/calendar', t('Calendar'), 'calendar')}
       {item('/quotations', t('Quotations'), 'quote')}
+      {item('/projects', t('Projects'), 'tasks', false, badge(counts?.projects, String(counts?.projects)))}
       <div className="navsec">{t('Work')}</div>
       {item('/tasks', t('Tasks'), 'tasks', false, badge(counts?.overdueTasks, t('{n} overdue', { n: counts?.overdueTasks ?? 0 })))}
       {item('/notifications', t('Notifications'), 'bell', false, badge(counts?.unread, t('{n} new', { n: counts?.unread ?? 0 }), true))}

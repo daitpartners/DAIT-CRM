@@ -13,6 +13,7 @@ import { LeadPage } from './pages/leads/LeadPage';
 import { LeadsList } from './pages/leads/LeadsList';
 import { NewLeadPage } from './pages/leads/NewLeadPage';
 import { NotificationsList } from './pages/notifications/NotificationsList';
+import { ProjectsPage } from './pages/projects/ProjectsPage';
 import { QuotationEditor } from './pages/quotations/QuotationEditor';
 import { QuotationsPage } from './pages/quotations/QuotationsPage';
 import { ReportsPage } from './pages/reports/ReportsPage';
@@ -53,6 +54,7 @@ export const router = createBrowserRouter([
       { path: 'calendar', element: <CalendarPage /> },
       { path: 'quotations', element: <QuotationsPage /> },
       { path: 'quotations/:id', element: <QuotationEditor /> },
+      { path: 'projects', element: <ProjectsPage /> },
       { path: 'tasks', element: <TasksList /> },
       { path: 'notifications', element: <NotificationsList /> },
       { path: 'reports', element: <ReportsPage /> },

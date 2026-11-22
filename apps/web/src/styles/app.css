@@ -776,3 +776,14 @@ a.strong{font-weight:600}
 .q-hist{font-size:12.5px;color:var(--body);display:flex;flex-direction:column;gap:6px}
 .q-accept{font-size:13px;color:var(--body);line-height:1.5}
 .q-pdf{width:100%;height:70vh;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+
+/* ---------- Projects (prototype V.projects / V.projectModal; its inline styles as classes) ---------- */
+.pj-sub{display:block;font-size:11.5px;color:var(--muted)}
+.pj-client{color:var(--text);font-weight:600}
+.pj-sh{max-width:260px}
+.pj-acts{white-space:nowrap}
+.pj-count{font-size:12.5px;color:var(--muted)}
+.pj-hint{font-weight:400;color:var(--muted)}
+.pj-stakeholders{display:flex;flex-direction:column;gap:6px}
+.pj-stakeholders .muted{color:var(--muted)}
+.pj-none{font-size:12.5px;color:var(--muted)}

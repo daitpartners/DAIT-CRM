@@ -21,26 +21,34 @@ type Props = {
   onClear?: () => void;
   /** Labels options "CO-… · name". */
   showNumber?: boolean;
+  /** Offers only companies with the Client flag (Projects). */
+  clientsOnly?: boolean;
+  /** Labels options with this instead of the name (e.g. "name · client"). */
+  optionLabel?: (c: { number: string; name: string }) => string;
+  /** Keeps the label for screen readers only (a filter chip). */
+  hideLabel?: boolean;
+  placeholder?: string;
 };
 
 /** Company chooser that searches companies server-side as the user types. Closed companies are not offered. */
 export function CompanyPicker({
-  id, label, value, onChange, required, invalid, errorText, selected, className, emptyLabel, onClear, showNumber,
+  id, label, value, onChange, required, invalid, errorText, selected, className, emptyLabel, onClear, showNumber, clientsOnly, optionLabel,
+  hideLabel, placeholder,
 }: Props) {
   const t = useT();
   const [text, setText] = useState('');
   const q = useDebounce(text.trim(), 400);
-  const { data } = useCompanies({ page: 1, pageSize: 100, sort: 'name', dir: 'asc', q: q || undefined });
+  const { data } = useCompanies({ page: 1, pageSize: 100, sort: 'name', dir: 'asc', q: q || undefined, ...(clientsOnly ? { isClient: true } : {}) });
   // Remember the chosen company so its name stays shown when a later search no longer returns it.
   const [chosen, setChosen] = useState<ComboOption | null>(null);
   const options = useMemo(() => {
     const opts = (data?.items ?? [])
       .filter((c) => c.status !== 'Closed')
-      .map((c) => ({ value: String(c.id), label: showNumber ? `${c.number} · ${c.name}` : c.name }));
+      .map((c) => ({ value: String(c.id), label: optionLabel ? optionLabel(c) : showNumber ? `${c.number} · ${c.name}` : c.name }));
     for (const o of [chosen, selected]) if (o && !opts.some((x) => x.value === o.value)) opts.unshift(o);
     if (emptyLabel !== undefined) opts.unshift({ value: '', label: emptyLabel });
     return opts;
-  }, [data, chosen, selected, emptyLabel, showNumber]);
+  }, [data, chosen, selected, emptyLabel, showNumber, optionLabel]);
 
   return (
     <div className={className}>
@@ -48,10 +56,11 @@ export function CompanyPicker({
         id={id}
         label={label}
         required={required}
+        hideLabel={hideLabel}
         searchable
         options={options}
         value={value === undefined ? null : String(value)}
-        placeholder={emptyLabel ?? t('Type to search companies…')}
+        placeholder={placeholder ?? emptyLabel ?? t('Type to search companies…')}
         onQuery={setText}
         errorId={invalid ? `${id}-err` : undefined}
         onChange={(v) => {

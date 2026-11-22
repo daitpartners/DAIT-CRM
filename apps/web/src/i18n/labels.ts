@@ -158,6 +158,22 @@ export function quoteStatusText(t: TFn, status: string): string {
   }
 }
 
+/** A project status in the user's language (release 3B; masculine "proyecto" / "projet"). */
+export function projectStatusText(t: TFn, status: string): string {
+  switch (status) {
+    case 'Active':
+      return t('Active|project');
+    case 'On hold':
+      return t('On hold|project');
+    case 'Completed':
+      return t('Completed|project');
+    case 'Cancelled':
+      return t('Cancelled|project');
+    default:
+      return status;
+  }
+}
+
 /** Badge class per quotation status (prototype/js/ui.js STATUS). */
 export function quoteStatusBadge(status: string): string {
   const cls: Record<string, string> = { Draft: 'b-grey', Sent: 'b-purple', Negotiating: 'b-warn', Accepted: 'b-ok', Rejected: 'b-bad', Expired: 'b-grey' };
