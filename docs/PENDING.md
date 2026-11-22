@@ -47,7 +47,7 @@ Kept here at the owner's request; picked up when the owner says so.
   18 % on INR and 0 % on USD and CAD by default, one "GST" line; issuer DAIT Partners LLP, D-303, Sagar Sadan, IP
   Extension, Delhi 110092, India, info@daitpartners.com; the PDF is drawn on the server (pdfkit), no browser needed.
 - **Builder's calls (from the design):** a quotation counts as sent only when Microsoft confirms the email (until then
-  it shows "Sending…" and cannot be edited; a failed send changes nothing and tells the owner); after sending, any edit
+  it shows "Sending…" and cannot be edited; a failed send changes nothing and tells the owner and whoever sent it); after sending, any edit
   to what the PDF prints opens the next revision, and sending again without edits re-sends the same revision; list,
   tiles, dashboard and company figures use the last sent revision while a new one is unsent, and accepting or rejecting
   then discards the unsent edit after a warning; changing the currency resets GST to that currency's default (you can
@@ -67,7 +67,12 @@ Kept here at the owner's request; picked up when the owner says so.
   a save that fails for another reason (connection, server) keeps what you typed on screen and says so, instead of
   reloading over it; changing the currency shows the GST from Company details at once; leaving a quotation with an
   empty subject or item now warns that those edits were not saved; the PDF prints plain amounts with the currency once
-  on "Total INR", as the prototype's preview.
+  on "Total INR", as the prototype's preview. Final review: the test deploy now packs the PDF logo
+  (`apps/api/assets`); Preview / Download of a sent revision with no edits shows that revision exactly as a send would
+  attach it; the send dialog's default message is in the quotation owner's language (as the PDF); Send is refused
+  ("someone else changed this record") if the quotation changed after the dialog opened; a failed send is reported to
+  the sender as well as the owner; the total including GST is capped so a sent revision can always be recorded; a
+  discard on accept / reject brings back the sent contact only if it is still active.
 - **Follow-ups (not fixed):**
   - The PDF uses Helvetica (not Montserrat), always prints dates as "22 Nov 2026", and shows characters outside
     Western European letters as "?"; a very long item name with a discount can run over; a line taller than a page is

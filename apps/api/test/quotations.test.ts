@@ -383,6 +383,51 @@ describe('quotations API', () => {
     expect(res.json()).toMatchObject({ status: 'Rejected', revision: 1, editingNewRevision: false });
   });
 
+  it('a discard restores the sent contact only while it is still active; otherwise no contact', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const a = await setup(rep.user.id);
+    let q = await createQuote(rep.cookie, { companyId: a.company.id, leadId: a.lead.id });
+    expect(q.contact?.id).toBe(a.leadContactId);
+    q = (await patch(rep.cookie, q, { lines: [line('Design', 1, 1000)] })).json();
+    await sendRevision1(q.id);
+    q = (await req('GET', `/api/quotations/${q.id}`, rep.cookie)).json();
+    q = (await patch(rep.cookie, q, { contactId: a.primaryId })).json();
+    expect(q).toMatchObject({ revision: 2, editingNewRevision: true, contact: { id: a.primaryId } });
+    // The contact the client received revision 1 at has since been deactivated.
+    await prisma.contact.update({ where: { id: a.leadContactId }, data: { isActive: false } });
+    const res = await req('POST', `/api/quotations/${q.id}/reject`, rep.cookie, { discardUnsent: true });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toMatchObject({ status: 'Rejected', revision: 1, contact: null });
+  });
+
+  it('the total including GST must fit the revision columns: a save that would pass it is refused (400 total_too_large)', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const a = await setup(rep.user.id);
+    let q = await createQuote(rep.cookie, { companyId: a.company.id });
+    // 600 000 000 000 + 18 % GST = 708 000 000 000: under the cap before GST; still fits.
+    let res = await patch(rep.cookie, q, { lines: [line('Programme', 1, 600_000_000_000)] });
+    expect(res.statusCode, res.body).toBe(200);
+    q = res.json();
+    // 900 000 000 000 + 18 % = 1 062 000 000 000: the lines alone pass, the total with GST does not.
+    res = await patch(rep.cookie, q, { lines: [line('Programme', 1, 900_000_000_000)] });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'validation', issues: [{ path: ['lines'], message: 'total_too_large' }] });
+    // Raising GST alone on the stored lines is refused the same way.
+    res = await patch(rep.cookie, q, { taxRate: 100, lines: [line('Programme', 1, 600_000_000_000)] });
+    expect(res.statusCode).toBe(400);
+    res = await patch(rep.cookie, q, { taxRate: 100 });
+    expect(res.statusCode).toBe(400);
+    expect((await req('GET', `/api/quotations/${q.id}`, rep.cookie)).json()).toMatchObject({ taxRate: 18, totals: { total: 708_000_000_000 } });
+  });
+
+  it('the detail carries the owner\'s language (the send dialog\'s default message is written in it)', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    await prisma.user.update({ where: { id: rep.user.id }, data: { language: 'fr' } });
+    const a = await setup(rep.user.id);
+    const q = await createQuote(rep.cookie, { companyId: a.company.id, leadId: a.lead.id });
+    expect((q as unknown as { owner: unknown }).owner).toEqual({ id: rep.user.id, name: rep.user.name, language: 'fr' });
+  });
+
   it('duplicate of an Accepted quotation → a new Draft with the lines', async () => {
     const rep = await as('SALES_REPRESENTATIVE');
     const a = await setup(rep.user.id);

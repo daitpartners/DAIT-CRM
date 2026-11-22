@@ -6,7 +6,7 @@ import { RuleError, applyStatusChange } from '../leads/service.js';
 import { notifyUser } from '../leads/notify.js';
 import { queueOutgoing } from '../mail/outgoing.js';
 import { renderQuotationPdf } from './pdf.js';
-import { appendHistory, editableQuotation, loadCompanySettings, quotationSnapshot, type QuotationSnapshot } from './service.js';
+import { appendHistory, editableQuotation, exceedsAmountCap, loadCompanySettings, quotationSnapshot, type QuotationSnapshot } from './service.js';
 
 /*
  * Send by email (release 3A). The PDF is drawn from a snapshot when the send is queued and travels on the send job,
@@ -32,11 +32,12 @@ export const pdfLang = (language: string | null | undefined): Lang => (PDF_LANGS
 /**
  * Queues quotation `id` for sending to its contact from the user's own mailbox, with the PDF of the revision being
  * worked on attached and the issuer frozen into the snapshot. 409 `no_contact_email` without a contact address,
- * `no_mailbox` without the user's connected mailbox (and the editableQuotation refusals: `locked`, `sending`, …).
- * While queued the quotation shows "Sending…" (sendingMessageId) and cannot be edited or sent again.
+ * `no_mailbox` without the user's connected mailbox (and the editableQuotation refusals: `locked`, `sending`, …;
+ * `stale` when `updatedAt`, the version the send dialog was opened on, has moved on). While queued the quotation
+ * shows "Sending…" (sendingMessageId) and cannot be edited or sent again.
  */
-export async function queueQuotationSend(tx: Tx, user: AuthUser, id: number, body?: string): Promise<void> {
-  const q = await editableQuotation(tx, user, id);
+export async function queueQuotationSend(tx: Tx, user: AuthUser, id: number, body?: string, updatedAt?: string): Promise<void> {
+  const q = await editableQuotation(tx, user, id, updatedAt);
   const to = q.contact?.businessEmail?.trim().toLowerCase();
   if (!to) throw new RuleError('no_contact_email');
   const account = await tx.emailAccount.findFirst({ where: { kind: 'personal', userId: user.id, status: 'connected' } });
@@ -52,6 +53,9 @@ export async function queueQuotationSend(tx: Tx, user: AuthUser, id: number, bod
       ...(await quotationSnapshot(tx, q.id)),
       issuer: { legalName: settings.legalName, addressLines: settings.addressLines, email: settings.email, gstin: settings.gstin },
     };
+  // The revision row's figures go into Decimal(14,2) columns when the send succeeds: refuse now, before the email
+  // leaves, rather than fail to record it afterwards (saves are capped the same way; this catches older rows).
+  if (exceedsAmountCap(snapshot.totals)) throw new RuleError('total_too_large');
   const owner = await tx.user.findUniqueOrThrow({ where: { id: q.ownerId }, select: { language: true } });
   const lang = pdfLang(owner.language);
   const pdf = (await renderQuotationPdf(snapshot, settings, lang)).toString('base64');
@@ -149,7 +153,7 @@ export async function onQuotationSent(
 /** Why a quotation left "Sending…" without its send effects. */
 export type SendOutcome = 'failed' | 'may_have_sent' | 'not_recorded';
 
-/** Owner notifications (stored as text, so written in the owner's language). */
+/** Send-failure notifications (stored as text, so written in each recipient's language). */
 const NOTICES: Record<Lang, Record<SendOutcome, [string, string]>> = {
   en: {
     failed: ['Quotation not sent · {number}', 'The email could not be sent. Send it again from the quotation.'],
@@ -185,7 +189,8 @@ const HISTORY: Record<SendOutcome, string> = {
 
 /**
  * The quotation sending message `messageId` leaves "Sending…" without the send effects (status, revision and lead
- * untouched, so it can be sent again): a history line and a notice to its owner. `failed` — the send job gave up
+ * untouched, so it can be sent again): a history line and a notice to its owner and to the user who sent it (one
+ * notice when they are the same person), each in that person's language. `failed` — the send job gave up
  * (called in the transaction that marks the message failed); `may_have_sent` — a send interrupted mid-way;
  * `not_recorded` — Microsoft took the email but onQuotationSent kept failing on the job's last attempt.
  */
@@ -193,9 +198,12 @@ export async function onQuotationSendFailed(tx: Tx, messageId: number, outcome: 
   const q = await lockSending(tx, messageId);
   if (!q) return;
   await tx.quotation.update({ where: { id: q.id }, data: { sendingMessageId: null, history: appendHistory(q, HISTORY[outcome]) } });
-  const owner = await tx.user.findUniqueOrThrow({ where: { id: q.ownerId }, select: { language: true } });
-  const [text, detail] = NOTICES[pdfLang(owner.language)][outcome];
-  await notifyUser(tx, q.ownerId, text.replace('{number}', q.number), detail, `/quotations/${q.id}`);
+  const sender = await tx.emailMessage.findUnique({ where: { id: messageId }, select: { userId: true } });
+  for (const userId of new Set([q.ownerId, ...(sender ? [sender.userId] : [])])) {
+    const who = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { language: true } });
+    const [text, detail] = NOTICES[pdfLang(who.language)][outcome];
+    await notifyUser(tx, userId, text.replace('{number}', q.number), detail, `/quotations/${q.id}`);
+  }
   await audit(tx, {
     entityType: 'quotation', entityId: q.id, action: 'update', userId: null,
     before: { sendingMessageId: messageId }, after: { sendingMessageId: null, outcome },

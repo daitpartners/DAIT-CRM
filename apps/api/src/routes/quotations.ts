@@ -15,7 +15,7 @@ import {
 } from '../quotations/service.js';
 
 /** RuleError codes answered with 409; `forbidden` is a 403; any other rule refusal is a 400. */
-const CONFLICT_CODES = new Set(['locked', 'sending', 'unsent_changes', 'invalid_transition', 'no_contact_email', 'no_mailbox', 'pdf_too_large']);
+const CONFLICT_CODES = new Set(['locked', 'sending', 'unsent_changes', 'invalid_transition', 'no_contact_email', 'no_mailbox', 'pdf_too_large', 'total_too_large']);
 
 async function guard<T>(reply: FastifyReply, fn: () => Promise<T>): Promise<T | FastifyReply> {
   try {
@@ -165,14 +165,15 @@ export const quotationRoutes: FastifyPluginAsync = async (app) => {
 
   /**
    * Send by email: queues the PDF of the revision being worked on to the quotation's contact from the user's own
-   * mailbox (202 with `sending: true`). The revision, status and lead change only when the send job succeeds.
+   * mailbox (202 with `sending: true`). The revision, status and lead change only when the send job succeeds. 409
+   * `stale` when the quotation changed after the dialog was opened (`updatedAt`).
    */
   app.post<{ Params: { id: string } }>('/quotations/:id/send', { preHandler: [requireRight('use_email')] }, async (request, reply) => {
     const body = parseBody(QuotationSend, request.body ?? {});
     const user = request.user!;
     const id = idOf(request.params.id);
     return guard(reply, async () => {
-      await prisma.$transaction((tx) => queueQuotationSend(tx, user, id, body.body));
+      await prisma.$transaction((tx) => queueQuotationSend(tx, user, id, body.body, body.updatedAt));
       return reply.code(202).send(await detailOf(id, user));
     });
   });

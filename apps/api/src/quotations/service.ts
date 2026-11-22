@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient, type Quotation } from '@prisma/client';
 import {
-  COMPANY_SETTINGS_DEFAULTS, QUOTE_CURRENCIES, defaultCurrency, defaultTaxRate, formatMoney, isQuoteLocked, quoteTotals, round2,
+  COMPANY_SETTINGS_DEFAULTS, QUOTE_CURRENCIES, QUOTE_MAX_AMOUNT, defaultCurrency, defaultTaxRate, formatMoney, isQuoteLocked, quoteTotals, round2,
   type LineInput, type QuoteCurrency, type QuoteTotals, type QuotationCreate, type QuotationUpdate,
 } from '@dait-crm/shared';
 import type { AuthUser } from '../plugins/auth.js';
@@ -113,6 +113,13 @@ type LineLike = { qty: Prisma.Decimal | number; unitPrice: Prisma.Decimal | numb
 const totalsOf = (q: { lines: LineLike[]; overallDiscount: Prisma.Decimal | number; taxRate: Prisma.Decimal | number }): QuoteTotals =>
   quoteTotals({ lines: q.lines.map((l) => ({ qty: l.qty, price: l.unitPrice, discount: l.discount })), overallDiscount: q.overallDiscount, taxRate: q.taxRate });
 
+/**
+ * True when a figure stored on a sent revision (subtotal, discounts, GST, total including GST) would not fit the
+ * Decimal(14,2) money columns.
+ */
+export const exceedsAmountCap = (t: QuoteTotals): boolean =>
+  [t.sub, t.disc + t.overall, t.tax, t.total].some((v) => v > QUOTE_MAX_AMOUNT);
+
 function lineTotal(l: LineLike): number {
   const gross = round2(Number(l.qty) * Number(l.unitPrice));
   return round2(gross - round2(gross * Number(l.discount) / 100));
@@ -161,7 +168,8 @@ export const quotationInclude = {
   company: { select: { id: true, number: true, name: true, legalName: true, country: true } },
   contact: { select: { id: true, firstName: true, lastName: true, businessEmail: true } },
   lead: { select: { id: true, number: true, status: true, assignedToId: true } },
-  owner: person,
+  // The owner's language: the PDF and the send dialog's default message are written in it.
+  owner: { select: { id: true, name: true, language: true } },
   lines: { orderBy: { sortOrder: 'asc' } },
   revisions: { orderBy: { revisionNo: 'asc' } },
 } satisfies Prisma.QuotationInclude;
@@ -459,6 +467,15 @@ export async function updateQuotation(tx: Tx, user: AuthUser, id: number, input:
     printed = true;
   }
   const linesChanged = lines !== undefined && !sameLines(q.lines, lines);
+  // The totals after this save, GST included, must fit the revision's Decimal(14,2) columns, or a send could leave
+  // the client's inbox and then fail to be recorded.
+  const next = quoteTotals({
+    lines: (linesChanged ? lines : q.lines.map((l) => ({ qty: l.qty, unitPrice: l.unitPrice, discount: l.discount })))
+      .map((l) => ({ qty: l.qty, price: l.unitPrice, discount: l.discount })),
+    overallDiscount: body.overallDiscount ?? q.overallDiscount,
+    taxRate: taxRate ?? q.taxRate,
+  });
+  if (exceedsAmountCap(next)) throw new ValidationError([{ path: ['lines'], message: 'total_too_large' }]);
   if (linesChanged) {
     await tx.quotationLine.deleteMany({ where: { quotationId: q.id } });
     await tx.quotationLine.createMany({ data: lineData(lines).map((l) => ({ ...l, quotationId: q.id })) });
@@ -482,7 +499,8 @@ export async function updateQuotation(tx: Tx, user: AuthUser, id: number, input:
 
 /**
  * Throws away unsent revision n+1: header and lines go back to the last sent snapshot and the revision number back to
- * it. Without a sent revision row (none can exist before sending is built) only the flag and number go back.
+ * it. Without a sent revision row (none can exist before sending is built) only the flag and number go back. The
+ * snapshot's contact comes back only while it is still an active contact of the company; otherwise none.
  */
 async function discardUnsent(tx: Tx, q: QuotationRow): Promise<Prisma.QuotationUncheckedUpdateInput> {
   const last = q.revisions.at(-1);
@@ -491,7 +509,7 @@ async function discardUnsent(tx: Tx, q: QuotationRow): Promise<Prisma.QuotationU
   const snap = last.snapshot as unknown as QuotationSnapshot;
   await tx.quotationLine.deleteMany({ where: { quotationId: q.id } });
   await tx.quotationLine.createMany({ data: lineData(snap.lines).map((l) => ({ ...l, quotationId: q.id })) });
-  const contactOk = snap.contactId !== null && (await tx.contact.count({ where: { id: snap.contactId, companyId: q.companyId } })) > 0;
+  const contactOk = snap.contactId !== null && (await tx.contact.count({ where: { id: snap.contactId, companyId: q.companyId, isActive: true } })) > 0;
   return {
     editingNewRevision: false,
     revision: last.revisionNo,

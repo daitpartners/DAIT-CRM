@@ -254,6 +254,26 @@ describe('send a quotation by email (release 3A)', () => {
     expect((await send(cookie, q.id)).statusCode).toBe(202);
   });
 
+  it('a failed send tells the sender as well as the owner, once each, each in their own language', async () => {
+    const { cookie: repCookie, q, rep } = await setup();
+    const admin = await makeUser({ role: 'ADMINISTRATOR', name: 'Carlos Torres', language: 'es' });
+    const adminCookie = await signIn(app, admin);
+    await personal(admin.id, 'carlos@daitpartners.com');
+    expect((await send(adminCookie, q.id)).statusCode).toBe(202);
+    await run(recordingGraph(new GraphError('token', 401)));
+    expect(await prisma.notification.findMany({ where: { userId: rep.id } })).toEqual([
+      expect.objectContaining({ text: `Quotation not sent · ${q.number}`, link: `/quotations/${q.id}` }),
+    ]);
+    expect(await prisma.notification.findMany({ where: { userId: admin.id } })).toEqual([
+      expect.objectContaining({ text: `Presupuesto no enviado · ${q.number}`, link: `/quotations/${q.id}` }),
+    ]);
+    // The owner sending their own quotation gets one notice.
+    expect((await send(repCookie, q.id)).statusCode).toBe(202);
+    await run(recordingGraph(new GraphError('token', 401)));
+    expect(await prisma.notification.count({ where: { userId: rep.id } })).toBe(2);
+    expect(await prisma.notification.count({ where: { userId: admin.id } })).toBe(1);
+  });
+
   it('a revoked mailbox fails the send at once, with the same effects', async () => {
     const { cookie, q } = await setup();
     await send(cookie, q.id);
@@ -285,6 +305,29 @@ describe('send a quotation by email (release 3A)', () => {
     expect((await send(cookie, q.id)).json().error).toBe('no_contact_email');
     expect(await prisma.emailMessage.count()).toBe(0);
     expect(await prisma.job.count()).toBe(0);
+  });
+
+  it('409 stale when the quotation changed after the send dialog was opened (updatedAt); nothing is queued', async () => {
+    const { cookie, q } = await setup();
+    const opened = q.updatedAt;
+    const res = await req('PATCH', `/api/quotations/${q.id}`, cookie, { updatedAt: opened, subject: 'Changed meanwhile' });
+    expect(res.statusCode, res.body).toBe(200);
+    const stale = await send(cookie, q.id, { updatedAt: opened });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json()).toEqual({ error: 'stale' });
+    expect(await prisma.emailMessage.count()).toBe(0);
+    expect(await prisma.job.count()).toBe(0);
+    expect((await send(cookie, q.id, { updatedAt: (res.json() as Detail).updatedAt })).statusCode).toBe(202);
+  });
+
+  it('409 total_too_large when the total including GST would not fit the revision columns (an older row); nothing is queued', async () => {
+    const { cookie, q } = await setup();
+    // Written past the save checks, as a row stored before the cap: 900 000 000 000 + 18 % GST.
+    await prisma.quotationLine.updateMany({ where: { quotationId: q.id }, data: { qty: 1, unitPrice: 900_000_000_000 } });
+    const res = await send(cookie, q.id);
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: 'total_too_large' });
+    expect(await prisma.emailMessage.count()).toBe(0);
   });
 
   it('409 no_mailbox without a connected mailbox', async () => {
