@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { EmailAccount, EmailMessage, Job } from '@prisma/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/app';
 import { prisma } from '../src/db';
 import { encrypt } from '../src/crypto/tokens';
@@ -11,6 +11,19 @@ import { todayIn } from '../src/leads/dates';
 import { fakeGraph, resetDb, seedLookups } from './helpers';
 import { makeCompany, makeContact, makeLead, makeUser, signIn } from './factory';
 
+// Lets a test make the reply's lead lock fail like a database error would.
+const lockFault = vi.hoisted(() => ({ error: null as Error | null }));
+vi.mock('../src/routes/leads', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/routes/leads')>();
+  return {
+    ...actual,
+    lockLeads: async (...args: Parameters<typeof actual.lockLeads>) => {
+      if (lockFault.error) throw lockFault.error;
+      return actual.lockLeads(...args);
+    },
+  };
+});
+
 let app: FastifyInstance;
 beforeAll(async () => {
   process.env.TEST_LOGIN = '1';
@@ -18,6 +31,7 @@ beforeAll(async () => {
 });
 afterAll(() => app.close());
 beforeEach(async () => {
+  lockFault.error = null;
   await resetDb();
   await seedLookups();
 });
@@ -99,6 +113,17 @@ describe('compose and reply (2B-2)', () => {
       leadId: lead.id, companyId: company.id, contactId: contact.id, threadId: 'conv-1',
     });
     expect(await prisma.leadActivity.count({ where: { leadId: lead.id, activityType: 'email', title: 'Email sent · Re: Proposal' } })).toBe(1);
+  });
+
+  it('reply surfaces a database error instead of sending without the lead', async () => {
+    const { rep, box, lead, company, contact } = await setup();
+    const original = await synced(rep.id, box.id, { leadId: lead.id, companyId: company.id, contactId: contact.id });
+    const cookie = await signIn(app, rep);
+    lockFault.error = new Error('connection lost');
+    const res = await call('POST', `/api/mail/${original.id}/reply`, cookie, { cc: [], body: 'Thanks Ana' });
+    expect(res.statusCode).toBe(500);
+    expect(await prisma.emailMessage.count()).toBe(1);
+    expect(await prisma.job.count({ where: { type: 'send_user_email' } })).toBe(0);
   });
 
   it("nobody can reply to another user's message, administrators included", async () => {
@@ -183,6 +208,44 @@ describe('reading mail on the Email screen (2B-2)', () => {
     await synced(rep.id, box.id, { folder: 'sent', status: 'sent', fromAddress: 'maya@daitpartners.com', leadId: lead.id, threadId: 't', occurredAt: new Date('2026-11-20T10:00:00Z') });
     await synced(rep.id, box.id, { leadId: lead.id, threadId: 't', occurredAt: new Date('2026-11-21T10:00:00Z') });
     expect((await call('GET', '/api/mail?view=awaiting', await signIn(app, rep))).json().items).toEqual([]);
+  });
+
+  it('list hides the number of a lead the user can no longer see', async () => {
+    const { rep, box, lead, company } = await setup();
+    const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    const m = await synced(rep.id, box.id, { leadId: lead.id, companyId: company.id });
+    await synced(rep.id, box.id, { subject: 'Draft', folder: 'drafts', status: 'draft', leadId: lead.id });
+    await prisma.lead.update({ where: { id: lead.id }, data: { assignedToId: other.id } });
+    const cookie = await signIn(app, rep);
+    const inbox = (await call('GET', '/api/mail?view=inbox', cookie)).json().items;
+    expect(inbox).toEqual([expect.objectContaining({ id: m.id, leadId: null, leadNumber: null, companyId: company.id })]);
+    const unlinked = (await call('GET', '/api/mail?view=unlinked', cookie)).json().items;
+    expect(unlinked.map((i: { id: number }) => i.id)).toEqual([m.id]);
+    expect(unlinked[0]).toMatchObject({ leadId: null, leadNumber: null });
+    expect((await call('GET', '/api/mail/meta', cookie)).json().unlinked).toBe(1);
+    // Someone who sees every lead keeps their linked mail off Unlinked.
+    const admin = await makeUser({ role: 'ADMINISTRATOR' });
+    await synced(admin.id, null, { subject: 'Admin linked', leadId: lead.id });
+    const adminCookie = await signIn(app, admin);
+    expect((await call('GET', '/api/mail?view=unlinked', adminCookie)).json().items).toEqual([]);
+    expect((await call('GET', '/api/mail/meta', adminCookie)).json().unlinked).toBe(0);
+  });
+
+  it('awaiting reply finds an old message when filtered by company', async () => {
+    const { rep, box, lead } = await setup();
+    const y = await makeCompany({ name: 'Globex', website: 'https://globex.com' });
+    const yLead = await makeLead({ companyId: y.id, assignedToId: rep.id });
+    const old = await synced(rep.id, box.id, {
+      folder: 'sent', status: 'sent', fromAddress: 'maya@daitpartners.com', leadId: yLead.id, companyId: y.id, threadId: 'y', occurredAt: new Date('2026-10-01T10:00:00Z'),
+    });
+    await prisma.emailMessage.createMany({
+      data: Array.from({ length: 205 }, (_, i) => ({
+        userId: rep.id, accountId: box.id, folder: 'sent', status: 'sent', fromAddress: 'maya@daitpartners.com', subject: `X ${i}`,
+        leadId: lead.id, companyId: lead.companyId, threadId: `x-${i}`, occurredAt: new Date(Date.UTC(2026, 10, 1, 0, i)),
+      })),
+    });
+    const res = (await call('GET', `/api/mail?view=awaiting&company=${y.id}`, await signIn(app, rep))).json();
+    expect(res.items.map((i: { id: number }) => i.id)).toEqual([old.id]);
   });
 
   it('meta gives the mailbox, unread and unlinked counts, and the clients and leads in your mail', async () => {

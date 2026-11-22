@@ -1,7 +1,7 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { CLOSED_STATUSES, domainOf, isFreeMail } from '@dait-crm/shared';
 import type { AuthUser } from '../plugins/auth.js';
-import { activeUser, leadWhere } from '../leads/visibility.js';
+import { activeUser, canSeeLead, leadWhere } from '../leads/visibility.js';
 
 type Db = Prisma.TransactionClient | PrismaClient;
 
@@ -30,7 +30,7 @@ async function openLead(db: Db, user: AuthUser, where: Prisma.LeadWhereInput): P
  * Links for a synced message (release 2B-2), first hit wins: the user's own linked conversation; a contact's business
  * email (contact, company, the contact's open lead, else the company's); a company domain (not free mail, not the
  * mailbox's own) held by exactly one company (company, and its open lead when it has exactly one). Leads only when the
- * user can see them.
+ * user can see them (a conversation's lead included).
  */
 export async function matchMail(
   db: Db, user: AuthUser, m: { threadId: string | null; counterparts: string[]; ownAddress: string },
@@ -41,7 +41,8 @@ export async function matchMail(
       select: { leadId: true, contactId: true, companyId: true },
       orderBy: { occurredAt: 'desc' },
     });
-    if (linked) return linked;
+    // The lead may since have moved to someone else: the contact and company stay, the lead does not.
+    if (linked) return linked.leadId && !(await canSeeLead(db, user, linked.leadId)) ? { ...linked, leadId: null } : linked;
   }
 
   const addresses = [...new Set(m.counterparts.map((a) => a.trim().toLowerCase()).filter(Boolean))];

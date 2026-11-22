@@ -75,6 +75,20 @@ describe('matching synced mail to CRM records (2B-2)', () => {
       .toEqual({ leadId: null, contactId: contact.id, companyId: company.id });
   });
 
+  test('thread link to a lead the user cannot see keeps company and contact but no lead', async () => {
+    const user = await rep();
+    const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    const company = await makeCompany({ website: 'https://acme.com' });
+    const contact = await makeContact({ companyId: company.id, businessEmail: 'ana@acme.com' });
+    const lead = await makeLead({ companyId: company.id, contactId: contact.id, assignedToId: user.id });
+    await prisma.emailMessage.create({
+      data: { userId: user.id, folder: 'sent', status: 'sent', fromAddress: own, subject: 's', threadId: 'conv-3', leadId: lead.id, contactId: contact.id, companyId: company.id },
+    });
+    await prisma.lead.update({ where: { id: lead.id }, data: { assignedToId: other.id } });
+    expect(await matchMail(prisma, user, { threadId: 'conv-3', counterparts: [], ownAddress: own }))
+      .toEqual({ leadId: null, contactId: contact.id, companyId: company.id });
+  });
+
   test('another user’s linked conversation is not used', async () => {
     const user = await rep();
     const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });

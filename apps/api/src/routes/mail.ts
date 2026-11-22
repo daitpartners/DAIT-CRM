@@ -23,6 +23,8 @@ type Tx = Prisma.TransactionClient;
 const VIEWS = ['inbox', 'sent', 'drafts', 'archive', 'unlinked', 'awaiting', 'mine'] as const;
 type View = (typeof VIEWS)[number];
 const LIST_MAX = 200;
+/** Upper bound on Awaiting reply candidates; the list's own cap applies after the other filters. */
+const AWAITING_MAX = 5000;
 const PREVIEW = 120;
 const DAY_MS = 86_400_000;
 /** Mailbox changes are retried a little (2, 4 minutes); the next sync shows Outlook's state anyway. */
@@ -64,9 +66,17 @@ async function awaitingIds(userId: number): Promise<number[]> {
       AND s.lead_id IS NOT NULL AND NOT EXISTS (
         SELECT 1 FROM email_messages r WHERE r.user_id = s.user_id AND r.status = 'received'
           AND r.thread_id IS NOT NULL AND r.thread_id = s.thread_id AND r.occurred_at > s.occurred_at)
-    ORDER BY s.occurred_at DESC LIMIT ${LIST_MAX}`;
+    ORDER BY s.occurred_at DESC LIMIT ${AWAITING_MAX}`;
   return rows.map((r) => r.id);
 }
+
+/**
+ * Messages with no lead the user can see: none, or one that has since moved to someone else (drafts aside). The NOT
+ * wraps the relation filter: `lead: { NOT: {} }` (everyone's leads visible) would match every linked message.
+ */
+const unlinkedWhere = (user: AuthUser): Prisma.EmailMessageWhereInput => ({
+  OR: [{ leadId: null }, { NOT: { lead: leadWhere(user, { includeArchived: true }) } }], folder: { not: 'drafts' },
+});
 
 /** Queues the same change in the user's mailbox (messages that came from it only). */
 async function tellMailbox(db: Tx | typeof prisma, m: EmailMessage, action: MailActionPayload['action']) {
@@ -145,7 +155,11 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
       const subject = /^\s*re\s*:/i.test(original.subject) ? original.subject : `Re: ${original.subject}`.slice(0, 500);
       const created = await prisma.$transaction(async (tx) => {
         const lead = original.leadId && (await canSeeLead(tx, user, original.leadId))
-          ? await lockedLead(tx, user, original.leadId).catch(() => null)
+          ? await lockedLead(tx, user, original.leadId).catch((e) => {
+            // Only a lead gone in the meantime is skipped; a database error must not send the reply without its lead.
+            if (e instanceof NotFoundError) return null;
+            throw e;
+          })
           : null;
         return queueOutgoing(tx, user, account, {
           lead, companyId: original.companyId, contactId: original.contactId, to, cc: body.cc, subject, body: body.body,
@@ -161,7 +175,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
     const q = request.query;
     const view: View = (VIEWS as readonly string[]).includes(q.view ?? '') ? (q.view as View) : 'inbox';
     const and: Prisma.EmailMessageWhereInput[] = [{ userId: user.id }];
-    if (view === 'unlinked') and.push({ leadId: null, folder: { not: 'drafts' } });
+    if (view === 'unlinked') and.push(unlinkedWhere(user));
     else if (view === 'mine') and.push({ lead: { assignedToId: user.id }, folder: { not: 'drafts' } });
     else if (view === 'awaiting') and.push({ id: { in: await awaitingIds(user.id) } });
     else and.push({ folder: view });
@@ -174,7 +188,12 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
     const rows = await prisma.emailMessage.findMany({
       where: { AND: and }, include: { lead: { select: { id: true, number: true } } }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: LIST_MAX,
     });
-    return { items: rows.map(listItem) };
+    // A lead the user can no longer see (moved to someone else) is not shown: no id, no number.
+    const leadIds = [...new Set(rows.flatMap((m) => (m.leadId ? [m.leadId] : [])))];
+    const visible = new Set(leadIds.length
+      ? (await prisma.lead.findMany({ where: { AND: [{ id: { in: leadIds } }, leadWhere(user, { includeArchived: true })] }, select: { id: true } })).map((l) => l.id)
+      : []);
+    return { items: rows.map((m) => listItem(m.leadId && !visible.has(m.leadId) ? { ...m, leadId: null, lead: null } : m)) };
   });
 
   app.get('/mail/meta', pre, async (request) => {
@@ -182,7 +201,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
     const [mailbox, unread, unlinked, companyIds, leadIds] = await Promise.all([
       prisma.emailAccount.findFirst({ where: { kind: 'personal', userId: user.id, status: { not: 'disconnected' } }, select: { id: true, address: true, status: true, lastSyncAt: true } }),
       prisma.emailMessage.count({ where: { userId: user.id, folder: 'inbox', isRead: false } }),
-      prisma.emailMessage.count({ where: { userId: user.id, leadId: null, folder: { not: 'drafts' } } }),
+      prisma.emailMessage.count({ where: { AND: [{ userId: user.id }, unlinkedWhere(user)] } }),
       prisma.emailMessage.findMany({ where: { userId: user.id, companyId: { not: null } }, distinct: ['companyId'], select: { companyId: true } }),
       prisma.emailMessage.findMany({ where: { userId: user.id, leadId: { not: null } }, distinct: ['leadId'], select: { leadId: true } }),
     ]);
