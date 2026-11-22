@@ -31,6 +31,60 @@ Kept here at the owner's request; picked up when the owner says so.
 - **1D public contact form + Enquiries** — "keep contact in pending, i will decide lateron" (22 Nov 2026). Open point:
   daitpartners.com/contact already has its own brief form (contact.php → Mailjet).
 
+## Release 3A — Quotations (22 Nov 2026) — ready on `release-3a-quotations`, not merged, not deployed
+- **Status:** branch `release-3a-quotations` (from main `4e14d50`), all tasks done and checked side by side against the
+  prototype (screenshots in `parity-screenshots-3a-quotations/` next to the repo); unit, API, e2e, build, translations
+  and database checks green. One database migration (`20261202100000_quotations`) and one new library (pdfkit, draws
+  the PDF on the server). Needs merge + "deploy" from the owner.
+- **Before deploying:** on live, `SELECT count(*) FROM tasks WHERE quotation_id IS NOT NULL` must be 0 (the migration
+  reshapes that link).
+- **What it adds:** the Quotations list (tiles, tabs, search), the quotation editor (lines with live totals, autosave,
+  revisions, status, history), Preview PDF, Send by email with the PDF attached (from your own mailbox), Duplicate,
+  Mark accepted / rejected / Negotiating, automatic Expired after the valid-until date, New quotation from the list and
+  from the company page, the Quotation column and open quotation value on the company's Leads tab, the dashboard tile
+  "Quotes awaiting response", and Settings → Company details (Administrators).
+- **Owner decisions recorded:** currencies USD, CAD and INR only (India → INR, Canada → CAD, everyone else USD); GST
+  18 % on INR and 0 % on USD and CAD by default, one "GST" line; issuer DAIT Partners LLP, D-303, Sagar Sadan, IP
+  Extension, Delhi 110092, India, info@daitpartners.com; the PDF is drawn on the server (pdfkit), no browser needed.
+- **Builder's calls (from the design):** a quotation counts as sent only when Microsoft confirms the email (until then
+  it shows "Sending…" and cannot be edited; a failed send changes nothing and tells the owner); after sending, any edit
+  to what the PDF prints opens the next revision, and sending again without edits re-sends the same revision; list,
+  tiles, dashboard and company figures use the last sent revision while a new one is unsent, and accepting or rejecting
+  then discards the unsent edit after a warning; changing the currency resets GST to that currency's default (you can
+  still change it); New quotation from the list asks for the company (and lead) first; accepting without a lead still
+  makes the company a Client; Duplicate keeps the overall discount (the prototype drops it); rejecting never changes
+  the lead's status.
+- **Owner to do:** fill in the GSTIN in Settings → Company details (printed only on INR quotations); tell us if the
+  accountant wants GST split into CGST / SGST (later, one line for now); Convert to project arrives with release 3B
+  (the button is there but greyed out).
+- **Email pagination (owner request, 22 Nov):** the Email message list now has the same pager as Leads (Rows 25 / 50 /
+  100, First / Prev / page box / Next / Last, 50 per page by default). In the narrow message column it wraps onto three
+  lines; search results count at most 2,000 messages.
+- **Differences from the prototype (accepted):** "GST" instead of "Tax"; Convert to project greyed out until 3B; the
+  send dialog has a Message box; the PDF dialog shows the real PDF with Download (instead of Print); New quotation from
+  the list opens a small dialog (the prototype creates one for the first company straight away); the Email pager.
+- **Fixed in the final check:** the editor button is "Negotiating" as in the prototype and saves your typing first;
+  a save that fails for another reason (connection, server) keeps what you typed on screen and says so, instead of
+  reloading over it; changing the currency shows the GST from Company details at once; leaving a quotation with an
+  empty subject or item now warns that those edits were not saved; the PDF prints plain amounts with the currency once
+  on "Total INR", as the prototype's preview.
+- **Follow-ups (not fixed):**
+  - The PDF uses Helvetica (not Montserrat), always prints dates as "22 Nov 2026", and shows characters outside
+    Western European letters as "?"; a very long item name with a discount can run over; a line taller than a page is
+    cut to one page. PDF wording follows the quotation owner's language but is not in the translation check.
+  - Changing the quotation date into another year keeps the old number (Q-2026-… stays). Valid until is not checked
+    against the quotation date.
+  - Accepting writes two similar lines on the lead timeline. Quotation history lines are in English only.
+  - Clearing the lead on a quotation can hide it from a sales representative who could see it only through that lead
+    (they are told it was saved).
+  - If the database is down for the whole last send attempt, the quotation can stay on "Sending…" until an
+    administrator retries the job. A re-send uses today's logo from Company details.
+  - The Quotations list is not paged (fine at today's numbers); search is by the URL `?q=` and also matches the legal
+    name; New quotation is offered on a closed company.
+  - Email pager: changing Rows does not scroll back to the top; an invalid `?size=` stays in the address bar.
+  - Pre-existing (not 3A): on the company Leads tab the lead number is dark text, not a purple link as in the
+    prototype (the whole row opens the lead).
+
 ## Release 3C — Calendar (22 Nov 2026) — ready on `release-3c-calendar`, not merged, not deployed
 - **Status:** branch `release-3c-calendar` (from main `63cd73e`), all six tasks done and checked side by side against
   the prototype; unit, API, e2e, build, translations and database checks all green. Two database migrations
