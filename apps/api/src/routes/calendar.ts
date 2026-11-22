@@ -62,9 +62,13 @@ function taskItem(t: TaskRow, today: string): CalendarItem {
  * company only when the caller may see it.
  */
 async function eventItems(user: AuthUser, from: string, to: string): Promise<CalendarItem[]> {
-  // A day either side covers every time zone; exact dates are checked after conversion.
+  // A day either side covers every time zone; exact dates are checked after conversion. Only from a mailbox still
+  // syncing its calendar: a run killed before clearing would otherwise leave copied events showing after sync is off.
   const rows = await prisma.calendarEvent.findMany({
-    where: { userId: user.id, startsAt: { lt: dateOnly(addDays(to, 2)) }, endsAt: { gt: dateOnly(addDays(from, -1)) } },
+    where: {
+      userId: user.id, startsAt: { lt: dateOnly(addDays(to, 2)) }, endsAt: { gt: dateOnly(addDays(from, -1)) },
+      account: { syncCalendar: true, status: { in: ['connected', 'error'] } },
+    },
     include: {
       account: { select: { address: true } },
       lead: { select: { id: true, number: true, companyName: true } },

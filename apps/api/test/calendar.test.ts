@@ -252,6 +252,20 @@ describe('calendar API', () => {
     expect((await get(`/api/calendar?${RANGE}`, rep.cookie)).json<Body>().outlook).toEqual({ syncOn: true });
   });
 
+  it('copied events show only from a mailbox with calendar sync on that is connected or in error (a killed run can leave rows behind)', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const box = await mailbox(rep.user);
+    const ev = await event(rep.user, box.id, new Date('2030-03-10T09:00:00Z'));
+    const ids = async () => (await get(`/api/calendar?${RANGE}`, rep.cookie)).json<Body>().items.filter((i) => i.kind === 'event').map((i) => i.id);
+    expect(await ids()).toEqual([ev.id]);
+    await prisma.emailAccount.update({ where: { id: box.id }, data: { status: 'error' } });
+    expect(await ids()).toEqual([ev.id]);
+    await prisma.emailAccount.update({ where: { id: box.id }, data: { status: 'disconnected' } });
+    expect(await ids()).toEqual([]);
+    await prisma.emailAccount.update({ where: { id: box.id }, data: { status: 'connected', syncCalendar: false } });
+    expect(await ids()).toEqual([]);
+  });
+
   it('sorted by date, then time (untimed last), then title', async () => {
     const rep = await as('SALES_REPRESENTATIVE');
     const box = await mailbox(rep.user);
