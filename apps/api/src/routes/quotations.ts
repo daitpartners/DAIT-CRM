@@ -42,7 +42,9 @@ const TABS: Record<QuoteTab, (status: string) => boolean> = {
 async function detailOf(id: number, user: AuthUser) {
   const q = await prisma.quotation.findFirst({ where: { AND: [{ id }, quotationWhere(user)] }, include: quotationInclude });
   if (!q) throw new NotFoundError();
-  return quotationDetail(q, user);
+  // The GST each currency starts with (Company details), so the editor shows it at once on a currency change.
+  const settings = await loadCompanySettings(prisma);
+  return { ...quotationDetail(q, user), taxDefaults: { INR: settings.taxInr, USD: settings.taxUsd, CAD: settings.taxCad } };
 }
 
 const idOf = (raw: string) => Number(raw);

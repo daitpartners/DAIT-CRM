@@ -102,6 +102,8 @@ describe('quotations API', () => {
     expect(usQ).toMatchObject({ currency: 'USD', taxRate: 5, number: `Q-${today().slice(0, 4)}-002` });
     const inQ = await createQuote(admin.cookie, { companyId: (await setup(null)).company.id });
     expect(inQ.taxRate).toBe(12);
+    // The detail carries each currency's starting GST for the editor.
+    expect((inQ as Detail & { taxDefaults: object }).taxDefaults).toEqual({ INR: 12, USD: 5, CAD: 7 });
   });
 
   it('refuses a lead of another company, a hidden company or lead, and users without quotation rights', async () => {
