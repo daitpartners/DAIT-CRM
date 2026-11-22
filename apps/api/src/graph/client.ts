@@ -5,7 +5,10 @@ import { decrypt, encrypt } from '../crypto/tokens.js';
 import { readRefreshToken, type MsEnv } from '../auth/microsoft.js';
 import { nearestUtcMidnight } from '../leads/dates.js';
 
-/** A file sent with a message (Graph fileAttachment, inline in the request: keep the message under 3 MB). */
+/**
+ * A file sent with a message (Graph fileAttachment, inline in the request: Graph takes at most 4 MB per request, so the
+ * caller keeps attachments under that with room for the rest; see MAX_PDF_BASE64 in quotations/send.ts).
+ */
 export interface MailAttachment {
   name: string;
   contentType: string;
