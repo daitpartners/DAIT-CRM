@@ -6,6 +6,7 @@ import { enqueue } from '../jobs/queue.js';
 import type { MailActionPayload } from '../jobs/types.js';
 import { dateOnly, todayIn, ymd } from '../leads/dates.js';
 import { auditCreatedLead, createLeadWithCompany, RuleError } from '../leads/service.js';
+import { autoResearchForLead } from '../research/service.js';
 import { findCompanyMatches } from '../companies/match.js';
 import { isUniqueViolation } from '../prismaErrors.js';
 import { prisma } from '../db.js';
@@ -388,6 +389,8 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
           await tx.emailMessage.update({ where: { id: m.id }, data: { leadId: l.id, companyId: l.companyId, contactId: l.contactId } });
           return l.id;
         });
+        // Release 4: AI research for a never-researched company with a website.
+        await autoResearchForLead(leadId, user.id, (msg) => request.log.warn(msg));
         return reply.code(201).send({ id: m.id, leadId });
       } catch (e) {
         if (isUniqueViolation(e, 'domain')) {

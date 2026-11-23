@@ -1,9 +1,12 @@
 import type { MailAttachment } from '../graph/client.js';
 import type { QuotationSnapshot } from '../quotations/service.js';
 
-export type JobType = 'send_email' | 'send_user_email' | 'sync_mailbox' | 'mail_action' | 'campaign_step' | 'sync_calendar';
+export type JobType =
+  | 'send_email' | 'send_user_email' | 'sync_mailbox' | 'mail_action' | 'campaign_step' | 'sync_calendar' | 'research_company';
 
-export const JOB_TYPES: readonly JobType[] = ['send_email', 'send_user_email', 'sync_mailbox', 'mail_action', 'campaign_step', 'sync_calendar'];
+export const JOB_TYPES: readonly JobType[] = [
+  'send_email', 'send_user_email', 'sync_mailbox', 'mail_action', 'campaign_step', 'sync_calendar', 'research_company',
+];
 
 export const JOB_STATUSES = ['queued', 'running', 'done', 'failed'] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
@@ -40,4 +43,9 @@ export interface SyncCalendarPayload {
 export interface MailActionPayload {
   emailMessageId: number;
   action: 'read' | 'unread' | 'archive';
+}
+
+/** `research_company` (release 4): run one queued AI research run. */
+export interface ResearchCompanyPayload {
+  runId: number;
 }

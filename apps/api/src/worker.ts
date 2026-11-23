@@ -8,6 +8,7 @@ import { syncMailboxHandler } from './jobs/handlers/syncMailbox.js';
 import { syncCalendarHandler } from './jobs/handlers/syncCalendar.js';
 import { mailActionHandler } from './jobs/handlers/mailAction.js';
 import { campaignStepHandler } from './jobs/handlers/campaignStep.js';
+import { researchCompanyHandler } from './jobs/handlers/researchCompany.js';
 import { scheduleCampaigns } from './mailer/schedule.js';
 import { scheduleMailSync } from './mail/schedule.js';
 import { scheduleCalendarSync } from './calendar/schedule.js';
@@ -64,10 +65,10 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<void> 
   console.log('worker: started');
   try {
     await runForever({
-      types: ['send_email', 'send_user_email', 'sync_mailbox', 'mail_action', 'campaign_step', 'sync_calendar'],
+      types: ['send_email', 'send_user_email', 'sync_mailbox', 'mail_action', 'campaign_step', 'sync_calendar', 'research_company'],
       handlers: {
         send_email: sendEmailHandler, send_user_email: sendUserEmailHandler, sync_mailbox: syncMailboxHandler, mail_action: mailActionHandler,
-        campaign_step: campaignStepHandler, sync_calendar: syncCalendarHandler,
+        campaign_step: campaignStepHandler, sync_calendar: syncCalendarHandler, research_company: researchCompanyHandler,
       },
       graph: opts.graph ?? createGraphClient(process.env),
       pollMs: opts.pollMs,

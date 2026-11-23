@@ -224,6 +224,12 @@ export const companyRoutes: FastifyPluginAsync = async (app) => {
           const verified = verifiedMap(before.verifiedFields);
           for (const k of changed) verified[k] = true;
           data.verifiedFields = verified;
+          // The value is now the user's, no longer AI's.
+          const ai = verifiedMap(before.aiFields) as Record<string, unknown>;
+          if (changed.some((k) => k in ai)) {
+            for (const k of changed) delete ai[k];
+            data.aiFields = ai as Prisma.InputJsonValue;
+          }
         }
         // Matching updatedAt in the where makes a concurrent write since `before` a P2025 (stale).
         const after = await tx.company.update({ where: { id, updatedAt: before.updatedAt }, data, include: companyDetailInclude });

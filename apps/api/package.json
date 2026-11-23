@@ -22,6 +22,7 @@
     "e2e:seed": "tsx test/e2e-seed.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "1.6.0",
     "@azure/msal-node": "3.8.10",
     "@fastify/cookie": "11.1.5",
     "@fastify/rate-limit": "10.3.0",

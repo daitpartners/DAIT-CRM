@@ -9,6 +9,7 @@ import { audit } from '../audit.js';
 import { NotFoundError, ValidationError, parseBody, parseQuery } from '../validate.js';
 import { requireRight, requireUser, type AuthUser } from '../plugins/auth.js';
 import { assertCompanyVisible, visibleCompanyIds } from '../companies/visibility.js';
+import { autoResearchForLead } from '../research/service.js';
 import { findCompanyMatches } from '../companies/match.js';
 import { StaleError, isNotFound, isUniqueViolation } from '../prismaErrors.js';
 import { assertLeadVisible, leadWhere } from '../leads/visibility.js';
@@ -211,6 +212,8 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
           await auditCreatedLead(tx, user.id, created);
           return created.lead.id;
         });
+        // Release 4: a lead created one at a time queues AI research for a never-researched company with a website.
+        await autoResearchForLead(id, user.id, (msg) => request.log.warn(msg));
         return reply.code(201).send(await detailOf(prisma, id, user));
       });
     } catch (e) {
