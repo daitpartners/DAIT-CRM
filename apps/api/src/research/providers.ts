@@ -267,8 +267,11 @@ export type ClaudeRunRequest = {
   signal: AbortSignal;
 };
 
-/** One Claude call: the schema-shaped answer, or a ClaudeRunError. A fake in tests. */
-export type ClaudeRunner = (req: ClaudeRunRequest) => Promise<{ output: unknown }>;
+/**
+ * One Claude call: the schema-shaped answer and the URLs its web searches returned (the only URLs, besides the pages
+ * read, a finding may cite), or a ClaudeRunError. A fake in tests.
+ */
+export type ClaudeRunner = (req: ClaudeRunRequest) => Promise<{ output: unknown; searchUrls: string[] }>;
 
 /** Per call; the whole Claude step is further bounded by CLAUDE_STEP_BUDGET_MS. */
 export const CLAUDE_CALL_TIMEOUT_MS = 120_000;
@@ -277,6 +280,69 @@ const CLAUDE_OUTPUT_MAX_BYTES = 2 * 1024 * 1024;
 /** After SIGTERM, a child still running this long gets SIGKILL. */
 const CLAUDE_KILL_GRACE_MS = 2000;
 const NOT_LOGGED_IN = /not logged in|please run \/login|oauth|authenticat/i;
+
+type StreamEvent = {
+  type?: unknown;
+  message?: { content?: unknown };
+  tool_use_result?: { results?: unknown };
+  is_error?: unknown;
+  result?: unknown;
+  structured_output?: unknown;
+};
+type ContentBlock = { type?: unknown; id?: unknown; name?: unknown; tool_use_id?: unknown; content?: unknown };
+
+const HTTP_URL = /https?:\/\/[^\s"'<>()\[\]{}\\]+/g;
+
+/** Every `url` field anywhere in a WebSearch tool's structured result. */
+function urlFields(v: unknown, into: Set<string>): void {
+  if (Array.isArray(v)) v.forEach((x) => urlFields(x, into));
+  else if (v && typeof v === 'object') {
+    for (const [k, x] of Object.entries(v)) {
+      if (k === 'url' && typeof x === 'string' && /^https?:\/\//i.test(x)) into.add(x);
+      else urlFields(x, into);
+    }
+  }
+}
+
+/** Every http(s) URL in a tool_result's content (a string or text blocks). */
+function urlsInText(v: unknown, into: Set<string>): void {
+  if (typeof v === 'string') for (const m of v.matchAll(HTTP_URL)) into.add(m[0].replace(/[.,;:]+$/, ''));
+  else if (Array.isArray(v)) v.forEach((x) => urlsInText(x, into));
+  else if (v && typeof v === 'object' && 'text' in v) urlsInText((v as { text: unknown }).text, into);
+}
+
+/**
+ * Claude Code's `--output-format stream-json --verbose` output: one JSON event per line (other lines and unknown
+ * event types are ignored). Returns the final `result` event and the URLs returned by its WebSearch calls — only
+ * results of a WebSearch tool_use (never of StructuredOutput, which echoes Claude's own answer).
+ */
+export function parseStreamJson(stdout: string): { result: StreamEvent | null; searchUrls: string[] } {
+  let result: StreamEvent | null = null;
+  const searchIds = new Set<unknown>();
+  const urls = new Set<string>();
+  for (const line of stdout.split('\n')) {
+    let ev: StreamEvent;
+    try {
+      ev = JSON.parse(line) as StreamEvent;
+    } catch {
+      continue;
+    }
+    if (!ev || typeof ev !== 'object') continue;
+    const blocks: ContentBlock[] = Array.isArray(ev.message?.content) ? ev.message.content as ContentBlock[] : [];
+    if (ev.type === 'result') result = ev;
+    else if (ev.type === 'assistant') {
+      for (const b of blocks) if (b?.type === 'tool_use' && b.name === 'WebSearch') searchIds.add(b.id);
+    } else if (ev.type === 'user') {
+      const searches = blocks.filter((b) => b?.type === 'tool_result' && searchIds.has(b.tool_use_id));
+      if (searches.length === 0) continue;
+      const found = new Set<string>();
+      urlFields(ev.tool_use_result?.results, found);
+      if (found.size === 0) searches.forEach((b) => urlsInText(b.content, found));
+      found.forEach((u) => urls.add(u));
+    }
+  }
+  return { result, searchUrls: [...urls] };
+}
 
 export interface ClaudeCodeRunnerOptions {
   bin: string;
@@ -293,9 +359,9 @@ export function createClaudeCodeRunner({ bin, token, timeoutMs = CLAUDE_CALL_TIM
   return async ({ system, prompt, schema, webSearch, model, signal }) => {
     const cwd = await mkdtemp(join(tmpdir(), 'dait-claude-'));
     try {
-      return await new Promise<{ output: unknown }>((resolve, reject) => {
+      return await new Promise<{ output: unknown; searchUrls: string[] }>((resolve, reject) => {
         const args = [
-          '-p', '--output-format', 'json', '--json-schema', JSON.stringify(schema), '--model', model,
+          '-p', '--output-format', 'stream-json', '--verbose', '--json-schema', JSON.stringify(schema), '--model', model,
           '--system-prompt', system, '--strict-mcp-config', '--setting-sources', '', '--no-session-persistence',
           ...(webSearch ? ['--tools', 'WebSearch', '--allowedTools', 'WebSearch'] : ['--tools', '']),
         ];
@@ -341,18 +407,13 @@ export function createClaudeCodeRunner({ bin, token, timeoutMs = CLAUDE_CALL_TIM
         child.on('error', () => finish(() => reject(new ClaudeRunError('failed'))));
         child.on('close', (code) => finish(() => {
           if (failure) return reject(failure);
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(Buffer.concat(out).toString('utf8'));
-          } catch {
-            return reject(new ClaudeRunError('failed'));
-          }
-          const r = parsed && typeof parsed === 'object' ? parsed as { is_error?: unknown; result?: unknown; structured_output?: unknown } : {};
+          const { result: r, searchUrls } = parseStreamJson(Buffer.concat(out).toString('utf8'));
+          if (!r) return reject(new ClaudeRunError('failed'));
           if (r.is_error === true) {
             return reject(new ClaudeRunError(typeof r.result === 'string' && NOT_LOGGED_IN.test(r.result) ? 'not_logged_in' : 'failed'));
           }
           if (code !== 0) return reject(new ClaudeRunError('failed'));
-          resolve({ output: r.structured_output });
+          resolve({ output: r.structured_output, searchUrls });
         }));
         child.stdin.end(prompt);
       });
@@ -458,7 +519,15 @@ export interface ClaudeProviderOptions {
   budgetMs?: number;
 }
 
-const normaliseUrl = (u: string) => u.trim().replace(/#.*$/, '').replace(/\/+$/, '');
+/** For comparing sources: host lowercased, no fragment, no trailing slash. */
+const normaliseUrl = (u: string) => {
+  try {
+    const url = new URL(u.trim());
+    return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, '')}${url.search}`;
+  } catch {
+    return u.trim().replace(/#.*$/, '').replace(/\/+$/, '');
+  }
+};
 
 export function claudeProvider({ runner, model, webSearch, secrets = [], budgetMs = CLAUDE_STEP_BUDGET_MS }: ClaudeProviderOptions): ResearchProvider {
   return {
@@ -477,16 +546,14 @@ export function claudeProvider({ runner, model, webSearch, secrets = [], budgetM
       const deadline = AbortSignal.timeout(budgetMs);
       try {
         // One call: Claude Code runs its own web search loop.
-        const { output } = await runner({ system: SYSTEM_PROMPT, prompt, schema: jsonSchema, webSearch, model, signal: deadline });
+        const { output, searchUrls } = await runner({ system: SYSTEM_PROMPT, prompt, schema: jsonSchema, webSearch, model, signal: deadline });
         const parsed = zodSchema.safeParse(output);
         if (!parsed.success) return { findings: [], sources: [], error: 'Claude returned an unexpected answer' };
         const out = parsed.data;
-        /**
-         * A value is kept only when its source is one of the pages given or, with web search on, an https URL (Claude
-         * Code's JSON output does not list the search results, so they cannot be matched one by one).
-         */
+        if (webSearch) for (const u of searchUrls) allowed.add(normaliseUrl(u));
+        /** A value is kept only when its source is one of the pages given or a web search result. */
         const keep = <V>(f: { value: V; sourceUrl: string } | null): { value: V; sourceUrl: string } | null =>
-          f && (allowed.has(normaliseUrl(f.sourceUrl)) || (webSearch && isHttpsUrl(f.sourceUrl))) ? f : null;
+          f && allowed.has(normaliseUrl(f.sourceUrl)) ? f : null;
 
         const ai: AiClassification = {};
         const summary = keep(out.summary);

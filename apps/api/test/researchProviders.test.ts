@@ -30,13 +30,17 @@ const fullAnswer = (url: string): Answer => ({
 });
 
 function fakeRunner(...answers: (unknown | Error)[]) {
+  return fakeRunnerWithSearch([], ...answers);
+}
+
+function fakeRunnerWithSearch(searchUrls: string[], ...answers: (unknown | Error)[]) {
   const calls: ClaudeRunRequest[] = [];
   const runner: ClaudeRunner = async (req) => {
     calls.push(req);
     if (answers.length === 0) throw new Error('unexpected Claude call');
     const next = answers.shift();
     if (next instanceof Error) throw next;
-    return { output: next };
+    return { output: next, searchUrls };
   };
   return { runner, calls };
 }
@@ -96,19 +100,31 @@ describe('claudeProvider', () => {
     expect(res.ai).toEqual({});
   });
 
-  test('with web search on: asks for the tool and accepts https search sources, never other schemes', async () => {
+  test('with web search on: asks for the tool and accepts only URLs its searches returned', async () => {
     const found = 'https://news.example/acme-expands';
     const answer = fullAnswer(found);
-    answer.specialisation = { value: 'Widgets', sourceUrl: 'http://plain.example/x' };
-    answer.employeeRange = { value: '51–200', sourceUrl: 'javascript:alert(1)' };
-    const { runner, calls } = fakeRunner(answer);
+    // The same result with an upper-case host and a trailing slash still matches.
+    answer.websiteAssessment = { value: 'Modern site.', sourceUrl: 'https://NEWS.example/acme-expands/' };
+    // A made-up https source is dropped.
+    answer.specialisation = { value: 'Widgets', sourceUrl: 'https://invented.example/acme' };
+    answer.summary = { value: 'Acme makes widgets.', sourceUrl: 'https://invented.example/summary' };
+    const { runner, calls } = fakeRunnerWithSearch([found, 'https://other.example/'], answer);
     const res = await claudeProvider({ runner, model: 'sonnet', webSearch: true }).run(input());
     expect(calls).toHaveLength(1);
     expect(calls[0]!.webSearch).toBe(true);
     expect(res.findings.map((f) => [f.field, f.sourceUrl])).toEqual([
-      ['aiPotentialServices', found], ['websiteAssessment', found],
+      ['aiPotentialServices', found], ['websiteAssessment', 'https://NEWS.example/acme-expands/'], ['employeeRange', found],
     ]);
-    expect(res.ai?.aiSummary).toBe('Acme makes industrial widgets for packaging lines.');
+    expect(res.ai?.aiSummary).toBeUndefined();
+    expect(res.ai?.aiIndustry).toBe('Manufacturing');
+  });
+
+  test('search URLs are ignored when web search is off', async () => {
+    const found = 'https://news.example/acme-expands';
+    const { runner } = fakeRunnerWithSearch([found], fullAnswer(found));
+    const res = await claudeProvider({ runner, model: 'sonnet', webSearch: false }).run(input());
+    expect(res.findings).toEqual([]);
+    expect(res.ai).toEqual({});
   });
 
   test('the whole step has one deadline: a call still running when it passes is aborted', async () => {

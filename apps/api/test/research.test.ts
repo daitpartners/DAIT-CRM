@@ -149,6 +149,7 @@ describe('research runs · website reader', () => {
           summary: { value: 'Late summary.', sourceUrl: site.url('site.test') }, industry: null, businessCategory: null,
           opportunityScore: null, confidence: 'Low', potentialServices: null, websiteAssessment: null, specialisation: null, employeeRange: null,
         },
+        searchUrls: [],
       };
     };
     await runResearch(runId, readerDeps({ claude, env: claudeEnv() }));
@@ -467,7 +468,7 @@ describe('paid providers', () => {
     const calls: Parameters<ClaudeRunner>[0][] = [];
     const runner: ClaudeRunner = async (request) => {
       calls.push(request);
-      return { output: answer(url) };
+      return { output: answer(url), searchUrls: [] };
     };
     return { calls, runner };
   };
