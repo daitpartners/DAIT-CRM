@@ -560,6 +560,30 @@ describe('paid providers', () => {
     expect(JSON.stringify(await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: runId } }))).not.toContain(token);
   });
 
+  it('a run that fails after calling Claude still records it, so it counts towards the monthly run cap', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const c = await siteCompany();
+    await claudeOn(1);
+    const res = await req('POST', `/api/companies/${c.id}/research`, admin.cookie);
+    const runId = res.json().runId as number;
+    // Claude answers, then saving the result fails (Postgres refuses a NUL character).
+    const fake = fakeClaude(site.url('site.test'));
+    const runner: ClaudeRunner = async (request) => {
+      const { output } = await fake.runner(request);
+      const answer = output as Record<string, { value: unknown; sourceUrl: string }>;
+      return { output: { ...answer, websiteAssessment: { ...answer.websiteAssessment!, value: 'Tidy\u0000site.' } }, searchUrls: [] };
+    };
+    await runResearch(runId, readerDeps({ claude: runner, env: claudeEnv() }));
+    expect(fake.calls).toHaveLength(1);
+    expect(await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: runId } })).toMatchObject({
+      status: 'Failed', sources: ['website', 'claude'], engine: 'Website reader + Claude Code sonnet',
+    });
+    // The cap of 1 is now used: the next run does not call Claude.
+    const next = await startAndRun(c.id, admin.cookie, readerDeps({ claude: fake.runner, env: claudeEnv() }));
+    expect(fake.calls).toHaveLength(1);
+    expect((await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: next } })).engine).toBe('Website reader');
+  });
+
   it('Google Places with a key, on and under the cap: suggestions and the call counted; refused at the cap', async () => {
     const admin = await as('ADMINISTRATOR');
     const c = await makeCompany({ name: 'Meta Co', website: site.url('meta.test') });
@@ -627,15 +651,15 @@ describe('enrichment settings', () => {
     expect(get.statusCode).toBe(200);
     expect(get.json()).toMatchObject({
       dailyRunLimit: 50, claudeEnabled: false, claudeMonthlyRunCap: 0, placesEnabled: false, placesMonthlyCallCap: 0,
-      webSearchEnabled: false, claudeCodeReady: true, placesKeyPresent: false, claudeRunsThisMonth: 2, placesCallsThisMonth: 3,
+      webSearchEnabled: false, claudeTokenPresent: true, claudeBinaryFound: true, placesKeyPresent: false, claudeRunsThisMonth: 2, placesCallsThisMonth: 3,
     });
     expect(get.body).not.toContain(token);
-    // Not ready without an executable binary, or without the token.
+    // A binary that is not executable, or no token.
     vi.stubEnv('CLAUDE_BIN', fixtureFile);
-    expect((await req('GET', '/api/settings/enrichment', admin.cookie)).json().claudeCodeReady).toBe(false);
+    expect((await req('GET', '/api/settings/enrichment', admin.cookie)).json()).toMatchObject({ claudeTokenPresent: true, claudeBinaryFound: false });
     vi.stubEnv('CLAUDE_BIN', process.execPath);
     vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
-    expect((await req('GET', '/api/settings/enrichment', admin.cookie)).json().claudeCodeReady).toBe(false);
+    expect((await req('GET', '/api/settings/enrichment', admin.cookie)).json()).toMatchObject({ claudeTokenPresent: false, claudeBinaryFound: true });
     vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', token);
 
     const put = await req('PUT', '/api/settings/enrichment', admin.cookie, {

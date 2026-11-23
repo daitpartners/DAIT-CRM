@@ -6,10 +6,14 @@ import { join } from 'node:path';
 import { ClaudeRunError, createClaudeCodeRunner, type ClaudeRunRequest } from '../src/research/providers';
 
 // A fake `claude` executable: records its argv, environment, cwd and stdin to a file, then behaves as told.
-type Behaviour =
+type Behaviour = (
   | { stdout: string; code?: number }
   | { hang: true; ignoreTerm?: boolean }
-  | { flood: true };
+  | { flood: true }
+) & {
+  /** Start a long-lived grandchild holding stdout/stderr: in the child's process group, or escaped into its own. */
+  grandchild?: 'group' | 'escape';
+};
 
 let dir: string;
 let n = 0;
@@ -30,12 +34,19 @@ async function fakeClaude(behaviour: Behaviour): Promise<{ bin: string; record: 
   const record = join(dir, `record-${n}.json`);
   const script = `#!${process.execPath}
 const fs = require('node:fs');
+const { spawn } = require('node:child_process');
 const behaviour = ${JSON.stringify(behaviour)};
 let stdin = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (c) => { stdin += c; });
 process.stdin.on('end', () => {
-  fs.writeFileSync(${JSON.stringify(record)}, JSON.stringify({ argv: process.argv.slice(2), env: process.env, cwd: process.cwd(), stdin, pid: process.pid }));
+  let grandchild;
+  if (behaviour.grandchild) {
+    grandchild = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+      stdio: ['ignore', 'inherit', 'inherit'], detached: behaviour.grandchild === 'escape',
+    }).pid;
+  }
+  fs.writeFileSync(${JSON.stringify(record)}, JSON.stringify({ argv: process.argv.slice(2), env: process.env, cwd: process.cwd(), stdin, pid: process.pid, grandchild }));
   if (behaviour.hang) {
     if (behaviour.ignoreTerm) process.on('SIGTERM', () => {});
     setInterval(() => {}, 1000);
@@ -55,7 +66,15 @@ process.stdin.on('end', () => {
   return { bin, record };
 }
 
-type Recorded = { argv: string[]; env: Record<string, string>; cwd: string; stdin: string; pid: number };
+type Recorded = { argv: string[]; env: Record<string, string>; cwd: string; stdin: string; pid: number; grandchild?: number };
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 const recorded = async (path: string): Promise<Recorded> => JSON.parse(await readFile(path, 'utf8')) as Recorded;
 
 const schema = { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'], additionalProperties: false };
@@ -69,16 +88,22 @@ const init = { type: 'system', subtype: 'init', session_id: 's1', tools: [] };
 const resultEvent = (structured: unknown) => ({ type: 'result', subtype: 'success', is_error: false, result: '', structured_output: structured });
 const errorEvent = (result: string) => ({ type: 'result', subtype: 'success', is_error: true, result });
 const success = (structured: unknown) => lines(init, resultEvent(structured));
-/** A WebSearch call and its result, as Claude Code streams them. */
-const search = (id: string, urls: string[], structured = true) => [
-  { type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'WebSearch', input: { query: 'acme' } }] } },
-  { type: 'rate_limit_event' },
-  {
-    type: 'user',
-    message: { content: [{ type: 'tool_result', tool_use_id: id, content: `Web search results for query: "acme"\n\nLinks: ${JSON.stringify(urls.map((url) => ({ title: 't', url })))}` }] },
-    ...(structured ? { tool_use_result: { query: 'acme', results: [{ tool_use_id: 'srv', content: urls.map((url) => ({ title: 't', url })) }, 'Commentary'], durationSeconds: 1 } } : {}),
-  },
-];
+/**
+ * A WebSearch call and its result, in the shape Claude Code 2.1.311 streams (checked on the server): the URLs are in
+ * `tool_use_result.results[].content[].url`; `results` may also hold plain summary strings.
+ */
+const search = (id: string, urls: string[], { query = 'acme', summary = 'Acme is a widget maker.' } = {}) => {
+  const links = urls.map((url) => ({ title: 't', url }));
+  return [
+    { type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'WebSearch', input: { query } }] } },
+    { type: 'rate_limit_event' },
+    {
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: id, content: `Web search results for query: "${query}"\n\nLinks: ${JSON.stringify(links)}\n\n${summary}` }] },
+      tool_use_result: { query, results: [...(urls.length ? [{ tool_use_id: 'srvtoolu_1', content: links }] : []), summary], durationSeconds: 1.2, searchCount: 1 },
+    },
+  ];
+};
 const structuredOutputCall = (answer: unknown) => [
   { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'so1', name: 'StructuredOutput', input: answer }] } },
   { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'so1', content: JSON.stringify(answer) }] }, tool_use_result: answer },
@@ -104,8 +129,12 @@ describe('createClaudeCodeRunner', () => {
 
     const r = await recorded(record);
     // macOS may add __CF_USER_TEXT_ENCODING to a child's environment; nothing else is allowed.
-    expect(Object.keys(r.env).filter((k) => k !== '__CF_USER_TEXT_ENCODING').sort()).toEqual(['CLAUDE_CODE_OAUTH_TOKEN', 'HOME', 'PATH']);
-    expect(r.env).toMatchObject({ CLAUDE_CODE_OAUTH_TOKEN: TOKEN, PATH: '/usr/bin:/bin', HOME: process.env.HOME });
+    expect(Object.keys(r.env).filter((k) => k !== '__CF_USER_TEXT_ENCODING').sort())
+      .toEqual(['CLAUDE_CODE_OAUTH_TOKEN', 'DISABLE_AUTOUPDATER', 'HOME', 'PATH', 'TMPDIR']);
+    expect(r.env).toMatchObject({ CLAUDE_CODE_OAUTH_TOKEN: TOKEN, PATH: '/usr/bin:/bin', HOME: process.env.HOME, DISABLE_AUTOUPDATER: '1' });
+    // Temp files stay in the run's own directory (cwd is the resolved path, e.g. /private/var/… on macOS).
+    expect(r.env.TMPDIR).toContain('dait-claude-');
+    expect(r.cwd.endsWith(r.env.TMPDIR.split('/').pop()!)).toBe(true);
     expect(r.env.DATABASE_URL).toBeUndefined();
     expect(r.argv).toEqual([
       '-p', '--output-format', 'stream-json', '--verbose', '--json-schema', JSON.stringify(schema), '--model', 'sonnet',
@@ -139,13 +168,13 @@ describe('createClaudeCodeRunner', () => {
     expect((await errorOf(createClaudeCodeRunner({ bin, token: TOKEN })(request()))).message).toBe('Claude Code failed');
   });
 
-  test('collects the URLs WebSearch returned (structured results, else the tool_result text), never StructuredOutput\'s', async () => {
+  test('collects only results[].content[].url of WebSearch results, never StructuredOutput\'s', async () => {
     const answer = { summary: { value: 'x', sourceUrl: 'https://invented.example/' } };
     const { bin } = await fakeClaude({
       stdout: lines(
         init,
         ...search('ws1', ['https://anthropic.com/company', 'https://Www.wikipedia.org/wiki/Anthropic']),
-        ...search('ws2', ['https://news.example/a'], false),
+        ...search('ws2', ['https://news.example/a', 'javascript:alert(1)', 'ftp://files.example/x']),
         ...structuredOutputCall(answer),
         resultEvent(answer),
       ),
@@ -153,6 +182,25 @@ describe('createClaudeCodeRunner', () => {
     const res = await createClaudeCodeRunner({ bin, token: TOKEN })(request({ webSearch: true }));
     expect(res.output).toEqual(answer);
     expect(res.searchUrls).toEqual(['https://anthropic.com/company', 'https://Www.wikipedia.org/wiki/Anthropic', 'https://news.example/a']);
+  });
+
+  test('fails closed: URLs in the query, in summary strings or only in the tool_result text are never search results', async () => {
+    const answer = { summary: 'x' };
+    const textOnly = {
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'ws3', content: 'Links: [{"title":"t","url":"https://text-only.example/"}]' }] },
+    };
+    const { bin } = await fakeClaude({
+      stdout: lines(
+        init,
+        ...search('ws1', [], { query: 'site:https://from-query.example/about' }),
+        ...search('ws2', [], { summary: 'See https://from-summary.example/page for details.' }),
+        { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'ws3', name: 'WebSearch', input: { query: 'acme' } }] } },
+        textOnly,
+        resultEvent(answer),
+      ),
+    });
+    expect((await createClaudeCodeRunner({ bin, token: TOKEN })(request({ webSearch: true }))).searchUrls).toEqual([]);
   });
 
   test('non-JSON noise lines and unknown event types are ignored; no result event fails', async () => {
@@ -210,5 +258,44 @@ describe('createClaudeCodeRunner', () => {
     const { bin } = await fakeClaude({ flood: true });
     const err = await errorOf(createClaudeCodeRunner({ bin, token: TOKEN })(request()));
     expect(err.message).toBe('Claude Code failed');
+  });
+
+  test('a process left behind holding stdout does not keep the run open: it settles and the group is killed', async () => {
+    const { bin, record } = await fakeClaude({ stdout: success({ summary: 'ok' }), grandchild: 'group' });
+    const started = Date.now();
+    const res = await createClaudeCodeRunner({ bin, token: TOKEN })(request());
+    expect(res).toEqual({ output: { summary: 'ok' }, searchUrls: [] });
+    expect(Date.now() - started).toBeLessThan(8000);
+    const { grandchild, cwd } = await recorded(record);
+    await vi.waitFor(() => expect(alive(grandchild!)).toBe(false));
+    expect(existsSync(cwd)).toBe(false);
+  });
+
+  test('a timeout ends the whole process group, grandchild included', async () => {
+    const { bin, record } = await fakeClaude({ hang: true, ignoreTerm: true, grandchild: 'group' });
+    const started = Date.now();
+    const err = await errorOf(createClaudeCodeRunner({ bin, token: TOKEN, timeoutMs: 3000 })(request()));
+    expect(err.message).toBe('Claude took too long');
+    expect(Date.now() - started).toBeLessThan(3000 + 2 * 2000 + 2000);
+    const { pid, grandchild, cwd } = await recorded(record);
+    await vi.waitFor(() => expect(alive(grandchild!)).toBe(false));
+    expect(alive(pid)).toBe(false);
+    expect(existsSync(cwd)).toBe(false);
+  });
+
+  test('a grandchild that escaped the group cannot hang the run either', async () => {
+    const { bin, record } = await fakeClaude({ hang: true, grandchild: 'escape' });
+    let grandchild: number | undefined;
+    try {
+      const started = Date.now();
+      const pending = createClaudeCodeRunner({ bin, token: TOKEN, timeoutMs: 3000 })(request());
+      await vi.waitFor(() => expect(existsSync(record)).toBe(true), { timeout: 5000 });
+      ({ grandchild } = await recorded(record));
+      expect((await errorOf(pending)).message).toBe('Claude took too long');
+      expect(Date.now() - started).toBeLessThan(3000 + 2 * 2000 + 2000);
+      expect(existsSync((await recorded(record)).cwd)).toBe(false);
+    } finally {
+      if (grandchild) process.kill(grandchild, 'SIGKILL');
+    }
   });
 });

@@ -300,12 +300,15 @@ async function runRecipient(
   return anyLead?.assignedToId ?? run.createdById;
 }
 
-async function finishFailed(runId: number, companyId: number, message: string): Promise<void> {
+/** What a failed run had already used: recorded so the monthly Claude run cap and Places call cap count it. */
+type UsedSoFar = { sources: string[]; engine: string; placesCalls: number };
+
+async function finishFailed(runId: number, companyId: number, message: string, used?: UsedSoFar): Promise<void> {
   try {
     await prisma.$transaction(async (tx) => {
       const company = await lockCompany(tx, companyId);
       const now = new Date();
-      await endRun(tx, runId, { status: 'Failed', result: message, error: message, finishedAt: now });
+      await endRun(tx, runId, { status: 'Failed', result: message, error: message, finishedAt: now, ...used });
       await setResearchStatus(tx, companyId, 'Failed', now);
       const run = await tx.enrichmentRun.findUniqueOrThrow({ where: { id: runId } });
       await failTriggeringLead(tx, run.leadId);
@@ -329,6 +332,10 @@ export async function runResearch(runId: number, deps: ResearchDeps = {}): Promi
   const run = await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: runId } });
   const env = deps.env ?? process.env;
   const secrets = [env.CLAUDE_CODE_OAUTH_TOKEN, env.GOOGLE_PLACES_API_KEY];
+  const results: ProviderResult[] = [];
+  const used: string[] = [];
+  let engine = 'Website reader';
+  const usedSoFar = (): UsedSoFar => ({ sources: used, engine, placesCalls: results.reduce((n, r) => n + (r.placesCalls ?? 0), 0) });
   try {
     await setResearchStatus(prisma, run.companyId, 'Processing');
     const company = await prisma.company.findUniqueOrThrow({ where: { id: run.companyId } });
@@ -344,18 +351,17 @@ export async function runResearch(runId: number, deps: ResearchDeps = {}): Promi
       return;
     }
     input.pages = website.pages ?? [];
-    const results: ProviderResult[] = [website];
-    const used: string[] = ['website'];
-    let engine = 'Website reader';
+    results.push(website);
+    used.push('website');
     const notes: string[] = [];
 
     const settings = await loadEnrichmentSettings(prisma);
     const totals = await monthTotals(prisma);
     const placesKey = env.GOOGLE_PLACES_API_KEY;
     if (placesKey && settings.placesEnabled && settings.placesMonthlyCallCap > 0 && totals.placesCalls < settings.placesMonthlyCallCap) {
+      used.push('places');
       const places = await placesProvider({ apiKey: placesKey, fetchImpl: deps.placesFetch }).run(input);
       results.push(places);
-      used.push('places');
       if (places.error) notes.push(`Google Places: ${places.error}`);
     }
 
@@ -368,11 +374,12 @@ export async function runResearch(runId: number, deps: ResearchDeps = {}): Promi
       const provider: ResearchProvider = claudeProvider({
         runner: deps.claude ?? createClaudeCodeRunner({ bin, token }), model, webSearch: settings.webSearchEnabled, secrets: [token],
       });
-      const claude = await provider.run(input);
-      results.push(claude);
+      // Recorded before the call, so a run that fails afterwards still counts towards the monthly run cap.
       used.push('claude');
       if (settings.webSearchEnabled) used.push('websearch');
       engine = `Website reader + Claude Code ${model}`.slice(0, 120);
+      const claude = await provider.run(input);
+      results.push(claude);
       if (claude.error) notes.push(claude.error);
     }
 
@@ -386,7 +393,7 @@ export async function runResearch(runId: number, deps: ResearchDeps = {}): Promi
       notes,
     });
   } catch (err) {
-    await finishFailed(run.id, run.companyId, redact(err instanceof Error ? err.message : 'Research failed', secrets));
+    await finishFailed(run.id, run.companyId, redact(err instanceof Error ? err.message : 'Research failed', secrets), usedSoFar());
   }
 }
 

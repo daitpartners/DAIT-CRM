@@ -236,15 +236,19 @@ export function claudeCodeConfig(env: Record<string, string | undefined>): Claud
   };
 }
 
-/** Claude can run: the token is set and the binary is executable by this process's user. */
-export async function claudeCodeReady(config: ClaudeCodeConfig): Promise<boolean> {
-  if (!config.token) return false;
+/** The binary exists and is executable by this process's user. */
+export async function claudeBinaryFound(bin: string): Promise<boolean> {
   try {
-    await access(config.bin, fsConstants.X_OK);
+    await access(bin, fsConstants.X_OK);
     return true;
   } catch {
     return false;
   }
+}
+
+/** Claude can run: the token is set and the binary is executable by this process's user. */
+export async function claudeCodeReady(config: ClaudeCodeConfig): Promise<boolean> {
+  return Boolean(config.token) && claudeBinaryFound(config.bin);
 }
 
 /** A Claude Code run that did not give an answer; the message is fixed text, safe to store and show. */
@@ -291,30 +295,26 @@ type StreamEvent = {
 };
 type ContentBlock = { type?: unknown; id?: unknown; name?: unknown; tool_use_id?: unknown; content?: unknown };
 
-const HTTP_URL = /https?:\/\/[^\s"'<>()\[\]{}\\]+/g;
-
-/** Every `url` field anywhere in a WebSearch tool's structured result. */
-function urlFields(v: unknown, into: Set<string>): void {
-  if (Array.isArray(v)) v.forEach((x) => urlFields(x, into));
-  else if (v && typeof v === 'object') {
-    for (const [k, x] of Object.entries(v)) {
-      if (k === 'url' && typeof x === 'string' && /^https?:\/\//i.test(x)) into.add(x);
-      else urlFields(x, into);
+/**
+ * The URLs a WebSearch returned: `tool_use_result.results[].content[].url` (http/https) only. Summary strings in
+ * `results`, the query and any text are never used, so a URL Claude merely wrote can never pass as a search result.
+ */
+function searchResultUrls(results: unknown, into: Set<string>): void {
+  if (!Array.isArray(results)) return;
+  for (const r of results) {
+    const content = r && typeof r === 'object' ? (r as { content?: unknown }).content : undefined;
+    if (!Array.isArray(content)) continue;
+    for (const c of content) {
+      const url = c && typeof c === 'object' ? (c as { url?: unknown }).url : undefined;
+      if (typeof url === 'string' && /^https?:\/\/\S+$/i.test(url) && url.length <= 2000) into.add(url);
     }
   }
-}
-
-/** Every http(s) URL in a tool_result's content (a string or text blocks). */
-function urlsInText(v: unknown, into: Set<string>): void {
-  if (typeof v === 'string') for (const m of v.matchAll(HTTP_URL)) into.add(m[0].replace(/[.,;:]+$/, ''));
-  else if (Array.isArray(v)) v.forEach((x) => urlsInText(x, into));
-  else if (v && typeof v === 'object' && 'text' in v) urlsInText((v as { text: unknown }).text, into);
 }
 
 /**
  * Claude Code's `--output-format stream-json --verbose` output: one JSON event per line (other lines and unknown
  * event types are ignored). Returns the final `result` event and the URLs returned by its WebSearch calls — only
- * results of a WebSearch tool_use (never of StructuredOutput, which echoes Claude's own answer).
+ * results of a WebSearch tool_use (never of StructuredOutput, which echoes Claude's own answer), fail closed.
  */
 export function parseStreamJson(stdout: string): { result: StreamEvent | null; searchUrls: string[] } {
   let result: StreamEvent | null = null;
@@ -335,10 +335,7 @@ export function parseStreamJson(stdout: string): { result: StreamEvent | null; s
     } else if (ev.type === 'user') {
       const searches = blocks.filter((b) => b?.type === 'tool_result' && searchIds.has(b.tool_use_id));
       if (searches.length === 0) continue;
-      const found = new Set<string>();
-      urlFields(ev.tool_use_result?.results, found);
-      if (found.size === 0) searches.forEach((b) => urlsInText(b.content, found));
-      found.forEach((u) => urls.add(u));
+      searchResultUrls(ev.tool_use_result?.results, urls);
     }
   }
   return { result, searchUrls: [...urls] };
@@ -365,34 +362,66 @@ export function createClaudeCodeRunner({ bin, token, timeoutMs = CLAUDE_CALL_TIM
           '--system-prompt', system, '--strict-mcp-config', '--setting-sources', '', '--no-session-persistence',
           ...(webSearch ? ['--tools', 'WebSearch', '--allowedTools', 'WebSearch'] : ['--tools', '']),
         ];
+        // Its own process group, so a timeout also ends anything it started.
         const child = spawn(bin, args, {
           cwd,
-          env: { HOME: process.env.HOME ?? cwd, PATH: '/usr/bin:/bin', CLAUDE_CODE_OAUTH_TOKEN: token },
+          env: {
+            HOME: process.env.HOME ?? cwd, PATH: '/usr/bin:/bin', CLAUDE_CODE_OAUTH_TOKEN: token, TMPDIR: cwd, DISABLE_AUTOUPDATER: '1',
+          },
           stdio: ['pipe', 'pipe', 'pipe'],
+          detached: true,
         });
         const out: Buffer[] = [];
         let bytes = 0;
         let failure: ClaudeRunError | null = null;
         let settled = false;
-        let killTimer: NodeJS.Timeout | undefined;
-        const stop = (err: ClaudeRunError) => {
-          failure ??= err;
-          if (killTimer) return;
-          child.kill('SIGTERM');
-          killTimer = setTimeout(() => child.kill('SIGKILL'), CLAUDE_KILL_GRACE_MS);
+        const timers: NodeJS.Timeout[] = [];
+        const later = (ms: number, fn: () => void) => timers.push(setTimeout(fn, ms));
+        const killGroup = (sig: NodeJS.Signals) => {
+          if (child.pid === undefined) return;
+          try {
+            process.kill(-child.pid, sig);
+          } catch {
+            // ESRCH: the group is already gone.
+          }
         };
-        const onAbort = () => stop(new ClaudeRunError('timeout'));
-        const timer = setTimeout(onAbort, timeoutMs);
-        if (signal.aborted) onAbort();
-        else signal.addEventListener('abort', onAbort, { once: true });
         const finish = (fn: () => void) => {
           if (settled) return;
           settled = true;
-          clearTimeout(timer);
-          clearTimeout(killTimer);
+          timers.forEach(clearTimeout);
           signal.removeEventListener('abort', onAbort);
+          killGroup('SIGKILL'); // anything left behind
+          child.stdin.destroy();
+          child.stdout.destroy();
+          child.stderr.destroy();
           fn();
         };
+        const settle = (code: number | null) => finish(() => {
+          if (failure) return reject(failure);
+          const { result: r, searchUrls } = parseStreamJson(Buffer.concat(out).toString('utf8'));
+          if (!r) return reject(new ClaudeRunError('failed'));
+          if (r.is_error === true) {
+            return reject(new ClaudeRunError(typeof r.result === 'string' && NOT_LOGGED_IN.test(r.result) ? 'not_logged_in' : 'failed'));
+          }
+          if (code !== 0) return reject(new ClaudeRunError('failed'));
+          resolve({ output: r.structured_output, searchUrls });
+        });
+        let stopping = false;
+        /** SIGTERM to the group, SIGKILL after a grace, and settle regardless after another grace. */
+        const stop = (err: ClaudeRunError) => {
+          failure ??= err;
+          if (stopping) return;
+          stopping = true;
+          killGroup('SIGTERM');
+          later(CLAUDE_KILL_GRACE_MS, () => {
+            killGroup('SIGKILL');
+            later(CLAUDE_KILL_GRACE_MS, () => finish(() => reject(failure)));
+          });
+        };
+        const onAbort = () => stop(new ClaudeRunError('timeout'));
+        later(timeoutMs, onAbort);
+        if (signal.aborted) onAbort();
+        else signal.addEventListener('abort', onAbort, { once: true });
         const count = (chunk: Buffer) => {
           bytes += chunk.length;
           if (bytes > CLAUDE_OUTPUT_MAX_BYTES) stop(new ClaudeRunError('failed'));
@@ -405,16 +434,9 @@ export function createClaudeCodeRunner({ bin, token, timeoutMs = CLAUDE_CALL_TIM
         child.stderr.on('data', count);
         child.stdin.on('error', () => undefined); // the child may exit before reading stdin
         child.on('error', () => finish(() => reject(new ClaudeRunError('failed'))));
-        child.on('close', (code) => finish(() => {
-          if (failure) return reject(failure);
-          const { result: r, searchUrls } = parseStreamJson(Buffer.concat(out).toString('utf8'));
-          if (!r) return reject(new ClaudeRunError('failed'));
-          if (r.is_error === true) {
-            return reject(new ClaudeRunError(typeof r.result === 'string' && NOT_LOGGED_IN.test(r.result) ? 'not_logged_in' : 'failed'));
-          }
-          if (code !== 0) return reject(new ClaudeRunError('failed'));
-          resolve({ output: r.structured_output, searchUrls });
-        }));
+        // 'close' waits for every holder of its pipes; a process it left behind must not keep the run open.
+        child.on('exit', (code) => later(CLAUDE_KILL_GRACE_MS, () => settle(code)));
+        child.on('close', (code) => settle(code));
         child.stdin.end(prompt);
       });
     } finally {
@@ -519,11 +541,12 @@ export interface ClaudeProviderOptions {
   budgetMs?: number;
 }
 
-/** For comparing sources: host lowercased, no fragment, no trailing slash. */
+/** For comparing sources: http and https alike, host lowercased without `www.`, no fragment, no trailing slash. */
 const normaliseUrl = (u: string) => {
   try {
     const url = new URL(u.trim());
-    return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, '')}${url.search}`;
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return u.trim();
+    return `https://${url.host.replace(/^www\./, '')}${url.pathname.replace(/\/+$/, '')}${url.search}`;
   } catch {
     return u.trim().replace(/#.*$/, '').replace(/\/+$/, '');
   }

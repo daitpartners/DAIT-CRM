@@ -119,6 +119,19 @@ describe('claudeProvider', () => {
     expect(res.ai?.aiIndustry).toBe('Manufacturing');
   });
 
+  test('sources compare http and https alike and without www., but path and query exactly', async () => {
+    const answer = fullAnswer(home);
+    answer.summary = { value: 'Acme makes widgets.', sourceUrl: 'http://www.acme.example/' };
+    answer.industry = { value: 'Manufacturing', sourceUrl: 'https://WWW.News.example/acme?id=1#top' };
+    answer.businessCategory = { value: 'Widgets', sourceUrl: 'https://news.example/acme?id=2' };
+    answer.opportunityScore = { value: 50, sourceUrl: 'https://news.example/ACME?id=1' };
+    const { runner } = fakeRunnerWithSearch(['http://news.example/acme?id=1'], answer);
+    const res = await claudeProvider({ runner, model: 'sonnet', webSearch: true }).run(input());
+    expect(res.ai).toMatchObject({ aiSummary: 'Acme makes widgets.', aiIndustry: 'Manufacturing' });
+    expect(res.ai?.aiBusinessCategory).toBeUndefined();
+    expect(res.ai?.aiOpportunityScore).toBeUndefined();
+  });
+
   test('search URLs are ignored when web search is off', async () => {
     const found = 'https://news.example/acme-expands';
     const { runner } = fakeRunnerWithSearch([found], fullAnswer(found));

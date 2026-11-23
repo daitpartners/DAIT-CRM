@@ -43,7 +43,7 @@ const RUN: ResearchView['runs'][number] = {
 
 const ENGINE: EnrichmentView = {
   dailyRunLimit: 50, claudeEnabled: false, claudeMonthlyRunCap: 0, placesEnabled: false, placesMonthlyCallCap: 0, webSearchEnabled: false,
-  claudeCodeReady: false, placesKeyPresent: false, claudeRunsThisMonth: 0, placesCallsThisMonth: 0,
+  claudeTokenPresent: false, claudeBinaryFound: false, placesKeyPresent: false, claudeRunsThisMonth: 0, placesCallsThisMonth: 0,
 };
 
 type Call = { method: string; url: string; body?: unknown };
@@ -250,12 +250,24 @@ describe('AI Intelligence tab (prototype views-companies.js tab ai)', () => {
     expect(within(engine).getByRole('checkbox', { name: /Web search/ })).toBeDisabled();
     expect(within(engine).queryByLabelText('Monthly run cap')).toBeNull();
     expect(within(engine).getByLabelText('Daily run limit')).toHaveValue(50);
+    expect(engine).not.toHaveTextContent('Claude Code not found on the server');
+  });
+
+  it('engine card: token set but no Claude Code binary shows "not found", not the token hint', async () => {
+    stub({ engine: { ...ENGINE, claudeTokenPresent: true, claudeBinaryFound: false, claudeEnabled: true } });
+    mount(admin);
+    const engine = await screen.findByRole('region', { name: /Enrichment engine/ });
+    await waitFor(() => expect(engine).toHaveTextContent('Claude Code not found on the server'));
+    expect(engine).not.toHaveTextContent('Add CLAUDE_CODE_OAUTH_TOKEN on the server to enable');
+    expect(within(engine).getByRole('radio', { name: /Claude Code/ })).toBeDisabled();
+    expect(within(engine).getByRole('radio', { name: /Website reader/ })).toBeChecked();
+    expect(within(engine).queryByLabelText('Monthly run cap')).toBeNull();
   });
 
   it('engine card with Claude Code and a Places key: Claude selectable with its run cap and use, Places switch and call cap; saves', async () => {
     const u = userEvent.setup();
     const { calls } = stub({
-      engine: { ...ENGINE, claudeCodeReady: true, placesKeyPresent: true, claudeRunsThisMonth: 7, placesCallsThisMonth: 4, claudeMonthlyRunCap: 10 },
+      engine: { ...ENGINE, claudeTokenPresent: true, claudeBinaryFound: true, placesKeyPresent: true, claudeRunsThisMonth: 7, placesCallsThisMonth: 4, claudeMonthlyRunCap: 10 },
     });
     mount(admin);
     const engine = await screen.findByRole('region', { name: /Enrichment engine/ });
@@ -280,7 +292,7 @@ describe('AI Intelligence tab (prototype views-companies.js tab ai)', () => {
     const u = userEvent.setup();
     let release: (r: Response) => void = () => {};
     const { calls } = stub({
-      engine: { ...ENGINE, claudeCodeReady: true, placesKeyPresent: true },
+      engine: { ...ENGINE, claudeTokenPresent: true, claudeBinaryFound: true, placesKeyPresent: true },
       post: { 'PUT /api/settings/enrichment': () => new Promise<Response>((r) => { release = r; }) },
     });
     mount(admin);
@@ -292,7 +304,7 @@ describe('AI Intelligence tab (prototype views-companies.js tab ai)', () => {
     await waitFor(() => expect(within(engine).getByLabelText('Monthly run cap')).toBeDisabled());
     expect(within(engine).getByLabelText('Monthly call cap')).toBeDisabled();
     expect(within(engine).getByLabelText('Daily run limit')).toBeDisabled();
-    release(Response.json({ ...ENGINE, claudeCodeReady: true, placesKeyPresent: true, dailyRunLimit: 20 }));
+    release(Response.json({ ...ENGINE, claudeTokenPresent: true, claudeBinaryFound: true, placesKeyPresent: true, dailyRunLimit: 20 }));
     await waitFor(() => expect(within(engine).getByLabelText('Monthly run cap')).toBeEnabled());
     expect(within(engine).getByLabelText('Daily run limit')).toHaveValue(20);
     expect(calls.filter((c) => c.method === 'PUT').map((c) => c.body)).toEqual([

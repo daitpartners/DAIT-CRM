@@ -41,7 +41,8 @@ export function EngineCard() {
     );
   };
 
-  const claudeOn = Boolean(data?.claudeCodeReady && data.claudeEnabled);
+  const claudeReady = Boolean(data?.claudeTokenPresent && data.claudeBinaryFound);
+  const claudeOn = Boolean(claudeReady && data?.claudeEnabled);
   const runs = data ? new Intl.NumberFormat(lang).format(data.claudeRunsThisMonth) : '';
 
   return (
@@ -65,15 +66,15 @@ export function EngineCard() {
               type="radio"
               name="engine"
               checked={claudeOn}
-              disabled={!data.claudeCodeReady || save.isPending}
-              aria-describedby={data.claudeCodeReady ? undefined : 'engine-claude-hint'}
+              disabled={!claudeReady || save.isPending}
+              aria-describedby={claudeReady ? undefined : 'engine-claude-hint'}
               onChange={() => put({ claudeEnabled: true }, t('Engine set to Claude Code'))}
             />
             <span>
               <strong>{t('Claude Code')}</strong> {t('on this server')} · {t('intelligence + web search')}
             </span>
           </label>
-          {data.claudeCodeReady ? (
+          {claudeReady ? (
             <div className="engine-sub">
               <NumberField
                 label={t('Monthly run cap')}
@@ -85,7 +86,7 @@ export function EngineCard() {
             </div>
           ) : (
             <div id="engine-claude-hint" className="engine-sub">
-              {t('Add CLAUDE_CODE_OAUTH_TOKEN on the server to enable')}
+              {data.claudeTokenPresent ? t('Claude Code not found on the server') : t('Add CLAUDE_CODE_OAUTH_TOKEN on the server to enable')}
             </div>
           )}
           <label className="sw">

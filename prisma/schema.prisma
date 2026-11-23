@@ -879,7 +879,8 @@ model EnrichmentSettings {
   /// Research runs per day across the CRM; automatic runs are skipped and manual ones refused once reached.
   dailyRunLimit        Int      @default(50) @map("daily_run_limit")
   claudeEnabled        Boolean  @default(false) @map("claude_enabled")
-  /// Research runs that use Claude Code per calendar month (UTC); 0 = Claude off.
+  /// Research runs that use Claude Code per calendar month (UTC); 0 = Claude off. (The old, unused
+  /// claude_monthly_cap_usd column is still in the table for the deploy window; a later migration may drop it.)
   claudeMonthlyRunCap  Int      @default(0) @map("claude_monthly_run_cap")
   placesEnabled        Boolean  @default(false) @map("places_enabled")
   /// Place Details calls per calendar month; 0 = Google Places off.

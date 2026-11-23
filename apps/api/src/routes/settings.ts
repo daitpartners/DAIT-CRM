@@ -6,19 +6,19 @@ import { parseBody } from '../validate.js';
 import { requireRight } from '../plugins/auth.js';
 import { loadCompanySettings } from '../quotations/service.js';
 import { loadEnrichmentSettings, monthTotals } from '../research/service.js';
-import { claudeCodeConfig, claudeCodeReady } from '../research/providers.js';
+import { claudeBinaryFound, claudeCodeConfig } from '../research/providers.js';
 
 /**
- * The enrichment engine card: the settings plus whether Claude Code (token and executable binary) and the Places key
- * are present on the server (never the token or key itself), and this month's Claude runs and Places calls.
+ * The enrichment engine card: the settings plus whether the Claude Code token and an executable binary and the Places
+ * key are present on the server (never the token or key itself), and this month's Claude runs and Places calls.
  */
 async function enrichmentView(db: Parameters<typeof loadEnrichmentSettings>[0]) {
-  const [settings, totals, claudeCodeOk] = await Promise.all([
-    loadEnrichmentSettings(db), monthTotals(db), claudeCodeReady(claudeCodeConfig(process.env)),
-  ]);
+  const claude = claudeCodeConfig(process.env);
+  const [settings, totals, binaryFound] = await Promise.all([loadEnrichmentSettings(db), monthTotals(db), claudeBinaryFound(claude.bin)]);
   return {
     ...settings,
-    claudeCodeReady: claudeCodeOk,
+    claudeTokenPresent: Boolean(claude.token),
+    claudeBinaryFound: binaryFound,
     placesKeyPresent: Boolean(process.env.GOOGLE_PLACES_API_KEY),
     claudeRunsThisMonth: totals.claudeRuns,
     placesCallsThisMonth: totals.placesCalls,

@@ -65,6 +65,8 @@ Kept here at the owner's request; picked up when the owner says so.
     Intelligence tab → Enrichment engine, switch Claude Code on and set a monthly run cap (runs that use Claude per
     calendar month). Optional env: `CLAUDE_MODEL` (default `sonnet`), `CLAUDE_BIN` (default `/root/.local/bin/claude`).
     Test Web search once on the live server, on one company, before relying on it.
+  - **Later clean-up (developer):** the unused `enrichment_settings.claude_monthly_cap_usd` column is kept for the
+    deploy window of the Claude Code change; drop it in a later migration.
   - **Google Places (optional, paid):** a Google Cloud project with a billing account, a budget alert and an API quota
     for the Places API (New); create `GOOGLE_PLACES_API_KEY` (restricted to the Places API) and set it in the server
     environment; then switch "Google Places API" on in the engine card with a monthly call cap.
