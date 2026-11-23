@@ -393,6 +393,14 @@ describe('timed tasks (calls and meetings)', () => {
     expect(await prisma.leadActivity.count()).toBe(4);
   });
 
+  it("a planned entry is in the lead's audit log, as other notes are", async () => {
+    const { rep, lead } = await setup();
+    const res = await create(rep.cookie, { leadId: lead.id, dueDate: '2026-11-23', assignedToId: rep.user.id, timeline: true, title: 'Demo', kind: 'meeting', dueTime: '10:00' });
+    const activity = await prisma.leadActivity.findFirstOrThrow({ where: { leadId: lead.id } });
+    const log = await prisma.auditLog.findFirst({ where: { entityType: 'lead', entityId: String(lead.id) } });
+    expect(log).toMatchObject({ action: 'update', userId: rep.user.id, after: { planned: 'Meeting scheduled · Demo', taskId: res.json().id, activityId: activity.id } });
+  });
+
   it('a planned entry is marked with its task and is not a contact (lead Last contact, company Activity summary)', async () => {
     const { rep, lead } = await setup();
     const base = { leadId: lead.id, dueDate: '2026-11-23', assignedToId: rep.user.id, timeline: true };

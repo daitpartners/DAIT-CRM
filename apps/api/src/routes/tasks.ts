@@ -108,7 +108,9 @@ async function plannedActivity(tx: Tx, user: AuthUser, task: Task, assignee: Pic
       body: `${date} ${task.dueTime}–${taskEndTime(task.dueTime!, task.durationMinutes!)} · ${task.kind === 'call' ? 'Phone' : 'Microsoft Teams'}`,
     };
   // Marked with its task: a plan is not a contact (lead "Last contact", company Activity summary skip it).
-  await tx.leadActivity.create({ data: { leadId: task.leadId!, ...data, relatedType: 'task', relatedId: task.id, byUserId: user.id } });
+  const activity = await tx.leadActivity.create({ data: { leadId: task.leadId!, ...data, relatedType: 'task', relatedId: task.id, byUserId: user.id } });
+  // In the lead's audit log, as the other timeline notes.
+  await audit(tx, { entityType: 'lead', entityId: task.leadId!, action: 'update', userId: user.id, after: { planned: data.title, taskId: task.id, activityId: activity.id } });
 }
 
 async function rowOf(id: number, user: AuthUser) {
