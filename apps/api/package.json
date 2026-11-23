@@ -29,10 +29,15 @@
     "@prisma/client": "6.19.3",
     "argon2": "0.45.2",
     "csv-parse": "7.0.3",
+    "exceljs": "4.4.0",
     "fastify": "5.12.8",
+    "jszip": "3.10.1",
+    "mammoth": "1.13.0",
     "node-html-parser": "9.0.7",
+    "pdfjs-dist": "6.5.438",
     "pdfkit": "0.20.2",
-    "prisma": "6.19.3"
+    "prisma": "6.19.3",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@types/node": "24.19.2",

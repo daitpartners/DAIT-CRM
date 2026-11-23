@@ -19,6 +19,8 @@ function app(env, kind, port) {
       NODE_ENV: 'production',
       ...(worker ? {} : { PORT: String(port), HOST: '127.0.0.1' }),
       WEB_DIST: `${cwd}/apps/web/dist`,
+      // Import leads uploads (imports/<batch>/<file>), kept across releases.
+      STORAGE_DIR: `${root}/${env}/shared/storage`,
       RELEASE: release(cwd),
     },
     max_memory_restart: '400M',

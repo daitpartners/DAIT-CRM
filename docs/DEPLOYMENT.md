@@ -37,7 +37,7 @@ See the processes with `! ssh root@88.222.213.73 'sudo -iu daitcrm pm2 ls'`. (In
 | `live/releases/<sha>/` | One folder per installed release (the newest 5 are kept, in install order from `live/releases.log`) |
 | `live/current` | Symlink to the release that is running; PM2 runs from it |
 | `live/shared/.env` | Environment file, shared by every release |
-| `live/shared/storage/` | Created at setup; nothing in the current code writes there (template uploads are not kept; the quotation PDF logo ships in `apps/api/assets`) |
+| `live/shared/storage/` | Created at setup; `STORAGE_DIR` for the api and worker (set in `deploy/ecosystem.config.cjs`). Import leads uploads live in `shared/storage/imports` (`imports/<batch>/<file>`, files 0600). Template uploads are not kept; the quotation PDF logo ships in `apps/api/assets` |
 | `build/<sha>/` | Where a release is built on the server during a manual deploy |
 | `incoming/<sha>.tgz` | The packed release that `release.sh` installs |
 | `backups/` | Database dumps (see Backups) |
