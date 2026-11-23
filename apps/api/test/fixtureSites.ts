@@ -26,6 +26,7 @@ const ROUTES: Record<string, Record<string, string>> = {
 /** Hosts the reader tests may reach (all served by this server on 127.0.0.1). */
 export const FIXTURE_HOSTS = [
   'site.test', 'meta.test', 'other.test', 'slow.test', 'big.test', 'blocked.test', 'hop.test', 'gzip.test',
+  'mailto.test',
 ];
 
 export const BIG_PAGE_BYTES = 2 * 1024 * 1024;
@@ -75,8 +76,15 @@ export async function startFixtureServer(): Promise<FixtureServer> {
       const chunk = 'x'.repeat(64 * 1024);
       res.write(head);
       bigBytes = head.length;
+      let clientGone = false;
+      res.on('close', () => { clientGone = true; });
+      let paused = false;
       const pump = () => {
         while (bigBytes < BIG_PAGE_BYTES) {
+          if (clientGone) return;
+          // Past the 1.5 MB limit, pause so the client's hang-up is seen before the rest is written
+          // (otherwise loopback socket buffers can swallow the whole page first).
+          if (!paused && bigBytes > 1.6 * 1024 * 1024) { paused = true; setTimeout(pump, 300); return; }
           bigBytes += chunk.length;
           if (!res.write(chunk)) { res.once('drain', pump); return; }
         }
@@ -96,7 +104,14 @@ export async function startFixtureServer(): Promise<FixtureServer> {
         .end(gzipSync('<html><head><title>Zipped</title><meta name="description" content="Compressed page."></head></html>'));
       return;
     }
-    if (host === 'other.test' || host === 'hop.test') {
+    if (host === 'mailto.test' && path === '/') {
+      // A hostile 1M-character mailto (no dot after the @, so a backtracking email regex would crawl), then a real one.
+      const hostile = 'mailto:' + 'a'.repeat(500_000) + '@' + 'b'.repeat(500_000);
+      res.writeHead(200, { 'content-type': 'text/html' })
+        .end(`<html><body><a href="${hostile}">x</a><a href="mailto:office@mailto.test">office</a></body></html>`);
+      return;
+    }
+    if (host === 'other.test' || host === 'hop.test' || host === 'mailto.test') {
       if (path === '/robots.txt') { res.writeHead(404).end(); return; }
       res.writeHead(200, { 'content-type': 'text/html' }).end(`<html><head><title>${host}</title></head><body>ok</body></html>`);
       return;

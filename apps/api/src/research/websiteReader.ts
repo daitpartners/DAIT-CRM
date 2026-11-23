@@ -50,6 +50,11 @@ const MAX_EXTRA_PAGES = 3;
 const SNAPSHOT_CHARS = 4000;
 const DESCRIPTION_MAX = 5000;
 const TEXT_MAX = 300;
+const EMAIL_MAX = 254;
+/** Before decoding and stripping "?subject=…": a mailto href longer than this is not an address worth reading. */
+const EMAIL_INPUT_MAX = 2048;
+/** Raw text taken before whitespace is collapsed (the snapshot keeps 4,000 characters). */
+const TEXT_SCAN_MAX = 20_000;
 
 const ERRORS: Record<SafeFetchErrorCode, string> = {
   timeout: 'Timeout fetching site',
@@ -112,9 +117,16 @@ function year(v: unknown): number | null {
 function sameDomainEmail(raw: unknown, siteDomain: string | null): string | null {
   if (typeof raw !== 'string' || !siteDomain) return null;
   let v = raw.trim().replace(/^mailto:/i, '');
+  // RFC 5321 caps an address at 254 characters; checking length first keeps every step below cheap.
+  if (v.length > EMAIL_INPUT_MAX) return null;
   try { v = decodeURIComponent(v); } catch { /* keep as is */ }
   v = v.split('?')[0]!.split(',')[0]!.trim();
-  if (!/^[^\s@<>()]+@[^\s@<>()]+\.[^\s@<>()]+$/.test(v)) return null;
+  if (v.length > EMAIL_MAX || /[\s<>()]/.test(v)) return null;
+  const parts = v.split('@');
+  if (parts.length !== 2) return null;
+  const [local, domain] = parts as [string, string];
+  const dot = domain.lastIndexOf('.');
+  if (!local || dot <= 0 || dot === domain.length - 1) return null;
   const d = domainOf(v);
   return d && (d === siteDomain || d.endsWith('.' + siteDomain)) ? v : null;
 }
@@ -168,7 +180,12 @@ function metaContent(root: HTMLElement, selector: string): string | null {
 function visibleText(root: HTMLElement): string {
   const body = root.querySelector('body') ?? root;
   for (const el of body.querySelectorAll('script, style, noscript, template, svg, iframe')) el.remove();
-  return body.structuredText.replace(/[ \t\f\v ]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim().slice(0, SNAPSHOT_CHARS);
+  return body.structuredText.slice(0, TEXT_SCAN_MAX)
+    .split('\n')
+    .map((line) => line.replace(/[\s\u00a0]+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n')
+    .slice(0, SNAPSHOT_CHARS);
 }
 
 interface Extracted {
@@ -239,6 +256,7 @@ function extract(page: SafeResponse, siteDomain: string | null): Extracted {
 
 const PAGE_HINT = /\b(about|contact|company|nosotros|contacto|empresa|qui[eé]nes|[aà][ -]propos|qui[- ]sommes|soci[eé]t[eé])\b/i;
 const LABEL_MAX = 30;
+const URL_INPUT_MAX = 2048;
 const FILE_EXT = /\.(pdf|jpe?g|png|gif|webp|svg|zip|docx?|xlsx?|pptx?|mp4|mp3)$/i;
 
 function siteHost(url: URL): string {
@@ -282,6 +300,7 @@ function isHtml(res: SafeResponse): boolean {
 
 function startUrl(input: string): string {
   const v = input.trim();
+  if (v.length > URL_INPUT_MAX) throw new TypeError('Website address too long');
   // "example.com" or "example.com/about" → https://; anything with its own scheme is left for safeFetch to judge.
   return /^[a-z][a-z0-9+.-]*:/i.test(v) && !/^[^:/]*\.[^:/]*:\d/.test(v) ? v : 'https://' + v;
 }

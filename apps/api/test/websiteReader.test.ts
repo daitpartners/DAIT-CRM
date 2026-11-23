@@ -119,6 +119,13 @@ describe('readWebsite · other pages', () => {
     expect(res.pages[0]!.text.length).toBeLessThanOrEqual(4000);
   });
 
+  test('a 1M-character mailto is skipped quickly and the real address is still read', async () => {
+    const started = Date.now();
+    const res = await readWebsite(site.url('mailto.test'), { resolve });
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(byField(res.findings).businessEmail).toMatchObject({ value: 'office@mailto.test', confidence: 85 });
+  });
+
   test('timeout → "Timeout fetching site"', async () => {
     const res = await readWebsite(site.url('slow.test'), { resolve, timeoutMs: 300 });
     expect(res).toEqual({ findings: [], pages: [], error: 'Timeout fetching site' });

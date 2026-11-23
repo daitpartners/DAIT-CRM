@@ -42,8 +42,9 @@ export interface SafeFetchOptions {
   /** DNS resolver; default: the system resolver (all addresses). */
   resolve?: ResolveFn;
   /**
-   * Test seam: a fetch to use instead of the built-in client. Every hop is still checked (scheme, DNS answer) before
-   * it is requested, but the connection cannot be pinned to the checked address, so production never passes one.
+   * Test seam: a fetch to use instead of the built-in client. Honoured only when NODE_ENV is 'test' or 'e2e' (it
+   * cannot pin the connection to the checked address); otherwise ignored and the pinned client is used. Every hop is
+   * still checked (scheme, port, DNS answer) before it is requested.
    */
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
@@ -63,9 +64,14 @@ export interface SafeResponse {
   truncated: boolean;
 }
 
-/** Hosts tests may reach although they resolve to loopback: only when NODE_ENV is 'test' or 'e2e'. */
+/** Test seams (allow-list, injected fetch) exist only when NODE_ENV is 'test' or 'e2e'; never in production. */
+function isTestEnv(env: NodeJS.ProcessEnv): boolean {
+  return env.NODE_ENV === 'test' || env.NODE_ENV === 'e2e';
+}
+
+/** Hosts tests may reach although they resolve to loopback (and on any port): only under NODE_ENV test/e2e. */
 export function allowedTestHosts(env: NodeJS.ProcessEnv = process.env): Set<string> {
-  if (env.NODE_ENV !== 'test' && env.NODE_ENV !== 'e2e') return new Set();
+  if (!isTestEnv(env)) return new Set();
   return new Set((env.RESEARCH_TEST_ALLOW_HOSTS ?? '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean));
 }
 
@@ -173,7 +179,12 @@ function checkUrl(url: URL, ctx: Ctx): string {
   if (url.username || url.password) throw new SafeFetchError('bad_url', 'Addresses with credentials are not fetched');
   const host = hostOf(url);
   if (!host) throw new SafeFetchError('bad_url', 'Address has no host');
-  if (isIP(host) && !ctx.allowed.has(host) && !isPublicAddress(host)) throw new SafeFetchError('blocked_host', BLOCKED);
+  if (ctx.allowed.has(host)) return host;
+  // Web ports only: url.port is '' for the scheme's default port.
+  if (url.port !== '' && url.port !== '80' && url.port !== '443') {
+    throw new SafeFetchError('blocked_host', 'Only ports 80 and 443 are fetched');
+  }
+  if (isIP(host) && !isPublicAddress(host)) throw new SafeFetchError('blocked_host', BLOCKED);
   return host;
 }
 
@@ -323,9 +334,11 @@ export async function safeFetch(input: string, opts: SafeFetchOptions = {}): Pro
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? PAGE_TIMEOUT_MS);
+  const env = opts.env ?? process.env;
+  const fetchImpl = isTestEnv(env) ? opts.fetchImpl : undefined;
   const ctx: Ctx = {
     resolve: opts.resolve ?? defaultResolve,
-    allowed: allowedTestHosts(opts.env ?? process.env),
+    allowed: allowedTestHosts(env),
     maxBytes: opts.maxBytes ?? PAGE_MAX_BYTES,
     signal: controller.signal,
   };
@@ -338,7 +351,7 @@ export async function safeFetch(input: string, opts: SafeFetchOptions = {}): Pro
     for (let redirects = 0; ; redirects++) {
       const host = checkUrl(url, ctx);
       const raw = await Promise.race([
-        opts.fetchImpl ? injectedRequest(url, host, ctx, opts.fetchImpl) : nodeRequest(url, host, ctx),
+        fetchImpl ? injectedRequest(url, host, ctx, fetchImpl) : nodeRequest(url, host, ctx),
         aborted,
       ]);
       const location = raw.headers.location;
@@ -370,13 +383,42 @@ export interface RobotsRules {
   allows(path: string): boolean;
 }
 
-interface Rule { allow: boolean; pattern: string; re: RegExp }
+interface Rule { allow: boolean; pattern: string }
 
-function ruleRegExp(pattern: string): RegExp {
+/** Rules longer than this, and rules past this count per group, are ignored (bounded matching work). */
+const ROBOTS_PATTERN_MAX = 512;
+const ROBOTS_RULES_MAX = 500;
+/** Longer paths are treated as disallowed rather than matched. */
+const ROBOTS_PATH_MAX = 2048;
+
+/**
+ * RFC 9309 path match: `*` matches any run of characters, a final `$` anchors the end, otherwise a prefix match.
+ * Linear two-pointer glob (O(path × pattern), no backtracking regex), so a hostile robots.txt can't stall the worker.
+ */
+export function robotsPatternMatches(pattern: string, path: string): boolean {
   const anchored = pattern.endsWith('$');
-  const body = (anchored ? pattern.slice(0, -1) : pattern)
-    .split('*').map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*');
-  return new RegExp('^' + body + (anchored ? '$' : ''));
+  let p = (anchored ? pattern.slice(0, -1) : pattern).replace(/\*+/g, '*');
+  if (!anchored && !p.endsWith('*')) p += '*';
+  let i = 0;
+  let j = 0;
+  let star = -1;
+  let mark = 0;
+  while (i < path.length) {
+    if (j < p.length && p[j] === '*') {
+      star = j++;
+      mark = i;
+    } else if (j < p.length && p[j] === path[i]) {
+      i++;
+      j++;
+    } else if (star >= 0) {
+      j = star + 1;
+      i = ++mark;
+    } else {
+      return false;
+    }
+  }
+  while (j < p.length && p[j] === '*') j++;
+  return j === p.length;
 }
 
 export function parseRobots(text: string, agent = ROBOTS_AGENT): RobotsRules {
@@ -385,10 +427,10 @@ export function parseRobots(text: string, agent = ROBOTS_AGENT): RobotsRules {
   let lastWasAgent = false;
   for (const rawLine of text.split(/\r\n|\r|\n/)) {
     const line = rawLine.replace(/#.*$/, '').trim();
-    const m = line.match(/^([A-Za-z-]+)\s*:\s*(.*)$/);
-    if (!m) continue;
-    const key = m[1]!.toLowerCase();
-    const value = m[2]!.trim();
+    const colon = line.indexOf(':');
+    if (colon <= 0) continue;
+    const key = line.slice(0, colon).trim().toLowerCase();
+    const value = line.slice(colon + 1).trim();
     if (key === 'user-agent') {
       if (!current || !lastWasAgent) {
         current = { agents: [], rules: [] };
@@ -400,17 +442,19 @@ export function parseRobots(text: string, agent = ROBOTS_AGENT): RobotsRules {
     }
     lastWasAgent = false;
     if (!current || (key !== 'allow' && key !== 'disallow')) continue;
-    if (!value) continue; // "Disallow:" with no path disallows nothing
-    current.rules.push({ allow: key === 'allow', pattern: value, re: ruleRegExp(value) });
+    if (!value || value.length > ROBOTS_PATTERN_MAX) continue; // "Disallow:" with no path disallows nothing
+    if (current.rules.length >= ROBOTS_RULES_MAX) continue;
+    current.rules.push({ allow: key === 'allow', pattern: value });
   }
   const ours = groups.filter((g) => g.agents.includes(agent.toLowerCase()));
   const chosen = ours.length ? ours : groups.filter((g) => g.agents.includes('*'));
   const rules = chosen.flatMap((g) => g.rules);
   return {
     allows(path: string) {
+      if (path.length > ROBOTS_PATH_MAX) return false;
       let best: Rule | null = null;
       for (const rule of rules) {
-        if (!rule.re.test(path)) continue;
+        if (!robotsPatternMatches(rule.pattern, path)) continue;
         if (!best || rule.pattern.length > best.pattern.length || (rule.pattern.length === best.pattern.length && rule.allow)) {
           best = rule;
         }

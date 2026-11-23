@@ -1,7 +1,8 @@
+import http from 'node:http';
 import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, test, vi } from 'vitest';
 import {
   MAX_REDIRECTS, PAGE_MAX_BYTES, RESEARCH_USER_AGENT, SafeFetchError, allowedTestHosts, fetchRobots,
-  isPublicAddress, parseRobots, safeFetch,
+  isPublicAddress, parseRobots, robotsPatternMatches, safeFetch,
 } from '../src/research/safeFetch';
 import { BIG_PAGE_BYTES, FIXTURE_HOSTS, fixtureResolver, startFixtureServer, type FixtureServer } from './fixtureSites';
 
@@ -179,7 +180,74 @@ describe('safeFetch', () => {
   });
 });
 
+describe('ports and test seams', () => {
+  test('only ports 80 and 443 are fetched for hosts not on the allow-list, redirects included', async () => {
+    const r = fixtureResolver({ 'public.test': ['93.184.216.34'] });
+    expect((await failure(safeFetch('http://public.test:8080/', { resolve: r }))).code).toBe('blocked_host');
+    expect((await failure(safeFetch('https://8.8.8.8:22/', { resolve: r }))).code).toBe('blocked_host');
+    const hop = await failure(safeFetch(site.url('site.test', `/redirect?to=${encodeURIComponent('http://public.test:6379/')}`), { resolve: r }));
+    expect(hop.code).toBe('blocked_host');
+    expect(hop.message).toBe('Only ports 80 and 443 are fetched');
+    // An allow-listed test host may use any port (the fixture server's random one).
+    expect((await safeFetch(site.url('site.test'), { resolve })).status).toBe(200);
+  });
+
+  test('an injected fetch is used under NODE_ENV test and ignored outside test/e2e', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return new Response('<html>injected</html>', { status: 200, headers: { 'content-type': 'text/html' } });
+    }) as typeof fetch;
+    const inTest = await safeFetch('http://site.test/', { resolve, fetchImpl });
+    expect(inTest.body).toBe('<html>injected</html>');
+    expect(calls).toBe(1);
+    // Outside test/e2e the pinned client is used instead (stubbed here so nothing leaves the machine); fetchImpl never runs.
+    const r = fixtureResolver({ 'public.test': ['93.184.216.34'] });
+    const pinned = vi.spyOn(http, 'request').mockImplementation(() => {
+      throw new Error('pinned client used');
+    });
+    try {
+      const prod = await failure(safeFetch('http://public.test/', { resolve: r, fetchImpl, env: { NODE_ENV: 'production' } }));
+      expect(prod.message).toBe('pinned client used');
+      vi.stubEnv('NODE_ENV', 'development');
+      await failure(safeFetch('http://public.test/', { resolve: r, fetchImpl }));
+      expect(pinned).toHaveBeenCalledTimes(2);
+    } finally {
+      pinned.mockRestore();
+    }
+    expect(calls).toBe(1);
+  });
+});
+
 describe('robots.txt', () => {
+  test('wildcard matching is linear: hostile patterns cannot stall the worker', () => {
+    const started = performance.now();
+    expect(robotsPatternMatches('/' + '*'.repeat(50) + 'Z', '/about-us-company-info')).toBe(false);
+    expect(robotsPatternMatches('/' + '*a'.repeat(200) + 'Z$', '/' + 'a'.repeat(2000))).toBe(false);
+    const rules = parseRobots('User-agent: *\nDisallow: /' + '*'.repeat(50) + 'Z\n');
+    expect(rules.allows('/about-us-company-info')).toBe(true);
+    expect(performance.now() - started).toBeLessThan(50);
+  });
+
+  test('pattern matching: prefix, * and the $ anchor', () => {
+    expect(robotsPatternMatches('/private', '/private/x')).toBe(true);
+    expect(robotsPatternMatches('/private$', '/private/x')).toBe(false);
+    expect(robotsPatternMatches('/private$', '/private')).toBe(true);
+    expect(robotsPatternMatches('/*.pdf$', '/a/b.pdf')).toBe(true);
+    expect(robotsPatternMatches('/*.pdf$', '/a/b.pdf?x')).toBe(false);
+    expect(robotsPatternMatches('/a*b*c', '/axxbyyczz')).toBe(true);
+    expect(robotsPatternMatches('/a*b*c', '/axxcyyb')).toBe(false);
+    expect(robotsPatternMatches('*', '/')).toBe(true);
+  });
+
+  test('over-long patterns and rules past the per-group cap are ignored', () => {
+    expect(parseRobots('User-agent: *\nDisallow: /' + 'x'.repeat(600) + '\n').allows('/' + 'x'.repeat(700))).toBe(true);
+    const many = Array.from({ length: 500 }, (_, i) => `Disallow: /n${i}`).join('\n');
+    const capped = parseRobots(`User-agent: *\n${many}\nDisallow: /late\n`);
+    expect(capped.allows('/n1')).toBe(false);
+    expect(capped.allows('/late')).toBe(true);
+  });
+
   test('parses groups, longest match wins, our agent group beats *', () => {
     const rules = parseRobots([
       'User-agent: *', 'Disallow: /private/', 'Allow: /private/press', 'Disallow: /*.pdf$', '',
