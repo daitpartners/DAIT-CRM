@@ -3,6 +3,7 @@ import { safeUrl } from '@dait-crm/shared';
 import type { CompanyDetail } from '../../../api/companies';
 import { useAcceptHigh, useDecideSuggestion, useSources, type ResearchSuggestion } from '../../../api/research';
 import { useCurrentUser } from '../../../api/useCurrentUser';
+import { ScrollBox } from '../../../components/Table';
 import { useToast } from '../../../components/Toast';
 import { useFormatDate } from '../../../hooks/useFormatDate';
 import { researchFieldText, researchSourcesText, researchStatusBadge, researchStatusText, sourceTypeText } from '../../../i18n/labels';
@@ -86,7 +87,7 @@ export function AiTab({ company, research }: { company: CompanyDetail; research:
               </button>
             ) : null}
           </div>
-          <div className="tbl">
+          <ScrollBox>
             <table>
               <thead>
                 <tr>
@@ -119,7 +120,7 @@ export function AiTab({ company, research }: { company: CompanyDetail; research:
                 )}
               </tbody>
             </table>
-          </div>
+          </ScrollBox>
         </section>
         <section className="card flush" aria-labelledby={histId}>
           <div className="head">
@@ -127,7 +128,7 @@ export function AiTab({ company, research }: { company: CompanyDetail; research:
               {t('Enrichment history')} <span className="sec-note">enrichment_history</span>
             </h2>
           </div>
-          <div className="tbl">
+          <ScrollBox>
             <table>
               <thead>
                 <tr>
@@ -164,7 +165,7 @@ export function AiTab({ company, research }: { company: CompanyDetail; research:
                 )}
               </tbody>
             </table>
-          </div>
+          </ScrollBox>
         </section>
       </div>
       <aside className="col-side">
@@ -279,7 +280,7 @@ export function SourcesTab({ company }: { company: CompanyDetail }) {
             </button>
           ) : null}
         </div>
-        <div className="tbl">
+        <ScrollBox>
           <table>
             <thead>
               <tr>
@@ -323,7 +324,7 @@ export function SourcesTab({ company }: { company: CompanyDetail }) {
               )}
             </tbody>
           </table>
-        </div>
+        </ScrollBox>
         <div className="foot">
           {t('Only approved sources are used: public websites, the approved Google Places integration, licensed directories, CSV imports and visitor submissions. No invented values: missing facts stay NULL.')}
         </div>

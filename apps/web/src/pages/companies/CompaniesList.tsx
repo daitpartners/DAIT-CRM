@@ -166,7 +166,7 @@ export function CompaniesList() {
     { id: 'clients', label: t('Clients'), count: counts?.clients },
     { id: 'open', label: t('With open leads'), count: counts?.open },
     { id: 'verify', label: t('Needs verification'), count: counts?.verify },
-    { id: 'dups', label: t('Duplicate review'), count: counts?.dups, countClass: 'bad' },
+    { id: 'dups', label: t('Duplicate review'), count: counts?.dups, countClass: counts?.dups ? 'bad' : undefined },
   ];
 
   return (

@@ -237,7 +237,7 @@ export function LeadsList() {
     { id: 'leads', label: t('Leads'), count: counts?.leads },
     { id: 'prospects', label: t('Prospects'), count: counts?.prospects },
     { id: 'mine', label: t('My leads'), count: counts?.mine },
-    { id: 'overdue', label: t('Overdue follow-ups'), count: counts?.overdue, countClass: 'bad' },
+    { id: 'overdue', label: t('Overdue follow-ups'), count: counts?.overdue, countClass: counts?.overdue ? 'bad' : undefined },
   ];
   const tiles = data?.tiles;
 
