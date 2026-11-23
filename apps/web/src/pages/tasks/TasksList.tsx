@@ -12,6 +12,7 @@ import { useFormatDate } from '../../hooks/useFormatDate';
 import { errorText, taskOriginText, taskWhenText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
 import { TaskModal } from './TaskModal';
+import { systemText } from '../../i18n/systemText';
 
 /** Completed tasks per page in the side card. */
 const DONE_PAGE_SIZE = 10;
@@ -177,11 +178,11 @@ export function TaskItem({ task, busy, onTick, onEdit, onSnooze }: TaskItemProps
         checked={task.isDone}
         disabled={busy}
         onChange={onTick}
-        aria-label={task.isDone ? t('Mark not done: {title}', { title: task.title }) : t('Mark done: {title}', { title: task.title })}
+        aria-label={task.isDone ? t('Mark not done: {title}', { title: systemText(t, task.title) }) : t('Mark done: {title}', { title: systemText(t, task.title) })}
       />
       <span className="grow">
         <strong>
-          {task.title}
+          {systemText(t, task.title)}
           {/* A break chance before the time: in the narrow Completed card the title keeps its words together and the
               type · time moves to its own line (review #27). */}
           {when ? <>{' '}<span className="task-when">{when}</span></> : null}

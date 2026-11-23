@@ -2,6 +2,7 @@ import type { CalendarItem } from '@dait-crm/shared';
 import { Modal } from '../../components/Modal';
 import { useT, type TFn } from '../../i18n/useT';
 import { shortDay, type CalendarNames } from './dates';
+import { systemText } from '../../i18n/systemText';
 
 function typeText(t: TFn, type: CalendarItem['type']): string {
   switch (type) {
@@ -22,7 +23,7 @@ export function EventInfoModal({ item: x, names, onClose }: { item: CalendarItem
   const when = shortDay(x.date, names) + (x.time ? ` · ${x.time}${x.end ? `–${x.end}` : ''}` : '');
   return (
     <Modal
-      title={x.title}
+      title={systemText(t, x.title)}
       onClose={onClose}
       actions={
         <button type="button" className="btn primary" onClick={onClose}>

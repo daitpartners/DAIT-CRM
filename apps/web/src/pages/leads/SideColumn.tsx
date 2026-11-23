@@ -15,6 +15,7 @@ import { useLang, useT } from '../../i18n/useT';
 import { useResearchRunner } from '../companies/AiCard';
 import { ContactModal } from '../companies/ContactModal';
 import { ProjectsCard } from '../projects/ProjectsCard';
+import { systemText } from '../../i18n/systemText';
 
 
 /**
@@ -218,7 +219,7 @@ function ComingUp({ lead }: { lead: LeadFull }) {
     ...(lead.nextFollowUp ? [{ key: 'fu', title: t('Follow-up · {number}', { number: lead.number }), due: lead.nextFollowUp, time: null, event: false, over: lead.isOverdue }] : []),
     ...lead.tasks
       .filter((task) => task.origin !== 'follow_up' || task.dueDate !== lead.nextFollowUp)
-      .map((task) => ({ key: `t${task.id}`, title: task.title, due: task.dueDate, time: task.dueTime, event: task.kind !== 'followup', over: task.isOverdue })),
+      .map((task) => ({ key: `t${task.id}`, title: systemText(t, task.title), due: task.dueDate, time: task.dueTime, event: task.kind !== 'followup', over: task.isOverdue })),
   ].sort((a, b) => a.due.localeCompare(b.due) || (a.time ?? '99').localeCompare(b.time ?? '99'));
   if (items.length === 0 && quotes.length === 0) return null;
   return (

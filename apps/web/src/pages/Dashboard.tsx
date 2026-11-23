@@ -14,6 +14,7 @@ import { useFormatDate } from '../hooks/useFormatDate';
 import { errorText, leadStatusText } from '../i18n/labels';
 import { useT, type TFn } from '../i18n/useT';
 import { TaskItem } from './tasks/TasksList';
+import { systemDetail, systemText } from '../i18n/systemText';
 
 /** Only in-app paths are followed from a notification. */
 const inApp = (link: string | null): link is string => Boolean(link && link.startsWith('/') && !link.startsWith('//'));
@@ -124,7 +125,7 @@ export function Dashboard() {
           <Tile
             label={t('Meetings today')}
             value={agenda?.length ?? '—'}
-            meta={agenda ? (next ? t('next at {time} · {title}', { time: next.dueTime ?? '', title: next.title }) : '—') : undefined}
+            meta={agenda ? (next ? t('next at {time} · {title}', { time: next.dueTime ?? '', title: systemText(t, next.title) }) : '—') : undefined}
             to="/calendar"
           />
           <Tile
@@ -194,7 +195,7 @@ export function Dashboard() {
                       <li key={a.id}>
                         <span className="ag-time">{a.dueTime}</span>
                         <span className="ag-body" style={{ borderLeftColor: agendaColour(a) }}>
-                          <strong>{a.title}</strong>
+                          <strong>{systemText(t, a.title)}</strong>
                           <span className="m">
                             {a.lead?.companyName ?? a.assignedTo.name}
                             {a.kind === 'call' ? ` · ${t('Phone')}` : a.kind === 'meeting' ? ' · Microsoft Teams' : null}
@@ -225,10 +226,10 @@ export function Dashboard() {
                         <button type="button" className={n.isRead ? 'dnote' : 'dnote unread'} onClick={() => openNote(n)}>
                           <span className="dot" aria-hidden="true" />
                           <span>
-                            <strong>{n.text}</strong>
+                            <strong>{systemText(t, n.text)}</strong>
                             <span className="m">
                               {date(n.createdAt)}
-                              {n.detail ? ` · ${n.detail}` : null}
+                              {n.detail ? ` · ${systemDetail(t, n.detail)}` : null}
                             </span>
                           </span>
                         </button>
