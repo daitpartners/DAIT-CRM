@@ -19,11 +19,14 @@ export type OriginKind = TextExtract['unit'];
 export type DraftRow = { fields: RowFields; originKind: OriginKind; originN: number };
 /**
  * A block: its index in the document, its origin (page n, card n or first line n) and its lines (non-blank, trimmed,
- * at most MAX_LINE characters) with their line numbers.
+ * at most MAX_LINE characters) with their line numbers and their index `k` in the block.
  */
-export type Block = { i: number; kind: OriginKind; n: number; lines: { n: number; text: string }[] };
-/** A deterministic row and the block it came from (so a chunk Claude could not read falls back to its own blocks' rows). */
-export type BlockRow = DraftRow & { block: number };
+export type Block = { i: number; kind: OriginKind; n: number; lines: { n: number; k: number; text: string }[] };
+/**
+ * A deterministic row and where its record starts (block `block`, line index `start`): a chunk Claude could not read
+ * falls back to exactly the rows that start on its own lines.
+ */
+export type BlockRow = DraftRow & { block: number; start: number };
 /** What the read child sends back for a document: its blocks and the deterministic reader's rows. */
 export type DocumentDraft = { blocks: Block[]; rows: BlockRow[] };
 
@@ -37,7 +40,7 @@ export function documentBlocks(extract: TextExtract): Block[] {
   const blocks: Block[] = [];
   let card = 0;
   for (const page of extract.pages) {
-    const lines: Block['lines'] = [];
+    const lines: { n: number; text: string }[] = [];
     page.text.replace(/\u0000/g, '').split('\n').forEach((t, i) => {
       const text = t.trim();
       if (text.length <= MAX_LINE) lines.push({ n: i + 1, text });
@@ -61,7 +64,7 @@ export function documentBlocks(extract: TextExtract): Block[] {
       }
       if (blank >= gap) flush();
       blank = 0;
-      current.push(line);
+      current.push({ n: line.n, k: current.length, text: line.text });
     }
     flush();
   }
@@ -153,6 +156,10 @@ function firstPhone(text: string): string | null {
     const v = trimEnd(m[0].trim(), ' \t(.-/');
     const d = digits(v).length;
     if (d < 8 || d > 15 || DATE_RE.test(v)) continue;
+    // Part of a longer number (an account or ID number): never a phone.
+    const before = text[m.index! - 1] ?? '';
+    const after = text[m.index! + m[0].length] ?? '';
+    if (/\d/.test(before) || /\d/.test(after)) continue;
     if (NUMBER_LABEL.test(text.slice(Math.max(0, m.index! - 24), m.index!))) continue;
     return v;
   }
@@ -190,7 +197,9 @@ function recordOf(lines: string[], known: readonly string[]): RowFields | null {
   const all = lines.join('\n');
   const email = all.match(EMAIL_RE)?.[0]?.toLowerCase() ?? null;
   const noEmail = all.replace(EMAIL_RE, ' ');
-  const website = firstWebsite(noEmail);
+  const found = firstWebsite(noEmail);
+  // A free-mail domain written on its own ("gmail.com") is no company's website.
+  const website = found && !isFreeMail(domainOf(found) ?? '') ? found : null;
   const phone = firstPhone(noEmail.replace(URL_RE, ' ').replace(DOMAIN_RE, ' '));
   if (!email && !phone && !website) return null;
 
@@ -254,7 +263,7 @@ function recordOf(lines: string[], known: readonly string[]): RowFields | null {
   }
   // Else the first part that is no other field: one that reads as a person's name only after one that reads as a business.
   if (!company) {
-    const open = free.filter((p) => !used.has(p));
+    const open = free.filter((p) => !used.has(p) && !(HEADING_WORD.test(p.rest) && !p.contact));
     company = open.find((p) => !nameLike(p)) ?? open.find(businessLike) ?? open[0];
   }
   if (company) {
@@ -274,41 +283,86 @@ function recordOf(lines: string[], known: readonly string[]): RowFields | null {
 }
 
 const hasEmail = (text: string) => text.search(EMAIL_RE) >= 0;
+/** The line holds an email, a phone or a website. */
+const hasContact = (text: string) => {
+  if (hasEmail(text)) return true;
+  const rest = text.replace(EMAIL_RE, ' ');
+  return firstWebsite(rest) !== null || firstPhone(rest.replace(URL_RE, ' ').replace(DOMAIN_RE, ' ')) !== null;
+};
 
 /**
- * A heading block: the document's title or the organiser's notice ("Exhibitor Directory 2026 / For enquiries: …"):
- * every line is a heading, an enquiry line or contact values only, and at least one is a heading.
+ * A heading segment: the document's title or the organiser's notice ("Exhibitor Directory 2026 / For enquiries: …"):
+ * every line is a heading line (a heading word, no contact value), an enquiry line or contact values only, and at
+ * least one is a heading line. A heading word on a line with a contact value ("Exhibitor Services · …"), or a heading
+ * line holding the website's name, is a company.
  */
-function isHeadingBlock(lines: string[]): boolean {
+function isHeadingSegment(lines: string[]): boolean {
   let heading = false;
+  const website = firstWebsite(lines.join('\n').replace(EMAIL_RE, ' '));
+  const stem = website ? squash((domainOf(website) ?? '').split('.')[0] ?? '') : '';
   for (const line of lines) {
     if (LEGAL_SUFFIX.test(line)) return false;
-    if (HEADING_WORD.test(line)) heading = true;
-    else if (!ENQUIRY.test(line) && partsOf([line], firstWebsite(line.replace(EMAIL_RE, ' ')), null).some((p) => p.rest !== '' && !/^\d/.test(p.rest))) return false;
+    const contact = hasContact(line);
+    if (ENQUIRY.test(line)) continue;
+    if (HEADING_WORD.test(line)) {
+      if (contact || (stem.length >= 3 && squash(line).includes(stem))) return false;
+      heading = true;
+    } else if (partsOf([line], firstWebsite(line.replace(EMAIL_RE, ' ')), null).some((p) => p.rest !== '' && !/^\d/.test(p.rest))) {
+      return false;
+    }
   }
   return heading;
 }
 
 /**
+ * Where a record starts in a list: a line with a legal suffix or a business word, or a line with no contact value that
+ * is no title, country or heading.
+ */
+function startsRecord(text: string, known: readonly string[]): boolean {
+  if (LEGAL_SUFFIX.test(text) || COMPANY_WORD.test(text)) return true;
+  if (hasContact(text) || TITLE_WORD.test(text) || HEADING_WORD.test(text)) return false;
+  const last = text.includes(',') ? text.slice(text.lastIndexOf(',') + 1).trim() : text;
+  return !matchCountry(text, known) && !matchCountry(last, known);
+}
+
+/**
  * Rows of blocks: a block with an email, phone or website is one record. One with two or more email lines (a list) is
- * split at them: each email line with the lines since the previous one, and what follows the last one when it holds a
- * phone or website (a record without an email).
+ * split where each record starts (a company-like line, or a line with no contact value, once the record so far holds
+ * a contact value); when no such line is found, after each email line (what follows the last one is a record when it
+ * holds a phone or website). Heading segments are no leads.
  */
 export function rowsFromBlocks(blocks: readonly Block[], known: readonly string[]): BlockRow[] {
   const rows: BlockRow[] = [];
   for (const block of blocks) {
-    const texts = block.lines.map((l) => l.text);
-    if (isHeadingBlock(texts)) continue;
     const add = (lines: Block['lines']) => {
+      if (lines.length === 0 || isHeadingSegment(lines.map((l) => l.text))) return;
       const fields = recordOf(lines.map((l) => l.text), known);
-      if (fields) rows.push({ fields, originKind: block.kind, originN: block.kind === 'line' ? lines[0]!.n : block.n, block: block.i });
+      if (fields) {
+        rows.push({ fields, originKind: block.kind, originN: block.kind === 'line' ? lines[0]!.n : block.n, block: block.i, start: lines[0]!.k });
+      }
     };
-    const emailLines = block.lines.filter((l) => hasEmail(l.text));
-    if (emailLines.length < 2) {
+    if (block.lines.filter((l) => hasEmail(l.text)).length < 2) {
       add(block.lines);
       continue;
     }
+    const segments: Block['lines'][] = [];
     let segment: Block['lines'] = [];
+    let withContact = false;
+    for (const line of block.lines) {
+      if (withContact && startsRecord(line.text, known)) {
+        segments.push(segment);
+        segment = [];
+        withContact = false;
+      }
+      segment.push(line);
+      if (hasContact(line.text)) withContact = true;
+    }
+    segments.push(segment);
+    if (segments.length > 1) {
+      for (const seg of segments) add(seg);
+      continue;
+    }
+    segment = [];
     for (const line of block.lines) {
       segment.push(line);
       if (hasEmail(line.text)) {
@@ -316,14 +370,14 @@ export function rowsFromBlocks(blocks: readonly Block[], known: readonly string[
         segment = [];
       }
     }
-    if (segment.length > 0) add(segment);
+    add(segment);
   }
   return rows;
 }
 
 /** The deterministic reader: the document's records, without Claude. */
 export function extractBlocks(extract: TextExtract, knownCountries: readonly string[]): DraftRow[] {
-  return rowsFromBlocks(documentBlocks(extract), knownCountries).map(({ block: _block, ...row }) => row);
+  return rowsFromBlocks(documentBlocks(extract), knownCountries).map(({ block: _block, start: _start, ...row }) => row);
 }
 
 /** The document's blocks and deterministic rows (run in the read child process). */
@@ -342,9 +396,8 @@ const FOLD: Record<string, string> = { ø: 'o', ß: 'ss', æ: 'ae', œ: 'oe', ł
  * Lowercase; a word hyphenated across a line break joined; accents and ø/ß/æ… folded; dotted acronyms closed up
  * ("A.B.C." → "abc"); punctuation removed and whitespace collapsed; padded so a match is whole words.
  */
-function normalise(s: string): string {
-  const t = s
-    .replace(/(?<=\p{L})-[ \t]*\r?\n[ \t]*(?=\p{L})/gu, '')
+function normalise(s: string, joinHyphens = true): string {
+  const t = (joinHyphens ? s.replace(/(?<=\p{L})-[ \t]*\r?\n[ \t]*(?=\p{L})/gu, '') : s)
     .normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
     .replace(/[øßæœłđðþı]/g, (c) => FOLD[c]!)
     .replace(/(?<![\p{L}\p{N}])(?:\p{L}\.){2,}/gu, (m) => m.replace(/\./g, ''))
@@ -353,16 +406,20 @@ function normalise(s: string): string {
   return ` ${t} `;
 }
 
-/** The digits of each phone-like run of the text (digits with single spaces, brackets, dots, dashes; no line breaks, no "/"). */
-const phoneRuns = (text: string) =>
-  (text.match(/\+?\(?\d(?:[\d().-]|[ \t](?=[\d(]))*/g) ?? []).map(digits).filter((d) => d.length >= 7);
+/**
+ * Each phone-like run of the text (digits with single spaces, brackets, dots, dashes; no line breaks, tabs or "/") as
+ * the digits of its space-separated groups.
+ */
+const phoneRuns = (text: string): string[][] =>
+  (text.match(/\+?\(?\d(?:[\d().-]| (?=[\d(]))*/g) ?? []).map((run) => run.split(' ').map(digits).filter((g) => g !== ''))
+    .filter((groups) => groups.join('').length >= 7);
 
 /** A text prepared once for many `valueInText` checks. */
-export type PreparedText = { lower: string; normal: string; emails: Set<string>; phones: string[] };
+export type PreparedText = { lower: string; normal: string; hyphenated: string; emails: Set<string>; phones: string[][] };
 
 export function prepareText(text: string): PreparedText {
   return {
-    lower: text.toLowerCase(), normal: normalise(text),
+    lower: text.toLowerCase(), normal: normalise(text), hyphenated: normalise(text, false),
     emails: new Set((text.match(EMAIL_RE) ?? []).map((e) => e.toLowerCase())), phones: phoneRuns(text),
   };
 }
@@ -388,12 +445,20 @@ export function valueInPrepared(value: string, field: ImportField, t: PreparedTe
     return domain !== null && domainIn(domain, t.lower);
   }
   if (field === 'phone') {
-    // One number of the text, whole, or without a short prefix (a country or trunk code) when 8+ digits are left.
+    // One number of the text, whole, or its last space-separated groups (without a country code or a postcode
+    // before it) when 9+ digits are left; never digits from inside a group (the tail of a longer ID).
     const d = digits(v);
-    return d.length >= 7 && t.phones.some((run) => run === d || (d.length >= 8 && run.endsWith(d) && run.length - d.length <= 4));
+    if (d.length < 7) return false;
+    return t.phones.some((groups) => {
+      if (groups.join('') === d) return true;
+      if (d.length < 9) return false;
+      for (let i = 1; i < groups.length; i += 1) if (groups.slice(i).join('') === d) return true;
+      return false;
+    });
   }
   const n = normalise(v);
-  return n.trim() !== '' && t.normal.includes(n);
+  // A word hyphenated at a line break reads either way: "Bright-\nline" is "Brightline", "Al-\nNoor" is "Al Noor".
+  return n.trim() !== '' && (t.normal.includes(n) || t.hyphenated.includes(n));
 }
 
 /**

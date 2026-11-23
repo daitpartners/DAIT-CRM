@@ -23,6 +23,8 @@ export const importReadDeps: ImportDeps = {};
  * both first delete the file's existing rows, so reading a file again is harmless.
  */
 export async function importReadFileHandler(job: Job, _ctx: JobContext): Promise<void> {
+  // The file's Claude time budget counts from here, so reading it never pushes the job past the stale limit.
+  const startedAt = Date.now();
   const { fileId } = job.payload as unknown as ImportReadFilePayload;
   if (!Number.isInteger(fileId)) throw new Error('bad_payload');
   const file = await prisma.importFile.findUnique({ where: { id: fileId } });
@@ -45,7 +47,7 @@ export async function importReadFileHandler(job: Job, _ctx: JobContext): Promise
   if (!written || result.status !== 'Read' || !extract) return;
   try {
     if (extract.kind === 'table') await stageTable(fileId, extract);
-    else await stageDocument(fileId, extract, importReadDeps, result.draft);
+    else await stageDocument(fileId, extract, importReadDeps, result.draft, startedAt);
   } catch (e) {
     // A file whose rows could not be staged is not half-staged: no rows, Failed, the error kept on the job.
     await prisma.importRow.deleteMany({ where: { fileId } });

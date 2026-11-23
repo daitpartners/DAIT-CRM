@@ -10,7 +10,7 @@ import { importReadFileHandler } from '../src/jobs/handlers/importReadFile';
 import { saveImportFile } from '../src/imports/storage';
 import type { TextExtract } from '../src/imports/read';
 import { readDocx } from '../src/imports/read/docx';
-import { extractBlocks, valueInText } from '../src/imports/documents';
+import { extractBlocks, valueInText, type DraftRow } from '../src/imports/documents';
 import { readInWorker } from '../src/imports/read/isolated';
 import {
   CHUNK_CHARS, claudeExtractRows, documentChunks, importClaude, importClaudeLimits, stageDocument, type ImportClaude,
@@ -344,6 +344,17 @@ describe('stageDocument', () => {
     expect(rows.map((r) => [r.originKind, r.originN, (r.fields as RowFields).companyName])).toEqual([['line', 1, 'Gulf Freight Partners LLC']]);
   });
 
+  it('the time budget counts from the job start: a job already 10 minutes in makes no Claude call', async () => {
+    await claudeOn(10);
+    const file = await newFile();
+    const fake = fakeRunner([]);
+    await stageDocument(file.id, DOC, { claude: fake.runner, env: claudeEnv }, undefined, Date.now() - 10 * 60_000);
+    expect(fake.calls).toHaveLength(0);
+    const f = await fileOf(file.id);
+    expect([f.claudeCalls, (f.meta as FileMeta).noClaude]).toEqual([0, 'limit']);
+    expect(await rowsOf(file.id)).toHaveLength(2);
+  });
+
   it('the per-file limit: with one call allowed, the rest is read without Claude and meta says limit', async () => {
     await claudeOn(10);
     const file = await newFile();
@@ -525,5 +536,75 @@ describe('review fixes', () => {
     const off = fakeRunner([]);
     const offOut = await claudeExtractRows(doc, claudeWith(off.runner), async () => 'off', { known: KNOWN });
     expect([off.calls.length, offOut.stopped, offOut.stoppedAtCap]).toEqual([0, 'off', false]);
+  });
+});
+
+describe('review round 2', () => {
+  /** One block of 300 one-line records (no blank lines): it spans several chunks. */
+  const LIST = txt(Array.from({ length: 300 }, (_, i) => `Company ${i} Ltd · Hall 4, Stand ${i} · company${i}.com · info${i}@company${i}.com · London`).join('\n'));
+  const echo: ClaudeRunner = async (req) => ({
+    output: {
+      rows: [...req.prompt.matchAll(/Company (\d+) Ltd/g)].map((m) => ({ ...blank, ref: 1, companyName: `Company ${m[1]} Ltd`, email: `info${m[1]}@company${m[1]}.com` })),
+    },
+    searchUrls: [],
+  });
+  const unique = (rows: DraftRow[]) => new Set(rows.map((r) => r.fields.email)).size;
+
+  it('a block spanning several chunks: every fallback gives each record exactly once', async () => {
+    const chunks = documentChunks(LIST);
+    expect(chunks.length).toBeGreaterThanOrEqual(2);
+    for (const c of chunks) expect(c.blocks.reduce((n, b) => n + b.lines.length, 0)).toBeLessThanOrEqual(180);
+    let n = 0;
+    const cap = await claudeExtractRows(LIST, claudeWith(echo), async () => (n++ < 1 ? true : 'cap'), { known: KNOWN });
+    const limit = await claudeExtractRows(LIST, claudeWith(echo), always, { known: KNOWN, maxChunks: 1 });
+    let k = 0;
+    const lastFails: ClaudeRunner = async (req) => { if (k++ === chunks.length - 1) throw new ClaudeRunError('timeout'); return echo(req); };
+    const last = await claudeExtractRows(LIST, claudeWith(lastFails), always, { known: KNOWN });
+    let j = 0;
+    const firstFails: ClaudeRunner = async (req) => { if (j++ === 0) throw new ClaudeRunError('timeout'); return echo(req); };
+    const first = await claudeExtractRows(LIST, claudeWith(firstFails), always, { known: KNOWN });
+    for (const out of [cap, limit, last, first]) {
+      expect(out.rows).toHaveLength(300);
+      expect(unique(out.rows)).toBe(300);
+    }
+    expect([cap.stopped, limit.stopped]).toEqual(['cap', 'limit']);
+  });
+
+  it('stacked lists split where each record starts: company / email / phone / city keep together', () => {
+    const rows = extractBlocks(pdf('Acme Widgets Ltd\nsales@acme.com\n+44 20 7946 0001\nLondon, United Kingdom\nBeta Trading LLC\ninfo@beta.co.uk\n+44 20 7946 0002\nLeeds, United Kingdom'), KNOWN);
+    expect(rows.map((r) => r.fields)).toEqual([
+      { companyName: 'Acme Widgets Ltd', email: 'sales@acme.com', phone: '+44 20 7946 0001', country: 'United Kingdom' },
+      { companyName: 'Beta Trading LLC', email: 'info@beta.co.uk', phone: '+44 20 7946 0002', country: 'United Kingdom' },
+    ]);
+    expect(extractBlocks(txt('Acme Widgets Ltd\nJohn Smith\nsales@acme.com\nBeta Trading LLC\nAna Lopez\ninfo@beta.co.uk'), KNOWN)).toEqual([
+      { originKind: 'line', originN: 1, fields: { companyName: 'Acme Widgets Ltd', contactName: 'John Smith', email: 'sales@acme.com' } },
+      { originKind: 'line', originN: 4, fields: { companyName: 'Beta Trading LLC', contactName: 'Ana Lopez', email: 'info@beta.co.uk' } },
+    ]);
+  });
+
+  it('heading lines inside a records block, account-number tails and "Exhibitor Services" companies', () => {
+    expect(extractBlocks(pdf('Exhibitor Directory 2026\nFor enquiries: expo@organiser.com\nAcme Ltd\nsales@acme.com\nBeta LLC\nb@beta.com'), KNOWN).map((r) => r.fields)).toEqual([
+      { companyName: 'Acme Ltd', email: 'sales@acme.com' }, { companyName: 'Beta LLC', email: 'b@beta.com' },
+    ]);
+    expect(extractBlocks(pdf('Acme Ltd\nAccount 1234567890123456789012345678901234567890\ninfo@acme.com'), KNOWN)[0]!.fields).toEqual({ companyName: 'Acme Ltd', email: 'info@acme.com' });
+    expect(extractBlocks(pdf('Exhibitor Services\nexhibitorservices.com\n\nAcme Ltd\nsales@acme.com'), KNOWN).map((r) => r.fields)).toEqual([
+      { companyName: 'Exhibitor Services', website: 'exhibitorservices.com' }, { companyName: 'Acme Ltd', email: 'sales@acme.com' },
+    ]);
+    expect(extractBlocks(pdf('Acme Ltd\ngmail.com\n+44 20 7946 0001'), KNOWN)[0]!.fields.website).toBeUndefined();
+  });
+
+  it('valueInText: a phone after a postcode, no tails of IDs, hyphenated names either way', () => {
+    expect(valueInText('080 4455 6677', 'phone', 'Bengaluru 560001\t080 4455 6677')).toBe(true);
+    expect(valueInText('080 4455 6677', 'phone', 'Bengaluru 560001 080 4455 6677')).toBe(true);
+    expect(valueInText('45678901', 'phone', 'VAT 12345678901')).toBe(false);
+    expect(valueInText('4455 6677', 'phone', 'Bengaluru 560001 080 4455 6677')).toBe(false);
+    expect(valueInText('Al-Noor Logistics', 'companyName', 'Al-\nNoor Logistics')).toBe(true);
+    expect(valueInText('AlNoor Logistics', 'companyName', 'Al-\nNoor Logistics')).toBe(true);
+  });
+
+  it('a free-mail domain from Claude is never kept as a website', async () => {
+    const fake = fakeRunner([{ ref: 1, companyName: 'Maria Lopez Design', email: 'maria@gmail.com', website: 'gmail.com' }]);
+    const out = await claudeExtractRows(pdf('Maria Lopez Design\nmaria@gmail.com'), claudeWith(fake.runner), always, { known: KNOWN });
+    expect(out.rows).toEqual([{ originKind: 'page', originN: 1, fields: { companyName: 'Maria Lopez Design', email: 'maria@gmail.com' } }]);
   });
 });

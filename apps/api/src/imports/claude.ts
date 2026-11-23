@@ -10,7 +10,7 @@
  */
 import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
-import type { FileMeta, ImportField, ImportNoClaude, RowFields } from '@dait-crm/shared';
+import { domainOf, isFreeMail, type FileMeta, type ImportField, type ImportNoClaude, type RowFields } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { loadEnrichmentSettings, reserveClaudeRun } from '../research/service.js';
 import {
@@ -51,6 +51,8 @@ export const CLAUDE_FILE_BUDGET_MS = 10 * 60_000;
 export const MIN_CALL_MS = 60_000;
 /** Test seam: the per-file limits `stageDocument` applies. */
 export const importClaudeLimits = { maxChunks: MAX_CLAUDE_CHUNKS_PER_FILE, budgetMs: CLAUDE_FILE_BUDGET_MS };
+/** Lines per Claude call: with one record a line at most, a chunk never holds more records than an answer may give. */
+export const CHUNK_LINES = 180;
 /** Rows Claude may return per call. */
 const MAX_ROWS_PER_CHUNK = 200;
 const VALUE_FIELDS = ['companyName', 'contactName', 'designation', 'email', 'phone', 'website', 'country', 'city', 'industry'] as const;
@@ -93,35 +95,45 @@ const ANSWER = z.object({
   })).max(MAX_ROWS_PER_CHUNK),
 });
 
-/** A chunk: its blocks (pieces of long blocks included), the blocks whose deterministic rows it answers for, its text. */
-type Chunk = { blocks: Block[]; owns: Set<number>; refs: Set<number>; first: number; text: string; source: string };
+/**
+ * A chunk: its blocks (pieces of long blocks included), the lines it holds (`"<block i>:<line k>"`: the deterministic
+ * rows starting on them are its fallback), its refs and its text.
+ */
+type Chunk = { blocks: Block[]; owns: Set<string>; refs: Set<number>; first: number; text: string; source: string };
 
 const blockText = (b: Block) => b.lines.map((l) => l.text).join('\n');
 const marker = (b: Block) => `[[${b.kind} ${b.n}]]`;
+const lineCount = (bs: Block[]) => bs.reduce((n, b) => n + b.lines.length, 0);
 /** Document text as sent: a "[[page 2]]" written in the document cannot pass for a marker (no longer than the original). */
 const escapeMarkers = (s: string) => s.replace(/\[\[/g, '⟦').replace(/\]\]/g, '⟧');
 
-/** A page (or card, or line block) as marked pieces of at most CHUNK_CHARS: whole when it fits, else split between blocks, then lines. */
+/**
+ * A page (or card, or line block) as marked pieces of at most CHUNK_CHARS and CHUNK_LINES: whole when it fits, else
+ * split between blocks, then between lines.
+ */
 function pieces(unit: Block[]): Block[][] {
   const head = marker(unit[0]!).length + 1;
   const render = (bs: Block[]) => head + bs.reduce((n, b, i) => n + (i > 0 ? 2 : 0) + blockText(b).length, 0);
-  if (render(unit) <= CHUNK_CHARS) return [unit];
+  if (render(unit) <= CHUNK_CHARS && lineCount(unit) <= CHUNK_LINES) return [unit];
   const room = CHUNK_CHARS - head;
   const out: Block[][] = [];
   let current: Block[] = [];
   let size = 0;
+  let count = 0;
   const push = (b: Block) => {
     const len = blockText(b).length;
-    if (current.length > 0 && size + 2 + len > room) {
+    if (current.length > 0 && (size + 2 + len > room || count + b.lines.length > CHUNK_LINES)) {
       out.push(current);
       current = [];
       size = 0;
+      count = 0;
     }
     size += (current.length > 0 ? 2 : 0) + len;
+    count += b.lines.length;
     current.push(b);
   };
   for (const block of unit) {
-    if (blockText(block).length <= room) {
+    if (blockText(block).length <= room && block.lines.length <= CHUNK_LINES) {
       push(block);
       continue;
     }
@@ -129,7 +141,7 @@ function pieces(unit: Block[]): Block[][] {
     let lines: Block['lines'] = [];
     let len = 0;
     for (const line of block.lines) {
-      if (lines.length > 0 && len + 1 + line.text.length > room) {
+      if (lines.length > 0 && (len + 1 + line.text.length > room || lines.length + 1 > CHUNK_LINES)) {
         push({ ...block, lines });
         lines = [];
         len = 0;
@@ -143,7 +155,10 @@ function pieces(unit: Block[]): Block[][] {
   return out;
 }
 
-/** The document's blocks in chunks of at most CHUNK_CHARS, on page (card, line block) boundaries, each part under its marker. */
+/**
+ * The document's blocks in chunks of at most CHUNK_CHARS and CHUNK_LINES, on page (card, line block) boundaries, each
+ * part under its marker. Every line is in exactly one chunk.
+ */
 export function documentChunks(source: TextExtract | Block[]): Chunk[] {
   const all = Array.isArray(source) ? source : draftDocument(source, []).blocks;
   const units: Block[][] = [];
@@ -153,28 +168,28 @@ export function documentChunks(source: TextExtract | Block[]): Chunk[] {
     else units.push([b]);
   }
   const chunks: Chunk[] = [];
-  const owned = new Set<number>();
   let parts: Block[][] = [];
   let size = 0;
+  let count = 0;
   const flush = () => {
     if (parts.length === 0) return;
     const blocks = parts.flat();
-    // A block split over two chunks falls back (when it must) with the chunk holding its first piece.
-    const owns = new Set(blocks.map((b) => b.i).filter((i) => !owned.has(i)));
-    for (const i of owns) owned.add(i);
     chunks.push({
-      blocks, owns, refs: new Set(blocks.map((b) => b.n)), first: blocks[0]!.n,
+      blocks, owns: new Set(blocks.flatMap((b) => b.lines.map((l) => `${b.i}:${l.k}`))),
+      refs: new Set(blocks.map((b) => b.n)), first: blocks[0]!.n,
       text: parts.map((p) => `${marker(p[0]!)}\n${p.map((b) => escapeMarkers(blockText(b))).join('\n\n')}`).join('\n\n'),
       source: blocks.map(blockText).join('\n\n'),
     });
     parts = [];
     size = 0;
+    count = 0;
   };
   for (const unit of units) {
     for (const piece of pieces(unit)) {
       const len = marker(piece[0]!).length + 1 + piece.map(blockText).join('\n\n').length;
-      if (parts.length > 0 && size + 2 + len > CHUNK_CHARS) flush();
+      if (parts.length > 0 && (size + 2 + len > CHUNK_CHARS || count + lineCount(piece) > CHUNK_LINES)) flush();
       size += (parts.length > 0 ? 2 : 0) + len;
+      count += lineCount(piece);
       parts.push(piece);
     }
   }
@@ -213,6 +228,8 @@ function verifiedRows(answer: z.infer<typeof ANSWER>, chunk: Chunk, kind: TextEx
     for (const f of VALUE_FIELDS) {
       const v = r[f]?.trim().slice(0, MAX_VALUE);
       if (!v || !valueInPrepared(v, f as ImportField, t)) continue;
+      // An email's free-mail domain ("gmail.com") is no company's website.
+      if (f === 'website' && isFreeMail(domainOf(v) ?? '')) continue;
       fields[f] = f === 'email' ? v.toLowerCase() : v;
     }
     return { fields, ref };
@@ -226,7 +243,7 @@ function verifiedRows(answer: z.infer<typeof ANSWER>, chunk: Chunk, kind: TextEx
       const v = d.fields[field];
       if (!v) continue;
       const key = field === 'email' ? v : v.replace(/\D/g, '');
-      const written = field === 'email' ? count(sourceEmails, key) : whole.phones.filter((run) => run.endsWith(key)).length;
+      const written = field === 'email' ? count(sourceEmails, key) : whole.phones.filter((groups) => groups.join('').endsWith(key)).length;
       if (seen.has(key) && written <= 1) delete d.fields[field];
       seen.add(key);
     }
@@ -266,7 +283,7 @@ export async function claudeExtractRows(
   const maxChunks = opts.maxChunks ?? MAX_CLAUDE_CHUNKS_PER_FILE;
   const deadline = (opts.startedAt ?? Date.now()) + (opts.budgetMs ?? CLAUDE_FILE_BUDGET_MS);
   const rowsOf = (chunk: Chunk): DraftRow[] =>
-    draft.rows.filter((r) => chunk.owns.has(r.block)).map(({ block: _block, ...row }: BlockRow) => row);
+    draft.rows.filter((r) => chunk.owns.has(`${r.block}:${r.start}`)).map(({ block: _block, start: _start, ...row }: BlockRow) => row);
   const rows: DraftRow[] = [];
   let calls = 0;
   let stopped: ImportNoClaude | null = null;
@@ -312,13 +329,14 @@ async function fileGone(fileId: number, batchId: number): Promise<boolean> {
 /**
  * Stages a read document: Claude extraction when Claude can run, else the deterministic reader. Meta `noClaude`:
  * "off" (switched off, also part-way), "cap" (the month's runs ran out part-way), "limit" (the file's 20 calls or 10
- * minutes were used). Each call is reserved and counted on the file (`claude_calls + 1`, `read_at`) in one transaction
- * before it is made. `draft` is the read child's deterministic reading (worked out here when absent, as in tests).
+ * minutes, counted from `startedAt` (the job's start), were used). Each call is reserved and counted on the file
+ * (`claude_calls + 1`, `read_at`) in one transaction before it is made. `draft` is the read child's deterministic reading (worked out here when absent, as in tests).
  * Rows are written once, at the end (the per-file limits keep that within about 10 minutes). Replaces the file's
  * earlier rows; refused (file Failed `too_many_rows`) when the batch would pass 5,000 rows.
  */
-export async function stageDocument(fileId: number, extract: TextExtract, deps: ImportDeps = {}, draft?: DocumentDraft): Promise<void> {
-  const startedAt = Date.now();
+export async function stageDocument(
+  fileId: number, extract: TextExtract, deps: ImportDeps = {}, draft?: DocumentDraft, startedAt = Date.now(),
+): Promise<void> {
   const file = await prisma.importFile.findUnique({ where: { id: fileId } });
   if (!file) return;
   const doc = draft ?? draftDocument(extract, await knownCountries());
@@ -342,7 +360,7 @@ export async function stageDocument(fileId: number, extract: TextExtract, deps: 
     rows = out.rows;
     noClaude = out.stopped;
   } else {
-    rows = doc.rows.map(({ block: _block, ...row }) => row);
+    rows = doc.rows.map(({ block: _block, start: _start, ...row }) => row);
     noClaude = 'off';
   }
   const { noClaude: _was, ...meta } = file.meta as FileMeta;
