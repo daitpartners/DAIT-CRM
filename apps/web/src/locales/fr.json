@@ -1690,5 +1690,6 @@
   "1 mailer run in progress": "1 envoi du mailer en cours",
   "{n} mailer runs in progress": "{n} envois du mailer en cours",
   "1 new since yesterday": "1 nouveau depuis hier",
-  "1 upcoming": "1 à venir"
+  "1 upcoming": "1 à venir",
+  "Follow-up planned · {title}": "Relance planifiée · {title}"
 }

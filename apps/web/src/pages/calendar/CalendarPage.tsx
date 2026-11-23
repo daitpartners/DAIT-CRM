@@ -14,7 +14,7 @@ import {
 } from './dates';
 import { EventInfoModal } from './EventInfoModal';
 import { NewFollowUpModal } from './NewFollowUpModal';
-import { systemText } from '../../i18n/systemText';
+import { taskTitle } from '../../i18n/systemText';
 
 const VIEWS: CalendarView[] = ['day', 'week', 'month'];
 
@@ -137,7 +137,7 @@ export function CalendarPage() {
       {overdue.length ? (
         overdue.map((x) => (
           <Link key={`${x.kind}-${x.id}`} className="coi" to={x.leadId ? `/leads/${x.leadId}` : link({ view: 'day', d: x.date })}>
-            <strong>{systemText(t, x.title)}</strong>
+            <strong>{taskTitle(t, x.title)}</strong>
             <span>{[x.company, shortDay(x.date, names) + (x.time ? `, ${x.time}` : '')].filter(Boolean).join(', ')}</span>
           </Link>
         ))
@@ -309,11 +309,11 @@ export function CalendarPage() {
 function Chip({ item: x, full, onInfo }: { item: CalendarItem; full: boolean; onInfo: (x: CalendarItem) => void }) {
   const t = useT();
   const cls = ['cit', `t-${x.type}`, x.done ? 'done' : '', x.overdue ? 'over' : ''].filter(Boolean).join(' ');
-  const tip = systemText(t, x.title) + (x.company ? ` · ${x.company}` : '') + (x.done ? ` ${t('(done)')}` : x.overdue ? ` ${t('(overdue)')}` : '');
+  const tip = taskTitle(t, x.title) + (x.company ? ` · ${x.company}` : '') + (x.done ? ` ${t('(done)')}` : x.overdue ? ` ${t('(overdue)')}` : '');
   const inner = (
     <>
       {x.time ? <span className="tm">{x.time}</span> : null}
-      <span className="tt">{systemText(t, x.title)}</span>
+      <span className="tt">{taskTitle(t, x.title)}</span>
       {full && x.company ? <span className="co">{x.company + (x.leadNumber ? ` · ${x.leadNumber}` : '')}</span> : null}
     </>
   );

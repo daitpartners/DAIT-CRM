@@ -5,7 +5,7 @@ import { Icons } from '../../components/Icons';
 import { useFormatDate } from '../../hooks/useFormatDate';
 import { StatusBadge } from '../../components/StatusBadge';
 import { useT } from '../../i18n/useT';
-import { systemText } from '../../i18n/systemText';
+import { timelineTitle } from '../../i18n/systemText';
 
 const ICON: Record<string, keyof typeof Icons> = {
   call: 'phone', email: 'mail', meeting: 'calendar', note: 'note', research: 'search', status: 'flag',
@@ -27,7 +27,7 @@ export function TimelineEntry({ activity: a, last, extra }: { activity: Activity
         {last ? null : <div className="line" />}
       </div>
       <div className="ev">
-        <strong>{systemText(t, a.title)}</strong>
+        <strong>{timelineTitle(t, a.title)}</strong>
         {a.body ? <div className="b pre">{a.body}</div> : null}
         {link ? (
           <div className="b">

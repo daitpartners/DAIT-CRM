@@ -14,7 +14,7 @@ import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
 import { errorText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
-import { systemDetail, systemText } from '../../i18n/systemText';
+import { notificationDetail, notificationText } from '../../i18n/systemText';
 
 /** Only in-app paths are followed; anything else stays on this page. */
 const inApp = (link: string | null): link is string => Boolean(link && link.startsWith('/') && !link.startsWith('//'));
@@ -191,8 +191,8 @@ export function NotificationsList() {
                             {KIND_STYLE[kind].icon}
                           </span>
                           <span className="nb">
-                            <strong>{systemText(t, n.text)}</strong>
-                            {n.detail ? <span className="nd">{systemDetail(t, n.detail)}</span> : null}
+                            <strong>{notificationText(t, n.text)}</strong>
+                            {n.detail ? <span className="nd">{notificationDetail(t, n.text, n.detail)}</span> : null}
                             <span className="nm">
                               {kindText[kind]} · {g === t('Earlier') ? date(n.createdAt) : `${g}, ${time(n.createdAt)}`}
                             </span>

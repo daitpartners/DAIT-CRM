@@ -18,7 +18,7 @@ import { CloseLeadModal } from './CloseLeadModal';
 import { Timeline } from './Timeline';
 import { TransferModal, UnassignModal } from './TransferModal';
 import { useActionError } from './staleToast';
-import { systemText } from '../../i18n/systemText';
+import { taskTitle } from '../../i18n/systemText';
 
 /** YYYY-MM-DD `days` from today (browser local date, as the date input shows it). */
 export function localDayPlus(days: number): string {
@@ -289,7 +289,7 @@ function FollowUpControls({ lead, statuses, live }: Props) {
             return (
               <label key={task.id} className="fu-task">
                 <input type="checkbox" checked={false} disabled={saveTask.isPending} onChange={() => tick(task)} />
-                <span className="fu-t">{systemText(t, task.title)}</span>
+                <span className="fu-t">{taskTitle(t, task.title)}</span>
                 {when ? <span className="fu-due">{when}</span> : null}
                 <span className={task.isOverdue ? 'fu-due overdue' : 'fu-due'}>{day(task.dueDate)}</span>
               </label>

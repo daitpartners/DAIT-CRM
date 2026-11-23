@@ -6,7 +6,7 @@ import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
 import { errorText, researchStatusBadge, researchStatusText, verificationBadge, verificationText } from '../../i18n/labels';
 import { useT, type TFn } from '../../i18n/useT';
-import { systemDetail } from '../../i18n/systemText';
+import { researchResult } from '../../i18n/systemText';
 
 /** Toast text for an API error from a research write; `locked` here means a verified field, not a closed quotation. */
 export function researchErrorText(t: TFn, err: unknown): string {
@@ -17,7 +17,7 @@ export function researchErrorText(t: TFn, err: unknown): string {
 /** The prototype's completion toast: suggestions from the run that just finished, or why it failed. */
 function finishedToast(t: TFn, view: ResearchView): { text: string; kind: 'ok' | 'warn' } {
   const run = view.runs[0];
-  if (run?.status === 'Failed') return { text: t('AI research failed · {reason}', { reason: run.result ? systemDetail(t, run.result) : '' }), kind: 'warn' };
+  if (run?.status === 'Failed') return { text: t('AI research failed · {reason}', { reason: run.result ? researchResult(t, run.result) : '' }), kind: 'warn' };
   const n = run ? view.pending.filter((s) => s.runId === run.id).length : 0;
   return {
     text: n === 1 ? t('AI research completed · 1 suggestion to review') : t('AI research completed · {n} suggestions to review', { n }),

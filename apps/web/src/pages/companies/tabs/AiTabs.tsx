@@ -11,7 +11,7 @@ import { useT } from '../../../i18n/useT';
 import { AddSourceModal } from '../AddSourceModal';
 import { AiCard, researchErrorText, type ResearchRunner } from '../AiCard';
 import { EngineCard } from '../EngineCard';
-import { systemDetail, systemText } from '../../../i18n/systemText';
+import { researchResult, researchText } from '../../../i18n/systemText';
 
 /** A stored value as text: arrays joined, empty → null (shown as NULL). */
 function asText(v: unknown): string | null {
@@ -146,10 +146,10 @@ export function AiTab({ company, research }: { company: CompanyDetail; research:
                   runs.map((r) => (
                     <tr key={r.id}>
                       <td>{dateTime(r.createdAt)}</td>
-                      <td>{systemText(t, r.trigger)}</td>
-                      <td>{systemText(t, r.engine)}</td>
+                      <td>{researchText(t, r.trigger)}</td>
+                      <td>{researchText(t, r.engine)}</td>
                       <td className="wrap">{researchSourcesText(t, r.sources)}</td>
-                      <td className="wrap">{r.result ? systemDetail(t, r.result) : ''}</td>
+                      <td className="wrap">{r.result ? researchResult(t, r.result) : ''}</td>
                       <td>{r.appliedCount}</td>
                       <td>
                         <span className={researchStatusBadge(r.status)}>{researchStatusText(t, r.status)}</span>
