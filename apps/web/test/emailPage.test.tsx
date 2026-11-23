@@ -424,6 +424,31 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       }
     });
 
+    it('when the list column scrolls on its own (desktop), a page change takes that column to its top, not the window', async () => {
+      const u = userEvent.setup();
+      paged();
+      const scrolled = vi.fn();
+      const own = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = scrolled;
+      try {
+        show('/email');
+        const list = screen.getByRole('region', { name: 'Message list' });
+        expect(await within(list).findByText('Message 1')).toBeTruthy();
+        const rows = list.querySelector('.msglist-rows') as HTMLElement;
+        // jsdom has no layout: make the rows box a scroller that has been scrolled down.
+        Object.defineProperty(rows, 'scrollHeight', { configurable: true, value: 3000 });
+        Object.defineProperty(rows, 'clientHeight', { configurable: true, value: 600 });
+        rows.scrollTop = 900;
+        const pager = within(list).getByRole('navigation', { name: 'Pagination' });
+        await u.click(within(pager).getByRole('button', { name: 'Next ›' }));
+        expect(await within(list).findByText('Message 51')).toBeTruthy();
+        expect(rows.scrollTop).toBe(0);
+        expect(scrolled).not.toHaveBeenCalled();
+      } finally {
+        Element.prototype.scrollIntoView = own;
+      }
+    });
+
     it('a search goes back to page 1', async () => {
       const u = userEvent.setup();
       paged();

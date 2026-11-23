@@ -59,6 +59,16 @@ export function EmailPage() {
   const [compose, setCompose] = useState<ComposeStart | null>(null);
   const [search, setSearch] = useState(filter.s ?? '');
   const listRef = useRef<HTMLElement>(null);
+  const rowsRef = useRef<HTMLDivElement>(null);
+  /**
+   * Shows a new page from its top. On desktop the rows scroll inside their column (owner, 23 Nov 2026: the screen
+   * fits the window), so that column goes to its top; where the page itself scrolls, the list is brought into view.
+   */
+  const listToTop = () => {
+    const rows = rowsRef.current;
+    if (rows && rows.scrollHeight > rows.clientHeight) rows.scrollTop = 0;
+    else listRef.current?.scrollIntoView?.({ block: 'start' });
+  };
   useEffect(() => setSearch(params.get('s') ?? ''), [params]);
 
   const items = list?.items ?? [];
@@ -314,14 +324,17 @@ export function EmailPage() {
             {companyName ? ` · ${companyName}` : ''}
             {leadNumber ? ` · ${leadNumber}` : ''}
           </div>
-          {items.map((m) => (
-            <MessageRow key={m.id} m={opened?.id === m.id && opened.isRead ? { ...m, isRead: true } : m} on={m.id === selectedId} to={`/email/${m.id}${params.toString() ? `?${params.toString()}` : ''}`} />
-          ))}
-          {!isLoading && items.length === 0 ? (
-            <div className="empty">
-              {filter.company || filter.lead || filter.project ? t('No messages for this filter in {folder}.', { folder: viewLabel(t, view) }) : t('Nothing here.')}
-            </div>
-          ) : null}
+          {/* The rows scroll on their own on desktop; the pager below stays in view. */}
+          <div className="msglist-rows" ref={rowsRef}>
+            {items.map((m) => (
+              <MessageRow key={m.id} m={opened?.id === m.id && opened.isRead ? { ...m, isRead: true } : m} on={m.id === selectedId} to={`/email/${m.id}${params.toString() ? `?${params.toString()}` : ''}`} />
+            ))}
+            {!isLoading && items.length === 0 ? (
+              <div className="empty">
+                {filter.company || filter.lead || filter.project ? t('No messages for this filter in {folder}.', { folder: viewLabel(t, view) }) : t('Nothing here.')}
+              </div>
+            ) : null}
+          </div>
           {/* Owner request (22 Nov 2026), not in the prototype: the Leads / Companies pager, 50 rows by default. */}
           {list && list.total > 0 ? (
             <Pager
@@ -330,13 +343,13 @@ export function EmailPage() {
               total={list.total}
               onPage={(p) => {
                 setQuery({ page: p > 1 ? String(p) : undefined });
-                // The pager sits under 50 rows: show the new page from its top.
-                listRef.current?.scrollIntoView?.({ block: 'start' });
+                listToTop();
               }}
               sizes={MAIL_PAGE_SIZES}
+              compact
               onPageSize={(size) => {
                 setQuery({ size: size === MAIL_PAGE_SIZE ? undefined : String(size) });
-                listRef.current?.scrollIntoView?.({ block: 'start' });
+                listToTop();
               }}
             />
           ) : null}

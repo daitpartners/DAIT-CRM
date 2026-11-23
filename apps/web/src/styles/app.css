@@ -717,11 +717,26 @@ td.nowrap{white-space:nowrap}
 .msglist{flex:1 1 300px;max-width:400px;min-width:0;border-right:1px solid var(--line);background:var(--surface)}
 .msglist-head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--muted)}
 .msglist-head strong{color:var(--text)}
-/* Owner request (22 Nov 2026), not in the prototype: the Leads pager wrapped to the narrow column — count and Rows on
-   one line, the navigation on the next (the full-width ::after breaks the line; the navigation is ordered after it). */
-.msglist .pager{padding:10px 14px;gap:8px;font-size:12.5px;color:var(--muted);border-top:1px solid var(--line)}
+/* Owner requests (22–23 Nov 2026), not in the prototype: the pager in the narrow list column, compact (« ‹ › » buttons)
+   on two lines — count and Rows, then the navigation (the full-width ::after breaks the line; the navigation is
+   ordered after it). */
+.msglist .pager{padding:8px 14px;gap:6px 8px;font-size:12.5px;color:var(--muted);border-top:1px solid var(--line);background:var(--surface)}
 .msglist .pager::after{content:'';flex-basis:100%;order:1}
 .msglist .pager>button,.msglist .pager>label:last-of-type{order:2}
+.pager.compact{gap:6px 4px}
+.pager.compact .pg-sym{width:30px;justify-content:center;padding:0;font-size:14px}
+.pager.compact input{width:48px;padding:0 6px}
+.pager.compact select.chip{height:30px}
+/* Desktop (owner, 23 Nov 2026): the Email screen fits the window — the mail area takes the height left under the
+   header and filters, each column scrolls on its own and the list's pager stays in view at its foot. */
+@media (min-width:1100px){
+  main:has(> .mail){height:100vh;overflow:hidden}
+  .mail{flex:1 1 0;min-height:0}
+  .folders,.reader,.mailside{overflow-y:auto;min-height:0}
+  .msglist{display:flex;flex-direction:column;min-height:0}
+  .msglist-head,.msglist .pager{flex:none}
+  .msglist-rows{flex:1 1 auto;min-height:0;overflow-y:auto}
+}
 .msg{display:flex;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line-2);cursor:pointer;color:var(--text);width:100%;text-align:left;text-decoration:none}
 .msg.on{background:var(--tint)}
 /* The open (and hovered) row keeps its dark text, as the prototype's selected row (review #20). */

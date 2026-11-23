@@ -12,13 +12,15 @@ type PagerProps = {
    */
   sizes?: readonly number[];
   onPageSize?: (size: number) => void;
+  /** A narrow column (Email list): the buttons show « ‹ › » only (their full name stays the accessible name). */
+  compact?: boolean;
 };
 
 /**
  * "Showing 26–50 of 112" with Previous / Next; renders nothing when the list is empty.
  * With `sizes` and `onPageSize` it renders the prototype's full pager instead.
  */
-export function Pager({ page, pageSize, total, onPage, sizes, onPageSize }: PagerProps) {
+export function Pager({ page, pageSize, total, onPage, sizes, onPageSize, compact }: PagerProps) {
   const t = useT();
   if (total === 0) return null;
   const pages = Math.max(1, Math.ceil(total / pageSize));
@@ -27,7 +29,7 @@ export function Pager({ page, pageSize, total, onPage, sizes, onPageSize }: Page
   const from = (page - 1) * pageSize + 1;
   const to = Math.min(total, page * pageSize);
   if (sizes && onPageSize) {
-    return <FullPager {...{ page, pages, pageSize, from, to, total, onPage, sizes, onPageSize }} />;
+    return <FullPager {...{ page, pages, pageSize, from, to, total, onPage, sizes, onPageSize, compact }} />;
   }
   return (
     <nav className="pager" aria-label={t('Pagination')}>
@@ -54,9 +56,10 @@ type FullProps = {
   onPage: (page: number) => void;
   sizes: readonly number[];
   onPageSize: (size: number) => void;
+  compact?: boolean;
 };
 
-function FullPager({ page, pages, pageSize, from, to, total, onPage, sizes, onPageSize }: FullProps) {
+function FullPager({ page, pages, pageSize, from, to, total, onPage, sizes, onPageSize, compact }: FullProps) {
   const t = useT();
   // The page box holds what is typed until Enter or leaving the field; then it jumps (clamped).
   const [typed, setTyped] = useState(String(page));
@@ -68,13 +71,18 @@ function FullPager({ page, pages, pageSize, from, to, total, onPage, sizes, onPa
     setTyped(String(next));
     if (next !== page) onPage(next);
   };
-  const nav = (label: string, target: number, off: boolean) => (
-    <button type="button" className="btn sm" disabled={off} onClick={() => onPage(target)}>
-      {label}
-    </button>
-  );
+  const nav = (label: string, target: number, off: boolean, symbol: string) =>
+    compact ? (
+      <button type="button" className="btn sm pg-sym" disabled={off} onClick={() => onPage(target)} aria-label={label} title={label}>
+        {symbol}
+      </button>
+    ) : (
+      <button type="button" className="btn sm" disabled={off} onClick={() => onPage(target)}>
+        {label}
+      </button>
+    );
   return (
-    <nav className="pager" aria-label={t('Pagination')}>
+    <nav className={compact ? 'pager compact' : 'pager'} aria-label={t('Pagination')}>
       <span aria-live="polite">{t('{from}–{to} of {total}', { from, to, total })}</span>
       <span className="grow" />
       <label>
@@ -87,10 +95,10 @@ function FullPager({ page, pages, pageSize, from, to, total, onPage, sizes, onPa
           ))}
         </select>
       </label>
-      {nav(`« ${t('First')}`, 1, page <= 1)}
-      {nav(`‹ ${t('Prev')}`, page - 1, page <= 1)}
+      {nav(`« ${t('First')}`, 1, page <= 1, '«')}
+      {nav(`‹ ${t('Prev')}`, page - 1, page <= 1, '‹')}
       <label>
-        {t('Page')}{' '}
+        <span className={compact ? 'sr' : undefined}>{t('Page')}</span>{' '}
         <input
           className="in"
           type="number"
@@ -106,8 +114,8 @@ function FullPager({ page, pages, pageSize, from, to, total, onPage, sizes, onPa
         />{' '}
         {t('of {pages}', { pages })}
       </label>
-      {nav(`${t('Next')} ›`, page + 1, page >= pages)}
-      {nav(`${t('Last')} »`, pages, page >= pages)}
+      {nav(`${t('Next')} ›`, page + 1, page >= pages, '›')}
+      {nav(`${t('Last')} »`, pages, page >= pages, '»')}
     </nav>
   );
 }
