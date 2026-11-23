@@ -29,10 +29,12 @@ export function useDialogFocus(ref: RefObject<HTMLElement | null>, onEscape: () 
       if (items.length === 0) return;
       const firstEl = items[0]!;
       const lastEl = items[items.length - 1]!;
-      if (e.shiftKey && (document.activeElement === firstEl || !root.contains(document.activeElement))) {
+      // Focus on the dialog itself (opened with nothing focused) or outside it counts as before the first control.
+      const away = document.activeElement === root || !root.contains(document.activeElement);
+      if (e.shiftKey && (document.activeElement === firstEl || away)) {
         e.preventDefault();
         lastEl.focus();
-      } else if (!e.shiftKey && (document.activeElement === lastEl || !root.contains(document.activeElement))) {
+      } else if (!e.shiftKey && (document.activeElement === lastEl || away)) {
         e.preventDefault();
         firstEl.focus();
       }
