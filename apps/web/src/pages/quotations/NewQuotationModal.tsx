@@ -43,7 +43,6 @@ export function NewQuotationModal({ onClose }: { onClose: () => void }) {
     <Modal
       title={t('New quotation')}
       onClose={onClose}
-      focusDialog
       actions={
         <>
           <button type="button" className="btn" onClick={onClose}>

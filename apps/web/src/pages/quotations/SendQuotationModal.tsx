@@ -52,7 +52,8 @@ export function SendQuotationModal({ q, total, onClose }: { q: QuotationDetail; 
     <Modal
       title={t('Send {number} by email', { number: q.number })}
       onClose={onClose}
-      focusDialog
+      // The cursor in Message: To is read-only (review #33).
+      initialFocus="#sqMessage"
       actions={
         <>
           <button type="button" className="btn" onClick={onClose}>

@@ -14,7 +14,12 @@ export function useDialogFocus(ref: RefObject<HTMLElement | null>, onEscape: () 
     const opener = document.activeElement as HTMLElement | null;
     const root = ref.current;
     const first = initial === null ? root : root?.querySelector<HTMLElement>(initial ?? FOCUSABLE);
-    first?.focus();
+    // Marked while it takes focus, so a searchable picker there does not open its list over the form (Combobox).
+    if (first && first !== root) {
+      first.dataset.dialogFocus = '1';
+      first.focus();
+      delete first.dataset.dialogFocus;
+    } else first?.focus();
     function onKey(e: KeyboardEvent) {
       if (!root) return;
       if (e.key === 'Escape') {
@@ -57,13 +62,15 @@ type ModalProps = {
    * open its list over the form (the prototype's dialogs open with nothing focused).
    */
   focusDialog?: boolean;
+  /** A selector for the field that takes the cursor on opening (default: the first focusable field). */
+  initialFocus?: string;
 };
 
 /** Accessible dialog: role="dialog", aria-modal, labelled by its title, Escape and backdrop close it. */
-export function Modal({ title, onClose, children, actions, focusDialog = false }: ModalProps) {
+export function Modal({ title, onClose, children, actions, focusDialog = false, initialFocus }: ModalProps) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
-  useDialogFocus(ref, onClose, focusDialog ? null : undefined);
+  useDialogFocus(ref, onClose, focusDialog ? null : initialFocus);
   return (
     <div
       className="modal-bg"

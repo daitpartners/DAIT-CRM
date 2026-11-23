@@ -86,7 +86,6 @@ export function NewFollowUpModal({ date, leadId, names, onClose }: { date: strin
     <Modal
       title={t('New follow-up')}
       onClose={onClose}
-      focusDialog
       actions={
         <>
           <button type="button" className="btn" onClick={onClose}>

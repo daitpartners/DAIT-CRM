@@ -24,7 +24,6 @@ export function PdfPreviewModal({ q, onClose }: { q: PreviewOf; onClose: () => v
     <Modal
       title={t('Quotation {number}', { number: q.number })}
       onClose={onClose}
-      focusDialog
       actions={
         <>
           <button type="button" className="btn" onClick={onClose}>

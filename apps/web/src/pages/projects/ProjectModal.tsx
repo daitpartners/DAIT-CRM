@@ -129,7 +129,6 @@ export function ProjectModal({ preset = {}, existing, onClose }: Props) {
     <Modal
       title={editing ? t('Edit project') : t('Create project')}
       onClose={onClose}
-      focusDialog
       actions={
         <>
           <button type="button" className="btn" onClick={onClose}>

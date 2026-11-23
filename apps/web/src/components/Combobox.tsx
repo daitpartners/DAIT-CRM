@@ -165,7 +165,8 @@ function SearchBox({ id, options, value, onChange, placeholder, required, onQuer
         placeholder={placeholder ?? t('Type to search…')}
         value={text}
         onFocus={(e) => {
-          show();
+          // A dialog opening on this field gives it the cursor without opening the list (review #33).
+          if (!e.currentTarget.dataset.dialogFocus) show();
           e.currentTarget.select();
         }}
         onClick={show}
