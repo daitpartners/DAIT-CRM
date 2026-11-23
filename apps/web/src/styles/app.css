@@ -850,6 +850,12 @@ a.strong{font-weight:600}
 .cell{height:34px;padding:0 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);font-size:13px;color:var(--text)}
 .totals{display:grid;grid-template-columns:1fr auto;gap:8px 16px;font-size:13px;align-content:start}
 .totals .big{font-weight:800;font-size:15px;border-top:1px solid var(--line);padding-top:8px}
+/* Each amount sits level with its label, also on the rows with a % box (review #24). */
+.totals{align-items:center}
+/* Quotation editor (review #23): the lines need about 720 px, so below that the side cards move under the editor
+   instead of squeezing Item to a few letters; Item keeps room for a readable name. */
+.q-editor>.col-main{flex-basis:720px}
+.q-item{min-width:200px}
 .q-m{color:var(--muted)}
 .q-hint{font-size:12.5px;color:var(--muted)}
 .q-foot{display:flex;flex-wrap:wrap;gap:20px;padding:16px 20px;border-top:1px solid var(--line)}

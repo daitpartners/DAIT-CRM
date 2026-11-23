@@ -46,7 +46,7 @@ export function LinesTable({ lines, currency, editable, onChange }: Props) {
       <table>
         <thead>
           <tr>
-            <th style={{ width: '34%' }}>{t('Item')}</th>
+            <th className="q-item" style={{ width: '34%' }}>{t('Item')}</th>
             <th>{t('Qty')}</th>
             <th>{t('Unit')}</th>
             <th className="num">{t('Unit price')}</th>

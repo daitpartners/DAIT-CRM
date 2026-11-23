@@ -396,7 +396,7 @@ function Editor({ q, crumb, refetch }: { q: QuotationDetail; crumb: React.ReactN
           </button>
         ) : null}
       </Topbar>
-      <div className="page cols">
+      <div className="page cols q-editor">
         <div className="col-main">
           <section className="card">
             <h2>{t('Quotation details')}</h2>
