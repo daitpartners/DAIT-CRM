@@ -168,10 +168,10 @@ describe('import research · Claude', () => {
     await claudeOn(10, true);
     const batch = await batchWith([{ companyName: 'Brightline Dental Clinics', country: 'Canada', phone: '+1 416 555 0144' }]);
     const { runner, calls } = fakeRunner({
-      website: { value: 'https://brightline.example/', sourceUrl: 'https://brightline.example/' },
-      city: { value: 'Toronto', sourceUrl: 'https://www.brightline.example/contact/' },
+      website: { value: 'https://brightlinedental.com/', sourceUrl: 'https://brightlinedental.com/' },
+      city: { value: 'Toronto', sourceUrl: 'https://www.brightlinedental.com/contact/' },
       designation: { value: 'Clinical Director', sourceUrl: 'https://invented.example/team' },
-    }, ['https://brightline.example/', 'https://brightline.example/contact']);
+    }, ['https://brightlinedental.com/', 'https://brightlinedental.com/contact']);
     expect(await startBatchResearch(batch.id, onDeps(runner))).toEqual({ total: 1 });
     expect((await batchOf(batch.id)).researchEngine).toEqual({ claude: 'sonnet' });
     expect(await researchNextRow(batch.id, onDeps(runner))).toBe('more');
@@ -183,7 +183,7 @@ describe('import research · Claude', () => {
     expect(asked).toEqual(['city', 'confidence', 'contactName', 'designation', 'email', 'industry', 'website']);
     const row = (await rowsOf(batch.id))[0]!;
     const found = researchOf(row);
-    expect(found.website).toEqual({ value: 'https://brightline.example/', sourceUrl: 'https://brightline.example/', sourceLabel: 'website search', confidence: 85 });
+    expect(found.website).toEqual({ value: 'https://brightlinedental.com/', sourceUrl: 'https://brightlinedental.com/', sourceLabel: 'website search', confidence: 85 });
     expect(found.city).toMatchObject({ value: 'Toronto', confidence: 85 });
     expect(found.designation).toBeUndefined();
     expect(row.claudeAt).not.toBeNull();
@@ -272,7 +272,7 @@ describe('import research · Claude', () => {
     const spyDeps = (runner: ClaudeRunner): ImportDeps => ({ ...onDeps(runner), reader: { resolve: async (h: string) => { asked.push(h); return resolve(h); } } });
     const batch = await batchWith([{ companyName: 'Brightline Dental Clinics', country: 'Canada' }]);
     const { runner } = fakeRunner({
-      website: { value: 'https://brightline-dental.example/', sourceUrl: 'https://directory.example/listing/brightline' },
+      website: { value: 'https://brightline-dental.com/', sourceUrl: 'https://directory.example/listing/brightline' },
       industry: { value: 'Dental clinics', sourceUrl: 'https://directory.example/listing/brightline' },
     }, ['https://directory.example/listing/brightline']);
     await startBatchResearch(batch.id, spyDeps(runner));
@@ -370,8 +370,8 @@ describe('import research · Claude', () => {
     await claudeOn(10, true);
     const batch = await batchWith([{ companyName: 'Brightline Dental Clinics', country: 'Canada' }]);
     const { runner } = fakeRunner(
-      { website: { value: 'https://brightline.example/', sourceUrl: 'https://brightline.example/' } },
-      ['https://brightline.example/'], 'High',
+      { website: { value: 'https://brightlinedental.com/', sourceUrl: 'https://brightlinedental.com/' } },
+      ['https://brightlinedental.com/'], 'High',
       async () => { await prisma.importBatch.update({ where: { id: batch.id }, data: { status: 'Importing' } }); },
     );
     await startBatchResearch(batch.id, onDeps(runner));
@@ -410,6 +410,19 @@ describe('foundWebsiteOk: a website found by search must be a home page its sour
     expect(foundWebsiteOk('https://en.wikipedia.org/', 'https://en.wikipedia.org/wiki/Acme', [])).toBe(false);
     expect(foundWebsiteOk('https://acme.com/about', 'https://acme.com/about', [])).toBe(false);
     expect(foundWebsiteOk('https://acme.com/?ref=ad', 'https://acme.com/', [])).toBe(false);
+  });
+
+  it('credentials, a port, an IP or an unknown TLD are never a company website', () => {
+    expect(foundWebsiteOk('https://acme.com/', 'https://acme.com/contact', [])).toBe(true);
+    expect(foundWebsiteOk('https://user:secret@acme.com/', 'https://acme.com/contact', [])).toBe(false);
+    expect(foundWebsiteOk('https://user@acme.com/', 'https://acme.com/contact', [])).toBe(false);
+    expect(foundWebsiteOk('https://acme.com:8443/', 'https://acme.com/contact', [])).toBe(false);
+    expect(foundWebsiteOk('http://10.0.0.5/', 'http://10.0.0.5/contact', [])).toBe(false);
+    expect(foundWebsiteOk('https://printer.local/', 'https://printer.local/contact', [])).toBe(false);
+    expect(foundWebsiteOk('https://intranet.internal/', 'https://intranet.internal/', [])).toBe(false);
+    expect(foundWebsiteOk('https://acme.example/', 'https://acme.example/contact', [])).toBe(false);
+    // A private suffix (myshopify.com) is known: a shop on it still passes.
+    expect(foundWebsiteOk('https://acme.myshopify.com/', 'https://acme.myshopify.com/pages/contact', [])).toBe(true);
   });
 });
 

@@ -13,7 +13,7 @@
  * - Pause / Resume, and a worker restart (`sweepImportResearch`) never lose or repeat a row.
  */
 import { Prisma, type ImportRow } from '@prisma/client';
-import { getDomain, getDomainWithoutSuffix } from 'tldts';
+import { getDomain, getDomainWithoutSuffix, parse as parseHost } from 'tldts';
 import { z } from 'zod';
 import {
   domainOf, type ImportActivity, type ImportField, type ResearchClaudeFailure, type ResearchEngine, type ResearchNotePart,
@@ -190,7 +190,8 @@ function absoluteUrl(v: string): URL | null {
 
 /**
  * A website Claude found is kept only when it is a company's home page vouched for by its source:
- * - it is a home page (no path beyond "/", no query);
+ * - it is a plain home page: no path beyond "/", no query, no user name or password, no port;
+ * - its host is under a known suffix (ICANN or private): never an IP, .local, .internal or another unknown TLD;
  * - its registrable domain is known and is the site itself (`www.` aside): never a bare public suffix such as co.uk or
  *   myshopify.com, never a deeper subdomain;
  * - it is not a directory, social, search or company-database site;
@@ -200,6 +201,9 @@ export function foundWebsiteOk(value: string, sourceUrl: string, searchUrls: str
   const url = absoluteUrl(value.trim());
   if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:')) return false;
   if ((url.pathname !== '/' && url.pathname !== '') || url.search) return false;
+  if (url.username || url.password || url.port) return false;
+  const host = parseHost(url.hostname, { allowPrivateDomains: true });
+  if (host.isIp || (host.isIcann !== true && host.isPrivate !== true)) return false;
   const domain = registrable(url.hostname);
   if (!domain || domain !== domainOf(url.hostname)) return false;
   const name = getDomainWithoutSuffix(url.hostname, { allowPrivateDomains: true });
