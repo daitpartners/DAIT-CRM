@@ -3,7 +3,7 @@ import { safeUrl } from '@dait-crm/shared';
 import { LEAD_ACTIVITY_PAGE_SIZE, useEarlierActivities, type ActivityRow, type LeadFull } from '../../api/leads';
 import { Icons } from '../../components/Icons';
 import { useFormatDate } from '../../hooks/useFormatDate';
-import { leadStatusText } from '../../i18n/labels';
+import { StatusBadge } from '../../components/StatusBadge';
 import { useT } from '../../i18n/useT';
 
 const ICON: Record<string, keyof typeof Icons> = {
@@ -11,25 +11,22 @@ const ICON: Record<string, keyof typeof Icons> = {
   assign: 'user', transfer: 'swap', ai: 'spark', created: 'star', quote: 'note',
 };
 
-/** One timeline row: icon by activity type, title, "from → to" for status changes, body, who and when. */
+/**
+ * One timeline row: icon by activity type on the prototype's colour for that type, title, body, a status change as
+ * "Status [from] → [to]" badges, and who and when (with the time, prototype rel()).
+ */
 export function TimelineEntry({ activity: a, last, extra }: { activity: ActivityRow; last?: boolean; extra?: ReactNode }) {
   const t = useT();
-  const { date } = useFormatDate();
+  const { relative } = useFormatDate();
   const link = safeUrl(a.url);
   return (
     <li className="tl">
       <div className="rail" aria-hidden="true">
-        <div className="dot">{Icons[ICON[a.activityType] ?? 'note']}</div>
+        <div className={`dot t-${ICON[a.activityType] ? a.activityType : 'note'}`}>{Icons[ICON[a.activityType] ?? 'note']}</div>
         {last ? null : <div className="line" />}
       </div>
       <div className="ev">
         <strong>{a.title}</strong>
-        {a.activityType === 'status' && a.statusTo ? (
-          <div className="b">
-            {a.statusFrom ? `${leadStatusText(t, a.statusFrom)} → ` : null}
-            {leadStatusText(t, a.statusTo)}
-          </div>
-        ) : null}
         {a.body ? <div className="b pre">{a.body}</div> : null}
         {link ? (
           <div className="b">
@@ -38,8 +35,14 @@ export function TimelineEntry({ activity: a, last, extra }: { activity: Activity
             </a>
           </div>
         ) : null}
+        {a.statusTo ? (
+          <div className="m tl-status">
+            {t('Status')} {a.statusFrom ? <><StatusBadge status={a.statusFrom} /> → </> : null}
+            <StatusBadge status={a.statusTo} />
+          </div>
+        ) : null}
         <div className="m">
-          {a.by ? a.by.name : t('System')} · {date(a.occurredAt)}
+          {a.by ? a.by.name : t('System')} · {relative(a.occurredAt)}
           {extra}
         </div>
       </div>

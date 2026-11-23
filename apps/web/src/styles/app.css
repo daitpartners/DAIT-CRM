@@ -139,6 +139,12 @@ textarea.in{height:auto;padding:10px 12px;resize:vertical;line-height:1.5}
 .tl{display:flex;gap:14px}.tl .rail{display:flex;flex-direction:column;align-items:center}
 .tl .dot{width:30px;height:30px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;background:var(--tint)}
 .tl .dot svg{width:15px;height:15px}
+/* Icon colours per activity type (prototype UI.timeline ACT), and the status change as badges (review #17). */
+.tl .dot.t-call,.tl .dot.t-research{background:#FBE4D4}.tl .dot.t-email{background:#E4D5FB}
+.tl .dot.t-meeting,.tl .dot.t-assign,.tl .dot.t-status{background:#EFE6FD}
+.tl .dot.t-transfer,.tl .dot.t-quote{background:#FFF1E0}.tl .dot.t-ai{background:#FFF8EC}
+.tl .dot.t-created{background:#E6F6EC}.tl .dot.t-note{background:#EDE9F4}
+.tl .ev .tl-status{margin:6px 0 2px;font-size:12px}
 .tl .line{flex-grow:1;width:2px;background:var(--line);margin:4px auto 0}
 .tl .ev{padding-bottom:18px;min-width:0;font-size:13px}.tl .ev .m{color:var(--muted)}.tl .ev .b{color:var(--body);margin-top:4px;line-height:1.5}
 .task{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px}
