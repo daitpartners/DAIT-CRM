@@ -225,3 +225,167 @@ export function importNoClaudeText(code: ImportNoClaude, lang: Lang): string {
 
 /** A batch number: IMPORT-YYYY-MM-DD, then -2, -3 … for later batches the same day. */
 export const BATCH_NUMBER_RE = /^IMPORT-\d{4}-\d{2}-\d{2}(-\d+)?$/i;
+
+// ---------------------------------------------------------------------------------------------------------------
+// Step 3 (AI research): what is stored is data; these render it in the reader's language.
+
+/** Why a row's Claude call gave nothing: `ClaudeRunError.kind`, or an answer that did not fit the schema. */
+export const RESEARCH_CLAUDE_FAILURES = ['not_logged_in', 'failed', 'timeout', 'unexpected'] as const;
+export type ResearchClaudeFailure = (typeof RESEARCH_CLAUDE_FAILURES)[number];
+
+/**
+ * One part of `ImportRow.researchNote` (stored as a list, rendered with `importResearchNoteText`). `readError` carries
+ * the website reader's own message (English, as release 4 shows it).
+ */
+export type ResearchNotePart =
+  | { k: 'foundBySearch' }
+  | { k: 'pagesRead'; n: number }
+  | { k: 'readError'; error: string }
+  | { k: 'claude'; kind: ResearchClaudeFailure }
+  | { k: 'capReached' }
+  | { k: 'filled'; n: number }
+  | { k: 'noWebsite' }
+  | { k: 'nothingToLookUp' }
+  | { k: 'nothingFound' }
+  | { k: 'researchFailed' };
+
+/** `ImportBatch.researchEngine`: the website reader, plus Claude Code with this model when `claude` is set. */
+export type ResearchEngine = { claude: string | null };
+
+/** One `ImportBatch.activity` entry (newest first, at most 50). */
+export type ImportActivity =
+  | { at: string; code: 'started'; params: { n: number; engine: ResearchEngine } }
+  | { at: string; code: 'row'; params: { name: string; note: ResearchNotePart[] } }
+  | { at: string; code: 'finished' | 'capStopped' | 'paused' | 'resumed' };
+export type ImportActivityCode = ImportActivity['code'];
+
+type NoteTexts = {
+  foundBySearch: string; pagesRead: (n: number) => string; readError: (e: string) => string;
+  claude: Record<ResearchClaudeFailure, string>; capReached: string; filled: (n: number) => string;
+  noWebsite: string; nothingToLookUp: string; nothingFound: string; researchFailed: string;
+};
+
+const NOTE_TEXT: Record<Lang, NoteTexts> = {
+  en: {
+    foundBySearch: 'website found by search',
+    pagesRead: (n) => `${n} ${n === 1 ? 'page' : 'pages'} read`,
+    readError: (e) => `could not read the website (${e})`,
+    claude: {
+      not_logged_in: 'Claude Code is not logged in on the server', failed: 'Claude Code failed', timeout: 'Claude took too long',
+      unexpected: 'Claude returned an unexpected answer',
+    },
+    capReached: "Claude's monthly run cap is reached",
+    filled: (n) => `${n} ${n === 1 ? 'field' : 'fields'} filled`,
+    noWebsite: 'No website to read',
+    nothingToLookUp: 'Nothing to look up',
+    nothingFound: 'nothing found',
+    researchFailed: 'Research failed',
+  },
+  es: {
+    foundBySearch: 'sitio web encontrado por búsqueda',
+    pagesRead: (n) => `${n} ${n === 1 ? 'página leída' : 'páginas leídas'}`,
+    readError: (e) => `no se pudo leer el sitio web (${e})`,
+    claude: {
+      not_logged_in: 'Claude Code no tiene la sesión iniciada en el servidor', failed: 'Claude Code falló',
+      timeout: 'Claude tardó demasiado', unexpected: 'Claude dio una respuesta inesperada',
+    },
+    capReached: 'se alcanzó el límite mensual de usos de Claude',
+    filled: (n) => `${n} ${n === 1 ? 'campo completado' : 'campos completados'}`,
+    noWebsite: 'No hay sitio web que leer',
+    nothingToLookUp: 'Nada que buscar',
+    nothingFound: 'no se encontró nada',
+    researchFailed: 'La investigación falló',
+  },
+  fr: {
+    foundBySearch: 'site web trouvé par recherche',
+    pagesRead: (n) => `${n} ${n === 1 ? 'page lue' : 'pages lues'}`,
+    readError: (e) => `impossible de lire le site web (${e})`,
+    claude: {
+      not_logged_in: 'Claude Code n’est pas connecté sur le serveur', failed: 'Claude Code a échoué',
+      timeout: 'Claude a mis trop de temps', unexpected: 'Claude a donné une réponse inattendue',
+    },
+    capReached: 'le plafond mensuel d’utilisations de Claude est atteint',
+    filled: (n) => `${n} ${n === 1 ? 'champ rempli' : 'champs remplis'}`,
+    noWebsite: 'Aucun site web à lire',
+    nothingToLookUp: 'Rien à rechercher',
+    nothingFound: 'rien trouvé',
+    researchFailed: 'La recherche a échoué',
+  },
+};
+
+/** A row's research note in `lang` ("website found by search, 3 pages read, 3 fields filled"); unknown parts are skipped. */
+export function importResearchNoteText(parts: readonly ResearchNotePart[] | null | undefined, lang: Lang): string {
+  const t = NOTE_TEXT[lang] ?? NOTE_TEXT.en;
+  const out: string[] = [];
+  const list: readonly ResearchNotePart[] = Array.isArray(parts) ? parts : [];
+  for (const p of list) {
+    if (!p || typeof p !== 'object') continue;
+    switch (p.k) {
+      case 'foundBySearch': out.push(t.foundBySearch); break;
+      case 'pagesRead': out.push(t.pagesRead(p.n)); break;
+      case 'readError': out.push(t.readError(p.error)); break;
+      case 'claude': out.push(t.claude[p.kind] ?? t.claude.failed); break;
+      case 'capReached': out.push(t.capReached); break;
+      case 'filled': out.push(t.filled(p.n)); break;
+      case 'noWebsite': out.push(t.noWebsite); break;
+      case 'nothingToLookUp': out.push(t.nothingToLookUp); break;
+      case 'nothingFound': out.push(t.nothingFound); break;
+      case 'researchFailed': out.push(t.researchFailed); break;
+      default: break;
+    }
+  }
+  return out.join(', ');
+}
+
+const ENGINE_TEXT: Record<Lang, { reader: string; claude: (model: string) => string }> = {
+  en: { reader: 'Website reader', claude: (m) => `Website reader + Claude Code ${m}` },
+  es: { reader: 'Lector de sitios web', claude: (m) => `Lector de sitios web + Claude Code ${m}` },
+  fr: { reader: 'Lecteur de sites web', claude: (m) => `Lecteur de sites web + Claude Code ${m}` },
+};
+
+/** The research engine in `lang`: "Website reader" or "Website reader + Claude Code sonnet". */
+export function importEngineText(engine: ResearchEngine | null | undefined, lang: Lang): string {
+  const t = ENGINE_TEXT[lang] ?? ENGINE_TEXT.en;
+  return engine?.claude ? t.claude(engine.claude) : t.reader;
+}
+
+const ACTIVITY_TEXT: Record<Lang, {
+  started: (n: number, engine: string) => string; finished: string; capStopped: string; paused: string; resumed: string;
+}> = {
+  en: {
+    started: (n, e) => `Started research for ${n} ${n === 1 ? 'row' : 'rows'} · ${e}`,
+    finished: 'Research finished',
+    capStopped: "Claude's monthly run cap is reached; research stopped",
+    paused: 'Research paused',
+    resumed: 'Research resumed',
+  },
+  es: {
+    started: (n, e) => `Investigación iniciada para ${n} ${n === 1 ? 'fila' : 'filas'} · ${e}`,
+    finished: 'Investigación terminada',
+    capStopped: 'Se alcanzó el límite mensual de usos de Claude; la investigación se detuvo',
+    paused: 'Investigación en pausa',
+    resumed: 'Investigación reanudada',
+  },
+  fr: {
+    started: (n, e) => `Recherche lancée pour ${n} ${n === 1 ? 'ligne' : 'lignes'} · ${e}`,
+    finished: 'Recherche terminée',
+    capStopped: 'Le plafond mensuel d’utilisations de Claude est atteint ; la recherche est arrêtée',
+    paused: 'Recherche en pause',
+    resumed: 'Recherche reprise',
+  },
+};
+
+/** One activity line in `lang` ("Fixture Freight — 1 page read, 2 fields filled"); an unknown entry reads as ''. */
+export function importActivityText(entry: ImportActivity, lang: Lang): string {
+  const t = ACTIVITY_TEXT[lang] ?? ACTIVITY_TEXT.en;
+  if (!entry || typeof entry !== 'object') return '';
+  switch (entry.code) {
+    case 'started': return t.started(entry.params.n, importEngineText(entry.params.engine, lang));
+    case 'row': return `${entry.params.name} — ${importResearchNoteText(entry.params.note, lang)}`;
+    case 'finished': return t.finished;
+    case 'capStopped': return t.capStopped;
+    case 'paused': return t.paused;
+    case 'resumed': return t.resumed;
+    default: return '';
+  }
+}

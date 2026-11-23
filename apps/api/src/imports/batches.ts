@@ -17,7 +17,9 @@ import { removeImportFile, saveImportFile } from './storage.js';
 /** A refused batch or file change; the route answers `status` with `{ error: code }`. */
 export class ImportError extends Error {
   constructor(
-    readonly code: 'batch_locked' | 'too_many_files' | 'file_type' | 'file_size' | 'files_reading' | 'no_rows',
+    readonly code:
+      | 'batch_locked' | 'too_many_files' | 'file_type' | 'file_size' | 'files_reading' | 'no_rows'
+      | 'research_stopped' | 'claude_cap_reached',
     readonly status: number,
   ) {
     super(code);

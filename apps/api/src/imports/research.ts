@@ -14,7 +14,10 @@
  */
 import { Prisma, type ImportRow } from '@prisma/client';
 import { z } from 'zod';
-import { domainOf, type ImportField, type ResearchValue, type RowFields } from '@dait-crm/shared';
+import {
+  domainOf, type ImportActivity, type ImportField, type ResearchClaudeFailure, type ResearchEngine, type ResearchNotePart,
+  type ResearchValue, type RowFields,
+} from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { enqueue, STALE_AFTER_MS } from '../jobs/queue.js';
 import { NotFoundError } from '../validate.js';
@@ -41,21 +44,20 @@ const CLAUDE_CONFIDENCE = { High: 85, Medium: 70, Low: 55 } as const;
 /** The label of a website Claude found with web search. */
 const WEBSITE_SEARCH_LABEL = 'website search';
 const VALUE_MAX = 500;
-const NOTE_MAX = 300;
 const PAGE_TEXT_MAX = 4000;
 /** `ImportBatch.activity` keeps the newest 50 lines. */
 const ACTIVITY_MAX = 50;
 /** Rows a page of the research table shows. */
 const PAGE_SIZE = 100;
-
-export const RESEARCH_FINISHED = 'Research finished';
-export const CAP_STOPPED = "Claude's monthly run cap is reached; research stopped";
-export const NO_WEBSITE = 'No website to read';
+/** ETA: the gaps between the last rows researched (a longer gap was a pause or a stop, and is left out). */
+const ETA_GAPS = 10;
+const ETA_MAX_GAP_MS = 10 * 60_000;
 
 export type RowResearchResult = {
   values: Partial<Record<ImportField, ResearchValue>>;
   outcome: 'everything' | 'some' | 'nothing' | 'failed';
-  note: string;
+  /** Rendered with `importResearchNoteText` (shared), in the reader's language. */
+  note: ResearchNotePart[];
   /** The Claude call was reserved (its spend is recorded in `claude_at`, even if the call failed or was discarded). */
   usedClaude: boolean;
   /** Claude is on but the month's run cap refused this row's call. */
@@ -63,7 +65,7 @@ export type RowResearchResult = {
 };
 
 const has = (v: string | undefined): v is string => typeof v === 'string' && v.trim() !== '';
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const digits = (v: string) => v.replace(/\D/g, '');
 
 /** "site.com/contact": the page's host without www and its path. */
 function labelOf(url: string): string {
@@ -131,12 +133,16 @@ function claudeSchemas(asked: TargetField[]) {
   return { jsonSchema, zodSchema };
 }
 
+/** Page text as data: no `<` or `>`, so nothing in it can close (or open) a `<page>` block. */
+const escapeText = (t: string) => t.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 function claudePrompt(fields: RowFields, asked: TargetField[], pages: PageRead[]): string {
   const known = (Object.keys(FIELD_NAME) as ImportField[])
     .filter((f) => f !== 'notes' && has(fields[f]))
-    .map((f) => `${FIELD_NAME[f]}: ${fields[f]!.trim()}`);
+    .map((f) => `${FIELD_NAME[f]}: ${escapeText(fields[f]!.trim())}`);
   const wanted = asked.map((f) => `- ${f}: ${FIELD_HELP[f]}`);
-  const pageBlocks = pages.map((p) => `<page url="${p.url}">\n${p.title}\n\n${p.text.slice(0, PAGE_TEXT_MAX)}\n</page>`);
+  const pageBlocks = pages.map((p) =>
+    `<page url="${p.url.replace(/["<>]/g, encodeURIComponent)}">\n${escapeText(p.title)}\n\n${escapeText(p.text.slice(0, PAGE_TEXT_MAX))}\n</page>`);
   return [
     `What the imported list says:\n${known.join('\n') || '(nothing)'}`,
     `Fields to find:\n${wanted.join('\n')}`,
@@ -158,11 +164,36 @@ function cleanValue(field: TargetField, raw: string, countries: readonly string[
 // ---------------------------------------------------------------------------------------------------------------
 // One row
 
+/** `host` is `domain` or one of its subdomains. */
+const withinDomain = (host: string | null, domain: string | null) =>
+  !!host && !!domain && (host === domain || host.endsWith(`.${domain}`));
+
+/**
+ * A found website is kept only when it is the site of its source: its domain is the domain of its sourceUrl or of a
+ * web search result (a directory or social profile citing another company's address never passes).
+ */
+function websiteMatchesSource(value: string, sourceUrl: string, searchUrls: string[]): boolean {
+  const domain = domainOf(value);
+  return [sourceUrl, ...searchUrls].some((u) => withinDomain(domainOf(u), domain));
+}
+
+/**
+ * A value citing a page read must be written in that page: an email (ignoring case) or a phone (by its digits). Other
+ * fields, and values citing a web search result (only its URL comes back), are kept on their source alone.
+ */
+function inCitedPage(field: TargetField, value: string, page: PageRead | undefined): boolean {
+  if (!page || (field !== 'email' && field !== 'phone')) return true;
+  const text = `${page.title}\n${page.text}`;
+  if (field === 'email') return text.toLowerCase().includes(value.toLowerCase());
+  const d = digits(value);
+  return d.length >= 6 && digits(text).includes(d);
+}
+
 /**
  * Researches one staged row: (1) its own website with the website reader (email only from the site's own domain, city,
  * a page's phone); (2) when `c` is given and fields are still missing, one Claude call, reserved first against the
- * monthly run cap (refused → `capReached`, no call). A website Claude found by web search is then read too (free).
- * Writes nothing but the reservation's `claude_at`.
+ * monthly run cap (refused → `capReached`, no call). A website Claude found by web search (matching its source's
+ * domain) is then read too (free). Writes nothing but the reservation's `claude_at`.
  */
 export async function researchRow(row: ImportRow, c: ImportClaude | null, deps: ImportDeps = {}): Promise<RowResearchResult> {
   const fields = row.fields as RowFields;
@@ -195,7 +226,7 @@ export async function researchRow(row: ImportRow, c: ImportClaude | null, deps: 
 
   let usedClaude = false;
   let capReached = false;
-  let claudeError: string | null = null;
+  let claudeFailure: ResearchClaudeFailure | null = null;
   let foundBySearch = false;
   // Without a page read or web search, no answer could be sourced: the call is not made (nor counted).
   if (c && missing().length > 0 && (pages.length > 0 || c.webSearch)) {
@@ -216,26 +247,30 @@ export async function researchRow(row: ImportRow, c: ImportClaude | null, deps: 
           model: c.model, signal: AbortSignal.timeout(CLAUDE_CALL_TIMEOUT_MS),
         });
         const parsed = zodSchema.safeParse(output);
-        if (!parsed.success) claudeError = 'Claude returned an unexpected answer';
+        if (!parsed.success) claudeFailure = 'unexpected';
         else {
           const answer = parsed.data as Record<string, { value: string; sourceUrl: string } | null | string>;
           const confidence = CLAUDE_CONFIDENCE[answer.confidence as keyof typeof CLAUDE_CONFIDENCE];
           // The same source rule as release 4's Claude provider: a page read, or a web search result.
-          const allowed = new Set(pages.map((p) => normaliseUrl(p.url)));
-          if (c.webSearch) for (const u of searchUrls) allowed.add(normaliseUrl(u));
+          const pageByUrl = new Map(pages.map((p) => [normaliseUrl(p.url), p]));
+          const results = c.webSearch ? searchUrls : [];
+          const allowed = new Set([...pageByUrl.keys(), ...results.map(normaliseUrl)]);
           const countries = asked.includes('country') ? await knownCountries() : [];
           for (const field of asked) {
             const f = answer[field];
-            if (!f || typeof f === 'string' || !allowed.has(normaliseUrl(f.sourceUrl))) continue;
+            if (!f || typeof f === 'string') continue;
+            const source = normaliseUrl(f.sourceUrl);
+            if (!allowed.has(source)) continue;
             const value = cleanValue(field, f.value, countries);
-            if (!value) continue;
+            if (!value || !inCitedPage(field, value, pageByUrl.get(source))) continue;
+            if (field === 'website' && !websiteMatchesSource(value, f.sourceUrl, results)) continue;
             const sourceLabel = field === 'website' ? WEBSITE_SEARCH_LABEL : `AI analysis · ${labelOf(f.sourceUrl)}`;
             values[field] = { value, sourceUrl: f.sourceUrl, sourceLabel, confidence };
             if (field === 'website') foundBySearch = true;
           }
         }
       } catch (err) {
-        claudeError = err instanceof ClaudeRunError ? err.message : 'Claude Code failed';
+        claudeFailure = err instanceof ClaudeRunError ? err.kind : 'failed';
       }
     }
   }
@@ -243,22 +278,22 @@ export async function researchRow(row: ImportRow, c: ImportClaude | null, deps: 
   if (foundBySearch && values.website && missing().length > 0) await read(values.website.value);
 
   const filled = Object.keys(values).length;
-  const parts: string[] = [];
-  if (foundBySearch) parts.push('website found by search');
-  if (pages.length > 0) parts.push(`${plural(pages.length, 'page')} read`);
-  if (readError) parts.push(`could not read the website (${readError})`);
-  if (claudeError) parts.push(claudeError);
-  if (capReached) parts.push("Claude's monthly run cap is reached");
-  if (filled > 0) parts.push(`${plural(filled, 'field')} filled`);
-  let note: string;
-  if (targets.length === 0) note = 'Nothing to look up';
-  else if (!ownSite && !usedClaude && parts.length === 0) note = NO_WEBSITE;
-  else note = parts.join(', ') || 'nothing found';
+  const parts: ResearchNotePart[] = [];
+  if (foundBySearch) parts.push({ k: 'foundBySearch' });
+  if (pages.length > 0) parts.push({ k: 'pagesRead', n: pages.length });
+  if (readError) parts.push({ k: 'readError', error: readError.slice(0, 200) });
+  if (claudeFailure) parts.push({ k: 'claude', kind: claudeFailure });
+  if (capReached) parts.push({ k: 'capReached' });
+  if (filled > 0) parts.push({ k: 'filled', n: filled });
+  let note: ResearchNotePart[];
+  if (targets.length === 0) note = [{ k: 'nothingToLookUp' }];
+  else if (!ownSite && !usedClaude && parts.length === 0) note = [{ k: 'noWebsite' }];
+  else note = parts.length > 0 ? parts : [{ k: 'nothingFound' }];
 
   const outcome: RowResearchResult['outcome'] = targets.length > 0 && filled === targets.length ? 'everything'
     : filled > 0 ? 'some'
-      : readError || claudeError ? 'failed' : 'nothing';
-  return { values, outcome, note: note.slice(0, NOTE_MAX), usedClaude, capReached };
+      : readError || claudeFailure ? 'failed' : 'nothing';
+  return { values, outcome, note, usedClaude, capReached };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -273,14 +308,21 @@ async function lockBatch(tx: Tx, batchId: number): Promise<LockedBatch | null> {
   return batch ?? null;
 }
 
-type Activity = { at: string; text: string };
+/** An activity entry without its time (added by `addActivity`). */
+type ActivityDraft =
+  | { code: 'started'; params: { n: number; engine: ResearchEngine } }
+  | { code: 'row'; params: { name: string; note: ResearchNotePart[] } }
+  | { code: 'finished' | 'capStopped' | 'paused' | 'resumed' };
 
-/** Adds activity lines (given oldest first; the list is newest first, 50 at most) with other batch changes. Under the lock. */
-async function addActivity(tx: Tx, batchId: number, texts: string[], data: Prisma.ImportBatchUpdateInput = {}): Promise<void> {
+/**
+ * Adds activity entries (given oldest first; the list is newest first, 50 at most) with other batch changes. Under the
+ * lock. Entries are data (`{ at, code, params }`), rendered in the reader's language with `importActivityText`.
+ */
+async function addActivity(tx: Tx, batchId: number, drafts: ActivityDraft[], data: Prisma.ImportBatchUpdateInput = {}): Promise<void> {
   const { activity } = await tx.importBatch.findUniqueOrThrow({ where: { id: batchId }, select: { activity: true } });
   const at = new Date().toISOString();
-  const lines: Activity[] = texts.map((text) => ({ at, text })).reverse();
-  const next = [...lines, ...(Array.isArray(activity) ? (activity as Activity[]) : [])].slice(0, ACTIVITY_MAX);
+  const entries = drafts.map((d) => ({ at, ...d }) as ImportActivity).reverse();
+  const next = [...entries, ...(Array.isArray(activity) ? (activity as unknown as ImportActivity[]) : [])].slice(0, ACTIVITY_MAX);
   await tx.importBatch.update({ where: { id: batchId }, data: { ...data, activity: next as unknown as Prisma.InputJsonValue } });
 }
 
@@ -303,19 +345,36 @@ async function ensureResearchJob(tx: Tx, batchId: number, runningSince?: Date): 
   return true;
 }
 
+/** Claude is on and this month's runs have reached the cap. */
+async function claudeCapReached(tx: Tx | typeof prisma): Promise<boolean> {
+  const settings = await loadEnrichmentSettings(tx);
+  if (!settings.claudeEnabled || settings.claudeMonthlyRunCap <= 0) return false;
+  return (await monthTotals(tx)).claudeRuns >= settings.claudeMonthlyRunCap;
+}
+
 /**
  * Starts research: targets = ticked rows with status Missing details and a company name or website (each `waiting`,
  * its earlier research cleared). The batch becomes Researching with one `import_research` job queued, or Waiting for
- * review when nothing needs research. A batch already Researching keeps its run. 409 `batch_locked` from Importing on.
+ * review when nothing needs research. A batch already Researching keeps its run. Refused (409):
+ * - `batch_locked` from Importing on;
+ * - `files_reading` while a file of the batch is still being read (its rows would miss the run);
+ * - `research_stopped` after a cap stop with rows already researched: Resume continues the run (a new Start would
+ *   research those rows, and spend Claude, again).
  */
 export async function startBatchResearch(batchId: number, deps: ImportDeps = {}): Promise<{ total: number }> {
   const c = await importClaude(deps);
-  const engine = (c ? `Website reader + Claude Code ${c.model}` : 'Website reader').slice(0, 120);
+  const engine: ResearchEngine = { claude: c ? c.model.slice(0, 100) : null };
   return prisma.$transaction(async (tx) => {
     const batch = await lockBatch(tx, batchId);
     if (!batch) throw new NotFoundError();
     if (isLocked(batch.status)) throw new ImportError('batch_locked', 409);
     if (batch.status === 'Researching') return { total: batch.research_total };
+    if (await tx.importFile.count({ where: { batchId, status: 'Reading', deletedAt: null } }) > 0) {
+      throw new ImportError('files_reading', 409);
+    }
+    if (batch.research_stop_reason === 'cap' && await tx.importRow.count({ where: { batchId, researchedAt: { not: null } } }) > 0) {
+      throw new ImportError('research_stopped', 409);
+    }
     await tx.$executeRaw`UPDATE import_rows SET research_status = NULL WHERE batch_id = ${batchId} AND research_status IS NOT NULL`;
     const total = await tx.$executeRaw`
       UPDATE import_rows SET research_status = 'waiting', research = '{}'::jsonb, research_note = NULL, researched_at = NULL
@@ -326,8 +385,8 @@ export async function startBatchResearch(batchId: number, deps: ImportDeps = {})
       await tx.importBatch.update({ where: { id: batchId }, data: { ...reset, status: 'Waiting for review' } });
       return { total: 0 };
     }
-    await addActivity(tx, batchId, [`Started research for ${plural(total, 'row')} · ${engine}`], {
-      ...reset, status: 'Researching', researchStartedAt: new Date(), researchEngine: engine,
+    await addActivity(tx, batchId, [{ code: 'started', params: { n: total, engine } }], {
+      ...reset, status: 'Researching', researchStartedAt: new Date(), researchEngine: engine as Prisma.InputJsonValue,
     });
     await ensureResearchJob(tx, batchId);
     return { total };
@@ -341,7 +400,7 @@ export async function pauseResearch(batchId: number): Promise<{ paused: boolean 
     if (!batch) throw new NotFoundError();
     if (isLocked(batch.status)) throw new ImportError('batch_locked', 409);
     if (batch.status !== 'Researching') return { paused: batch.research_paused };
-    if (!batch.research_paused) await addActivity(tx, batchId, ['Research paused'], { researchPaused: true });
+    if (!batch.research_paused) await addActivity(tx, batchId, [{ code: 'paused' }], { researchPaused: true });
     return { paused: true };
   });
 }
@@ -349,22 +408,28 @@ export async function pauseResearch(batchId: number): Promise<{ paused: boolean 
 /**
  * Resumes a paused batch, or one stopped at the Claude cap that still has rows waiting (status back to Researching):
  * clears the stop reason and queues a job unless one is already queued (checked under the batch lock, so resuming twice
- * queues one job).
+ * queues one job). Refused with 409 `claude_cap_reached` while Claude is on and this month's cap is still reached (the
+ * next row would stop again at once).
  */
-export async function resumeResearch(batchId: number): Promise<{ paused: boolean }> {
+export async function resumeResearch(batchId: number, deps: ImportDeps = {}): Promise<{ paused: boolean }> {
+  const c = await importClaude(deps);
   return prisma.$transaction(async (tx) => {
     const batch = await lockBatch(tx, batchId);
     if (!batch) throw new NotFoundError();
     if (isLocked(batch.status)) throw new ImportError('batch_locked', 409);
     const stopped = batch.research_paused || batch.research_stop_reason !== null;
     const clear = { researchPaused: false, researchStopReason: null };
+    const left = batch.status === 'Researching'
+      || await tx.importRow.count({ where: { batchId, researchStatus: { in: ['waiting', 'running'] } } }) > 0;
+    if ((stopped || batch.status === 'Researching') && left && c && await claudeCapReached(tx)) {
+      throw new ImportError('claude_cap_reached', 409);
+    }
     if (batch.status === 'Researching') {
-      if (stopped) await addActivity(tx, batchId, ['Research resumed'], clear);
+      if (stopped) await addActivity(tx, batchId, [{ code: 'resumed' }], clear);
       await ensureResearchJob(tx, batchId);
     } else if (stopped) {
-      const left = await tx.importRow.count({ where: { batchId, researchStatus: { in: ['waiting', 'running'] } } });
-      if (left > 0) {
-        await addActivity(tx, batchId, ['Research resumed'], { ...clear, status: 'Researching' });
+      if (left) {
+        await addActivity(tx, batchId, [{ code: 'resumed' }], { ...clear, status: 'Researching' });
         await ensureResearchJob(tx, batchId);
       } else {
         await tx.importBatch.update({ where: { id: batchId }, data: clear });
@@ -374,18 +439,12 @@ export async function resumeResearch(batchId: number): Promise<{ paused: boolean
   });
 }
 
-/** Claude is on and this month's runs have reached the cap. */
-async function claudeCapReached(tx: Tx): Promise<boolean> {
-  const settings = await loadEnrichmentSettings(tx);
-  if (!settings.claudeEnabled || settings.claudeMonthlyRunCap <= 0) return false;
-  return (await monthTotals(tx)).claudeRuns >= settings.claudeMonthlyRunCap;
-}
-
-const capStop = { status: 'Waiting for review', researchStopReason: 'cap' } as const;
+/** A cap stop: Waiting for review with the reason; a pause asked meanwhile no longer applies. */
+const capStop = { status: 'Waiting for review', researchStopReason: 'cap', researchPaused: false } as const;
 
 /**
  * Researches the batch's next waiting row (by position): `paused` when paused; `done` when no row is waiting (the batch
- * becomes Waiting for review, "Research finished") or the batch is no longer Researching; `stopped` when Claude is on
+ * becomes Waiting for review, activity `finished`) or the batch is no longer Researching; `stopped` when Claude is on
  * and the month's run cap is reached (before a row, which then stays waiting, or by the row just researched, which keeps
  * its website reader values and counts as researched): Waiting for review, stop reason `cap`; otherwise `more`. The
  * daily research limit is never consulted. Results are written only while the batch is still Researching.
@@ -397,7 +456,7 @@ export async function researchNextRow(batchId: number, deps: ImportDeps = {}): P
     if (!batch || batch.status !== 'Researching') return 'done';
     if (batch.research_paused) return 'paused';
     if (c && await claudeCapReached(tx)) {
-      await addActivity(tx, batchId, [CAP_STOPPED], capStop);
+      await addActivity(tx, batchId, [{ code: 'capStopped' }], capStop);
       return 'stopped';
     }
     const [next] = await tx.$queryRaw<{ id: number }[]>`
@@ -405,7 +464,7 @@ export async function researchNextRow(batchId: number, deps: ImportDeps = {}): P
     if (!next) {
       // A row still running belongs to a lost job: the sweep makes it waiting again and restarts the chain.
       if (await tx.importRow.count({ where: { batchId, researchStatus: 'running' } }) === 0) {
-        await addActivity(tx, batchId, [RESEARCH_FINISHED], { status: 'Waiting for review' });
+        await addActivity(tx, batchId, [{ code: 'finished' }], { status: 'Waiting for review' });
       }
       return 'done';
     }
@@ -417,7 +476,7 @@ export async function researchNextRow(batchId: number, deps: ImportDeps = {}): P
   try {
     result = await researchRow(claim, c, deps);
   } catch {
-    result = { values: {}, outcome: 'failed', note: 'Research failed', usedClaude: false, capReached: false };
+    result = { values: {}, outcome: 'failed', note: [{ k: 'researchFailed' }], usedClaude: false, capReached: false };
   }
 
   return prisma.$transaction(async (tx) => {
@@ -430,15 +489,16 @@ export async function researchNextRow(batchId: number, deps: ImportDeps = {}): P
     const written = await tx.importRow.updateMany({
       where: { id: claim.id, researchStatus: 'running' },
       data: {
-        research: result.values as Prisma.InputJsonValue, researchStatus: result.outcome, researchNote: result.note,
-        researchedAt: new Date(),
+        research: result.values as Prisma.InputJsonValue, researchStatus: result.outcome,
+        researchNote: result.note as unknown as Prisma.InputJsonValue, researchedAt: new Date(),
       },
     });
     if (written.count === 0) return 'more'; // released by the sweep meanwhile: it is researched again
-    const name = (claim.fields as RowFields).companyName?.trim() || (claim.fields as RowFields).website?.trim() || `Row ${claim.position}`;
-    const line = `${name} — ${result.note}`;
+    const f = claim.fields as RowFields;
+    const name = (f.companyName?.trim() || f.website?.trim() || `#${claim.position}`).slice(0, 200);
+    const line: ActivityDraft = { code: 'row', params: { name, note: result.note } };
     if (result.capReached) {
-      await addActivity(tx, batchId, [line, CAP_STOPPED], { researchDone: { increment: 1 }, ...capStop });
+      await addActivity(tx, batchId, [line, { code: 'capStopped' }], { researchDone: { increment: 1 }, ...capStop });
       return 'stopped';
     }
     await addActivity(tx, batchId, [line], { researchDone: { increment: 1 } });
@@ -455,13 +515,19 @@ export async function continueResearch(batchId: number): Promise<void> {
 }
 
 /**
- * Restart recovery. Rows left `running` by a lost job become `waiting` again (at startup every running row, as no job
- * runs yet; on the schedule those of batches with no `import_research` job locked within STALE_AFTER_MS). Researching
- * batches that are not paused and have no queued (or, on the schedule, recently locked running) job get one. Returns
- * how many rows were released.
+ * Restart recovery. At startup no job runs yet: the dead worker's `import_research` jobs still marked running become
+ * failed "Interrupted", and every running row is waiting again. On the schedule, rows `running` in batches with no
+ * `import_research` job locked within STALE_AFTER_MS are released. Then Researching batches that are not paused and
+ * have no queued (or, on the schedule, recently locked running) job get one. Returns how many rows were released.
  */
 export async function sweepImportResearch(opts: { startup?: boolean } = {}, now = new Date()): Promise<number> {
   const staleBefore = new Date(now.getTime() - STALE_AFTER_MS);
+  if (opts.startup) {
+    await prisma.job.updateMany({
+      where: { type: 'import_research', status: 'running' },
+      data: { status: 'failed', lockedAt: null, lastError: 'Interrupted (the worker restarted)' },
+    });
+  }
   const liveJobs = opts.startup ? [] : await prisma.job.findMany({
     where: { type: 'import_research', status: 'running', lockedAt: { gte: staleBefore } }, select: { payload: true },
   });
@@ -495,20 +561,48 @@ export type ResearchView = {
   etaMinutes: number | null;
   tiles: { everything: number; some: number; nothing: number };
   claude: { on: boolean; runsThisMonth: number; cap: number };
-  engine: string | null;
+  /** Rendered with `importEngineText` (shared); null before research starts. */
+  engine: ResearchEngine | null;
   items: RowView[];
-  activity: Activity[];
+  /** Rendered with `importActivityText` (shared). */
+  activity: ImportActivity[];
 };
+
+/**
+ * Minutes left, from the pace of the last rows researched: the mean gap between their `researched_at` (gaps over 10
+ * minutes were a pause or a stop and are left out), else the time since the start for a first row. Null when nothing
+ * is known yet.
+ */
+export function estimateMinutes(researchedAt: Date[], startedAt: Date | null, left: number): number | null {
+  if (left <= 0) return 0;
+  const times = [...researchedAt].sort((a, b) => a.getTime() - b.getTime()).slice(-(ETA_GAPS + 1));
+  const gaps: number[] = [];
+  for (let i = 1; i < times.length; i += 1) {
+    const gap = times[i]!.getTime() - times[i - 1]!.getTime();
+    if (gap <= ETA_MAX_GAP_MS) gaps.push(gap);
+  }
+  if (gaps.length === 0 && times.length > 0 && startedAt) {
+    const first = times[0]!.getTime() - startedAt.getTime();
+    if (first >= 0 && first <= ETA_MAX_GAP_MS) gaps.push(first);
+  }
+  if (gaps.length === 0) return null;
+  const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+  return Math.ceil((mean * left) / 60_000);
+}
 
 /** Progress, tiles, Claude's month, the target rows (by position, 100 a page) and the activity log. */
 export async function researchView(batchId: number, page = 1): Promise<ResearchView> {
   const batch = await prisma.importBatch.findUnique({ where: { id: batchId } });
   if (!batch) throw new NotFoundError();
   const where: Prisma.ImportRowWhereInput = { batchId, researchStatus: { not: null } };
-  const [byStatus, rows, settings, totals, ready] = await Promise.all([
+  const [byStatus, rows, recent, settings, totals, ready] = await Promise.all([
     prisma.importRow.groupBy({ by: ['researchStatus'], where, _count: { _all: true } }),
     prisma.importRow.findMany({
       where, select: rowSelect, orderBy: [{ position: 'asc' }, { id: 'asc' }], skip: (page - 1) * PAGE_SIZE, take: PAGE_SIZE,
+    }),
+    prisma.importRow.findMany({
+      where: { batchId, researchedAt: { not: null } }, select: { researchedAt: true },
+      orderBy: { researchedAt: 'desc' }, take: ETA_GAPS + 1,
     }),
     loadEnrichmentSettings(prisma),
     monthTotals(prisma),
@@ -517,8 +611,8 @@ export async function researchView(batchId: number, page = 1): Promise<ResearchV
   const n = (s: string) => byStatus.find((g) => g.researchStatus === s)?._count._all ?? 0;
   const { researchTotal: total, researchDone: done } = batch;
   const running = batch.status === 'Researching' && !batch.researchPaused;
-  const etaMinutes = running && done > 0 && batch.researchStartedAt
-    ? Math.ceil(((Date.now() - batch.researchStartedAt.getTime()) / 60_000 / done) * Math.max(0, total - done))
+  const etaMinutes = running
+    ? estimateMinutes(recent.map((r) => r.researchedAt!), batch.researchStartedAt, Math.max(0, total - done))
     : null;
   return {
     status: batch.status,
@@ -534,8 +628,8 @@ export async function researchView(batchId: number, page = 1): Promise<ResearchV
       runsThisMonth: totals.claudeRuns,
       cap: settings.claudeMonthlyRunCap,
     },
-    engine: batch.researchEngine,
+    engine: (batch.researchEngine as ResearchEngine | null) ?? null,
     items: rows.map(rowView),
-    activity: Array.isArray(batch.activity) ? (batch.activity as Activity[]) : [],
+    activity: Array.isArray(batch.activity) ? (batch.activity as unknown as ImportActivity[]) : [],
   };
 }

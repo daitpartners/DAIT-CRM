@@ -999,8 +999,9 @@ model ImportBatch {
   /// Why research stopped by itself: only "cap" (the monthly Claude run cap).
   researchStopReason   String?   @map("research_stop_reason") @db.VarChar(20)
   researchStartedAt    DateTime? @map("research_started_at")
-  researchEngine       String?   @map("research_engine") @db.VarChar(120)
-  /// { at: string; text: string }[], newest first, at most 50.
+  /// ResearchEngine (shared): { claude: model | null } (rendered with importEngineText).
+  researchEngine       Json?     @map("research_engine")
+  /// ImportActivity[] (shared): { at, code, params }, newest first, at most 50 (rendered with importActivityText).
   activity             Json      @default("[]")
   /// ImportCommit (shared): the step-4 choices.
   options              Json      @default("{}")
@@ -1083,7 +1084,8 @@ model ImportRow {
   research         Json      @default("{}")
   /// RESEARCH_ROW_STATUSES (shared).
   researchStatus   String?   @map("research_status") @db.VarChar(12)
-  researchNote     String?   @map("research_note") @db.VarChar(300)
+  /// ResearchNotePart[] (shared), rendered with importResearchNoteText.
+  researchNote     Json?     @map("research_note")
   researchedAt     DateTime? @map("researched_at")
   /// Set by reserveClaudeRun before the row's Claude call and never cleared: counts toward the monthly run cap.
   claudeAt         DateTime? @map("claude_at")

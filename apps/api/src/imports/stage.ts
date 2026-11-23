@@ -8,7 +8,7 @@ import { Prisma } from '@prisma/client';
 import {
   IMPORT_MAX_ROWS, domainOf, pageArgs,
   type ColumnQuestion, type FileMeta, type ImportColumnAnswer, type ImportField, type ImportIncludeAll,
-  type ImportRowUpdate, type ImportRowsQuery, type ResearchValue, type RowFields, type RowFilter, type RowProblem,
+  type ImportRowUpdate, type ImportRowsQuery, type ResearchNotePart, type ResearchValue, type RowFields, type RowFilter, type RowProblem,
   type RowStatus,
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
@@ -425,6 +425,8 @@ export type RowView = {
   id: number; fields: RowFields; status: string; include: boolean; problems: RowProblem[];
   matched: CompanyRef | null; from: string; fileName: string;
   research?: Record<string, ResearchValue>; researchStatus?: string;
+  /** Rendered with `importResearchNoteText` (shared). */
+  researchNote?: ResearchNotePart[];
 };
 
 const ORIGIN_LABEL: Record<string, (n: number) => string> = {
@@ -439,7 +441,7 @@ export function fromLabel(fileName: string, ext: string, originKind: string, ori
 
 export const rowSelect = {
   id: true, fields: true, status: true, include: true, problems: true, originKind: true, originN: true,
-  research: true, researchStatus: true,
+  research: true, researchStatus: true, researchNote: true,
   matchedCompany: { select: { id: true, number: true } },
   file: { select: { name: true, ext: true } },
 } satisfies Prisma.ImportRowSelect;
@@ -452,6 +454,7 @@ export function rowView(r: Prisma.ImportRowGetPayload<{ select: typeof rowSelect
     from: fromLabel(r.file.name, r.file.ext, r.originKind, r.originN), fileName: r.file.name,
     ...(research && Object.keys(research).length > 0 ? { research } : {}),
     ...(r.researchStatus ? { researchStatus: r.researchStatus } : {}),
+    ...(Array.isArray(r.researchNote) ? { researchNote: r.researchNote as unknown as ResearchNotePart[] } : {}),
   };
 }
 

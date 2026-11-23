@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import {
   BATCH_NUMBER_RE, IMPORT_FILE_ERRORS, IMPORT_FIELDS, IMPORT_NO_CLAUDE, importNoClaudeText, IMPORT_TABLE_FIELDS, PROBLEM_CODES, importColumnLabel, importFileErrorText, importSource, problemText,
-  type RowProblem,
+  importActivityText, importEngineText, importResearchNoteText, RESEARCH_CLAUDE_FAILURES,
+  type ImportActivity, type ResearchNotePart, type RowProblem,
 } from '../src/imports';
 import {
   ImportBatchCreate, ImportBatchListQuery, ImportBatchUpdate, ImportColumnAnswer, ImportCommit, ImportIncludeAll,
@@ -144,5 +145,64 @@ describe('import schemas', () => {
     expect(ImportCommit.safeParse({ acceptHigh: false, noContactRows: null, notify: false }).success).toBe(true);
     expect(ImportCommit.safeParse({ acceptHigh: true, noContactRows: 'leave', notify: true }).success).toBe(true);
     expect(ImportCommit.safeParse({ noContactRows: 'import', notify: true }).success).toBe(false);
+  });
+});
+
+describe('research notes, engine and activity (step 3)', () => {
+  const note: ResearchNotePart[] = [{ k: 'foundBySearch' }, { k: 'pagesRead', n: 3 }, { k: 'filled', n: 3 }];
+
+  test('a row note in each language', () => {
+    expect(importResearchNoteText(note, 'en')).toBe('website found by search, 3 pages read, 3 fields filled');
+    expect(importResearchNoteText(note, 'es')).toBe('sitio web encontrado por búsqueda, 3 páginas leídas, 3 campos completados');
+    expect(importResearchNoteText(note, 'fr')).toBe('site web trouvé par recherche, 3 pages lues, 3 champs remplis');
+    expect(importResearchNoteText([{ k: 'pagesRead', n: 1 }, { k: 'filled', n: 1 }], 'en')).toBe('1 page read, 1 field filled');
+    expect(importResearchNoteText([{ k: 'pagesRead', n: 1 }, { k: 'filled', n: 1 }], 'es')).toBe('1 página leída, 1 campo completado');
+    expect(importResearchNoteText([{ k: 'pagesRead', n: 1 }, { k: 'filled', n: 1 }], 'fr')).toBe('1 page lue, 1 champ rempli');
+    expect(importResearchNoteText([{ k: 'noWebsite' }], 'en')).toBe('No website to read');
+    expect(importResearchNoteText([{ k: 'noWebsite' }], 'es')).toBe('No hay sitio web que leer');
+    expect(importResearchNoteText([{ k: 'noWebsite' }], 'fr')).toBe('Aucun site web à lire');
+    expect(importResearchNoteText([{ k: 'readError', error: 'Timeout fetching site' }, { k: 'capReached' }], 'en'))
+      .toBe("could not read the website (Timeout fetching site), Claude's monthly run cap is reached");
+    expect(importResearchNoteText(null, 'en')).toBe('');
+  });
+
+  test('every part and Claude failure has text in every language', () => {
+    const all: ResearchNotePart[] = [
+      { k: 'foundBySearch' }, { k: 'pagesRead', n: 2 }, { k: 'readError', error: 'x' }, { k: 'capReached' }, { k: 'filled', n: 2 },
+      { k: 'noWebsite' }, { k: 'nothingToLookUp' }, { k: 'nothingFound' }, { k: 'researchFailed' },
+      ...RESEARCH_CLAUDE_FAILURES.map((kind) => ({ k: 'claude', kind }) as ResearchNotePart),
+    ];
+    for (const lang of LANGS) {
+      for (const p of all) expect(importResearchNoteText([p], lang)).not.toBe('');
+    }
+    expect(importResearchNoteText([{ k: 'claude', kind: 'timeout' }], 'en')).toBe('Claude took too long');
+    expect(importResearchNoteText([{ k: 'claude', kind: 'timeout' }], 'es')).toBe('Claude tardó demasiado');
+    expect(importResearchNoteText([{ k: 'claude', kind: 'timeout' }], 'fr')).toBe('Claude a mis trop de temps');
+  });
+
+  test('the engine in each language', () => {
+    expect(importEngineText({ claude: null }, 'en')).toBe('Website reader');
+    expect(importEngineText({ claude: 'sonnet' }, 'en')).toBe('Website reader + Claude Code sonnet');
+    expect(importEngineText({ claude: 'sonnet' }, 'es')).toBe('Lector de sitios web + Claude Code sonnet');
+    expect(importEngineText({ claude: null }, 'fr')).toBe('Lecteur de sites web');
+    expect(importEngineText(null, 'en')).toBe('Website reader');
+  });
+
+  test('activity lines in each language', () => {
+    const at = '2026-11-24T10:00:00.000Z';
+    const started: ImportActivity = { at, code: 'started', params: { n: 2, engine: { claude: 'sonnet' } } };
+    const row: ImportActivity = { at, code: 'row', params: { name: 'Fixture Freight', note: [{ k: 'pagesRead', n: 1 }, { k: 'filled', n: 2 }] } };
+    expect(importActivityText(started, 'en')).toBe('Started research for 2 rows · Website reader + Claude Code sonnet');
+    expect(importActivityText(started, 'es')).toBe('Investigación iniciada para 2 filas · Lector de sitios web + Claude Code sonnet');
+    expect(importActivityText(started, 'fr')).toBe('Recherche lancée pour 2 lignes · Lecteur de sites web + Claude Code sonnet');
+    expect(importActivityText(row, 'en')).toBe('Fixture Freight — 1 page read, 2 fields filled');
+    expect(importActivityText(row, 'es')).toBe('Fixture Freight — 1 página leída, 2 campos completados');
+    expect(importActivityText({ at, code: 'capStopped' }, 'en')).toBe("Claude's monthly run cap is reached; research stopped");
+    expect(importActivityText({ at, code: 'capStopped' }, 'es')).toBe('Se alcanzó el límite mensual de usos de Claude; la investigación se detuvo');
+    expect(importActivityText({ at, code: 'capStopped' }, 'fr')).toBe('Le plafond mensuel d’utilisations de Claude est atteint ; la recherche est arrêtée');
+    for (const lang of LANGS) {
+      for (const code of ['finished', 'paused', 'resumed'] as const) expect(importActivityText({ at, code }, lang)).not.toBe('');
+    }
+    expect(importActivityText({ at, code: 'finished' }, 'fr')).toBe('Recherche terminée');
   });
 });
