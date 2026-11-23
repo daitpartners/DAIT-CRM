@@ -6,7 +6,7 @@ import * as XLSX from 'xlsx';
 import * as cptable from 'xlsx/dist/cpexcel.full.mjs';
 import { IMPORT_MAX_ROWS } from '@dait-crm/shared';
 import type { ReadResult } from './index.js';
-import { ReadFailure, isEncryptedPackage, isOle } from './failure.js';
+import { MAX_TABLE_CHARS, ReadFailure, assertTextSize, isEncryptedPackage, isOle } from './failure.js';
 import { assertZipSize, isZip } from './zip.js';
 
 // Legacy .xls text in a Windows code page needs the code page tables.
@@ -66,9 +66,10 @@ export async function readSpreadsheet(data: Buffer, ext: 'xlsx' | 'xls'): Promis
     }
     const sheets = book.SheetNames.map((name) => ({ name, rows: sheetRows(book.Sheets[name]) }));
     const rows = sheets.reduce((n, s) => n + s.rows.filter((r) => r.length > 0).length, 0);
+    assertTextSize(sheets.reduce((n, s) => n + s.rows.reduce((m, r) => m + r.reduce((k, c) => k + c.length, 0), 0), 0), MAX_TABLE_CHARS);
     return { status: 'Read', meta: { sheets: sheets.length, rows }, extract: { kind: 'table', sheets } };
   } catch (e) {
-    if (e instanceof ReadFailure) return { status: 'Failed', meta: {}, error: e.text(ext) };
+    if (e instanceof ReadFailure) return { status: 'Failed', meta: {}, error: e.code };
     throw e;
   }
 }

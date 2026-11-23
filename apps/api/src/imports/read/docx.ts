@@ -1,7 +1,7 @@
 /** .docx → its raw text as one page (Task 4 splits it into cards); the page count comes from docProps/app.xml. */
 import mammoth from 'mammoth';
 import type { ReadResult } from './index.js';
-import { ReadFailure, isEncryptedPackage, isOle } from './failure.js';
+import { MAX_TEXT_CHARS, ReadFailure, assertTextSize, isEncryptedPackage, isOle } from './failure.js';
 import { assertZipSize, docxPageCount, isZip } from './zip.js';
 
 export async function readDocx(data: Buffer): Promise<ReadResult> {
@@ -13,11 +13,12 @@ export async function readDocx(data: Buffer): Promise<ReadResult> {
     let text: string;
     let pages: number | undefined;
     try {
-      pages = await docxPageCount(data);
+      pages = docxPageCount(data);
       text = (await mammoth.extractRawText({ buffer: data })).value;
-    } catch {
-      throw new ReadFailure('invalid');
+    } catch (e) {
+      throw e instanceof ReadFailure ? e : new ReadFailure('invalid');
     }
+    assertTextSize(text.length, MAX_TEXT_CHARS);
     text = text.replace(/\r\n?/g, '\n');
     return {
       status: 'Read',
@@ -25,7 +26,7 @@ export async function readDocx(data: Buffer): Promise<ReadResult> {
       extract: { kind: 'text', unit: 'card', pages: [{ n: 1, text }] },
     };
   } catch (e) {
-    if (e instanceof ReadFailure) return { status: 'Failed', meta: {}, error: e.text('docx') };
+    if (e instanceof ReadFailure) return { status: 'Failed', meta: {}, error: e.code };
     throw e;
   }
 }

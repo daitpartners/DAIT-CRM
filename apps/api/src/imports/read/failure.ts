@@ -1,27 +1,13 @@
-/* Why a file could not be read: the texts stored in `import_files.error` and shown in the file list. */
+/*
+ * Why a file could not be read. `import_files.error` stores the stable code (`IMPORT_FILE_ERRORS`, shared); the screen
+ * shows it in the user's language with `importFileErrorText`.
+ */
+import type { ImportFileError } from '@dait-crm/shared';
 
-export type ReadFailureKind = 'invalid' | 'too_large' | 'password' | 'old_doc';
-
-/** The stored failure texts (English; the screen translates them by their exact text). */
-export const READ_FAILURE_TEXT = {
-  invalid: (ext: string) => `This file is not a valid .${ext} file`,
-  too_large: 'This file is too large to read',
-  password: 'This file is password-protected',
-  old_doc: "Old .doc files can't be read; save it as .docx",
-  /** Anything else the reader threw (the job's catch-all). */
-  unreadable: 'Could not read this file',
-  /** A file left Reading after its job was lost (worker stopped, host asleep). */
-  interrupted: 'Reading was interrupted; upload the file again',
-} as const;
-
-/** A file the reader refuses; `text(ext)` is the stored failure text. */
+/** A file the reader refuses; `code` is what is stored. */
 export class ReadFailure extends Error {
-  constructor(readonly kind: ReadFailureKind) {
-    super(kind === 'invalid' ? 'This file is not a valid file' : READ_FAILURE_TEXT[kind]);
-  }
-
-  text(ext: string): string {
-    return this.kind === 'invalid' ? READ_FAILURE_TEXT.invalid(ext) : READ_FAILURE_TEXT[this.kind];
+  constructor(readonly code: ImportFileError) {
+    super(code);
   }
 }
 
@@ -31,3 +17,13 @@ export const isOle = (data: Buffer) => data.length >= 4 && data.readUInt32BE(0) 
 /** An OLE container holding an encrypted Office Open XML package (a password-protected .xlsx / .docx). */
 export const isEncryptedPackage = (data: Buffer) =>
   isOle(data) && data.includes(Buffer.from('EncryptionInfo', 'utf16le'));
+
+/** Text a document may yield (characters); more is refused as too large. */
+export const MAX_TEXT_CHARS = 5_000_000;
+/** Cell text a spreadsheet or CSV may yield (characters, all sheets); more is refused as too large. */
+export const MAX_TABLE_CHARS = 20_000_000;
+
+/** Refuses an extract above its cap (`too_large`). */
+export function assertTextSize(chars: number, cap: number): void {
+  if (chars > cap) throw new ReadFailure('too_large');
+}

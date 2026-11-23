@@ -139,5 +139,49 @@ export function importSource(number: string): string {
   return `Import · ${number}`;
 }
 
+/**
+ * Why a file could not be read: the stable code stored in `import_files.error` (the screen shows it in the user's
+ * language with `importFileErrorText`). `invalid` reads with the file's extension.
+ */
+export const IMPORT_FILE_ERRORS = ['invalid', 'too_large', 'password', 'old_doc', 'timeout', 'unreadable', 'interrupted'] as const;
+export type ImportFileError = (typeof IMPORT_FILE_ERRORS)[number];
+
+const FILE_ERROR_TEXT: Record<Lang, Record<ImportFileError, string>> = {
+  en: {
+    invalid: 'This file is not a valid .{ext} file',
+    too_large: 'This file is too large to read',
+    password: 'This file is password-protected',
+    old_doc: "Old .doc files can't be read; save it as .docx",
+    timeout: 'This file took too long to read',
+    unreadable: 'Could not read this file',
+    interrupted: 'Reading was interrupted; upload the file again',
+  },
+  es: {
+    invalid: 'Este archivo no es un archivo .{ext} válido',
+    too_large: 'Este archivo es demasiado grande para leerlo',
+    password: 'Este archivo está protegido con contraseña',
+    old_doc: 'Los archivos .doc antiguos no se pueden leer; guárdalo como .docx',
+    timeout: 'Este archivo tardó demasiado en leerse',
+    unreadable: 'No se pudo leer este archivo',
+    interrupted: 'La lectura se interrumpió; vuelve a subir el archivo',
+  },
+  fr: {
+    invalid: 'Ce fichier n’est pas un fichier .{ext} valide',
+    too_large: 'Ce fichier est trop volumineux pour être lu',
+    password: 'Ce fichier est protégé par un mot de passe',
+    old_doc: 'Les anciens fichiers .doc ne peuvent pas être lus ; enregistrez-le au format .docx',
+    timeout: 'La lecture de ce fichier a pris trop de temps',
+    unreadable: 'Impossible de lire ce fichier',
+    interrupted: 'La lecture a été interrompue ; importez à nouveau le fichier',
+  },
+};
+
+/** A stored file error code in plain words, in `lang`; an unknown value reads as "Could not read this file". */
+export function importFileErrorText(code: string, ext: string, lang: Lang): string {
+  const texts = FILE_ERROR_TEXT[lang] ?? FILE_ERROR_TEXT.en;
+  const known = (IMPORT_FILE_ERRORS as readonly string[]).includes(code) ? (code as ImportFileError) : 'unreadable';
+  return texts[known].replace('{ext}', ext);
+}
+
 /** A batch number: IMPORT-YYYY-MM-DD, then -2, -3 … for later batches the same day. */
 export const BATCH_NUMBER_RE = /^IMPORT-\d{4}-\d{2}-\d{2}(-\d+)?$/i;

@@ -7,7 +7,7 @@ import { prisma } from '../src/db';
 import { buildApp } from '../src/app';
 import { STALE_AFTER_MS } from '../src/jobs/queue';
 import { runOnce } from '../src/jobs/runner';
-import { importReadFileHandler } from '../src/jobs/handlers/importReadFile';
+import { importReadFileHandler, importReadOptions } from '../src/jobs/handlers/importReadFile';
 import { sweepImportFiles } from '../src/imports/batches';
 import { readImportFile, removeBatchFiles, saveImportFile, storageDir } from '../src/imports/storage';
 import { fakeGraph, resetDb, seedLookups } from './helpers';
@@ -212,14 +212,27 @@ describe('file upload', () => {
     expect([res.statusCode, res.json()]).toEqual([409, { error: 'batch_locked' }]);
   });
 
-  it('a file that cannot be read becomes Failed "Could not read this file"', async () => {
+  it('a file that cannot be read becomes Failed unreadable', async () => {
     const { cookie } = await as('ADMINISTRATOR');
     const batch = await newBatch(cookie);
     const file = (await upload(batch.id, 'a.csv', Buffer.from('Company\nAcme'), cookie)).json();
     await removeBatchFiles(batch.id);
     expect(await runReadJob()).toBe(true);
-    expect(await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } })).toMatchObject({ status: 'Failed', error: 'Could not read this file' });
+    expect(await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } })).toMatchObject({ status: 'Failed', error: 'unreadable' });
     expect((await prisma.job.findFirstOrThrow({ where: { type: 'import_read_file' } })).status).toBe('failed');
+  });
+
+  it('a read that runs past the timeout leaves the file Failed timeout', async () => {
+    const { cookie } = await as('ADMINISTRATOR');
+    const batch = await newBatch(cookie);
+    const file = (await upload(batch.id, 'list.pdf', await pdfWithText(['Acme Widgets Ltd sales@acme.test']), cookie)).json();
+    importReadOptions.timeoutMs = 1;
+    try {
+      expect(await runReadJob()).toBe(true);
+    } finally {
+      delete importReadOptions.timeoutMs;
+    }
+    expect(await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } })).toMatchObject({ status: 'Failed', error: 'timeout' });
   });
 
   it('a file the reader refuses keeps its reason', async () => {
@@ -228,7 +241,7 @@ describe('file upload', () => {
     const file = (await upload(batch.id, 'sheet.xlsx', Buffer.from('not a spreadsheet'), cookie)).json();
     await runReadJob();
     expect(await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } }))
-      .toMatchObject({ status: 'Failed', error: 'This file is not a valid .xlsx file' });
+      .toMatchObject({ status: 'Failed', error: 'invalid' });
   });
 });
 
@@ -248,10 +261,37 @@ describe('reading sweep', () => {
 
     expect(await sweepImportFiles()).toBe(1);
     const status = async (id: number) => prisma.importFile.findUniqueOrThrow({ where: { id } });
-    expect(await status(lost.id)).toMatchObject({ status: 'Failed', error: 'Reading was interrupted; upload the file again' });
+    expect(await status(lost.id)).toMatchObject({ status: 'Failed', error: 'interrupted' });
     expect((await status(queued.id)).status).toBe('Reading');
     expect((await status(fresh.id)).status).toBe('Reading');
     expect((await status(done.id)).status).toBe('Read');
+  });
+
+  it('a running job keeps its file while its lock is fresh; a stale lock means the read was lost', async () => {
+    const { user } = await as('ADMINISTRATOR');
+    const batch = await prisma.importBatch.create({ data: { number: 'IMPORT-2026-11-24', language: 'en', leadType: 'Lead', createdById: user.id } });
+    const old = new Date(Date.now() - STALE_AFTER_MS - 60_000);
+    const mk = (name: string) =>
+      prisma.importFile.create({ data: { batchId: batch.id, name, ext: 'csv', size: 1, storagePath: '', status: 'Reading', createdAt: old } });
+    const live = await mk('live.csv');
+    const stale = await mk('stale.csv');
+    const job = (fileId: number, lockedAt: Date) => prisma.job.create({
+      data: { type: 'import_read_file', payload: { fileId }, runAt: old, status: 'running', lockedAt, maxAttempts: 1 },
+    });
+    await job(live.id, new Date());
+    await job(stale.id, old);
+    expect(await sweepImportFiles()).toBe(1);
+    expect((await prisma.importFile.findUniqueOrThrow({ where: { id: live.id } })).status).toBe('Reading');
+    expect(await prisma.importFile.findUniqueOrThrow({ where: { id: stale.id } })).toMatchObject({ status: 'Failed', error: 'interrupted' });
+  });
+
+  it('a file swept to Failed is not overwritten by its job afterwards', async () => {
+    const { cookie } = await as('ADMINISTRATOR');
+    const batch = await newBatch(cookie);
+    const file = (await upload(batch.id, 'a.csv', Buffer.from('Company\nAcme'), cookie)).json();
+    await prisma.importFile.update({ where: { id: file.id }, data: { status: 'Failed', error: 'interrupted' } });
+    expect(await runReadJob()).toBe(true);
+    expect(await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } })).toMatchObject({ status: 'Failed', error: 'interrupted' });
   });
 });
 

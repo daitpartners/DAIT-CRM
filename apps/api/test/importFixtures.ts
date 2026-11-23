@@ -1,5 +1,5 @@
 /* In-memory builders for import test files (nothing is committed): spreadsheets, PDFs, Word files and a zip bomb. */
-import { crc32, deflateSync } from 'node:zlib';
+import { crc32, deflateRawSync, deflateSync } from 'node:zlib';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import PDFDocument from 'pdfkit';
@@ -112,4 +112,79 @@ export function zipBomb(): Promise<Buffer> {
     return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 1 } });
   })();
   return bomb;
+}
+
+type HandEntry = { name: string; raw: Buffer; declared?: number; extra?: Buffer };
+
+/** A zip built by hand, so it can lie: `declared` replaces an entry's real size, `count` the end record's entry count. */
+export function handZip(entries: HandEntry[], count?: number): Buffer {
+  const locals: Buffer[] = [];
+  const central: Buffer[] = [];
+  let offset = 0;
+  for (const e of entries) {
+    const comp = deflateRawSync(e.raw);
+    const size = e.declared ?? e.raw.length;
+    const name = Buffer.from(e.name);
+    const extra = e.extra ?? Buffer.alloc(0);
+    const crc = e.declared === undefined ? crc32(e.raw) : 0;
+    const lh = Buffer.alloc(30);
+    lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(8, 8);
+    lh.writeUInt32LE(crc >>> 0, 14); lh.writeUInt32LE(comp.length, 18); lh.writeUInt32LE(size, 22); lh.writeUInt16LE(name.length, 26);
+    locals.push(lh, name, comp);
+    const cd = Buffer.alloc(46);
+    cd.writeUInt32LE(0x02014b50, 0); cd.writeUInt16LE(20, 4); cd.writeUInt16LE(20, 6); cd.writeUInt16LE(8, 10);
+    cd.writeUInt32LE(crc >>> 0, 16); cd.writeUInt32LE(comp.length, 20); cd.writeUInt32LE(size, 24);
+    cd.writeUInt16LE(name.length, 28); cd.writeUInt16LE(extra.length, 30); cd.writeUInt32LE(offset, 42);
+    central.push(cd, name, extra);
+    offset += 30 + name.length + comp.length;
+  }
+  const dir = Buffer.concat(central);
+  const n = count ?? entries.length;
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0); eocd.writeUInt16LE(n, 8); eocd.writeUInt16LE(n, 10);
+  eocd.writeUInt32LE(dir.length, 12); eocd.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, dir, eocd]);
+}
+
+const CONTENT_TYPES = Buffer.from('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>');
+const lying = new Map<string, Buffer>();
+
+/**
+ * Zips that lie to a guard that trusts them: `size` declares 1,000 bytes for an entry of 64 MB of zeros; `count` says
+ * one entry while the directory holds a second, 300 MB of zeros; `zip64` points at a ZIP64 size its extra field cuts off.
+ */
+export function lyingZip(kind: 'size' | 'count' | 'zip64'): Buffer {
+  const cached = lying.get(kind);
+  if (cached) return cached;
+  const ct = { name: '[Content_Types].xml', raw: CONTENT_TYPES };
+  const zip = kind === 'size'
+    ? handZip([ct, { name: 'word/document.xml', raw: Buffer.alloc(64 * 1024 * 1024), declared: 1000 }])
+    : kind === 'count'
+      ? handZip([ct, { name: 'word/document.xml', raw: Buffer.alloc(300 * 1024 * 1024) }], 1)
+      : handZip([ct, { name: 'word/document.xml', raw: Buffer.from('<w:document/>'), declared: 0xffffffff, extra: Buffer.from([1, 0, 4, 0, 0, 0, 0, 0]) }]);
+  lying.set(kind, zip);
+  return zip;
+}
+
+/** A valid PDF whose page tree lists the same page `pages` times (tiny file, very slow for pdf.js to walk). */
+export function repeatedPagePdf(pages: number): Buffer {
+  const stream = 'BT /F1 12 Tf 72 720 Td (Hello exhibitor list page text here) Tj ET';
+  const objs = [
+    '',
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    `<< /Type /Pages /Count ${pages} /Kids [${Array(pages).fill('3 0 R').join(' ')}] >>`,
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  let out = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  for (let i = 1; i < objs.length; i += 1) {
+    offsets[i] = Buffer.byteLength(out);
+    out += `${i} 0 obj\n${objs[i]}\nendobj\n`;
+  }
+  const xref = Buffer.byteLength(out);
+  out += `xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}`;
+  out += `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out);
 }

@@ -13,7 +13,6 @@ import { todayIn } from '../leads/dates.js';
 import { NotFoundError } from '../validate.js';
 import type { AuthUser } from '../plugins/auth.js';
 import { removeImportFile, saveImportFile } from './storage.js';
-import { READ_FAILURE_TEXT } from './read/failure.js';
 
 /** A refused batch or file change; the route answers `status` with `{ error: code }`. */
 export class ImportError extends Error {
@@ -89,26 +88,28 @@ export function importExt(name: string): ImportExt | null {
  */
 export async function addFile(user: AuthUser, batchId: number, name: string, data: Buffer): Promise<ImportFile> {
   const fileName = name.trim().slice(0, 255);
-  const file = await prisma.$transaction(async (tx) => {
-    // Locks the batch row, so two uploads at once cannot both take the tenth place.
-    const [batch] = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM import_batches WHERE id = ${batchId} FOR UPDATE`;
-    if (!batch) throw new NotFoundError();
-    if (!ACCEPTS_FILES.has(batch.status)) throw new ImportError('batch_locked', 409);
-    if (await tx.importFile.count({ where: { batchId } }) >= IMPORT_MAX_FILES) throw new ImportError('too_many_files', 400);
-    const ext = importExt(fileName);
-    if (!ext) throw new ImportError('file_type', 400);
-    if (data.length === 0 || data.length > IMPORT_MAX_FILE_BYTES) throw new ImportError('file_size', 400);
-    const row = await tx.importFile.create({ data: { batchId, name: fileName, ext, size: data.length, storagePath: '', status: 'Reading' } });
-    const storagePath = await saveImportFile(batchId, row.id, data);
-    try {
+  // Set once the bytes are on disk; removed again if anything after that fails (including the commit).
+  let saved: string | null = null;
+  try {
+    return await prisma.$transaction(async (tx) => {
+      // Locks the batch row, so two uploads at once cannot both take the tenth place.
+      const [batch] = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM import_batches WHERE id = ${batchId} FOR UPDATE`;
+      if (!batch) throw new NotFoundError();
+      if (!ACCEPTS_FILES.has(batch.status)) throw new ImportError('batch_locked', 409);
+      if (await tx.importFile.count({ where: { batchId } }) >= IMPORT_MAX_FILES) throw new ImportError('too_many_files', 400);
+      const ext = importExt(fileName);
+      if (!ext) throw new ImportError('file_type', 400);
+      if (data.length === 0 || data.length > IMPORT_MAX_FILE_BYTES) throw new ImportError('file_size', 400);
+      const row = await tx.importFile.create({ data: { batchId, name: fileName, ext, size: data.length, storagePath: '', status: 'Reading' } });
+      saved = await saveImportFile(batchId, row.id, data);
       await enqueue(tx, 'import_read_file', { fileId: row.id }, { maxAttempts: 1 });
-      return await tx.importFile.update({ where: { id: row.id }, data: { storagePath } });
-    } catch (e) {
-      await removeImportFile(storagePath);
-      throw e;
-    }
-  });
-  return file;
+      return tx.importFile.update({ where: { id: row.id }, data: { storagePath: saved } });
+      // Uploads queue on the batch lock and each writes up to 20 MB inside it: more than Prisma's 5 s default.
+    }, { timeout: 30_000, maxWait: 30_000 });
+  } catch (e) {
+    if (saved) await removeImportFile(saved).catch(() => undefined);
+    throw e;
+  }
 }
 
 /** A batch's files, in upload order. */
@@ -123,7 +124,8 @@ export async function listFiles(batchId: number) {
 
 /**
  * Files still Reading with no queued or running `import_read_file` job for them for longer than STALE_AFTER_MS were
- * interrupted (worker stopped, host asleep): they become Failed "Reading was interrupted; upload the file again".
+ * interrupted (worker stopped, host asleep): they become Failed `interrupted` ("Reading was interrupted; upload the file
+ * again"). Reads time out after 2 minutes, so a live read is never swept.
  * A running job locked longer than STALE_AFTER_MS counts as lost too. Returns how many were released.
  */
 export async function sweepImportFiles(now = new Date()): Promise<number> {
@@ -138,11 +140,12 @@ export async function sweepImportFiles(now = new Date()): Promise<number> {
     select: { payload: true },
   });
   const alive = new Set(jobs.map((j) => (j.payload as { fileId?: unknown } | null)?.fileId));
+  // Still Reading only: a job that finished meanwhile keeps its result.
   const lost = reading.filter((f) => !alive.has(f.id)).map((f) => f.id);
   if (lost.length === 0) return 0;
   const { count } = await prisma.importFile.updateMany({
     where: { id: { in: lost }, status: 'Reading' },
-    data: { status: 'Failed', error: READ_FAILURE_TEXT.interrupted, readAt: now },
+    data: { status: 'Failed', error: 'interrupted', readAt: now },
   });
   return count;
 }

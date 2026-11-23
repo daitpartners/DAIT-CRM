@@ -2,6 +2,7 @@
 import { parse } from 'csv-parse/sync';
 import { IMPORT_MAX_ROWS } from '@dait-crm/shared';
 import { decodeText, type ReadResult } from './index.js';
+import { MAX_TABLE_CHARS } from './failure.js';
 
 const DELIMITERS = [',', ';', '\t'] as const;
 
@@ -31,7 +32,7 @@ export async function readCsv(data: Buffer, fileName?: string): Promise<ReadResu
       skip_empty_lines: false, to: IMPORT_MAX_ROWS + 50,
     }) as string[][];
   } catch {
-    return { status: 'Failed', meta: {}, error: 'This file is not a valid .csv file' };
+    return { status: 'Failed', meta: {}, error: 'invalid' };
   }
   const rows = records.map((r) => {
     const row = r.map((cell) => cell.trim());
@@ -39,6 +40,9 @@ export async function readCsv(data: Buffer, fileName?: string): Promise<ReadResu
     return row;
   });
   while (rows.length > 0 && rows[rows.length - 1].length === 0) rows.pop();
+  if (rows.reduce((n, r) => n + r.reduce((m, c) => m + c.length, 0), 0) > MAX_TABLE_CHARS) {
+    return { status: 'Failed', meta: {}, error: 'too_large' };
+  }
   return {
     status: 'Read',
     meta: { rows: rows.filter((r) => r.length > 0).length },

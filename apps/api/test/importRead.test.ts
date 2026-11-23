@@ -4,7 +4,11 @@ import mammoth from 'mammoth';
 import {
   assertZipSize, decodeText, readImportBuffer, type TableExtract, type TextExtract,
 } from '../src/imports/read/index';
-import { docx, pdfImageOnly, pdfWithText, xlsBook, xlsxBook, zipBomb } from './importFixtures';
+import { readInWorker } from '../src/imports/read/isolated';
+import { PDF_MAX_PAGES } from '../src/imports/read/pdf';
+import {
+  docx, handZip, lyingZip, pdfImageOnly, pdfWithText, repeatedPagePdf, xlsBook, xlsxBook, zipBomb,
+} from './importFixtures';
 
 // Spies on the parsers: a file refused by the zip size check must never reach them.
 vi.mock('xlsx', async (importOriginal) => {
@@ -66,7 +70,7 @@ describe('spreadsheets', () => {
 
   it('refuses an .xlsx that is really a PDF', async () => {
     const r = await readImportBuffer('xlsx', await pdfWithText(['hello']));
-    expect(r).toMatchObject({ status: 'Failed', error: 'This file is not a valid .xlsx file' });
+    expect(r).toMatchObject({ status: 'Failed', error: 'invalid' });
     expect(r.extract).toBeUndefined();
   });
 
@@ -74,13 +78,53 @@ describe('spreadsheets', () => {
     vi.mocked(XLSX.read).mockClear();
     vi.mocked(mammoth.extractRawText).mockClear();
     const bomb = await zipBomb();
-    await expect(assertZipSize(bomb)).rejects.toThrow('This file is too large to read');
-    expect(await readImportBuffer('xlsx', bomb)).toMatchObject({ status: 'Failed', error: 'This file is too large to read' });
-    expect(await readImportBuffer('docx', bomb)).toMatchObject({ status: 'Failed', error: 'This file is too large to read' });
+    await expect(assertZipSize(bomb)).rejects.toMatchObject({ code: 'too_large' });
+    expect(await readImportBuffer('xlsx', bomb)).toMatchObject({ status: 'Failed', error: 'too_large' });
+    expect(await readImportBuffer('docx', bomb)).toMatchObject({ status: 'Failed', error: 'too_large' });
     expect(XLSX.read).not.toHaveBeenCalled();
     expect(mammoth.extractRawText).not.toHaveBeenCalled();
     // A small zip passes.
     await expect(assertZipSize(xlsxBook({ S: [['a']] }))).resolves.toBeUndefined();
+  });
+});
+
+describe('zips that lie about themselves', () => {
+  it('an entry larger than it declares is refused after at most one byte too many, before any parser', async () => {
+    vi.mocked(XLSX.read).mockClear();
+    vi.mocked(mammoth.extractRawText).mockClear();
+    const zip = lyingZip('size');
+    const rss = process.memoryUsage().rss;
+    await expect(assertZipSize(zip)).rejects.toMatchObject({ code: 'too_large' });
+    expect(await readImportBuffer('docx', zip)).toMatchObject({ status: 'Failed', error: 'too_large' });
+    expect(await readImportBuffer('xlsx', zip)).toMatchObject({ status: 'Failed', error: 'too_large' });
+    expect(XLSX.read).not.toHaveBeenCalled();
+    expect(mammoth.extractRawText).not.toHaveBeenCalled();
+    // Nothing near the real 64 MB was inflated.
+    expect(process.memoryUsage().rss - rss).toBeLessThan(48 * 1024 * 1024);
+  });
+
+  it('an end record that counts fewer entries than the directory holds is refused', async () => {
+    vi.mocked(XLSX.read).mockClear();
+    vi.mocked(mammoth.extractRawText).mockClear();
+    const zip = lyingZip('count');
+    await expect(assertZipSize(zip)).rejects.toMatchObject({ code: 'invalid' });
+    expect(await readImportBuffer('docx', zip)).toMatchObject({ status: 'Failed', error: 'invalid' });
+    expect(await readImportBuffer('xlsx', zip)).toMatchObject({ status: 'Failed', error: 'invalid' });
+    expect(XLSX.read).not.toHaveBeenCalled();
+    expect(mammoth.extractRawText).not.toHaveBeenCalled();
+  });
+
+  it('a ZIP64 size cut off in its extra field is not a valid file', async () => {
+    expect(await readImportBuffer('docx', lyingZip('zip64'))).toMatchObject({ status: 'Failed', error: 'invalid' });
+    expect(await readImportBuffer('xlsx', lyingZip('zip64'))).toMatchObject({ status: 'Failed', error: 'invalid' });
+  });
+
+  it('docProps/app.xml is read through the same capped path', async () => {
+    const zip = handZip([
+      { name: '[Content_Types].xml', raw: Buffer.from('<Types/>') },
+      { name: 'docProps/app.xml', raw: Buffer.alloc(8 * 1024 * 1024), declared: 100 },
+    ]);
+    expect(await readImportBuffer('docx', zip)).toMatchObject({ status: 'Failed', error: 'too_large' });
   });
 });
 
@@ -149,8 +193,48 @@ describe('pdf', () => {
 
   it('refuses a password-protected PDF and a file that is not a PDF', async () => {
     const locked = await pdfWithText(['secret text on the page'], { userPassword: 'pw', ownerPassword: 'pw2' });
-    expect(await readImportBuffer('pdf', locked)).toMatchObject({ status: 'Failed', error: 'This file is password-protected' });
-    expect(await readImportBuffer('pdf', Buffer.from('Company,Email\n'))).toMatchObject({ status: 'Failed', error: 'This file is not a valid .pdf file' });
+    expect(await readImportBuffer('pdf', locked)).toMatchObject({ status: 'Failed', error: 'password' });
+    expect(await readImportBuffer('pdf', Buffer.from('Company,Email\n'))).toMatchObject({ status: 'Failed', error: 'invalid' });
+  });
+});
+
+describe('pdf limits', () => {
+  it(`refuses more than ${PDF_MAX_PAGES} pages before reading any page`, async () => {
+    const started = Date.now();
+    expect(await readImportBuffer('pdf', repeatedPagePdf(50_000))).toMatchObject({ status: 'Failed', error: 'too_large' });
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+});
+
+describe('reading in a worker thread', () => {
+  it('reads a file and returns the same result', async () => {
+    const r = await readInWorker('csv', Buffer.from('Company;City\nAcme;Paris\n'), 'list.csv');
+    expect(r).toMatchObject({ status: 'Read', meta: { rows: 2 }, extract: { kind: 'table', sheets: [{ name: 'list', rows: [['Company', 'City'], ['Acme', 'Paris']] }] } });
+  });
+
+  it('a read that takes too long is stopped: Failed timeout', async () => {
+    expect(await readInWorker('pdf', repeatedPagePdf(PDF_MAX_PAGES), undefined, { timeoutMs: 1 }))
+      .toEqual({ status: 'Failed', meta: {}, error: 'timeout' });
+  });
+
+  it('never blocks this thread: timers keep ticking while hostile PDFs are read', async () => {
+    let ticks = 0;
+    const timer = setInterval(() => { ticks += 1; }, 10);
+    const started = Date.now();
+    try {
+      const [big, repeated] = await Promise.all([
+        readInWorker('pdf', repeatedPagePdf(50_000)),
+        readInWorker('pdf', repeatedPagePdf(PDF_MAX_PAGES)),
+      ]);
+      expect(big).toMatchObject({ status: 'Failed', error: 'too_large' });
+      expect(repeated).toMatchObject({ status: 'Read', meta: { pages: PDF_MAX_PAGES, textFound: true } });
+    } finally {
+      clearInterval(timer);
+    }
+    const elapsed = Date.now() - started;
+    // At least a third of the ticks a free event loop would give (a blocked loop gives none).
+    expect(ticks).toBeGreaterThanOrEqual(Math.floor(elapsed / 10 / 3));
+    expect(ticks).toBeGreaterThan(5);
   });
 });
 
@@ -172,7 +256,7 @@ describe('docx', () => {
   });
 
   it('refuses an old .doc saved as .docx and a file that is not a .docx', async () => {
-    expect(await readImportBuffer('docx', OLE)).toMatchObject({ status: 'Failed', error: "Old .doc files can't be read; save it as .docx" });
-    expect(await readImportBuffer('docx', Buffer.from('hello'))).toMatchObject({ status: 'Failed', error: 'This file is not a valid .docx file' });
+    expect(await readImportBuffer('docx', OLE)).toMatchObject({ status: 'Failed', error: 'old_doc' });
+    expect(await readImportBuffer('docx', Buffer.from('hello'))).toMatchObject({ status: 'Failed', error: 'invalid' });
   });
 });

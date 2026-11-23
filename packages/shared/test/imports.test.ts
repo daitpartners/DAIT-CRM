@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
-  BATCH_NUMBER_RE, IMPORT_FIELDS, IMPORT_TABLE_FIELDS, PROBLEM_CODES, importColumnLabel, importSource, problemText,
+  BATCH_NUMBER_RE, IMPORT_FILE_ERRORS, IMPORT_FIELDS, IMPORT_TABLE_FIELDS, PROBLEM_CODES, importColumnLabel, importFileErrorText, importSource, problemText,
   type RowProblem,
 } from '../src/imports';
 import {
@@ -43,6 +43,30 @@ describe('problemText', () => {
       expect(problemText(p, 'es'), code).not.toBe(problemText(p, 'en'));
       expect(problemText(p, 'fr'), code).not.toBe(problemText(p, 'en'));
     }
+  });
+});
+
+describe('importFileErrorText', () => {
+  test('every stored file error code reads in en, es and fr', () => {
+    for (const lang of LANGS) {
+      for (const code of IMPORT_FILE_ERRORS) expect(importFileErrorText(code, 'pdf', lang)).toMatch(/\S/);
+    }
+    expect(new Set(IMPORT_FILE_ERRORS.map((c) => importFileErrorText(c, 'pdf', 'es'))).size).toBe(IMPORT_FILE_ERRORS.length);
+  });
+
+  test('the English texts, with the extension for an invalid file', () => {
+    expect(importFileErrorText('invalid', 'xlsx', 'en')).toBe('This file is not a valid .xlsx file');
+    expect(importFileErrorText('too_large', 'pdf', 'en')).toBe('This file is too large to read');
+    expect(importFileErrorText('password', 'pdf', 'en')).toBe('This file is password-protected');
+    expect(importFileErrorText('old_doc', 'docx', 'en')).toBe("Old .doc files can't be read; save it as .docx");
+    expect(importFileErrorText('unreadable', 'csv', 'en')).toBe('Could not read this file');
+    expect(importFileErrorText('interrupted', 'csv', 'en')).toBe('Reading was interrupted; upload the file again');
+    expect(importFileErrorText('invalid', 'docx', 'fr')).toContain('.docx');
+    expect(importFileErrorText('invalid', 'xls', 'es')).toContain('.xls');
+  });
+
+  test('an unknown stored value falls back to "Could not read this file"', () => {
+    expect(importFileErrorText('something else', 'pdf', 'en')).toBe('Could not read this file');
   });
 });
 

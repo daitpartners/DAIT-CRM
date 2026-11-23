@@ -1,9 +1,10 @@
 /**
  * Reading an uploaded import file: a spreadsheet becomes tables of cell text, a document becomes page text. A file
- * the reader refuses comes back Failed with the reason shown in the file list; anything unexpected is thrown (the
- * job then marks the file "Could not read this file").
+ * the reader refuses comes back Failed with the reason's code; anything unexpected is thrown (the job then marks the
+ * file `unreadable`). The job never calls these directly: it reads in a worker thread (`isolated.ts`), so a hostile
+ * file can only time out or run out of its own memory, never block or crash the worker process.
  */
-import type { FileMeta, ImportExt } from '@dait-crm/shared';
+import type { FileMeta, ImportExt, ImportFileError } from '@dait-crm/shared';
 import { readSpreadsheet } from './spreadsheet.js';
 import { readCsv } from './csv.js';
 import { readPdf } from './pdf.js';
@@ -11,12 +12,15 @@ import { readDocx } from './docx.js';
 import { readText } from './text.js';
 
 export { assertZipSize } from './zip.js';
-export { READ_FAILURE_TEXT, ReadFailure } from './failure.js';
+export { ReadFailure } from './failure.js';
 export { readSpreadsheet, readCsv, readPdf, readDocx, readText };
 
 export type TableExtract = { kind: 'table'; sheets: { name: string; rows: string[][] }[] };
 export type TextExtract = { kind: 'text'; unit: 'page' | 'card' | 'line'; pages: { n: number; text: string }[] };
-export type ReadResult = { status: 'Read' | 'Scan' | 'Failed'; meta: FileMeta; extract?: TableExtract | TextExtract; error?: string };
+/** `error` (Failed only) is the stable code stored in `import_files.error` (`IMPORT_FILE_ERRORS`, shared). */
+export type ReadResult = {
+  status: 'Read' | 'Scan' | 'Failed'; meta: FileMeta; extract?: TableExtract | TextExtract; error?: ImportFileError;
+};
 
 /**
  * Bytes to text: a BOM decides (UTF-8, UTF-16LE, UTF-16BE); without one, UTF-8 when it is valid, else windows-1252
