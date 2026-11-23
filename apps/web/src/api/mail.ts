@@ -1,4 +1,5 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { ApiError, api } from './client';
 import { keys } from './queries';
 
@@ -6,13 +7,15 @@ import { keys } from './queries';
 export const MAIL_VIEWS = ['inbox', 'sent', 'drafts', 'archive', 'unlinked', 'awaiting', 'mine'] as const;
 export type MailView = (typeof MAIL_VIEWS)[number];
 
-export type MailFilter = { view: MailView; company?: number; lead?: number; project?: number; s?: string; page?: number; pageSize?: number };
+export type MailFilter = { view: MailView; company?: number; lead?: number; project?: number; s?: string };
 
-/** Rows per page offered by the list's pager, as Leads and Companies (owner, 22 Nov 2026: the synced list had grown too long). */
-export const MAIL_PAGE_SIZES = [25, 50, 100] as const;
-export const MAIL_PAGE_SIZE = 50;
+/**
+ * Messages per batch: the list loads the next 50 when scrolled near its foot (owner, 23 Nov 2026: no page numbers on
+ * the Email screen).
+ */
+export const MAIL_BATCH = 50;
 
-/** One page of the list; `total` counts every message the filters leave. */
+/** One batch of the list; `total` counts every message the filters leave. */
 export type MailPage = { items: MailItem[]; total: number; page: number; pageSize: number };
 
 /** A message in the list (release 2B-2): only ever the signed-in user's own. */
@@ -39,6 +42,8 @@ export type MailItem = {
 export type MailDetail = MailItem & {
   ccAddresses: string[];
   bodyText: string;
+  /** Sanitised HTML (shown in the reader's sandboxed frame); null for plain text. */
+  bodyHtml: string | null;
   attachmentNames: string[];
   loggedAt: string | null;
   lead: { id: number; number: string; status: string; priority: string; nextFollowUp: string | null; companyId: number | null } | null;
@@ -67,26 +72,43 @@ export type MailCompose = {
 };
 
 const ROOT = ['mail'] as const;
-const listPath = (f: MailFilter) => {
+const listPath = (f: MailFilter, page: number) => {
   const q = new URLSearchParams({ view: f.view });
   if (f.company) q.set('company', String(f.company));
   if (f.lead) q.set('lead', String(f.lead));
   if (f.project) q.set('project', String(f.project));
   if (f.s) q.set('s', f.s);
-  if (f.page && f.page > 1) q.set('page', String(f.page));
-  q.set('pageSize', String(f.pageSize ?? MAIL_PAGE_SIZE));
+  if (page > 1) q.set('page', String(page));
+  q.set('pageSize', String(MAIL_BATCH));
   return `/api/mail?${q.toString()}`;
 };
 
+/**
+ * The list, one batch of 50 at a time (`fetchNextPage` loads the next). `items` are the batches loaded so far, once each
+ * (mail arriving between two batches shifts the later one; a message already shown is not repeated).
+ */
 export function useMailList(f: MailFilter, enabled = true) {
-  return useQuery({
+  const q = useInfiniteQuery({
     queryKey: [...ROOT, 'list', f],
-    queryFn: () => api<MailPage>(listPath(f)),
+    queryFn: ({ pageParam }) => api<MailPage>(listPath(f, pageParam)),
+    initialPageParam: 1,
+    getNextPageParam: (last, pages) => (pages.reduce((n, p) => n + p.items.length, 0) < last.total && last.items.length > 0 ? last.page + 1 : undefined),
     placeholderData: keepPreviousData,
     enabled,
     // New mail arrives with each 5-minute sync; a queued message turns Sent within seconds.
-    refetchInterval: (q) => (q.state.data?.items.some((m) => m.status === 'queued' || m.status === 'sending') ? 5000 : 60_000),
+    refetchInterval: (query) =>
+      (query.state.data?.pages.some((p) => p.items.some((m) => m.status === 'queued' || m.status === 'sending')) ? 5000 : 60_000),
   });
+  const pages = q.data?.pages;
+  const items = useMemo(() => {
+    const seen = new Set<number>();
+    return (pages ?? []).flatMap((p) => p.items).filter((m) => {
+      if (seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    });
+  }, [pages]);
+  return { ...q, items, total: pages?.at(-1)?.total ?? 0 };
 }
 
 export function useMailMeta() {
@@ -102,10 +124,10 @@ export function useMailMessage(id: number | null, peek = false) {
       const m = await api<MailDetail>(`/api/mail/${id}${peek ? '?peek=1' : ''}`);
       // Opening marks it read: the row loses its bold at once (no list refetch), the counts change.
       if (!peek) {
-        // Every cached page of every list: the message is on whichever page holds it.
-        qc.setQueriesData<MailPage>({ queryKey: [...ROOT, 'list'] }, (data) =>
-          data?.items.some((x) => x.id === id && !x.isRead)
-            ? { ...data, items: data.items.map((x) => (x.id === id ? { ...x, isRead: true } : x)) }
+        // Every loaded batch of every list: the message is in whichever batch holds it.
+        qc.setQueriesData<InfiniteData<MailPage, number>>({ queryKey: [...ROOT, 'list'] }, (data) =>
+          data?.pages.some((p) => p.items.some((x) => x.id === id && !x.isRead))
+            ? { ...data, pages: data.pages.map((p) => ({ ...p, items: p.items.map((x) => (x.id === id ? { ...x, isRead: true } : x)) })) }
             : data,
         );
       }

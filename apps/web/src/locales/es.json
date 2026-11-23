@@ -1693,5 +1693,6 @@
   "1 upcoming": "1 próxima",
   "Follow-up planned · {title}": "Seguimiento planificado · {title}",
   "1 new|badge": "1 nueva",
-  "{n} new|badge": "{n} nuevas"
+  "{n} new|badge": "{n} nuevas",
+  "Message body": "Cuerpo del mensaje"
 }

@@ -10,6 +10,7 @@ import { errorText, leadStatusText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
 import type { ComposeStart } from './ComposeModal';
 import { LinkLeadModal } from './LinkLeadModal';
+import { MailBody } from './MailBody';
 
 type Props = {
   id: number;
@@ -91,7 +92,7 @@ export function Reader({ id, peek = false, connected, onReply, onArchived }: Pro
             </div>
           )}
         </div>
-        <div className="body">{m.bodyText}</div>
+        <MailBody html={m.bodyHtml} text={m.bodyText} />
         {m.attachmentNames.length ? (
           <div className="reader-attach">{t('Attachments: {names}', { names: m.attachmentNames.join(', ') })}</div>
         ) : null}

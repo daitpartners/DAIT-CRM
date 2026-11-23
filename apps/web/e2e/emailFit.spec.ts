@@ -3,9 +3,10 @@ import { expect, test, type Page } from '@playwright/test';
 import { ARJUN, signInAs } from './fixtures';
 
 /**
- * Owner request (23 Nov 2026): on desktop the Email screen fits the window — the mail area takes the height under the
- * header and filters, the list scrolls on its own and its pager stays in view. 60 read messages are added to Arjun's
- * own mail for this spec (no mailbox is connected, so other specs see no change) and removed afterwards.
+ * Owner requests (23 Nov 2026): on desktop the Email screen fits the window — the mail area takes the height under the
+ * header and filters and the list scrolls on its own; there are no page numbers, the next 50 load when the list is
+ * scrolled near its foot. 60 read messages are added to Arjun's own mail for this spec (no mailbox is connected, so
+ * other specs see no change) and removed afterwards.
  */
 const DB = process.env.E2E_DATABASE_URL ?? 'postgresql://mac@localhost:5432/dait_crm_e2e';
 const sql = (q: string) => execFileSync('psql', [DB, '-Atc', q], { encoding: 'utf8' }).trim();
@@ -28,21 +29,22 @@ async function fits(page: Page, width: number, height: number) {
   await expect(list.getByText('Fit check 1', { exact: true })).toBeVisible();
   // No page scroll: the document is the window's height.
   expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(height + 1);
-  // The pager is in view without scrolling.
-  const pager = list.getByRole('navigation', { name: 'Pagination' });
-  await expect(pager).toBeInViewport({ ratio: 1 });
-  await expect(pager.getByText('1–50 of 60')).toBeVisible();
-  // The list column scrolls on its own, and Next takes it back to its top.
+  // No pager: the header gives the total, the rows scroll on their own.
+  await expect(list.getByRole('navigation', { name: 'Pagination' })).toHaveCount(0);
+  await expect(list.locator('.msglist-head')).toContainText('60 messages');
   const rows = list.locator('.msglist-rows');
   expect(await rows.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
-  await rows.evaluate((el) => el.scrollTo(0, 800));
-  await pager.getByRole('button', { name: 'Next ›' }).click();
-  await expect(list.getByText('Fit check 51', { exact: true })).toBeVisible();
-  expect(await rows.evaluate((el) => el.scrollTop)).toBe(0);
+  await expect(list.getByText('Fit check 51', { exact: true })).toHaveCount(0);
+  // Scrolled to its foot, the list loads the next batch under the first, in the same column.
+  await rows.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  await expect(list.getByText('Fit check 51', { exact: true })).toBeAttached();
+  await expect(list.locator('a.msg')).toHaveCount(60);
+  await expect(list.getByRole('status')).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(height + 1);
   expect(await page.evaluate(() => window.scrollY)).toBe(0);
 }
 
-test('the Email screen fits the window at 1400×900 and 1280×720; the list scrolls and its pager stays in view', async ({ page }) => {
+test('the Email screen fits the window at 1400×900 and 1280×720; the list scrolls and loads the next batch at its foot', async ({ page }) => {
   await signInAs(page, ARJUN);
   await fits(page, 1400, 900);
   await fits(page, 1280, 720);

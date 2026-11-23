@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { MAIL_PAGE_SIZE, MAIL_PAGE_SIZES, MAIL_VIEWS, useMailList, useMailMessage, useMailMeta, useSyncNow, type MailFilter, type MailItem, type MailView } from '../../api/mail';
+import { MAIL_VIEWS, useMailList, useMailMessage, useMailMeta, useSyncNow, type MailFilter, type MailItem, type MailView } from '../../api/mail';
 import { clientName } from '../../api/companies';
 import { useTemplates } from '../../api/templates';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Icons } from '../../components/Icons';
-import { Pager } from '../../components/Pager';
 import { Topbar } from '../../components/Topbar';
 import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
@@ -35,6 +34,7 @@ function viewLabel(t: TFn, v: MailView): string {
  * Folders and smart views, "Show mail for" Client / Lead / Project, search, the message list, the reader with its
  * linked records. Nobody sees anyone else's mail: the Project filter only narrows your own.
  * `?compose=1` (with `company`, `lead`, `project`) opens Compose preset (the Projects list's Email buttons).
+ * No page numbers (owner, 23 Nov 2026): the list loads the next 50 when scrolled near its foot.
  */
 export function EmailPage() {
   const t = useT();
@@ -45,34 +45,43 @@ export function EmailPage() {
   const { id } = useParams();
   const [params, setParams] = useSearchParams();
   const view: MailView = (MAIL_VIEWS as readonly string[]).includes(params.get('folder') ?? '') ? (params.get('folder') as MailView) : 'inbox';
-  const page = Math.max(1, num(params.get('page')) ?? 1);
-  const sizeParam = num(params.get('size')) ?? 0;
-  const pageSize = (MAIL_PAGE_SIZES as readonly number[]).includes(sizeParam) ? sizeParam : MAIL_PAGE_SIZE;
   const filter: MailFilter = {
     view, company: num(params.get('company')), lead: num(params.get('lead')), project: num(params.get('project')), s: params.get('s') ?? undefined,
-    page, pageSize,
   };
   const { data: meta } = useMailMeta();
-  const { data: list, isLoading } = useMailList(filter);
+  const { items, total, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } = useMailList(filter);
   const { data: templates } = useTemplates();
   const sync = useSyncNow();
   const [compose, setCompose] = useState<ComposeStart | null>(null);
   const [search, setSearch] = useState(filter.s ?? '');
-  const listRef = useRef<HTMLElement>(null);
   const rowsRef = useRef<HTMLDivElement>(null);
-  /**
-   * Shows a new page from its top. On desktop the rows scroll inside their column (owner, 23 Nov 2026: the screen
-   * fits the window), so that column goes to its top; where the page itself scrolls, the list is brought into view.
-   */
-  const listToTop = () => {
-    const rows = rowsRef.current;
-    if (rows && rows.scrollHeight > rows.clientHeight) rows.scrollTop = 0;
-    else listRef.current?.scrollIntoView?.({ block: 'start' });
-  };
+  const moreRef = useRef<HTMLDivElement>(null);
   useEffect(() => setSearch(params.get('s') ?? ''), [params]);
 
-  const items = list?.items ?? [];
-  const total = list?.total ?? 0;
+  // Another folder, filter or search starts at the top of the list (on desktop its rows scroll inside their column).
+  const listKey = JSON.stringify(filter);
+  useEffect(() => {
+    if (rowsRef.current) rowsRef.current.scrollTop = 0;
+  }, [listKey]);
+
+  /**
+   * The next batch loads when the list's foot comes near: within the rows' own column on desktop (owner, 23 Nov 2026:
+   * the screen fits the window), within the window where the page itself scrolls. Watching again after each batch
+   * keeps loading while the foot is still in view (a tall screen).
+   */
+  const loaded = items.length;
+  useEffect(() => {
+    const foot = moreRef.current;
+    if (!foot || !hasNextPage || isFetchingNextPage || typeof IntersectionObserver === 'undefined') return;
+    const rows = rowsRef.current;
+    const root = rows && getComputedStyle(rows).overflowY !== 'visible' ? rows : null;
+    const watch = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) void fetchNextPage();
+    }, { root, rootMargin: '0px 0px 300px 0px' });
+    watch.observe(foot);
+    return () => watch.disconnect();
+  }, [hasNextPage, isFetchingNextPage, loaded, listKey, fetchNextPage]);
+
   const selectedId = num(id ?? null) ?? items[0]?.id ?? null;
   // The message opened from a link (the Reader's own query): a list answered before the open marked it read
   // still shows its row as read.
@@ -85,13 +94,9 @@ export function EmailPage() {
     [templates, lang],
   );
 
-  /**
-   * Same screen with some query values changed (selection kept only when asked). A change of folder, filter, search
-   * or rows per page goes back to page 1, as the other lists; a change with nothing in it keeps the page.
-   */
+  /** Same screen with some query values changed (selection kept only when asked). */
   const href = (change: Record<string, string | undefined>, keepId = false) => {
     const q = new URLSearchParams(params);
-    if (!('page' in change) && Object.keys(change).length) q.delete('page');
     for (const [k, v] of Object.entries(change)) {
       if (v) q.set(k, v);
       else q.delete(k);
@@ -101,14 +106,12 @@ export function EmailPage() {
   };
   const setQuery = (change: Record<string, string | undefined>) => navigate(href(change));
 
-  // An unknown or default ?size= (typed or left from an old link) leaves the address, as choosing 50 does.
-  const sizeRaw = params.get('size');
+  // ?page= and ?size= from the old pager (bookmarks, old links) mean nothing now: they leave the address.
+  const oldPaging = params.has('page') || params.has('size');
   useEffect(() => {
-    if (sizeRaw !== null && (sizeParam !== pageSize || pageSize === MAIL_PAGE_SIZE)) {
-      navigate(href({ size: undefined, page: params.get('page') ?? undefined }, true), { replace: true });
-    }
-    // Only a change of the size in the address should trigger this.
-  }, [sizeRaw]);
+    if (oldPaging) navigate(href({ page: undefined, size: undefined }, true), { replace: true });
+    // Only their arrival in the address should trigger this.
+  }, [oldPaging]);
 
   // A Compose link (`?compose=1&company=…&lead=…&project=…`) opens Compose once; the filters stay in the address.
   const composeLink = params.get('compose') === '1';
@@ -121,14 +124,6 @@ export function EmailPage() {
     navigate(`/email${id ? `/${id}` : ''}${s ? `?${s}` : ''}`, { replace: true });
     // Only the link's arrival should trigger this.
   }, [composeLink]);
-
-  // A page past the end (old link, or the last messages archived): go to the last page that has messages.
-  useEffect(() => {
-    if (!list || list.items.length > 0 || list.total === 0) return;
-    const last = Math.ceil(list.total / list.pageSize);
-    if (list.page > last) navigate(href({ page: last > 1 ? String(last) : undefined }, true), { replace: true });
-    // Only new data should trigger this.
-  }, [list]);
 
   // Owner addition (23 Nov 2026): the folders / templates column folds to a strip, remembered in this browser. The
   // folder and filters live in the address, so folding loses neither.
@@ -318,13 +313,13 @@ export function EmailPage() {
           </div>
         </nav>
 
-        <section className="msglist" aria-label={t('Message list')} ref={listRef}>
+        <section className="msglist" aria-label={t('Message list')}>
           <div className="msglist-head">
-            <strong>{viewLabel(t, view)}</strong> · {total}
+            <strong>{viewLabel(t, view)}</strong> · {total === 1 ? t('1 message') : t('{n} messages', { n: total })}
             {companyName ? ` · ${companyName}` : ''}
             {leadNumber ? ` · ${leadNumber}` : ''}
           </div>
-          {/* The rows scroll on their own on desktop; the pager below stays in view. */}
+          {/* The rows scroll on their own on desktop. */}
           <div className="msglist-rows" ref={rowsRef}>
             {items.map((m) => (
               <MessageRow key={m.id} m={opened?.id === m.id && opened.isRead ? { ...m, isRead: true } : m} on={m.id === selectedId} to={`/email/${m.id}${params.toString() ? `?${params.toString()}` : ''}`} />
@@ -334,25 +329,12 @@ export function EmailPage() {
                 {filter.company || filter.lead || filter.project ? t('No messages for this filter in {folder}.', { folder: viewLabel(t, view) }) : t('Nothing here.')}
               </div>
             ) : null}
+            {hasNextPage ? (
+              <div className="msglist-more" ref={moreRef} role="status">
+                {t('Loading…')}
+              </div>
+            ) : null}
           </div>
-          {/* Owner request (22 Nov 2026), not in the prototype: the Leads / Companies pager, 50 rows by default. */}
-          {list && list.total > 0 ? (
-            <Pager
-              page={list.page}
-              pageSize={list.pageSize}
-              total={list.total}
-              onPage={(p) => {
-                setQuery({ page: p > 1 ? String(p) : undefined });
-                listToTop();
-              }}
-              sizes={MAIL_PAGE_SIZES}
-              compact
-              onPageSize={(size) => {
-                setQuery({ size: size === MAIL_PAGE_SIZE ? undefined : String(size) });
-                listToTop();
-              }}
-            />
-          ) : null}
         </section>
 
         {selectedId !== null ? (

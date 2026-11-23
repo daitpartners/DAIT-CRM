@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
@@ -25,7 +25,7 @@ const item = (over: Partial<MailItem> = {}): MailItem => ({
   companyId: null, hasAttachments: false, projectId: null, projectNumber: null, ...over,
 });
 const detail = (m: MailItem, over: Partial<MailDetail> = {}): MailDetail => ({
-  ...m, ccAddresses: [], bodyText: 'Looks good', attachmentNames: [], loggedAt: null, lead: null, contact: null, company: null, thread: [], ...over,
+  ...m, ccAddresses: [], bodyText: 'Looks good', bodyHtml: null, attachmentNames: [], loggedAt: null, lead: null, contact: null, company: null, thread: [], ...over,
 });
 const META: MailMeta = {
   mailbox: { id: 7, address: 'arjun@daitpartners.com', status: 'connected', lastSyncAt: '2026-11-22T09:00:00.000Z' },
@@ -320,12 +320,12 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     await waitFor(() => expect(within(folders).getByRole('link', { name: /Inbox\s*2/ })).toBeTruthy());
   });
 
-  describe('pagination (owner, 22 Nov 2026)', () => {
-    /** 120 inbox messages, served 50 a page like the API; records every list request. */
-    function paged() {
-      const all = Array.from({ length: 120 }, (_, i) => item({ id: i + 1, subject: `Message ${i + 1}`, isRead: true }));
+  describe('no page numbers: the list loads more as it is scrolled (owner, 23 Nov 2026)', () => {
+    /** 120 inbox messages, served 50 a batch like the API; records every list request. */
+    function batched(total = 120) {
+      const all = Array.from({ length: total }, (_, i) => item({ id: i + 1, subject: `Message ${i + 1}`, isRead: true }));
       const lists: URLSearchParams[] = [];
-      stub([], { 1: detail(all[0]!), 51: detail(all[50]!) }, META, (url) => {
+      stub([], Object.fromEntries(all.map((m) => [m.id, detail(m)])), META, (url) => {
         if (!url.startsWith('/api/mail?')) return undefined;
         const q = new URL(url, 'http://x').searchParams;
         lists.push(q);
@@ -336,168 +336,168 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       });
       return lists;
     }
+
+    /** jsdom has no layout: an IntersectionObserver the test triggers (the list foot coming into view). */
+    function watcher() {
+      const watched: { cb: IntersectionObserverCallback; el: Element | null; root: Element | Document | null; alive: boolean }[] = [];
+      vi.stubGlobal('IntersectionObserver', class {
+        entry: (typeof watched)[number];
+        constructor(cb: IntersectionObserverCallback, opts?: IntersectionObserverInit) {
+          this.entry = { cb, el: null, root: opts?.root ?? null, alive: true };
+          watched.push(this.entry);
+        }
+        observe(el: Element) { this.entry.el = el; }
+        disconnect() { this.entry.alive = false; }
+        unobserve() {}
+        takeRecords() { return []; }
+      });
+      return {
+        /** The foot comes into view: the live observer fires. */
+        reach: () => {
+          const w = watched.filter((x) => x.alive && x.el).at(-1);
+          if (!w) throw new Error('nothing is watching the list foot');
+          act(() => w.cb([{ isIntersecting: true, target: w.el! } as IntersectionObserverEntry], {} as IntersectionObserver));
+        },
+        live: () => watched.filter((x) => x.alive && x.el),
+      };
+    }
     const where = () => screen.getByTestId('where').textContent;
 
-    it('shows the pager under the list, the header counts the total, Next asks for page 2 and keeps it in the URL', async () => {
-      const u = userEvent.setup();
-      const lists = paged();
+    it('shows the first 50 with the total and no pager; reaching the foot loads the next 50 under them, then the rest', async () => {
+      const lists = batched();
+      const w = watcher();
       show();
       const list = screen.getByRole('region', { name: 'Message list' });
       expect(await within(list).findByText('Message 1')).toBeTruthy();
-      expect(within(list).getByText(/Inbox/).parentElement!.textContent).toMatch(/Inbox · 120/);
+      expect(within(list).getByText(/Inbox/).parentElement!.textContent).toMatch(/Inbox · 120 messages/);
+      expect(within(list).queryByRole('navigation', { name: 'Pagination' })).toBeNull();
+      expect(within(list).queryByRole('combobox')).toBeNull();
       expect(lists.at(-1)!.get('pageSize')).toBe('50');
-      // The Leads / Companies pager: count, Rows, First / Prev / Page [n] of m / Next / Last.
-      const pager = within(list).getByRole('navigation', { name: 'Pagination' });
-      expect(within(pager).getByText('1–50 of 120')).toBeTruthy();
-      expect((within(pager).getByRole('combobox', { name: 'Rows per page' }) as HTMLSelectElement).value).toBe('50');
-      expect(within(pager).getAllByRole('option').map((o) => o.textContent)).toEqual(['25', '50', '100']);
-      expect(within(pager).getByRole('button', { name: '« First' })).toHaveProperty('disabled', true);
-      expect(within(pager).getByRole('button', { name: '‹ Prev' })).toHaveProperty('disabled', true);
-      expect((within(pager).getByRole('spinbutton', { name: 'Go to page' }) as HTMLInputElement).value).toBe('1');
-      expect(pager.textContent).toMatch(/Page\s*of 3/);
-      expect(within(pager).getByRole('button', { name: 'Last »' })).toHaveProperty('disabled', false);
-      await u.click(within(pager).getByRole('button', { name: 'Next ›' }));
+      expect(lists.at(-1)!.get('page')).toBeNull();
+      expect(within(list).queryByText('Message 51')).toBeNull();
+      expect(within(list).getByRole('status').textContent).toBe('Loading…');
+      w.reach();
       expect(await within(list).findByText('Message 51')).toBeTruthy();
       expect(lists.at(-1)!.get('page')).toBe('2');
-      expect(where()).toBe('/email?page=2');
-      // The first message of the current page is shown on arrival.
-      expect(within(list).getByText('Message 51').closest('a')!.getAttribute('aria-current')).toBe('true');
-      // Opening a message keeps the page.
-      expect(within(list).getByText('Message 52').closest('a')!.getAttribute('href')).toBe('/email/52?page=2');
-    });
-
-    it('a folder, Client / Lead filter or search goes back to page 1', async () => {
-      const u = userEvent.setup();
-      const lists = paged();
-      show('/email?page=3');
-      const list = screen.getByRole('region', { name: 'Message list' });
-      expect(await within(list).findByText('Message 101')).toBeTruthy();
-      expect(lists.at(-1)!.get('page')).toBe('3');
-      const folders = screen.getByRole('navigation', { name: 'Mail folders' });
-      expect(within(folders).getByRole('link', { name: 'Sent' }).getAttribute('href')).toBe('/email?folder=sent');
-      await u.selectOptions(screen.getByRole('combobox', { name: 'Client / company' }), '4');
-      await waitFor(() => expect(where()).toBe('/email?company=4'));
-      await waitFor(() => expect(lists.at(-1)!.get('page')).toBeNull());
-    });
-
-    it('Last and First jump to the ends; Rows asks for that many and goes back to page 1, kept in the URL', async () => {
-      const u = userEvent.setup();
-      const lists = paged();
-      show('/email?page=2');
-      const list = screen.getByRole('region', { name: 'Message list' });
-      expect(await within(list).findByText('Message 51')).toBeTruthy();
-      const pager = () => within(list).getByRole('navigation', { name: 'Pagination' });
-      await u.click(within(pager()).getByRole('button', { name: 'Last »' }));
-      expect(await within(list).findByText('Message 101')).toBeTruthy();
-      expect(where()).toBe('/email?page=3');
-      await u.click(within(pager()).getByRole('button', { name: '« First' }));
-      expect(await within(list).findByText('Message 1')).toBeTruthy();
+      expect(within(list).getByText('Message 1')).toBeTruthy();
+      expect(list.querySelectorAll('a.msg')).toHaveLength(100);
+      w.reach();
+      expect(await within(list).findByText('Message 120')).toBeTruthy();
+      expect(list.querySelectorAll('a.msg')).toHaveLength(120);
+      // Everything is loaded: no Loading… row, nothing watched.
+      await waitFor(() => expect(within(list).queryByRole('status')).toBeNull());
+      expect(w.live()).toHaveLength(0);
+      // The address never carries a page.
       expect(where()).toBe('/email');
-      await u.click(within(pager()).getByRole('button', { name: 'Next ›' }));
-      expect(await within(list).findByText('Message 51')).toBeTruthy();
-      await u.selectOptions(within(pager()).getByRole('combobox', { name: 'Rows per page' }), '25');
-      await waitFor(() => expect(where()).toBe('/email?size=25'));
-      await waitFor(() => expect(within(pager()).getByText('1–25 of 120')).toBeTruthy());
-      expect(lists.at(-1)!.get('pageSize')).toBe('25');
-      expect(lists.at(-1)!.get('page')).toBeNull();
-      // Back to the default: 50 leaves the URL.
-      await u.selectOptions(within(pager()).getByRole('combobox', { name: 'Rows per page' }), '50');
-      await waitFor(() => expect(where()).toBe('/email'));
     });
 
-    it('changing Rows shows the list from its top; an invalid ?size= is dropped from the address', async () => {
+    it('loading more keeps the open message, its selection and the filters', async () => {
       const u = userEvent.setup();
-      paged();
-      const scrolled = vi.fn();
-      const own = Element.prototype.scrollIntoView;
-      Element.prototype.scrollIntoView = scrolled;
-      try {
-        show('/email?size=7');
-        const list = screen.getByRole('region', { name: 'Message list' });
-        expect(await within(list).findByText('Message 1')).toBeTruthy();
-        await waitFor(() => expect(where()).toBe('/email'));
-        const pager = within(list).getByRole('navigation', { name: 'Pagination' });
-        await u.selectOptions(within(pager).getByRole('combobox', { name: 'Rows per page' }), '25');
-        expect(scrolled).toHaveBeenCalled();
-      } finally {
-        Element.prototype.scrollIntoView = own;
-      }
-    });
-
-    it('when the list column scrolls on its own (desktop), a page change takes that column to its top, not the window', async () => {
-      const u = userEvent.setup();
-      paged();
-      const scrolled = vi.fn();
-      const own = Element.prototype.scrollIntoView;
-      Element.prototype.scrollIntoView = scrolled;
-      try {
-        show('/email');
-        const list = screen.getByRole('region', { name: 'Message list' });
-        expect(await within(list).findByText('Message 1')).toBeTruthy();
-        const rows = list.querySelector('.msglist-rows') as HTMLElement;
-        // jsdom has no layout: make the rows box a scroller that has been scrolled down.
-        Object.defineProperty(rows, 'scrollHeight', { configurable: true, value: 3000 });
-        Object.defineProperty(rows, 'clientHeight', { configurable: true, value: 600 });
-        rows.scrollTop = 900;
-        const pager = within(list).getByRole('navigation', { name: 'Pagination' });
-        await u.click(within(pager).getByRole('button', { name: 'Next ›' }));
-        expect(await within(list).findByText('Message 51')).toBeTruthy();
-        expect(rows.scrollTop).toBe(0);
-        expect(scrolled).not.toHaveBeenCalled();
-      } finally {
-        Element.prototype.scrollIntoView = own;
-      }
-    });
-
-    it('a search goes back to page 1', async () => {
-      const u = userEvent.setup();
-      paged();
-      show('/email?page=2');
-      expect(await screen.findByText('Message 51')).toBeTruthy();
-      await u.type(screen.getByRole('searchbox', { name: 'Search mail' }), 'quote{Enter}');
-      await waitFor(() => expect(where()).toBe('/email?s=quote'));
-    });
-
-    it('a page past the end goes to the last page', async () => {
-      paged();
-      show('/email?page=9');
-      expect(await screen.findByText('Message 101')).toBeTruthy();
-      expect(where()).toBe('/email?page=3');
-    });
-
-    it('the pager shows even when everything fits on one page, as Leads; not for an empty list', async () => {
-      const a = item();
-      stub([a, item({ id: 2 })], { 1: detail(a) });
-      show();
+      const lists = batched();
+      const w = watcher();
+      show('/email?company=4&s=proposal');
       const list = screen.getByRole('region', { name: 'Message list' });
-      expect(await within(list).findAllByText('Proposal')).toHaveLength(2);
-      expect(within(list).getByText(/Inbox/).parentElement!.textContent).toMatch(/Inbox · 2/);
-      const pager = within(list).getByRole('navigation', { name: 'Pagination' });
-      expect(within(pager).getByText('1–2 of 2')).toBeTruthy();
-      expect(within(pager).getByRole('button', { name: 'Next ›' })).toHaveProperty('disabled', true);
+      expect(await within(list).findByText('Message 1')).toBeTruthy();
+      await u.click(within(list).getByText('Message 3').closest('a')!);
+      await waitFor(() => expect(where()).toBe('/email/3?company=4&s=proposal'));
+      w.reach();
+      expect(await within(list).findByText('Message 51')).toBeTruthy();
+      expect(lists.at(-1)!.get('page')).toBe('2');
+      expect(lists.at(-1)!.get('company')).toBe('4');
+      expect(lists.at(-1)!.get('s')).toBe('proposal');
+      expect(where()).toBe('/email/3?company=4&s=proposal');
+      expect(within(list).getByText('Message 3').closest('a')!.getAttribute('aria-current')).toBe('true');
+      expect(within(list).getByText('Message 52').closest('a')!.getAttribute('href')).toBe('/email/52?company=4&s=proposal');
     });
 
-    it('no pager on an empty list', async () => {
-      stub([], {});
-      show();
-      expect(await screen.findByText('Nothing here.')).toBeTruthy();
-      expect(screen.queryByRole('navigation', { name: 'Pagination' })).toBeNull();
-    });
-
-    it('opening an unread message on page 2 clears its bold at once', async () => {
+    it('opening an unread message from a later batch clears its bold at once', async () => {
       const u = userEvent.setup();
       const all = Array.from({ length: 60 }, (_, i) => item({ id: i + 1, subject: `Message ${i + 1}`, isRead: i !== 55 }));
-      stub([], { 51: detail(all[50]!), 56: detail({ ...all[55]!, isRead: true }) }, META, (url) => {
+      stub([], { 1: detail(all[0]!), 56: detail({ ...all[55]!, isRead: true }) }, META, (url) => {
         if (!url.startsWith('/api/mail?')) return undefined;
         const page = Number(new URL(url, 'http://x').searchParams.get('page') ?? 1);
         return { items: all.slice((page - 1) * 50, page * 50), total: 60, page, pageSize: 50 };
       });
-      show('/email?page=2');
+      const w = watcher();
+      show();
       const list = screen.getByRole('region', { name: 'Message list' });
+      expect(await within(list).findByText('Message 1')).toBeTruthy();
+      w.reach();
       const row = (await within(list).findByText('Message 56')).closest('a')!;
       expect(row.className).toMatch(/\bunread\b/);
       await u.click(row);
       await waitFor(() => expect(row.className).not.toMatch(/\bunread\b/));
+    });
+
+    it('?page= and ?size= from old links are ignored and leave the address; the list starts from the top', async () => {
+      const lists = batched();
+      watcher();
+      show('/email/5?page=3&size=25&folder=inbox');
+      const list = screen.getByRole('region', { name: 'Message list' });
+      expect(await within(list).findByText('Message 1')).toBeTruthy();
+      await waitFor(() => expect(where()).toBe('/email/5?folder=inbox'));
+      expect(lists.every((q) => q.get('page') === null && q.get('pageSize') === '50')).toBe(true);
+      expect(within(list).getByText('Message 5').closest('a')!.getAttribute('aria-current')).toBe('true');
+    });
+
+    it('another folder or filter shows its list from the top', async () => {
+      const u = userEvent.setup();
+      batched();
+      watcher();
+      show();
+      const list = screen.getByRole('region', { name: 'Message list' });
+      expect(await within(list).findByText('Message 1')).toBeTruthy();
+      const rows = list.querySelector('.msglist-rows') as HTMLElement;
+      rows.scrollTop = 900;
+      await u.selectOptions(screen.getByRole('combobox', { name: 'Client / company' }), '4');
+      await waitFor(() => expect(where()).toBe('/email?company=4'));
+      await waitFor(() => expect(rows.scrollTop).toBe(0));
+    });
+
+    it('a short list: the total in words, no Loading… row; an empty one says so', async () => {
+      const a = item();
+      stub([a], { 1: detail(a) });
+      watcher();
+      const { unmount } = show();
+      const list = screen.getByRole('region', { name: 'Message list' });
+      expect(await within(list).findByText('Proposal', { selector: '.sub' })).toBeTruthy();
+      expect(within(list).getByText(/Inbox/).parentElement!.textContent).toMatch(/Inbox · 1 message$/);
+      expect(within(list).queryByRole('status')).toBeNull();
+      unmount();
+      stub([], {});
+      show();
+      expect(await screen.findByText('Nothing here.')).toBeTruthy();
+      expect(screen.getByRole('region', { name: 'Message list' }).querySelector('.msglist-head')!.textContent).toMatch(/Inbox · 0 messages/);
+    });
+  });
+
+  describe('message bodies (owner, 23 Nov 2026: formatted as in Outlook)', () => {
+    it('an HTML body shows in a sandboxed frame (no scripts, no same-origin) with a strict content policy', async () => {
+      const a = item();
+      stub([a], { 1: detail(a, { bodyHtml: '<table><tr><td style="color:#1f497d"><b>Ana Ruiz</b><br>Acme</td></tr></table>' }) });
+      show('/email/1');
+      const frame = (await screen.findByTitle('Message body')) as HTMLIFrameElement;
+      expect(frame.tagName).toBe('IFRAME');
+      expect(frame.getAttribute('sandbox')).toBe('allow-popups allow-popups-to-escape-sandbox');
+      const doc = frame.getAttribute('srcdoc')!;
+      expect(doc).toContain('<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src https: http: data:; style-src \'unsafe-inline\'">');
+      expect(doc).toContain('<base target="_blank">');
+      expect(doc).toContain('<td style="color:#1f497d"><b>Ana Ruiz</b><br>Acme</td>');
+      // The plain-text body is not shown beside it.
+      expect(document.querySelector('.reader .body')).toBeNull();
+    });
+
+    it('a plain-text body shows as text, as before (no frame)', async () => {
+      const a = item();
+      stub([a], { 1: detail(a, { bodyText: 'Hi Arjun,\n\n<b>not markup</b>', bodyHtml: null }) });
+      show('/email/1');
+      const body = await waitFor(() => {
+        const el = document.querySelector('.reader .body');
+        if (!el) throw new Error('no body yet');
+        return el;
+      });
+      expect(body.textContent).toBe('Hi Arjun,\n\n<b>not markup</b>');
+      expect(screen.queryByTitle('Message body')).toBeNull();
     });
   });
 
