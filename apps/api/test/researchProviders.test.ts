@@ -77,7 +77,8 @@ describe('claudeProvider', () => {
     expect(calls).toHaveLength(1);
     const req = calls[0]!;
     expect(req.model).toBe('claude-opus-5-5');
-    expect(req.output_config?.format?.type).toBe('json_schema');
+    // The fixed schema, and no other output setting (no effort parameter).
+    expect(req.output_config).toEqual({ format: { type: 'json_schema', schema: expect.any(Object) } });
     expect(req.tools).toBeUndefined();
     expect(JSON.stringify(req.messages)).toContain('We build widgets.');
 
@@ -140,6 +141,21 @@ describe('claudeProvider', () => {
     expect(calls[1]!.messages.at(-1)!.role).toBe('assistant');
     expect(res.costUsd).toBeCloseTo(2 * claudeCostUsd('claude-opus-5-5', { input_tokens: 10_000, output_tokens: 1_000 }));
     expect(res.findings.length).toBeGreaterThan(0);
+  });
+
+  test('the whole step has one deadline: a request still running when it passes is aborted', async () => {
+    const signals: (AbortSignal | undefined)[] = [];
+    const client: ClaudeClient = {
+      create: (_params, options) => new Promise((_resolve, reject) => {
+        signals.push(options?.signal);
+        options?.signal?.addEventListener('abort', () => reject(options.signal!.reason));
+      }),
+    };
+    const started = Date.now();
+    const res = await claudeProvider({ client, model: 'claude-opus-5-5', webSearch: false, budgetMs: 50 }).run(input());
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
+    expect(res).toMatchObject({ findings: [], error: 'Claude took too long' });
   });
 
   test('refusal, malformed JSON, a wrong shape and an API error give an error and no values', async () => {
@@ -207,7 +223,7 @@ describe('placesProvider', () => {
     const byField = Object.fromEntries(res.findings.map((x) => [x.field, x.value]));
     expect(byField).toEqual({
       street: '12 Foundry Lane', city: 'Sheffield', state: 'England', zip: 'S1 2AB', lat: 53.381299, lng: -1.47009,
-      mapsUrl: 'https://maps.google.com/?cid=123', website: 'https://acme.example/',
+      mapsUrl: 'https://maps.google.com/?cid=123',
     });
     expect(res.findings.every((x) => x.sourceUrl === 'https://maps.google.com/?cid=123' && x.confidence === 85)).toBe(true);
     expect(res.sources).toHaveLength(1);

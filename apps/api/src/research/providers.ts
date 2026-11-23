@@ -182,7 +182,6 @@ export function placesProvider({ apiKey, fetchImpl = fetch }: PlacesProviderOpti
           ['lat', d.location ? Math.round(d.location.latitude * 1e6) / 1e6 : undefined],
           ['lng', d.location ? Math.round(d.location.longitude * 1e6) / 1e6 : undefined],
           ['mapsUrl', mapsUrl],
-          ['website', d.websiteUri && /^https?:\/\//i.test(d.websiteUri) && d.websiteUri.length <= 500 ? d.websiteUri : undefined],
         ];
         const findings: Finding[] = values
           .filter(([, v]) => v !== undefined && v !== '')
@@ -278,13 +277,20 @@ export const DAIT_SERVICES = [
 
 /** The part of the SDK client a run uses (a fake in tests). */
 export type ClaudeClient = {
-  create(params: Anthropic.MessageCreateParamsNonStreaming): Promise<Anthropic.Message>;
+  create(params: Anthropic.MessageCreateParamsNonStreaming, options?: { signal?: AbortSignal }): Promise<Anthropic.Message>;
 };
 
+/** Per request: 2 minutes, one retry. The whole Claude step is further bounded by CLAUDE_STEP_BUDGET_MS. */
 export function createClaudeClient(apiKey: string): ClaudeClient {
-  const client = new Anthropic({ apiKey, maxRetries: 2, timeout: 180_000 });
-  return { create: (params) => client.messages.create(params) };
+  const client = new Anthropic({ apiKey, maxRetries: 1, timeout: 120_000 });
+  return { create: (params, options) => client.messages.create(params, { signal: options?.signal }) };
 }
+
+/**
+ * One deadline for the whole Claude step (every turn and retry): with the website read (≤ ~100 s) a run stays well
+ * inside the queue's 15-minute stale limit, after which a run may be released and started again.
+ */
+export const CLAUDE_STEP_BUDGET_MS = 5 * 60_000;
 
 /** Suggestion confidence from Claude's overall confidence. */
 const CLAUDE_CONFIDENCE = { High: 85, Medium: 70, Low: 55 } as const;
@@ -359,11 +365,13 @@ export interface ClaudeProviderOptions {
   webSearch: boolean;
   /** Secrets to keep out of error messages. */
   secrets?: string[];
+  /** Overall deadline for the step; default CLAUDE_STEP_BUDGET_MS. */
+  budgetMs?: number;
 }
 
 const normaliseUrl = (u: string) => u.trim().replace(/#.*$/, '').replace(/\/+$/, '');
 
-export function claudeProvider({ client, model, webSearch, secrets = [] }: ClaudeProviderOptions): ResearchProvider {
+export function claudeProvider({ client, model, webSearch, secrets = [], budgetMs = CLAUDE_STEP_BUDGET_MS }: ClaudeProviderOptions): ResearchProvider {
   return {
     source: 'claude',
     async run({ company, pages, employeeRanges }) {
@@ -381,17 +389,19 @@ export function claudeProvider({ client, model, webSearch, secrets = [] }: Claud
       }];
       const allowed = new Set(pages.map((p) => normaliseUrl(p.url)));
       let costUsd = 0;
+      const deadline = AbortSignal.timeout(budgetMs);
       try {
         let response: Anthropic.Message | null = null;
         for (let turn = 0; turn < MAX_TURNS; turn += 1) {
+          if (deadline.aborted) throw deadline.reason;
           response = await client.create({
             model,
             max_tokens: 16000,
             system: SYSTEM_PROMPT,
             messages,
-            output_config: { effort: 'medium', format: { type: 'json_schema', schema: jsonSchema } },
+            output_config: { format: { type: 'json_schema', schema: jsonSchema } },
             ...(webSearch ? { tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }] } : {}),
-          });
+          }, { signal: deadline });
           costUsd += claudeCostUsd(model, response.usage);
           for (const block of response.content) {
             if (block.type === 'web_search_tool_result' && Array.isArray(block.content)) {
@@ -449,7 +459,8 @@ export function claudeProvider({ client, model, webSearch, secrets = [] }: Claud
         if (Object.keys(ai).length > 0 || findings.length > 0) ai.aiConfidence = out.confidence;
         return { findings, sources: [], ai, costUsd };
       } catch (err) {
-        const msg = err instanceof Anthropic.APIError ? `Claude API error ${err.status ?? ''}`.trim() : 'Could not reach Claude';
+        const msg = deadline.aborted ? 'Claude took too long'
+          : err instanceof Anthropic.APIError ? `Claude API error ${err.status ?? ''}`.trim() : 'Could not reach Claude';
         return { findings: [], sources: [], costUsd, error: redact(msg, secrets) };
       }
     },

@@ -6,6 +6,7 @@ import { buildApp } from '../src/app';
 import { runResearch, type ResearchDeps } from '../src/research/service';
 import { researchCompanyHandler } from '../src/jobs/handlers/researchCompany';
 import { fakeGraph, resetDb, seedLookups } from './helpers';
+import { RIGHTS, type Action } from '@dait-crm/shared';
 import { makeCompany, makeLead, makeUser, signIn } from './factory';
 import { FIXTURE_HOSTS, fixtureResolver, startFixtureServer, type FixtureServer } from './fixtureSites';
 
@@ -119,6 +120,59 @@ describe('research runs · website reader', () => {
     expect((await prisma.company.findUniqueOrThrow({ where: { id: c.id } })).aiResearchStatus).toBe('Failed');
   });
 
+  it('a failed run notifies too, with the reason', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const c = await makeCompany({ name: 'Blocked Co', website: site.url('blocked.test') });
+    await startAndRun(c.id, admin.cookie);
+    const n = await prisma.notification.findFirstOrThrow({ where: { userId: admin.user.id } });
+    expect(n).toMatchObject({ text: 'AI research failed · Blocked Co', detail: 'Blocked by robots.txt', link: `/companies/${c.id}#ai` });
+  });
+
+  it('a run released while working (marked Interrupted) writes nothing when it finishes', async () => {
+    const admin = await as('ADMINISTRATOR');
+    await prisma.enrichmentSettings.create({ data: { id: 1, claudeEnabled: true, claudeMonthlyCapUsd: 5 } });
+    const c = await siteCompany();
+    const res = await req('POST', `/api/companies/${c.id}/research`, admin.cookie);
+    const runId = res.json().runId as number;
+    // While Claude works, the run outlives the stale limit and a new start marks it Interrupted.
+    const claude = {
+      create: async () => {
+        await prisma.enrichmentRun.update({ where: { id: runId }, data: { status: 'Failed', result: 'Interrupted' } });
+        return {
+          id: 'm', type: 'message', role: 'assistant', model: 'x', stop_reason: 'end_turn', stop_sequence: null,
+          content: [{ type: 'text', citations: null, text: JSON.stringify({
+            summary: { value: 'Late summary.', sourceUrl: site.url('site.test') }, industry: null, businessCategory: null,
+            opportunityScore: null, confidence: 'Low', potentialServices: null, websiteAssessment: null, specialisation: null, employeeRange: null,
+          }) }],
+          usage: { input_tokens: 1, output_tokens: 1 },
+        } as unknown as Anthropic.Message;
+      },
+    };
+    await runResearch(runId, readerDeps({ claude, env: { ANTHROPIC_API_KEY: 'sk-test' } }));
+    expect(await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: runId } })).toMatchObject({ status: 'Failed', result: 'Interrupted' });
+    const company = await prisma.company.findUniqueOrThrow({ where: { id: c.id } });
+    expect(company.aiSummary).toBeNull();
+    expect(await prisma.enrichmentSuggestion.count()).toBe(0);
+    expect(await prisma.sourceRecord.count()).toBe(0);
+    expect(await prisma.notification.count()).toBe(0);
+  });
+
+  it('a released run that then fails does not overwrite the newer state either', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const c = await siteCompany(); // the injected resolver below fails the read
+    const res = await req('POST', `/api/companies/${c.id}/research`, admin.cookie);
+    const runId = res.json().runId as number;
+    const resolve = async (host: string) => {
+      await prisma.enrichmentRun.update({ where: { id: runId }, data: { status: 'Failed', result: 'Interrupted' } });
+      await prisma.company.update({ where: { id: c.id }, data: { aiResearchStatus: 'Pending' } });
+      throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${host}`), { code: 'ENOTFOUND' });
+    };
+    await runResearch(runId, readerDeps({ reader: { resolve } }));
+    expect(await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: runId } })).toMatchObject({ status: 'Failed', result: 'Interrupted' });
+    expect((await prisma.company.findUniqueOrThrow({ where: { id: c.id } })).aiResearchStatus).toBe('Pending');
+    expect(await prisma.notification.count()).toBe(0);
+  });
+
   it('a re-run supersedes the older pending suggestion for the same field', async () => {
     const admin = await as('ADMINISTRATOR');
     const c = await siteCompany();
@@ -174,6 +228,20 @@ describe('suggestion decisions', () => {
     expect(await prisma.enrichmentSuggestion.findUniqueOrThrow({ where: { id: city.id } })).toMatchObject({ decision: 'accepted', decidedById: admin.user.id });
     // Decided once only.
     expect((await req('POST', `/api/research/suggestions/${city.id}/accept`, admin.cookie)).statusCode).toBe(409);
+  });
+
+  it('concurrent accepts on different fields both keep their verified and ai_fields entries', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const c = await siteCompany();
+    await startAndRun(c.id, admin.cookie);
+    const pending = (await pendingOf(c.id)).slice(0, 4);
+    const results = await Promise.all(pending.map((s) => req('POST', `/api/research/suggestions/${s.id}/accept`, admin.cookie)));
+    expect(results.map((r) => r.statusCode)).toEqual(pending.map(() => 200));
+    const company = await prisma.company.findUniqueOrThrow({ where: { id: c.id } });
+    for (const s of pending) {
+      expect((company.verifiedFields as Record<string, boolean>)[s.field], s.field).toBe(true);
+      expect((company.aiFields as Record<string, unknown>)[s.field], s.field).toBeDefined();
+    }
   });
 
   it('accepting a year and coordinates stores them in their column types', async () => {
@@ -309,6 +377,36 @@ describe('starting runs', () => {
   });
 });
 
+describe('company edit rights', () => {
+  it('a role without manage_companies sees research (canEdit false) but cannot run, decide, verify or add sources', async () => {
+    // No current role lacks manage_companies; take it away from Sales Representatives for this test.
+    const rights = RIGHTS['Sales Representative'] as Set<Action>;
+    rights.delete('manage_companies');
+    try {
+      const admin = await as('ADMINISTRATOR');
+      const rep = await as('SALES_REPRESENTATIVE');
+      const c = await siteCompany({ createdById: rep.user.id });
+      await startAndRun(c.id, admin.cookie);
+      const s = (await pendingOf(c.id))[0]!;
+      const get = await req('GET', `/api/companies/${c.id}/research`, rep.cookie);
+      expect(get.statusCode).toBe(200);
+      expect(get.json().canEdit).toBe(false);
+      expect((await req('GET', `/api/companies/${c.id}/sources`, rep.cookie)).statusCode).toBe(200);
+      for (const [u, body] of [
+        [`/api/companies/${c.id}/research`, undefined], [`/api/research/suggestions/${s.id}/accept`, undefined],
+        [`/api/research/suggestions/${s.id}/reject`, undefined], [`/api/companies/${c.id}/research/accept-high`, undefined],
+        [`/api/companies/${c.id}/verify-profile`, undefined],
+        [`/api/companies/${c.id}/sources`, { title: 'X', sourceType: 'Other' }],
+      ] as const) {
+        expect((await req('POST', u, rep.cookie, body)).statusCode, u).toBe(403);
+      }
+      expect((await prisma.enrichmentSuggestion.findUniqueOrThrow({ where: { id: s.id } })).decision).toBe('pending');
+    } finally {
+      rights.add('manage_companies');
+    }
+  });
+});
+
 describe('automatic runs', () => {
   it('a single new lead for a never-researched company with a website queues one, with an activity; CSV import queues none', async () => {
     await seedLookups();
@@ -395,6 +493,10 @@ describe('paid providers', () => {
     // Key, cap 1, this month's spend already 1.
     await prisma.enrichmentSettings.update({ where: { id: 1 }, data: { claudeMonthlyCapUsd: 1 } });
     await prisma.enrichmentRun.update({ where: { id: runId }, data: { costUsd: 1 } });
+    runId = await startAndRun(c.id, admin.cookie, readerDeps({ claude: fake.client, env: { ANTHROPIC_API_KEY: 'sk-test' } }));
+    expect((await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: runId } })).engine).toBe('Website reader');
+    // Key and cap, but the Claude engine switched off.
+    await prisma.enrichmentSettings.update({ where: { id: 1 }, data: { claudeMonthlyCapUsd: 50, claudeEnabled: false } });
     runId = await startAndRun(c.id, admin.cookie, readerDeps({ claude: fake.client, env: { ANTHROPIC_API_KEY: 'sk-test' } }));
     expect((await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: runId } })).engine).toBe('Website reader');
     expect(fake.calls).toHaveLength(0);

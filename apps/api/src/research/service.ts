@@ -203,11 +203,54 @@ function bestPerField(findings: Finding[]): Finding[] {
   return [...best.values()];
 }
 
+/**
+ * The run was released while it was working (it outlived the stale limit and was marked Interrupted, or a newer run
+ * started): its results are dropped so they never overwrite the newer run's.
+ */
+class RunReleased extends Error {
+  constructor() {
+    super('run_released');
+  }
+}
+
+/** Ends the run (still Processing) in `tx`; throws RunReleased, rolling the transaction back, when it is not. */
+async function endRun(tx: Prisma.TransactionClient, runId: number, data: Prisma.EnrichmentRunUpdateManyMutationInput): Promise<void> {
+  const ended = await tx.enrichmentRun.updateMany({ where: { id: runId, status: 'Processing' }, data });
+  if (ended.count === 0) throw new RunReleased();
+}
+
+/** Locks the company row for the rest of the transaction and returns it as it is now. */
+async function lockCompany(tx: Prisma.TransactionClient, companyId: number): Promise<Company> {
+  await tx.$executeRaw`SELECT 1 FROM companies WHERE id = ${companyId} FOR UPDATE`;
+  return tx.company.findUniqueOrThrow({ where: { id: companyId } });
+}
+
+/** Who hears that a run finished: the company's lead owner (the triggering lead's first), else who started it. */
+async function runRecipient(
+  tx: Prisma.TransactionClient, run: { leadId: number | null; createdById: number | null }, companyId: number,
+): Promise<number | null> {
+  const trigger = run.leadId ? await tx.lead.findUnique({ where: { id: run.leadId }, select: { assignedToId: true } }) : null;
+  if (trigger?.assignedToId) return trigger.assignedToId;
+  const anyLead = await tx.lead.findFirst({
+    where: { companyId, assignedToId: { not: null }, archivedAt: null }, orderBy: { createdAt: 'desc' }, select: { assignedToId: true },
+  });
+  return anyLead?.assignedToId ?? run.createdById;
+}
+
 async function finishFailed(runId: number, companyId: number, message: string): Promise<void> {
-  await prisma.$transaction([
-    prisma.enrichmentRun.update({ where: { id: runId }, data: { status: 'Failed', result: message, error: message, finishedAt: new Date() } }),
-    prisma.company.update({ where: { id: companyId }, data: { aiResearchStatus: 'Failed', aiLastResearchAt: new Date() } }),
-  ]);
+  try {
+    await prisma.$transaction(async (tx) => {
+      const company = await lockCompany(tx, companyId);
+      const now = new Date();
+      await endRun(tx, runId, { status: 'Failed', result: message, error: message, finishedAt: now });
+      await tx.company.update({ where: { id: companyId }, data: { aiResearchStatus: 'Failed', aiLastResearchAt: now } });
+      const run = await tx.enrichmentRun.findUniqueOrThrow({ where: { id: runId } });
+      const to = await runRecipient(tx, run, companyId);
+      if (to) await notifyUser(tx, to, `AI research failed · ${company.name}`, message, `/companies/${companyId}#ai`);
+    });
+  } catch (err) {
+    if (!(err instanceof RunReleased)) throw err;
+  }
 }
 
 /**
@@ -298,9 +341,19 @@ type Outcome = {
 
 /** Writes the run's results in one transaction, against the company as it is now (a user may have edited it meanwhile). */
 async function complete(runId: number, companyId: number, o: Outcome): Promise<void> {
+  try {
+    await completeTx(runId, companyId, o);
+  } catch (err) {
+    if (!(err instanceof RunReleased)) throw err;
+  }
+}
+
+async function completeTx(runId: number, companyId: number, o: Outcome): Promise<void> {
   await prisma.$transaction(async (tx) => {
-    const company = await tx.company.findUniqueOrThrow({ where: { id: companyId } });
+    // Locked: a hand edit or an accept committing meanwhile is seen, never overwritten.
+    const company = await lockCompany(tx, companyId);
     const run = await tx.enrichmentRun.findUniqueOrThrow({ where: { id: runId } });
+    if (run.status !== 'Processing') throw new RunReleased();
     const fresh = o.findings.filter((f) => !isLocked(company, f.field));
     if (fresh.length > 0) {
       await tx.enrichmentSuggestion.updateMany({
@@ -326,22 +379,14 @@ async function complete(runId: number, companyId: number, o: Outcome): Promise<v
     const counted = `${n} suggestion${n === 1 ? '' : 's'}`;
     const result = o.result ?? [counted, ...(o.notes ?? [])].join(' · ');
     const now = new Date();
-    await tx.enrichmentRun.update({
-      where: { id: runId },
-      data: {
-        status: 'Completed', engine: o.engine, sources: o.sources, result, finishedAt: now, costUsd: o.costUsd, placesCalls: o.placesCalls,
-        error: o.notes?.length ? o.notes.join(' · ') : null,
-      },
+    await endRun(tx, runId, {
+      status: 'Completed', engine: o.engine, sources: o.sources, result, finishedAt: now, costUsd: o.costUsd, placesCalls: o.placesCalls,
+      error: o.notes?.length ? o.notes.join(' · ') : null,
     });
     await tx.company.update({ where: { id: companyId }, data: { aiResearchStatus: 'Completed', aiLastResearchAt: now, ...(o.ai ?? {}) } });
     await tx.lead.updateMany({ where: { companyId, enrichmentStatus: { not: 'Completed' } }, data: { enrichmentStatus: 'Completed' } });
 
-    // The company's lead owner (the triggering lead's first), else the person who started the run.
-    const trigger = run.leadId ? await tx.lead.findUnique({ where: { id: run.leadId }, select: { assignedToId: true } }) : null;
-    const anyLead = trigger?.assignedToId ? null : await tx.lead.findFirst({
-      where: { companyId, assignedToId: { not: null }, archivedAt: null }, orderBy: { createdAt: 'desc' }, select: { assignedToId: true },
-    });
-    const to = trigger?.assignedToId ?? anyLead?.assignedToId ?? run.createdById;
+    const to = await runRecipient(tx, run, companyId);
     if (to) await notifyUser(tx, to, `AI research completed · ${company.name}`, `${counted} to review`, `/companies/${companyId}#ai`);
   });
 }
@@ -357,8 +402,8 @@ const assertCanEdit = (user: AuthUser) => {
 async function visibleSuggestion(tx: Prisma.TransactionClient, user: AuthUser, id: number) {
   const s = Number.isInteger(id) ? await tx.enrichmentSuggestion.findUnique({ where: { id } }) : null;
   if (!s) throw new NotFoundError();
-  const company = await assertCompanyVisible(tx, user, s.companyId);
-  return { s, company };
+  await assertCompanyVisible(tx, user, s.companyId);
+  return { s };
 }
 
 async function applySuggestion(
@@ -391,8 +436,10 @@ async function applySuggestion(
 export async function decideSuggestion(user: AuthUser, id: number, accept: boolean): Promise<{ id: number; decision: string }> {
   assertCanEdit(user);
   return prisma.$transaction(async (tx) => {
-    const { s, company } = await visibleSuggestion(tx, user, id);
-    // Row lock: a double click or a second tab decides once.
+    const { s } = await visibleSuggestion(tx, user, id);
+    // Company row first (as acceptAllHigh and a finishing run), then the suggestion: concurrent accepts on other fields
+    // and a hand edit committing meanwhile are seen, never overwritten; a double click decides once.
+    const company = await lockCompany(tx, s.companyId);
     await tx.$executeRaw`SELECT 1 FROM enrichment_suggestions WHERE id = ${s.id} FOR UPDATE`;
     const current = await tx.enrichmentSuggestion.findUniqueOrThrow({ where: { id: s.id } });
     if (current.decision !== 'pending') throw new ResearchError('already_decided', 409);
@@ -410,9 +457,8 @@ export async function decideSuggestion(user: AuthUser, id: number, accept: boole
 export async function acceptAllHigh(user: AuthUser, companyId: number): Promise<{ accepted: number }> {
   assertCanEdit(user);
   return prisma.$transaction(async (tx) => {
-    let company = await assertCompanyVisible(tx, user, companyId);
-    await tx.$executeRaw`SELECT 1 FROM companies WHERE id = ${company.id} FOR UPDATE`;
-    company = await tx.company.findUniqueOrThrow({ where: { id: company.id } });
+    const visible = await assertCompanyVisible(tx, user, companyId);
+    let company = await lockCompany(tx, visible.id);
     const pending = await tx.enrichmentSuggestion.findMany({
       where: { companyId, decision: 'pending', confidence: { gte: 80 } }, orderBy: { id: 'asc' },
     });

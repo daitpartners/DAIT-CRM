@@ -1,6 +1,7 @@
 import { prisma } from './db.js';
 import { createGraphClient, type GraphClient } from './graph/client.js';
-import { runForever } from './jobs/runner.js';
+import { runForever, type JobHandler } from './jobs/runner.js';
+import type { JobType } from './jobs/types.js';
 import { pruneJobs } from './jobs/queue.js';
 import { sendUserEmailHandler } from './jobs/handlers/sendUserEmail.js';
 import { sendEmailHandler } from './jobs/handlers/sendEmail.js';
@@ -15,6 +16,20 @@ import { scheduleCalendarSync } from './calendar/schedule.js';
 import { scheduleQuotationExpiry } from './jobs/quotationExpiry.js';
 
 export { runOnce, runForever } from './jobs/runner.js';
+
+const HANDLERS: Partial<Record<JobType, JobHandler>> = {
+  send_email: sendEmailHandler, send_user_email: sendUserEmailHandler, sync_mailbox: syncMailboxHandler, mail_action: mailActionHandler,
+  campaign_step: campaignStepHandler, sync_calendar: syncCalendarHandler, research_company: researchCompanyHandler,
+};
+
+/**
+ * The worker's job lanes, each claimed by its own loop (concurrency 1 per lane). Mail jobs are quick; an AI research
+ * run can take minutes (website read + Claude), so it has its own lane.
+ */
+export const WORKER_LANES: readonly { name: string; types: readonly JobType[] }[] = [
+  { name: 'mail', types: ['send_email', 'send_user_email', 'sync_mailbox', 'mail_action', 'campaign_step', 'sync_calendar'] },
+  { name: 'research', types: ['research_company'] },
+];
 
 /** How often the worker checks which mailboxes are due a sync. */
 const SCHEDULE_EVERY_MS = 60_000;
@@ -64,17 +79,12 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<void> 
 
   console.log('worker: started');
   try {
-    await runForever({
-      types: ['send_email', 'send_user_email', 'sync_mailbox', 'mail_action', 'campaign_step', 'sync_calendar', 'research_company'],
-      handlers: {
-        send_email: sendEmailHandler, send_user_email: sendUserEmailHandler, sync_mailbox: syncMailboxHandler, mail_action: mailActionHandler,
-        campaign_step: campaignStepHandler, sync_calendar: syncCalendarHandler, research_company: researchCompanyHandler,
-      },
-      graph: opts.graph ?? createGraphClient(process.env),
-      pollMs: opts.pollMs,
-      signal: controller.signal,
-      log: (msg) => console.warn(`worker: ${msg}`),
-    });
+    const graph = opts.graph ?? createGraphClient(process.env);
+    const log = (msg: string) => console.warn(`worker: ${msg}`);
+    // One loop per lane, each one job at a time: a slow research run never holds up mail.
+    await Promise.all(WORKER_LANES.map((lane) => runForever({
+      types: [...lane.types], handlers: HANDLERS, graph, pollMs: opts.pollMs, signal: controller.signal, log,
+    })));
   } finally {
     clearInterval(scheduler);
     clearInterval(cleaner);
