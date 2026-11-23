@@ -385,7 +385,7 @@
   "Lead unassigned": "Lead désattribué",
   "Lead updated": "Lead mis à jour",
   "Lead views": "Vues des leads",
-  "Leads": "Prospects",
+  "Leads": "Leads",
   "Leads & Prospects": "Leads et prospects",
   "Leads & prospects": "Leads et prospects",
   "Leads & prospects linked to this company": "Leads et prospects liés à cette entreprise",
@@ -1611,5 +1611,10 @@
   "Unlinked from project {number}": "Délié du projet {number}",
   "Send failed": "Échec de l’envoi",
   "Send failed · may not have been sent — check Sent Items before sending again": "Échec de l’envoi · peut-être non envoyé : vérifiez les Éléments envoyés avant de renvoyer",
-  "Emailed, but the send could not be recorded — check the status and lead before sending again": "Envoyé par e-mail, mais l’envoi n’a pas pu être enregistré : vérifiez le statut et le lead avant de renvoyer"
+  "Emailed, but the send could not be recorded — check the status and lead before sending again": "Envoyé par e-mail, mais l’envoi n’a pas pu être enregistré : vérifiez le statut et le lead avant de renvoyer",
+  "Collapse sidebar": "Réduire la barre latérale",
+  "Expand sidebar": "Déplier la barre latérale",
+  "1 live": "1 en cours",
+  "1 overdue": "1 en retard",
+  "1 new": "1 nouvelle"
 }

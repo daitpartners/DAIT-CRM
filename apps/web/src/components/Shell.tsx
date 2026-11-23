@@ -1,14 +1,19 @@
 import { useEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import type { Me } from '../api/queries';
+import { useStoredFlag } from '../hooks/useStoredFlag';
 import { useT } from '../i18n/useT';
 import { Icons } from './Icons';
 import { Sidebar } from './Sidebar';
 
-/** Sidebar + main column. Below 900 px the sidebar collapses into a top bar with a menu button. */
+/**
+ * Sidebar + main column. Below 900 px the sidebar collapses into a top bar with a menu button. On wider screens the
+ * sidebar can be folded to an icon rail, remembered in this browser (owner addition, 23 Nov 2026).
+ */
 export function Shell({ me }: { me: Me }) {
   const t = useT();
   const [navOpen, setNavOpen] = useState(false);
+  const [collapsed, setCollapsed] = useStoredFlag('dait-sidebar-collapsed');
   const location = useLocation();
 
   useEffect(() => setNavOpen(false), [location.pathname]);
@@ -22,13 +27,13 @@ export function Shell({ me }: { me: Me }) {
   }, [navOpen]);
 
   return (
-    <div className="shell">
+    <div className={collapsed ? 'shell side-collapsed' : 'shell'}>
       <div className="mobilebar">
         <img src="/logo-mark-white.svg" alt="" />
         <b>{t('DAIT Partners CRM')}</b>
         <button
           type="button"
-          className="menu"
+          className="menu-btn"
           aria-expanded={navOpen}
           aria-controls="sidebar"
           onClick={() => setNavOpen((o) => !o)}
@@ -37,7 +42,7 @@ export function Shell({ me }: { me: Me }) {
           {navOpen ? t('Close') : t('Menu')}
         </button>
       </div>
-      <Sidebar me={me} open={navOpen} onNavigate={() => setNavOpen(false)} />
+      <Sidebar me={me} open={navOpen} onNavigate={() => setNavOpen(false)} collapsed={collapsed} onCollapse={setCollapsed} />
       <div className={navOpen ? 'nav-scrim open' : 'nav-scrim'} onClick={() => setNavOpen(false)} aria-hidden="true" />
       <main>
         <Outlet />

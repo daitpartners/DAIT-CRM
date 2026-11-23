@@ -1611,5 +1611,10 @@
   "Unlinked from project {number}": "Desvinculado del proyecto {number}",
   "Send failed": "Error al enviar",
   "Send failed · may not have been sent — check Sent Items before sending again": "Error al enviar · puede que no se haya enviado: revise Elementos enviados antes de volver a enviarlo",
-  "Emailed, but the send could not be recorded — check the status and lead before sending again": "Enviado por correo, pero no se pudo registrar el envío: revise el estado y el lead antes de volver a enviarlo"
+  "Emailed, but the send could not be recorded — check the status and lead before sending again": "Enviado por correo, pero no se pudo registrar el envío: revise el estado y el lead antes de volver a enviarlo",
+  "Collapse sidebar": "Contraer la barra lateral",
+  "Expand sidebar": "Expandir la barra lateral",
+  "1 live": "1 activa",
+  "1 overdue": "1 vencida",
+  "1 new": "1 nueva"
 }

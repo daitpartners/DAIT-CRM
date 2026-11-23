@@ -177,4 +177,18 @@ export const Icons: Record<string, ReactElement> = {
       <path d="M6 9l6 6 6-6" />
     </svg>
   ),
+  /* Not in the prototype (collapsible panels, owner 23 Nov 2026): « to fold a panel, sign-out, in the same line style. */
+  fold: (
+    <svg {...base}>
+      <path d="M11 17l-5-5 5-5" />
+      <path d="M18 17l-5-5 5-5" />
+    </svg>
+  ),
+  signout: (
+    <svg {...base}>
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <path d="M16 17l5-5-5-5" />
+      <path d="M21 12H9" />
+    </svg>
+  ),
 };
