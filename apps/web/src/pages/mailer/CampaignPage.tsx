@@ -7,15 +7,10 @@ import { Topbar } from '../../components/Topbar';
 import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
 import { errorText } from '../../i18n/labels';
+import { ScrollBox } from '../../components/Table';
 import { useT } from '../../i18n/useT';
 import { Progress, StatusBadge, pauseReasonText, waitText } from './status';
 import { zoneSourceText, zoneText } from './zones';
-
-/** An address that may wrap only before its @ (keeps "name" and "@domain" whole, so the table fits its card). */
-function AddressBreak({ to }: { to: string }) {
-  const at = to.indexOf('@');
-  return at > 0 ? <>{to.slice(0, at)}<wbr />{to.slice(at)}</> : <>{to}</>;
-}
 
 /** One campaign (prototype mailer detail): tiles, recipients with their audit trail, details, the email as queued. */
 export function CampaignPage() {
@@ -100,18 +95,22 @@ export function CampaignPage() {
                 <h2>{t('Recipients')}</h2>
                 <span className="dim mw-help">{c.stats.total === 1 ? t('1 lead · audit record per recipient') : t('{n} leads · audit record per recipient', { n: c.stats.total })}</span>
               </div>
-              <div className="tbl">
+              {/* Review #22: the local time sits under the address (the prototype has no Local time column), so addresses
+                  stay on one line and Message fits; a narrower window scrolls with the table cue. */}
+              <ScrollBox sticky={1}>
                 <table aria-label={t('Recipients')} className="mw-rec">
                   <thead>
-                    <tr><th>{t('Lead')}</th><th>{t('Name')}</th><th>{t('To')}</th><th>{t('Local time')}</th><th>{t('Status')}</th><th>{t('Sent at')}</th><th>{t('Message')}</th></tr>
+                    <tr><th>{t('Lead')}</th><th>{t('Name')}</th><th>{t('To')}</th><th>{t('Status')}</th><th>{t('Sent at')}</th><th>{t('Message')}</th></tr>
                   </thead>
                   <tbody>
                     {c.recipients.map((r) => (
                       <tr key={r.id}>
                         <td>{r.leadId && r.leadNumber ? <Link to={`/leads/${r.leadId}`} className="strong">{r.leadNumber}</Link> : '—'}</td>
                         <td>{r.name || r.company || '—'}</td>
-                        <td className="mw-to">{r.to ? <AddressBreak to={r.to} /> : <span className="dim">—</span>}</td>
-                        <td className="wrap" title={zoneSourceText(t, r.timezoneSource)}>{zoneText(t, r.timezones)}</td>
+                        <td className="mw-to">
+                          {r.to ?? <span className="dim">—</span>}
+                          <span className="mw-local" title={zoneSourceText(t, r.timezoneSource)}>{zoneText(t, r.timezones)}</span>
+                        </td>
                         <td className="wrap mw-status">
                           <StatusBadge t={t} status={r.status} />
                           {r.error ? <div className="dim mw-err">{t(r.error)}</div> : null}
@@ -122,7 +121,7 @@ export function CampaignPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </ScrollBox>
             </section>
           </div>
           <aside className="col-side">

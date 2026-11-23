@@ -89,6 +89,20 @@ select.in:disabled,select.chip:disabled{opacity:.6;cursor:default}
 .search{display:flex;align-items:center;gap:8px;height:36px;padding:0 12px;border:1px solid var(--field);border-radius:8px;background:var(--surface);width:280px;max-width:100%}
 .search input{border:0;outline:0;background:transparent;flex-grow:1;font-size:13px;min-width:0}
 .tbl{overflow-x:auto;position:relative}
+/* Wide tables (review #02): a fade marks the side where columns are scrolled out of view (ScrollBox sets more-l /
+   more-r), and sticky-1 / sticky-2 keep the first column(s) in view with a shadow on their edge once scrolled. */
+.tbl-wrap{position:relative;min-width:0}
+.tbl-wrap::before,.tbl-wrap::after{content:"";position:absolute;top:0;bottom:0;width:28px;pointer-events:none;opacity:0;transition:opacity .15s;z-index:3}
+.tbl-wrap::before{left:0;background:linear-gradient(90deg,rgba(31,2,73,.14),rgba(31,2,73,0))}
+.tbl-wrap::after{right:0;background:linear-gradient(270deg,rgba(31,2,73,.14),rgba(31,2,73,0))}
+.tbl-wrap.more-l::before,.tbl-wrap.more-r::after{opacity:1}
+.tbl-wrap.more-l:has(> .tbl.sticky-1,> .tbl.sticky-2)::before{opacity:0}
+.tbl.sticky-1 tr>:first-child,.tbl.sticky-2 tr>:nth-child(-n+2){position:sticky;left:0;z-index:2}
+.tbl.sticky-1 td:first-child,.tbl.sticky-2 td:nth-child(-n+2){background:var(--surface)}
+.tbl.sticky-2 tr>:first-child{width:34px;min-width:34px;max-width:34px}
+.tbl.sticky-2 tr>:nth-child(2){left:34px}
+.more-l .tbl.sticky-1 tr>:first-child,.more-l .tbl.sticky-2 tr>:nth-child(2){box-shadow:8px 0 8px -8px rgba(31,2,73,.3)}
+@media (prefers-reduced-motion:reduce){.tbl-wrap::before,.tbl-wrap::after{transition:none}}
 table{border-collapse:collapse;width:100%;font-size:13px}
 th{text-align:left;font-weight:600;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;background:#F9F7FD}
 td{padding:11px 12px;border-bottom:1px solid var(--line-2);vertical-align:middle;white-space:nowrap}
@@ -741,10 +755,11 @@ td.nowrap{white-space:nowrap}
 .mbulk{display:none;align-items:center;gap:8px;padding:8px 18px;background:var(--tint);border-bottom:1px solid var(--line);font-size:13px;flex-wrap:wrap}
 .mbulk.on{display:flex}.mbulk .btn svg{width:14px;height:14px}.mbulk .btn:disabled{opacity:.5;cursor:not-allowed}
 a.strong{font-weight:600}
-/* Campaign recipients fit their card at 1440 px with the added Local time column: long cells wrap (an address before
-   its @, the local time before its zone, the sent time after its date, a message id anywhere). */
+/* Campaign recipients (review #22): the address stays on one line with the recipient's local time under it; the sent
+   time may wrap after its date and a message id anywhere. */
 .mw-rec th,.mw-rec td{padding-left:10px;padding-right:10px}
-.mw-rec td.mw-to,.mw-rec td.mw-sent{white-space:normal}
+.mw-rec td.mw-sent{white-space:normal}
+.mw-rec .mw-local{display:block;font-size:11.5px;color:var(--muted)}
 .mw-rec td.mw-status{min-width:150px}.mw-rec td.mw-sent{min-width:106px}
 .mw-rec td.mw-msg{white-space:normal;overflow-wrap:anywhere;font-size:12px;min-width:96px}
 .mrec{max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px}
@@ -809,6 +824,8 @@ a.strong{font-weight:600}
 
 /* ---------- Quotations (prototype V.quotes; its inline styles as classes) ---------- */
 .q-num{font-weight:600}
+/* The company may wrap so the Owner column fits at 1400 px (review #02). */
+.q-co{min-width:170px}
 .q-exp{color:var(--bad-fg);font-weight:600}
 .q-act{font-size:12.5px;font-weight:600}.q-convert{color:var(--orange)}
 /* Quotation editor (prototype V.quoteEditor; its inline styles as classes) */

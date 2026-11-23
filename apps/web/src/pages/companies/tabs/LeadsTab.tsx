@@ -69,7 +69,7 @@ export function LeadsTab({ company, canManage }: { company: CompanyDetail; canMa
             {errorText(t, error instanceof ApiError ? error.code : 'unknown')}
           </div>
         ) : (
-          <Table head={head} isEmpty={isPending || !rows?.length} empty={isPending ? t('Loading…') : t('No leads for this company yet')}>
+          <Table head={head} sticky={1} isEmpty={isPending || !rows?.length} empty={isPending ? t('Loading…') : t('No leads for this company yet')}>
             {rows?.map((l) => {
               const leadQuotes = quotesOf(l.id);
               return (

@@ -317,12 +317,13 @@ describe('Campaign page (prototype mailer detail)', () => {
     await waitFor(() => expect(posts.map((p) => p.url)).toEqual(['/api/mailer/7/pause']));
   });
 
-  it('campaign page has a Message column', async () => {
+  it('campaign page has a Message column; the local time sits under the address (review #22)', async () => {
     stub(CAMPAIGN);
     wrap(<CampaignPage />, '/mailer/7');
     const recipients = await screen.findByRole('table', { name: 'Recipients' });
     const headers = within(recipients).getAllByRole('columnheader').map((h) => h.textContent);
-    expect(headers).toEqual(['Lead', 'Name', 'To', 'Local time', 'Status', 'Sent at', 'Message']);
+    expect(headers).toEqual(['Lead', 'Name', 'To', 'Status', 'Sent at', 'Message']);
+    expect(within(recipients).getByText(/· America\/Mexico_City$/).closest('td')).toHaveClass('mw-to');
     const [, ana, luis] = within(recipients).getAllByRole('row');
     expect(within(ana!).getAllByRole('cell').at(-1)!.textContent).toBe('<abc@mail.outlook.com>');
     expect(within(luis!).getAllByRole('cell').at(-1)!.textContent).toBe('—');

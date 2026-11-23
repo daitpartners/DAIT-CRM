@@ -85,7 +85,7 @@ export function QuotationsPage() {
                 {errorText(t, error instanceof ApiError ? error.code : 'unknown')}
               </div>
             ) : (
-              <Table head={head} isEmpty={isPending || !rows?.length} empty={isPending ? t('Loading…') : t('No quotations.')}>
+              <Table head={head} sticky={1} isEmpty={isPending || !rows?.length} empty={isPending ? t('Loading…') : t('No quotations.')}>
                 {rows?.map((q) => <QuotationRow key={q.id} q={q} />)}
               </Table>
             )}
@@ -110,7 +110,7 @@ function QuotationRow({ q }: { q: QuotationListItem }) {
           {q.number}
         </Link>
       </td>
-      <td>
+      <td className="wrap q-co">
         <Link to={`/companies/${q.company.id}`} className="row-link">
           {q.company.legalName || q.company.name}
         </Link>

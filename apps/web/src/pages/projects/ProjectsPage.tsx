@@ -126,6 +126,7 @@ export function ProjectsPage() {
           ) : (
             <Table
               head={head}
+              sticky={1}
               isEmpty={isPending || !rows?.length}
               empty={isPending ? t('Loading…') : t('No projects yet. Mark a lead as Won or accept a quotation, then create the project.')}
             >
