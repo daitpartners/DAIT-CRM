@@ -1007,6 +1007,11 @@ model ImportBatch {
   options              Json      @default("{}")
   importedAt           DateTime? @map("imported_at")
   importedById         Int?      @map("imported_by_id")
+  /// Why the import job gave up (batch Failed, can be continued): IMPORT_FAILURES (shared), e.g. "job_failed".
+  importError          String?   @map("import_error") @db.VarChar(30)
+  /// The `import_commit` run holding the batch (a lease: one run at a time) and its last sign of life.
+  commitRun            String?   @map("commit_run") @db.VarChar(36)
+  commitHeartbeatAt    DateTime? @map("commit_heartbeat_at")
   undoneAt             DateTime? @map("undone_at")
   undoneById           Int?      @map("undone_by_id")
   /// What Undo removed and kept.

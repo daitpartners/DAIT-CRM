@@ -158,6 +158,34 @@ export type ReviewSummary = {
   unknownCountries: { value: string; count: number }[];
 };
 
+/**
+ * Why an import job gave up (`import_batches.import_error`; the batch is Failed and can be continued): `job_failed` = it
+ * failed on every attempt, `interrupted` = the worker stopped during its last attempt.
+ */
+export const IMPORT_FAILURES = ['job_failed', 'interrupted'] as const;
+export type ImportFailure = (typeof IMPORT_FAILURES)[number];
+
+const IMPORT_FAILURE_TEXT: Record<Lang, Record<ImportFailure, string>> = {
+  en: {
+    job_failed: 'The import stopped after repeated errors. Continue it to import the remaining rows.',
+    interrupted: 'The import was interrupted. Continue it to import the remaining rows.',
+  },
+  es: {
+    job_failed: 'La importación se detuvo tras varios errores. Continúala para importar las filas restantes.',
+    interrupted: 'La importación se interrumpió. Continúala para importar las filas restantes.',
+  },
+  fr: {
+    job_failed: "L'import s'est arrêté après plusieurs erreurs. Reprenez-le pour importer les lignes restantes.",
+    interrupted: "L'import a été interrompu. Reprenez-le pour importer les lignes restantes.",
+  },
+};
+
+/** An import failure in `lang` (an unknown code reads as `job_failed`). */
+export function importFailureText(code: string, lang: Lang): string {
+  const t = IMPORT_FAILURE_TEXT[lang] ?? IMPORT_FAILURE_TEXT.en;
+  return t[(IMPORT_FAILURES as readonly string[]).includes(code) ? (code as ImportFailure) : 'job_failed'];
+}
+
 /** How an imported lead's source reads: "Import · IMPORT-2026-11-24-2". */
 export function importSource(number: string): string {
   return `Import · ${number}`;

@@ -19,7 +19,7 @@ export class ImportError extends Error {
   constructor(
     readonly code:
       | 'batch_locked' | 'too_many_files' | 'file_type' | 'file_size' | 'files_reading' | 'no_rows'
-      | 'research_stopped' | 'claude_cap_reached' | 'choice_required' | 'nothing_to_import',
+      | 'research_stopped' | 'claude_cap_reached' | 'choice_required' | 'nothing_to_import' | 'cannot_continue',
     readonly status: number,
   ) {
     super(code);

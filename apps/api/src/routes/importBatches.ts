@@ -12,7 +12,7 @@ import { answerColumn, includeAll, listRows, rematchBatch, sortBatch, updateRow 
 import { loadEnrichmentSettings, monthTotals } from '../research/service.js';
 import { claudeCodeConfig, claudeCodeReady } from '../research/providers.js';
 import { pauseResearch, researchView, resumeResearch, startBatchResearch } from '../imports/research.js';
-import { reviewBatch, startImport } from '../imports/commit.js';
+import { continueImport, reviewBatch, startImport } from '../imports/commit.js';
 
 const idOf = (raw: string) => {
   const id = Number(raw);
@@ -204,6 +204,15 @@ export const importBatchRoutes: FastifyPluginAsync = async (app) => {
     const body = parseBody(ImportCommit, request.body);
     return guard(reply, async () => {
       await startImport(request.user!, id, body);
+      return reply.code(202).send({ id, status: 'Importing' });
+    });
+  });
+
+  /** Data manager: continue a Failed import (the job gave up); only rows with no lead yet are imported (202). */
+  app.post<{ Params: { id: string } }>('/imports/batches/:id/import/continue', canImport, async (request, reply) => {
+    const id = idOf(request.params.id);
+    return guard(reply, async () => {
+      await continueImport(id);
       return reply.code(202).send({ id, status: 'Importing' });
     });
   });

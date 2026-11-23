@@ -12,13 +12,15 @@
  *   accepted at 80% or higher when ticked; contact values not used are listed on the lead as "Research found (not
  *   verified)"; nothing a person filled or verified is ever overwritten.
  */
+import { randomUUID } from 'node:crypto';
 import type { Company, Contact, ImportBatch, ImportRow, Prisma, User } from '@prisma/client';
 import {
   IMPORT_LEAD_SOURCE, importColumnLabel, importEngineText, normalisePhone, researchFieldLabel, roleLabel,
-  type ImportCommit, type ImportField, type LeadType, type ResearchEngine, type ResearchValue, type ReviewSummary, type RowFields,
+  type ImportCommit, type ImportFailure, type ImportField, type LeadType, type ResearchEngine, type ResearchValue, type ReviewSummary, type RowFields,
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
-import { enqueue } from '../jobs/queue.js';
+import { enqueue, STALE_AFTER_MS } from '../jobs/queue.js';
+import { audit } from '../audit.js';
 import { rowMessage } from '../leads/csv.js';
 import { auditCreatedLead, companyDataFromLead, createLeadWithCompany } from '../leads/service.js';
 import { notifyUser } from '../leads/notify.js';
@@ -131,6 +133,114 @@ export async function startImport(user: AuthUser, batchId: number, body: ImportC
   });
 }
 
+/**
+ * Continues a Failed import (the job gave up: `import_error` set): the batch is Importing again and a new `import_commit`
+ * job imports the rows that have no lead yet. 409 `cannot_continue` for any other batch (a finished one included).
+ */
+export async function continueImport(batchId: number): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const [batch] = await tx.$queryRaw<{ status: string; import_error: string | null }[]>`
+      SELECT status, import_error FROM import_batches WHERE id = ${batchId} FOR UPDATE`;
+    if (!batch) throw new NotFoundError();
+    if (batch.status !== 'Failed' || batch.import_error === null) throw new ImportError('cannot_continue', 409);
+    await tx.importBatch.update({
+      where: { id: batchId }, data: { status: 'Importing', importError: null, commitRun: null, commitHeartbeatAt: null },
+    });
+    await enqueue(tx, 'import_commit', { batchId }, { maxAttempts: 3 });
+  });
+}
+
+/** The import job gave up: an Importing batch becomes Failed with the reason (it can be continued). */
+export async function failImport(batchId: number, code: ImportFailure): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const [batch] = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM import_batches WHERE id = ${batchId} FOR UPDATE`;
+    if (batch?.status !== 'Importing') return;
+    await tx.importBatch.update({
+      where: { id: batchId }, data: { status: 'Failed', importError: code, commitRun: null, commitHeartbeatAt: null },
+    });
+  });
+}
+
+/**
+ * A run holds its batch with a lease (`commit_run` + `commit_heartbeat_at`, renewed before every row); a run that has
+ * shown no sign of life for this long has lost it (a row's transaction times out after a minute). A database lease rather
+ * than a session advisory lock: Prisma's pool cannot keep one connection for the whole run, and the sweep can read it.
+ */
+export const COMMIT_LEASE_MS = 5 * 60_000;
+
+class LeaseLost extends Error {
+  constructor() {
+    super('import_lease_lost');
+  }
+}
+
+/** Takes the batch for this run: false when it is not Importing or another run holds a live lease. */
+async function takeLease(batchId: number, run: string): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    const [locked] = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM import_batches WHERE id = ${batchId} FOR UPDATE`;
+    if (!locked) return false;
+    const b = await tx.importBatch.findUniqueOrThrow({ where: { id: batchId }, select: { status: true, commitRun: true, commitHeartbeatAt: true } });
+    if (b.status !== 'Importing') return false;
+    const live = b.commitRun !== null && b.commitHeartbeatAt !== null && b.commitHeartbeatAt.getTime() > Date.now() - COMMIT_LEASE_MS;
+    if (live) return false;
+    await tx.importBatch.update({ where: { id: batchId }, data: { commitRun: run, commitHeartbeatAt: new Date() } });
+    return true;
+  });
+}
+
+async function renewLease(batchId: number, run: string): Promise<void> {
+  const { count } = await prisma.importBatch.updateMany({ where: { id: batchId, commitRun: run }, data: { commitHeartbeatAt: new Date() } });
+  if (count === 0) throw new LeaseLost();
+}
+
+/**
+ * Restart recovery for `import_commit` (the job is resumable: a rerun imports only rows with no lead yet). At startup no
+ * job runs yet: every running `import_commit` job was interrupted, and every lease is released. On the schedule, a
+ * running job locked for longer than STALE_AFTER_MS whose batch lease shows no sign of life for COMMIT_LEASE_MS was lost.
+ * A lost job is queued again (counting the attempt), or, on its last attempt, failed with the batch Failed `interrupted`.
+ * An Importing batch left with no queued or running job (its job failed for good) becomes Failed `job_failed`. Both can
+ * be continued. Returns how many jobs were released.
+ */
+export async function sweepImportCommit(opts: { startup?: boolean } = {}, now = new Date()): Promise<number> {
+  const staleBefore = new Date(now.getTime() - STALE_AFTER_MS);
+  if (opts.startup) {
+    await prisma.importBatch.updateMany({ where: { commitRun: { not: null } }, data: { commitRun: null, commitHeartbeatAt: null } });
+  }
+  const jobs = await prisma.job.findMany({
+    where: { type: 'import_commit', status: 'running', ...(opts.startup ? {} : { lockedAt: { lt: staleBefore } }) },
+  });
+  let released = 0;
+  for (const job of jobs) {
+    const batchId = (job.payload as { batchId?: unknown } | null)?.batchId;
+    if (typeof batchId !== 'number') continue;
+    if (!opts.startup) {
+      const b = await prisma.importBatch.findUnique({ where: { id: batchId }, select: { commitRun: true, commitHeartbeatAt: true } });
+      const live = b?.commitRun && b.commitHeartbeatAt && b.commitHeartbeatAt.getTime() > now.getTime() - COMMIT_LEASE_MS;
+      if (live) continue;
+    }
+    const attempts = job.attempts + 1;
+    const lastError = 'Interrupted (the worker stopped)';
+    const last = attempts >= job.maxAttempts;
+    const { count } = await prisma.job.updateMany({
+      where: { id: job.id, status: 'running' },
+      data: last
+        ? { status: 'failed', attempts, lastError, lockedAt: null }
+        : { status: 'queued', attempts, lastError, lockedAt: null, runAt: now },
+    });
+    if (count === 0) continue;
+    released += 1;
+    if (last) await failImport(batchId, 'interrupted');
+  }
+  const importing = await prisma.importBatch.findMany({ where: { status: 'Importing' }, select: { id: true } });
+  for (const { id } of importing) {
+    const alive = await prisma.job.count({
+      where: { type: 'import_commit', status: { in: ['queued', 'running'] }, payload: { path: ['batchId'], equals: id } },
+    });
+    if (alive === 0) await failImport(id, 'job_failed');
+  }
+  return released;
+}
+
 /** Test seam: `afterRow(n)` runs after each row the run attempts (n = rows attempted so far in this run). */
 export type CommitDeps = { afterRow?: (n: number) => void | Promise<void> };
 
@@ -138,11 +248,22 @@ export type CommitDeps = { afterRow?: (n: number) => void | Promise<void> };
  * The `import_commit` job: plans the batch once with its saved choices; rows left out become Skipped (with the reason),
  * each row to import that has no lead yet is imported in its own transaction (an error is recorded on the row and the
  * batch carries on); then the counts, Imported (Failed when every row to import failed) and, with "notify", one
- * notification per assignee. Nothing happens unless the batch is Importing, so a rerun after the end is harmless.
+ * notification per assignee. Nothing happens unless the batch is Importing, so a rerun after the end is harmless; a
+ * second run while one holds the batch's lease ends at once, and each row is locked and re-checked inside its own
+ * transaction, so a row is never imported twice.
  */
 export async function commitBatch(batchId: number, deps: CommitDeps = {}): Promise<void> {
-  const batch = await prisma.importBatch.findUnique({ where: { id: batchId } });
-  if (!batch || batch.status !== 'Importing') return;
+  const run = randomUUID();
+  if (!await takeLease(batchId, run)) return;
+  try {
+    await commitUnderLease(batchId, run, deps);
+  } finally {
+    await prisma.importBatch.updateMany({ where: { id: batchId, commitRun: run }, data: { commitRun: null, commitHeartbeatAt: null } });
+  }
+}
+
+async function commitUnderLease(batchId: number, run: string, deps: CommitDeps): Promise<void> {
+  const batch = await prisma.importBatch.findUniqueOrThrow({ where: { id: batchId } });
   const options = batch.options as ImportCommit;
   const userId = batch.importedById ?? batch.createdById;
   const importer = userId === null ? null : await prisma.user.findUnique({ where: { id: userId } });
@@ -165,13 +286,15 @@ export async function commitBatch(batchId: number, deps: CommitDeps = {}): Promi
   for (const [i, plan] of plans.entries()) {
     const row = rows[i]!;
     if (plan.action !== 'import' || row.leadId !== null || row.outcome !== null) continue;
+    await renewLease(batchId, run);
     try {
       await prisma.$transaction((tx) => importRow(tx, row, batch, ctx), { timeout: 60_000, maxWait: 30_000 });
     } catch (e) {
       const message = rowMessage(e);
       if (message === null) console.error(`import ${batch.number}: row ${row.id} failed`, e);
-      await prisma.importRow.update({
-        where: { id: row.id },
+      // Only a row nobody imported meanwhile records the error.
+      await prisma.importRow.updateMany({
+        where: { id: row.id, leadId: null, outcome: null },
         data: { outcome: 'Error', outcomeCode: 'import_error', error: (message ?? UNEXPECTED).slice(0, ERROR_MAX) },
       });
     }
@@ -199,7 +322,7 @@ async function finishBatch(batchId: number, notify: boolean): Promise<void> {
       data: {
         status: imported.length === 0 && errorCount > 0 ? 'Failed' : 'Imported',
         importedCount: imported.length, newCompanyCount: created.size, existingCompanyCount, skippedCount, errorCount,
-        importedAt: new Date(),
+        importedAt: new Date(), importError: null, commitRun: null, commitHeartbeatAt: null,
       },
     });
     if (!notify) return;
@@ -261,7 +384,11 @@ function companyResearch(own: RowFields, research: Partial<Record<ImportField, R
  */
 export async function importRow(
   tx: Tx, row: ImportRow, batch: ImportBatch, ctx: { user: AuthUser; acceptHigh: boolean; knownCountries: readonly string[] },
-): Promise<RowResult> {
+): Promise<RowResult | null> {
+  // The row, locked: a row another run imported (or recorded) meanwhile is left as it is.
+  const [current] = await tx.$queryRaw<{ lead_id: number | null; outcome: string | null }[]>`
+    SELECT lead_id, outcome FROM import_rows WHERE id = ${row.id} FOR UPDATE`;
+  if (!current || current.lead_id !== null || current.outcome !== null) return null;
   const own = (row.fields ?? {}) as RowFields;
   const { fields, fromResearch } = effectiveFields(row, ctx.acceptHigh);
   const country = matchCountry(fields.country ?? '', ctx.knownCountries) ?? clean(fields.country) ?? '';
@@ -279,9 +406,15 @@ export async function importRow(
   let companyCreated = false;
   if (!company) {
     const ownEmail = clean(own.email)?.toLowerCase() ?? null;
-    const key = companyKeyOf(f);
+    // The domain from the row's own website / email, or from a research website accepted below (with its provenance);
+    // never from a research email alone.
+    const key = companyKeyOf({
+      companyName, country, email: own.email,
+      website: has(own.website) ? own.website : fromResearch.includes('website') ? f.website : undefined,
+    });
     const industry = await industryValue(tx, clean(own.industry));
-    // The company's own columns come from the row's own values; research values reach it only through step 4.
+    // The company's own columns come from the row's own values; research values reach it only through step 4 (a
+    // country from research, which a company cannot be created without, is recorded there as accepted).
     const data = companyDataFromLead({
       companyName, website: withScheme(clean(own.website)), businessEmail: isGenericEmail(ownEmail) ? ownEmail : null, country,
       city: clean(own.city),
@@ -337,6 +470,18 @@ export async function importRow(
     company = await tx.company.findUniqueOrThrow({ where: { id: company.id } });
   }
   let runId: number | null = null;
+  const researchCountry = research.country;
+  if (companyCreated && fromResearch.includes('country') && researchCountry) {
+    // The new company's country came from research ("Accept" ticked): recorded as an accepted suggestion, as release 4.
+    runId = await importRun(tx, company!, batch, lead.id, ctx.user.id);
+    const s = await tx.enrichmentSuggestion.create({
+      data: {
+        runId, companyId: company!.id, field: 'country', label: 'Country', value: country, confidence: researchCountry.confidence,
+        sourceUrl: researchCountry.sourceUrl, sourceLabel: researchCountry.sourceLabel.slice(0, 200),
+      },
+    });
+    company = await applySuggestion(tx, ctx.user, s, company!);
+  }
   for (const [column, v] of forCompany) {
     if (isFieldLocked(company!, column)) continue;
     runId ??= await importRun(tx, company!, batch, lead.id, ctx.user.id);
@@ -356,7 +501,12 @@ export async function importRow(
   }
   const foundIndustry = clean(research.industry?.value);
   if (foundIndustry && !has(company!.aiIndustry)) {
+    const before = company!.aiIndustry;
     company = await tx.company.update({ where: { id: company!.id }, data: { aiIndustry: foundIndustry.slice(0, 200) } });
+    await audit(tx, {
+      entityType: 'company', entityId: company.id, action: 'update', userId: ctx.user.id,
+      before: { aiIndustry: before }, after: { aiIndustry: company.aiIndustry, importBatch: batch.number },
+    });
   }
   // Contact values (and a country) research found that were not used: listed on the lead, never written.
   const used = new Set(fromResearch.filter((k) => contactCreated || (k !== 'contactName' && k !== 'designation')));
@@ -370,6 +520,18 @@ export async function importRow(
   if (lines.length > 0) {
     await tx.leadActivity.create({
       data: { leadId: lead.id, activityType: 'ai', title: 'Research found (not verified)', body: lines.join('\n'), byUserId: null },
+    });
+  }
+  // Research values accepted ("Accept" ticked, 80% or more) onto the lead and a new contact: where each came from.
+  const acceptedLines: string[] = [];
+  for (const field of ['website', 'country', 'city', 'contactName', 'designation', 'email', 'phone'] as const) {
+    const v = research[field];
+    if (!v || !used.has(field)) continue;
+    acceptedLines.push(`${importColumnLabel(field, 'en')}: ${v.value.trim()} · ${v.sourceUrl} · ${v.confidence}%`);
+  }
+  if (acceptedLines.length > 0) {
+    await tx.leadActivity.create({
+      data: { leadId: lead.id, activityType: 'ai', title: 'Accepted from research', body: acceptedLines.join('\n'), byUserId: null },
     });
   }
 

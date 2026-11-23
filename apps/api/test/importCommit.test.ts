@@ -1,13 +1,15 @@
 import type { FastifyInstance } from 'fastify';
 import type { User } from '@prisma/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { normalisePhone, roleLabel, type ImportCommit, type ResearchValue, type RowFields } from '@dait-crm/shared';
 import { prisma } from '../src/db';
 import { buildApp } from '../src/app';
 import type { AuthUser } from '../src/plugins/auth';
-import { commitBatch, normalisePersonName, splitName, startImport } from '../src/imports/commit';
+import { commitBatch, importRow, normalisePersonName, splitName, startImport, sweepImportCommit, COMMIT_LEASE_MS } from '../src/imports/commit';
+import { knownCountries } from '../src/imports/stage';
+import { claimNext, STALE_AFTER_MS } from '../src/jobs/queue';
 import { rematchBatch, stageHooks } from '../src/imports/stage';
-import { importCommitHandler } from '../src/jobs/handlers/importCommit';
+import { importCommitDeps, importCommitHandler } from '../src/jobs/handlers/importCommit';
 import { runOnce } from '../src/jobs/runner';
 import { fakeGraph, resetDb, seedLookups } from './helpers';
 import { makeCompany, makeContact, makeUser, signIn } from './factory';
@@ -18,6 +20,7 @@ beforeAll(async () => {
   app = await buildApp();
 });
 afterAll(() => app.close());
+afterEach(() => { delete importCommitDeps.afterRow; });
 
 let admin: User;
 let cookie: string;
@@ -272,6 +275,20 @@ describe('import · creating companies, contacts and leads', () => {
     expect(await prisma.notification.count()).toBe(0);
   });
 
+  it('an inactive contact matched by email is neither linked nor duplicated', async () => {
+    const co = await makeCompany({ name: 'Inact Co', country: 'India', website: 'https://inact.test' });
+    const old = await makeContact({ companyId: co.id, firstName: 'Ravi', lastName: 'Old', businessEmail: 'ravi@inact.test' });
+    await prisma.contact.update({ where: { id: old.id }, data: { isActive: false } });
+    const batch = await batchWith([{
+      companyName: 'Inact Co', country: 'India', email: 'Ravi@Inact.test', contactName: 'Ravi New', $status: 'Already in CRM', $matched: co.id,
+    }]);
+    await importNow(batch.id);
+    const [row] = await rowsOf(batch.id);
+    expect(row).toMatchObject({ outcome: 'Imported', contactId: null, contactCreated: false });
+    expect(await prisma.contact.count({ where: { companyId: co.id } })).toBe(1);
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: row!.leadId! } })).contactId).toBeNull();
+  });
+
   it('the same company twice, and a row matching a company an earlier row created → one company, each row its own contact and lead', async () => {
     const batch = await batchWith([
       { companyName: 'Gulf Freight', website: 'https://gulffreight.ae', country: 'United Arab Emirates', contactName: 'Ali Khan', email: 'ali@gulffreight.ae' },
@@ -348,6 +365,47 @@ describe('import · research values (release-4 golden rule)', () => {
     expect(entry.body).toBe(`Phone: +91 261 555 0101 · ${site} · 75%`);
   });
 
+  it('ticked: a country only from research is recorded as accepted (verified, ai_fields with source) and listed as accepted on the lead', async () => {
+    const src = 'https://directorio.test/ficha';
+    const batch = await batchWith([{
+      companyName: 'Research Country Co', phone: '+34 600 000 001', contactName: 'Ana Ruiz', $status: 'Missing details',
+      $research: { country: found('Spain', 90, src), email: found('ana.ruiz@researchcountry.es', 85, src) },
+    }], { language: 'es' });
+    await importNow(batch.id, { acceptHigh: true });
+    const [row] = await rowsOf(batch.id);
+    expect(row!.outcome).toBe('Imported');
+    const company = await prisma.company.findUniqueOrThrow({ where: { id: row!.companyId! } });
+    expect(company.country).toBe('Spain');
+    expect((company.verifiedFields as Record<string, boolean>).country).toBe(true);
+    expect((company.aiFields as Record<string, { source: string; confidence: number }>).country).toMatchObject({ source: src, confidence: 90 });
+    // A person's email found by research never becomes the company domain.
+    expect(company.domain).toBeNull();
+    const s = await prisma.enrichmentSuggestion.findFirstOrThrow({ where: { companyId: company.id, field: 'country' } });
+    expect(s).toMatchObject({ decision: 'accepted', value: 'Spain', sourceUrl: src });
+    const entry = await prisma.leadActivity.findFirstOrThrow({ where: { leadId: row!.leadId!, title: 'Accepted from research' } });
+    expect(entry.body).toBe(`Country: Spain · ${src} · 90%\nEmail: ana.ruiz@researchcountry.es · ${src} · 85%`);
+    // Unticked, the same row is left out (a lead needs a country).
+    const again = await batchWith([{
+      companyName: 'Research Country Two', phone: '+34 600 000 002', $status: 'Missing details', $research: { country: found('Spain', 90, src) },
+    }]);
+    const res = await post(`/api/imports/batches/${again.id}/import`, choose());
+    expect(res.json()).toEqual({ error: 'nothing_to_import' });
+  });
+
+  it('existing company: a filled but unverified field is left untouched (no suggestion); a research industry → ai_industry, audited', async () => {
+    const co = await makeCompany({ name: 'Filled Mills', country: 'India', website: 'https://filledmills.in', city: 'Pune' });
+    const batch = await batchWith([{
+      companyName: 'Filled Mills', country: 'India', email: 'a@filledmills.in', $status: 'Already in CRM', $matched: co.id,
+      $research: { city: found('Nagpur', 95), industry: found('Textiles', 85) },
+    }]);
+    await importNow(batch.id, { acceptHigh: true });
+    const after = await prisma.company.findUniqueOrThrow({ where: { id: co.id } });
+    expect(after).toMatchObject({ city: 'Pune', verifiedFields: {}, aiIndustry: 'Textiles' });
+    expect(await prisma.enrichmentSuggestion.count()).toBe(0);
+    const log = await prisma.auditLog.findFirstOrThrow({ where: { entityType: 'company', entityId: String(co.id), action: 'update' } });
+    expect(log).toMatchObject({ userId: admin.id, before: { aiIndustry: null }, after: { aiIndustry: 'Textiles' } });
+  });
+
   it('existing company with a verified city: no write and no suggestion', async () => {
     const co = await makeCompany({ name: 'Verified Mills', country: 'India', website: 'https://verifiedmills.in' });
     await prisma.company.update({ where: { id: co.id }, data: { verifiedFields: { city: true } } });
@@ -381,6 +439,104 @@ describe('import · resumable job, stamps and errors', () => {
     expect(await prisma.company.count()).toBe(3);
     expect(await prisma.contact.count()).toBe(4);
     expect(await batchOf(batch.id)).toMatchObject({ status: 'Imported', importedCount: 4, newCompanyCount: 3 });
+  });
+
+  it('two runs at the same time import each row once (6 rows → 6 leads, companies and contacts)', async () => {
+    const rows: RowSpec[] = Array.from({ length: 6 }, (_, i) => (i % 2 === 0
+      ? { companyName: `Name Co ${i}`, country: 'India', phone: `+91 20 555 01${i}0`, contactName: `Person ${i} Test` }
+      : { companyName: `Domain Co ${i}`, website: `https://domain${i}.test`, country: 'India', email: `p${i}@domain${i}.test`, contactName: `Person ${i} Test` }));
+    const batch = await batchWith(rows);
+    await startImport(authOf(admin), batch.id, choose());
+    const settled = await Promise.allSettled([commitBatch(batch.id), commitBatch(batch.id)]);
+    expect(settled.map((x) => x.status)).toEqual(['fulfilled', 'fulfilled']);
+    expect(await prisma.lead.count({ where: { importBatch: batch.number } })).toBe(6);
+    expect(await prisma.company.count()).toBe(6);
+    expect(await prisma.contact.count()).toBe(6);
+    expect((await rowsOf(batch.id)).map((r) => r.outcome)).toEqual(Array(6).fill('Imported'));
+    expect(await batchOf(batch.id)).toMatchObject({ status: 'Imported', importedCount: 6, errorCount: 0, commitRun: null });
+  });
+
+  it('a row already imported by another run is left alone (row lock and re-check)', async () => {
+    const batch = await batchWith(four().slice(0, 1));
+    await startImport(authOf(admin), batch.id, choose());
+    const [stale] = await rowsOf(batch.id);
+    await commitBatch(batch.id);
+    const ctx = { user: authOf(admin), acceptHigh: false, knownCountries: await knownCountries() };
+    const b = await batchOf(batch.id);
+    expect(await prisma.$transaction((tx) => importRow(tx, stale!, b, ctx))).toBeNull();
+    expect(await prisma.lead.count()).toBe(1);
+  });
+
+  it('restart mid-import: the startup sweep re-queues the job, which finishes with no duplicates', async () => {
+    const batch = await batchWith(four());
+    await startImport(authOf(admin), batch.id, choose());
+    const job = await claimNext(['import_commit']);
+    expect(job).not.toBeNull();
+    // The worker dies after row 2 (the job stays running, the lease is left behind).
+    await expect(commitBatch(batch.id, { afterRow: (n) => { if (n === 2) throw new Error('killed'); } })).rejects.toThrow('killed');
+    await prisma.importBatch.update({ where: { id: batch.id }, data: { commitRun: 'dead-run', commitHeartbeatAt: new Date() } });
+    // A second run meanwhile finds the lease held and does nothing.
+    await commitBatch(batch.id);
+    expect(await prisma.lead.count()).toBe(2);
+
+    expect(await sweepImportCommit({ startup: true })).toBe(1);
+    expect(await prisma.job.findUniqueOrThrow({ where: { id: job!.id } })).toMatchObject({ status: 'queued', attempts: 1 });
+    expect(await runJob()).toBe(true);
+    expect(await prisma.lead.count()).toBe(4);
+    expect(await prisma.company.count()).toBe(3);
+    expect(await prisma.contact.count()).toBe(4);
+    expect(await batchOf(batch.id)).toMatchObject({ status: 'Imported', importedCount: 4 });
+  });
+
+  it('scheduled sweep: a stale job whose lease is dead is re-queued; one with a live lease is left running', async () => {
+    const batch = await batchWith(four());
+    await startImport(authOf(admin), batch.id, choose());
+    const job = (await claimNext(['import_commit']))!;
+    const old = new Date(Date.now() - STALE_AFTER_MS - 60_000);
+    await prisma.job.update({ where: { id: job.id }, data: { lockedAt: old } });
+    await prisma.importBatch.update({ where: { id: batch.id }, data: { commitRun: 'live', commitHeartbeatAt: new Date() } });
+    expect(await sweepImportCommit()).toBe(0);
+    expect((await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status).toBe('running');
+    await prisma.importBatch.update({ where: { id: batch.id }, data: { commitHeartbeatAt: new Date(Date.now() - COMMIT_LEASE_MS - 1000) } });
+    expect(await sweepImportCommit()).toBe(1);
+    expect((await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status).toBe('queued');
+    expect(await runJob()).toBe(true);
+    expect(await batchOf(batch.id)).toMatchObject({ status: 'Imported', importedCount: 4 });
+  });
+
+  it('attempts exhausted → Failed job_failed; Continue imports the rest (no duplicates); only a Failed import can be continued', async () => {
+    const batch = await batchWith(four());
+    await startImport(authOf(admin), batch.id, choose());
+    importCommitDeps.afterRow = () => { throw new Error('boom'); };
+    for (let i = 0; i < 3; i += 1) {
+      await prisma.job.updateMany({ where: { type: 'import_commit', status: 'queued' }, data: { runAt: new Date(Date.now() - 1000) } });
+      expect(await runJob()).toBe(true);
+    }
+    expect(await batchOf(batch.id)).toMatchObject({ status: 'Failed', importError: 'job_failed', commitRun: null });
+    expect((await prisma.job.findFirstOrThrow({ where: { type: 'import_commit' } })).status).toBe('failed');
+    expect(await prisma.lead.count()).toBe(3);
+    delete importCommitDeps.afterRow;
+
+    const rep = await signIn(app, await makeUser({ role: 'SALES_REPRESENTATIVE' }));
+    expect((await post(`/api/imports/batches/${batch.id}/import/continue`, {}, rep)).statusCode).toBe(403);
+    const res = await post(`/api/imports/batches/${batch.id}/import/continue`, {});
+    expect(res.statusCode, res.body).toBe(202);
+    expect(await batchOf(batch.id)).toMatchObject({ status: 'Importing', importError: null });
+    expect(await runJob()).toBe(true);
+    expect(await prisma.lead.count()).toBe(4);
+    expect(await prisma.company.count()).toBe(3);
+    expect(await batchOf(batch.id)).toMatchObject({ status: 'Imported', importedCount: 4 });
+    const again = await post(`/api/imports/batches/${batch.id}/import/continue`, {});
+    expect(again.statusCode).toBe(409);
+    expect(again.json()).toEqual({ error: 'cannot_continue' });
+  });
+
+  it('scheduled sweep: an Importing batch whose job failed for good becomes Failed (and can be continued)', async () => {
+    const batch = await batchWith(four().slice(0, 1));
+    await startImport(authOf(admin), batch.id, choose());
+    await prisma.job.updateMany({ where: { type: 'import_commit' }, data: { status: 'failed' } });
+    await sweepImportCommit();
+    expect(await batchOf(batch.id)).toMatchObject({ status: 'Failed', importError: 'job_failed' });
   });
 
   it('a company shared by two rows: both rows carry the company\'s final stamp', async () => {

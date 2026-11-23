@@ -20,6 +20,7 @@ import { scheduleQuotationExpiry } from './jobs/quotationExpiry.js';
 import { sweepStuckRuns } from './research/service.js';
 import { sweepImportFiles } from './imports/batches.js';
 import { sweepImportResearch } from './imports/research.js';
+import { sweepImportCommit } from './imports/commit.js';
 
 export { runOnce, runForever } from './jobs/runner.js';
 
@@ -85,11 +86,14 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<void> 
     sweepImportFiles().catch(warn('import sweep')),
     // Import research: rows left running by a lost job are waiting again; a Researching batch without a job gets one.
     sweepImportResearch().catch(warn('import research sweep')),
+    // Import: a lost import job is queued again (it resumes), or the batch becomes Failed and can be continued.
+    sweepImportCommit().catch(warn('import commit sweep')),
   ]);
   // At startup no research job is running yet, so every Processing run was interrupted.
   await sweepStuckRuns({ startup: true }).catch(warn('research startup sweep'));
   await sweepImportFiles().catch(warn('import startup sweep'));
   await sweepImportResearch({ startup: true }).catch(warn('import research startup sweep'));
+  await sweepImportCommit({ startup: true }).catch(warn('import commit startup sweep'));
   void schedule();
   const scheduler = setInterval(schedule, SCHEDULE_EVERY_MS);
   // Old done / failed job rows are deleted at start and hourly.

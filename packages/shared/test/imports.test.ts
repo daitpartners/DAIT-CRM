@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
-  BATCH_NUMBER_RE, IMPORT_FILE_ERRORS, IMPORT_FIELDS, IMPORT_NO_CLAUDE, importNoClaudeText, IMPORT_TABLE_FIELDS, PROBLEM_CODES, importColumnLabel, importFileErrorText, importSource, problemText,
+  BATCH_NUMBER_RE, IMPORT_FILE_ERRORS, IMPORT_FIELDS, IMPORT_NO_CLAUDE, importNoClaudeText, IMPORT_TABLE_FIELDS, PROBLEM_CODES, importColumnLabel, importFileErrorText, importSource, IMPORT_FAILURES, importFailureText, problemText,
   importActivityText, importEngineText, importResearchNoteText, RESEARCH_CLAUDE_FAILURES,
   type ImportActivity, type ResearchNotePart, type RowProblem,
 } from '../src/imports';
@@ -55,6 +55,16 @@ describe('importNoClaudeText', () => {
     expect(importNoClaudeText('limit', 'en')).toBe('Long document: part read without Claude');
     expect(importNoClaudeText('limit', 'es')).toBe('Documento largo: parte leída sin Claude');
     expect(importNoClaudeText('limit', 'fr')).toBe('Document long : lu en partie sans Claude');
+  });
+});
+
+describe('importFailureText', () => {
+  test('every import failure code reads in en, es and fr, each different', () => {
+    for (const lang of LANGS) {
+      expect(new Set(IMPORT_FAILURES.map((c) => importFailureText(c, lang))).size).toBe(IMPORT_FAILURES.length);
+    }
+    expect(importFailureText('job_failed', 'en')).toBe('The import stopped after repeated errors. Continue it to import the remaining rows.');
+    expect(importFailureText('interrupted', 'es')).not.toBe(importFailureText('interrupted', 'en'));
   });
 });
 
