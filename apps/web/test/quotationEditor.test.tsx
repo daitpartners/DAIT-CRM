@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
@@ -352,6 +352,10 @@ describe('Quotation editor (prototype V.quoteEditor)', () => {
     const buttons = within(screen.getByRole('heading', { level: 2, name: 'Status' }).closest('section') as HTMLElement).getAllByRole('button').map((b) => b.textContent);
     expect(buttons).toEqual(['Mark accepted', 'Mark rejected', 'Negotiating']);
     await userEvent.click(screen.getByRole('button', { name: 'Mark accepted' }));
+    // Review #27: as the Close lead / Won dialogs, accepting says what closing the lead does before it does it.
+    const warn = await screen.findByRole('dialog');
+    expect(warn).toHaveTextContent('LD-1005 moves to Won: its follow-up date and open tasks, including planned calls and meetings, are closed.');
+    await userEvent.click(within(warn).getByRole('button', { name: 'Mark accepted' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url === '/api/quotations/7/accept')).toBe(true));
     expect(calls.find((c) => c.url === '/api/quotations/7/accept')!.body).toEqual({});
     expect(await screen.findByText('Q-2026-007 marked Accepted')).toBeTruthy();
@@ -442,8 +446,26 @@ describe('Quotation editor (prototype V.quoteEditor)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Mark accepted' }));
     const dialog = await screen.findByRole('dialog');
     expect(dialog).toHaveTextContent('Revision 2 has unsent changes — they will be discarded');
+    expect(dialog).toHaveTextContent('LD-1005 moves to Won');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Mark accepted' }));
     await waitFor(() => expect(calls.find((c) => c.url === '/api/quotations/7/accept')?.body).toEqual({ discardUnsent: true }));
+  });
+
+  it('accepting with the lead already closed asks nothing; cancelling the Won warning sends nothing', async () => {
+    const closed = stub(detail({ status: 'Sent', lead: { id: 5, number: 'LD-1005', status: 'Won' } }));
+    mount();
+    await screen.findByDisplayValue('Consulting services');
+    await userEvent.click(screen.getByRole('button', { name: 'Mark accepted' }));
+    await waitFor(() => expect(closed.some((c) => c.url === '/api/quotations/7/accept')).toBe(true));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    cleanup();
+
+    const open = stub(detail({ status: 'Sent' }));
+    mount();
+    await screen.findByDisplayValue('Consulting services');
+    await userEvent.click(screen.getByRole('button', { name: 'Mark accepted' }));
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    expect(open.some((c) => c.url.endsWith('/accept'))).toBe(false);
   });
 
   it('cancelling that confirm sends nothing', async () => {

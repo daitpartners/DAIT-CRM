@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { QUOTE_CURRENCIES, defaultTaxRate, formatMoney, quoteTotals, type QuotationUpdate, type QuoteCurrency } from '@dait-crm/shared';
+import { QUOTE_CURRENCIES, defaultTaxRate, isClosedStatus, formatMoney, quoteTotals, type QuotationUpdate, type QuoteCurrency } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
 import { useContacts } from '../../api/contacts';
 import { useLeads } from '../../api/leads';
@@ -290,15 +290,18 @@ function Editor({ q, crumb, refetch }: { q: QuotationDetail; crumb: React.ReactN
     if (!(await ready())) return;
     const now = base.current;
     const label = kind === 'accept' ? t('Mark accepted') : t('Mark rejected');
-    let discardUnsent = false;
-    if (now.editingNewRevision) {
-      const ok = await confirm({
-        title: label, body: t('Revision {n} has unsent changes — they will be discarded', { n: now.revision }), confirmLabel: label, danger: kind === 'reject',
-      });
+    // Review #27: accepting moves an open lead to Won, which closes its follow-up and open tasks (planned calls and
+    // meetings too), as the Close lead and Won dialogs say; say it here before it happens.
+    const wins = kind === 'accept' && now.lead !== null && !isClosedStatus(now.lead.status);
+    const notes = [
+      ...(now.editingNewRevision ? [t('Revision {n} has unsent changes — they will be discarded', { n: now.revision })] : []),
+      ...(wins ? [t('{number} moves to Won: its follow-up date and open tasks, including planned calls and meetings, are closed.', { number: now.lead!.number })] : []),
+    ];
+    if (notes.length) {
+      const ok = await confirm({ title: label, body: notes.join(' '), confirmLabel: label, danger: kind === 'reject' });
       if (!ok) return;
-      discardUnsent = true;
     }
-    run({ kind, discardUnsent });
+    run({ kind, discardUnsent: now.editingNewRevision });
   }
 
   async function negotiate() {

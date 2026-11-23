@@ -1627,5 +1627,6 @@
   "This date has passed: the lead stays overdue. Pick a new date.": "Cette date est passée : le lead reste en retard. Choisissez une nouvelle date.",
   "for 1 client": "pour 1 client",
   "for {n} clients": "pour {n} clients",
-  "1 project": "1 projet"
+  "1 project": "1 projet",
+  "{number} moves to Won: its follow-up date and open tasks, including planned calls and meetings, are closed.": "{number} passe à Gagné : sa date de suivi et ses tâches ouvertes, y compris les appels et réunions planifiés, sont clôturées."
 }

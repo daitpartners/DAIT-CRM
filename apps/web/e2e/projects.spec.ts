@@ -100,6 +100,10 @@ test('Convert an accepted quotation: the project at net value, on the list, the 
   await expect.poll(async () => (await api()).lines.map((l) => l.item)).toEqual(['Strategy workshop']);
   await expect(page.getByRole('button', { name: 'Convert to project' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Mark accepted' }).click();
+  // The lead is open: accepting says it moves to Won and closes its planned tasks first (review #27).
+  const won = page.getByRole('dialog', { name: 'Mark accepted' });
+  await expect(won).toContainText(`${lead.number} moves to Won`);
+  await won.getByRole('button', { name: 'Mark accepted' }).click();
   await expect(page.locator('.topbar .badge').first()).toHaveText('Accepted');
 
   // Convert: the toast, then the editor shows the project instead of the button.
