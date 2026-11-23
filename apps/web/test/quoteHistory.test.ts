@@ -36,6 +36,13 @@ describe('quotation history lines in the reader’s language (stored in English)
     expect(quoteHistoryText(tEs, 'Accepted · by Neha Kapoor')).toEqual({ status: 'Accepted', rest: 'por Neha Kapoor', full: `${tEs('Accepted|quote')} · por Neha Kapoor` });
   });
 
+  it("Expired shows the valid-until date in the user's date format", () => {
+    const day = (ymd: string) => `«${ymd.split('-').reverse().join('/')}»`;
+    expect(quoteHistoryText(tEn, 'Expired · valid until 2026-12-01', day).rest).toBe('valid until «01/12/2026»');
+    expect(quoteHistoryText(tEs, 'Expired · valid until 2026-12-01', day).full).toContain('«01/12/2026»');
+    expect(quoteHistoryText(tFr, 'Expired · valid until 2026-12-01', day).full).toContain('«01/12/2026»');
+  });
+
   it('an unknown line is shown as stored', () => {
     expect(quoteHistoryText(tEs, 'Something new')).toEqual({ status: null, rest: 'Something new', full: 'Something new' });
   });

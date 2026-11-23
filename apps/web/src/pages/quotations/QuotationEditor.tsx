@@ -125,7 +125,7 @@ function Editor({ q, crumb, refetch }: { q: QuotationDetail; crumb: React.ReactN
   const toast = useToast();
   const confirm = useConfirm();
   const navigate = useNavigate();
-  const { date, relative } = useFormatDate();
+  const { date, day, relative } = useFormatDate();
   const action = useQuotationAction(q.id);
   const convert = useConvertQuotation();
   const [draft, setDraftState] = useState<Draft>(() => draftOf(q));
@@ -541,7 +541,7 @@ function Editor({ q, crumb, refetch }: { q: QuotationDetail; crumb: React.ReactN
                     <span className={idx >= i ? 'd on' : 'd'} />
                     <span className={idx >= i ? undefined : 'q-m'}>
                       <strong>{quoteStatusText(t, s)}</strong>
-                      {h ? ` · ${relative(h.at)} · ${((x) => (x.status === s ? x.rest : x.full))(quoteHistoryText(t, h.text))}` : null}
+                      {h ? ` · ${relative(h.at)} · ${((x) => (x.status === s ? x.rest : x.full))(quoteHistoryText(t, h.text, day))}` : null}
                     </span>
                   </div>
                 );
@@ -608,7 +608,7 @@ function Editor({ q, crumb, refetch }: { q: QuotationDetail; crumb: React.ReactN
             <div className="q-hist">
               {q.history.slice().reverse().map((h, i) => (
                 <div key={i}>
-                  {relative(h.at)} · {quoteHistoryText(t, h.text).full}
+                  {relative(h.at)} · {quoteHistoryText(t, h.text, day).full}
                 </div>
               ))}
             </div>
