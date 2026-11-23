@@ -244,6 +244,7 @@ a:focus-visible,button:focus-visible,[role=combobox]:focus-visible,summary:focus
 .signin .card{width:420px;max-width:100%;padding:28px 28px 24px}
 .signin .mark{width:48px;height:56px;object-fit:contain}
 .signin .btn{justify-content:center;width:100%;height:42px}
+.signin .ms-tile{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:5px;background:#fff;margin-right:4px}
 .signin form{display:flex;flex-direction:column;gap:12px}
 .signin .divider{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
 .signin .divider::before,.signin .divider::after{content:"";flex:1;height:1px;background:var(--line)}

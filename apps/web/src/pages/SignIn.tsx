@@ -6,6 +6,7 @@ import { keys, useAuthOptions } from '../api/queries';
 import { FormField } from '../components/FormField';
 import { errorText } from '../i18n/labels';
 import { useT } from '../i18n/useT';
+import { MicrosoftLogo } from './settings/MicrosoftLogo';
 
 export function SignIn() {
   const t = useT();
@@ -28,7 +29,9 @@ export function SignIn() {
             {t('Your Microsoft account is not registered for this CRM. Ask an administrator.')}
           </div>
         ) : null}
-        <a className="btn primary" href="/api/auth/microsoft">
+        {/* The Microsoft logo, as on the Settings connect buttons (review #30). */}
+        <a className="btn primary ms-signin" href="/api/auth/microsoft">
+          <span className="ms-tile"><MicrosoftLogo /></span>
           {t('Sign in with Microsoft')}
         </a>
         {options?.localLogin ? <LocalForm /> : null}
