@@ -47,13 +47,14 @@ export type QuotationList = {
 /** `companyId` narrows rows, counts and tiles to one company (the company page). */
 export type QuotationListQuery = { tab?: QuoteTab; s?: string; companyId?: number };
 
-export function useQuotations(query: QuotationListQuery) {
+export function useQuotations(query: QuotationListQuery, enabled = true) {
   const params = new URLSearchParams();
   for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== '') params.set(k, String(v));
   return useQuery({
     queryKey: keys.quotations(query),
     queryFn: () => api<QuotationList>(`/api/quotations?${params.toString()}`),
     placeholderData: keepPreviousData,
+    enabled,
   });
 }
 

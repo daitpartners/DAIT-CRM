@@ -94,6 +94,29 @@ describe('SideColumn', () => {
     expect(link.textContent).toMatch(/10:30$/);
   });
 
+  it("Coming up lists the lead's quotations with total and status, linking to each (prototype)", async () => {
+    const quote = (id: number, number: string, leadId: number, status: string, total: number) => ({
+      id, number, status, revision: 1, editingNewRevision: false, company: { id: 4, number: 'CO-0004', name: 'Meridian Textiles', legalName: null },
+      contact: null, lead: { id: leadId, number: `LD-${leadId}`, status: 'Proposal Sent' }, owner: { id: 2, name: 'Arjun Mehta' },
+      quotationDate: '2030-01-01', validUntil: null, subject: 'Scope', currency: 'USD', total, projectId: null, expiringSoon: false,
+    });
+    stub();
+    const base = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (url, init) => (String(url).startsWith('/api/quotations?')
+      ? Response.json({ items: [quote(9, 'Q-2030-001', 5, 'Sent', 57120), quote(10, 'Q-2030-002', 6, 'Draft', 10)], counts: {}, tiles: {} })
+      : base(url, init)));
+    render(
+      <Wrap qc={makeClient(seller)}>
+        <SideColumn lead={makeLead({ nextFollowUp: null, tasks: [] })} live />
+      </Wrap>,
+    );
+    const link = await screen.findByRole('link', { name: /Q-2030-001/ });
+    expect(link).toHaveAttribute('href', '/quotations/9');
+    expect(link.textContent).toBe('Q-2030-001 · USD 57,120.00Sent');
+    expect(screen.getByRole('heading', { name: 'Coming up' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Q-2030-002/ })).toBeNull();
+  });
+
   it('the Projects card replaces the placeholder: this lead’s project highlighted', async () => {
     const calls = stub();
     render(

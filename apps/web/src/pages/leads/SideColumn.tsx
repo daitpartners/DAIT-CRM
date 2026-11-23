@@ -1,15 +1,16 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { isClosedStatus, safeUrl } from '@dait-crm/shared';
+import { formatMoney, isClosedStatus, safeUrl } from '@dait-crm/shared';
 import { useLeadAction, useRefreshWhenOutOfDate, type LeadFull } from '../../api/leads';
 import { keys, useLookupText } from '../../api/queries';
+import { useQuotations } from '../../api/quotations';
 import { isResearchQueued } from '../../api/research';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Icons } from '../../components/Icons';
 import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
-import { researchStatusBadge, researchStatusText, verificationBadge, verificationText } from '../../i18n/labels';
+import { quoteStatusBadge, quoteStatusText, researchStatusBadge, researchStatusText, verificationBadge, verificationText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
 import { useResearchRunner } from '../companies/AiCard';
 import { ContactModal } from '../companies/ContactModal';
@@ -205,18 +206,21 @@ function AiLine({ lead }: { lead: LeadFull }) {
 
 /**
  * Next follow-up and the open tasks, soonest first. A call or meeting shows as the prototype's calendar events: the
- * calendar icon, date and start time, linking to that week of the Calendar; a timed follow-up shows its time.
+ * calendar icon, date and start time, linking to that week of the Calendar; a timed follow-up shows its time. Then the
+ * lead's quotations the user can see (prototype): number · total and the status badge, linking to each.
  */
 function ComingUp({ lead }: { lead: LeadFull }) {
   const t = useT();
   const { day } = useFormatDate();
+  const { data: quoteList } = useQuotations({ companyId: lead.companyId ?? undefined }, lead.companyId !== null);
+  const quotes = quoteList?.items?.filter((q) => q.lead?.id === lead.id) ?? [];
   const items = [
     ...(lead.nextFollowUp ? [{ key: 'fu', title: t('Follow-up · {number}', { number: lead.number }), due: lead.nextFollowUp, time: null, event: false, over: lead.isOverdue }] : []),
     ...lead.tasks
       .filter((task) => task.origin !== 'follow_up' || task.dueDate !== lead.nextFollowUp)
       .map((task) => ({ key: `t${task.id}`, title: task.title, due: task.dueDate, time: task.dueTime, event: task.kind !== 'followup', over: task.isOverdue })),
   ].sort((a, b) => a.due.localeCompare(b.due) || (a.time ?? '99').localeCompare(b.time ?? '99'));
-  if (items.length === 0) return null;
+  if (items.length === 0 && quotes.length === 0) return null;
   return (
     <section className="card side-card" aria-labelledby="lead-up-title">
       <h2 id="lead-up-title">{t('Coming up')}</h2>
@@ -242,6 +246,14 @@ function ComingUp({ lead }: { lead: LeadFull }) {
             </li>
           );
         })}
+        {quotes.map((q) => (
+          <li key={`q${q.id}`}>
+            <Link className="link" to={`/quotations/${q.id}`}>
+              <span>{`${q.number} · ${formatMoney(q.total, q.currency)}`}</span>
+              <span className={quoteStatusBadge(q.status)}>{quoteStatusText(t, q.status)}</span>
+            </Link>
+          </li>
+        ))}
       </ul>
     </section>
   );
