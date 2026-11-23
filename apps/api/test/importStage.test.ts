@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { importFileErrorText, type RowFields, type RowProblem } from '@dait-crm/shared';
+import { importFileErrorText, normaliseCompanyName, type RowFields, type RowProblem } from '@dait-crm/shared';
 import { prisma } from '../src/db';
 import { buildApp } from '../src/app';
 import { runOnce } from '../src/jobs/runner';
@@ -11,7 +11,7 @@ import { importReadFileHandler } from '../src/jobs/handlers/importReadFile';
 import { enqueue } from '../src/jobs/queue';
 import { saveImportFile } from '../src/imports/storage';
 import type { TableExtract } from '../src/imports/read';
-import { columnKey, refreshBatch, stageTable } from '../src/imports/stage';
+import { applyRowEdit, columnKey, refreshBatch, resortFile, stageHooks, stageTable, updateRow } from '../src/imports/stage';
 import { companyKeyOf, findExistingCompanies } from '../src/imports/companies';
 import { fakeGraph, resetDb, seedLookups } from './helpers';
 import { makeCompany, makeUser, signIn } from './factory';
@@ -34,6 +34,8 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   vi.unstubAllEnvs();
+  stageHooks.beforeEvaluationWrite = undefined;
+  stageHooks.beforeResortWrite = undefined;
   await rm(storage, { recursive: true, force: true });
 });
 
@@ -159,6 +161,29 @@ async function stageSimple(rows: string[][]) {
 }
 
 describe('row statuses', () => {
+  it('a sheet that starts with data keeps its first row (I-4)', async () => {
+    const batch = await newBatch();
+    const file = await newFile(batch.id, 'list.csv');
+    await stageTable(file.id, table({ list: [['Acme Ltd', 'info@acme.com', 'Spain'], ['Beta SL', 'b@beta.es', 'Spain']] }));
+    const rows = await rowsOf(file.id);
+    expect(rows.map((r) => [r.originN, fieldsOf(r)])).toEqual([
+      [1, { email: 'info@acme.com', country: 'Spain' }],
+      [2, { email: 'b@beta.es', country: 'Spain' }],
+    ]);
+    const after = await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } });
+    expect((after.meta as { headers: Record<string, unknown> }).headers.list).toBeNull();
+  });
+
+  it('caps raw cells at 2,000 and header cells at 200 characters (M-6)', async () => {
+    const batch = await newBatch();
+    const file = await newFile(batch.id, 'long.csv');
+    await stageTable(file.id, table({ long: [[...SIMPLE, 'H'.repeat(500)], ['Acme', 'India', '', 'a@acme.in', '', 'x'.repeat(5000)]] }));
+    const [row] = await rowsOf(file.id);
+    expect((row!.raw as string[])[5]).toHaveLength(2000);
+    const meta = (await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } })).meta as { headers: Record<string, string[]> };
+    expect(meta.headers.long![5]).toHaveLength(200);
+  });
+
   it('company + country + website only → Missing details, contact_missing', async () => {
     const { rows } = await stageSimple([['Acme Tools', 'India', 'acmetools.in', '', '']]);
     expect(rows[0].status).toBe('Missing details');
@@ -227,6 +252,39 @@ describe('row statuses', () => {
 });
 
 describe('companies', () => {
+  it('free-mail domains never match or group, even when a CRM company was given one (I-1)', async () => {
+    const wrong = await prisma.company.create({
+      data: { name: 'Old Mistake', nameNormalised: 'old mistake', country: 'Spain', domain: 'hotmail.es', website: 'hotmail.es' },
+    });
+    const found = await findExistingCompanies(prisma, [
+      { companyName: 'Andes Foods', email: 'pedro@hotmail.es', country: 'Spain' },
+      { companyName: 'Andes Foods', website: 'www.hotmail.es', country: 'Spain' },
+      { companyName: 'Old Mistake', email: 'x@yahoo.com.mx', country: 'Spain' },
+    ]);
+    expect(found.map((f) => f?.id ?? null)).toEqual([null, null, wrong.id]);
+    for (const email of ['a@hotmail.es', 'b@yahoo.es', 'c@outlook.es', 'd@hotmail.fr', 'e@orange.fr', 'f@wanadoo.fr', 'g@free.fr',
+      'h@live.com.mx', 'i@yahoo.com.mx', 'j@prodigy.net.mx', 'k@telefonica.net']) {
+      expect(companyKeyOf({ companyName: 'Andes Foods', email, country: 'Spain' }), email).toBe('n:andes foods|spain');
+    }
+    expect(companyKeyOf({ companyName: 'Andes Foods', website: 'hotmail.es', email: 'ventas@andesfoods.es' })).toBe('d:andesfoods.es');
+    const { rows } = await stageSimple([['Brisa Textil', 'Spain', '', 'brisa@hotmail.es', '']]);
+    expect(rows[0].status).toBe('Ready');
+  });
+
+  it('the migration\'s normalise_company_name equals normaliseCompanyName (M-1)', async () => {
+    const names = [
+      'Acme S.L.', 'Acme SL', 'Acme S. A.', 'Construcciones Ibéricas S.A. de C.V.', 'Société Générale', 'Dupont SARL',
+      'Rossi S.r.l.', 'Müller AG', 'Van Dijk B.V.', 'Acme Corp.', 'Acme Pvt. Ltd.', 'A.Smith Trading', 'J. Booth & Sons',
+      'Banco de España', 'Meridian Textiles Limited', 'Northwind Logistics Private Limited', 'Company Group Ltd',
+      'Ørsted A/S', 'Straße GmbH', 'Ｆｕｌｌｗｉｄｔｈ Co', 'İstanbul Lojistik', 'Café-Bar "El Niño", S.L.U.', '  Zenith   Retail LLC ',
+      'L\'Oréal S.A.', 'Total Care Ltd.', 'x.y.z', 'S.A.', '', 'Ação Ltda', 'Grupo Bimbo, S.A.B. de C.V.',
+    ];
+    for (const name of names) {
+      const [row] = await prisma.$queryRaw<{ n: string }[]>`SELECT normalise_company_name(${name}) AS n`;
+      expect(row!.n, name).toBe(normaliseCompanyName(name));
+    }
+  });
+
   it('companyKeyOf: domain first, else name + country', () => {
     expect(companyKeyOf({ companyName: 'Acme Ltd', website: 'https://www.acme.com/x' })).toBe('d:acme.com');
     expect(companyKeyOf({ companyName: 'Acme Ltd', email: 'a@acme.com' })).toBe('d:acme.com');
@@ -300,6 +358,13 @@ describe('step-2 API', () => {
     expect(fieldsOf(after[0]).companyName).toBeUndefined();
     expect(fieldsOf(after[1])).toMatchObject({ companyName: 'Brightline Dental', contactName: 'Brightline Dental Clinics' });
     expect(after[1].edited).toEqual(['companyName']);
+    // "Contact" already held the contact: it is asked about now (M-4); answering it never re-asks Firma.
+    const file1 = await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } });
+    expect(file1.questions).toEqual([
+      { sheet: 'Visitors', col: 1, header: 'Contact', guess: 'contactName', samples: ['Omar Haddad', 'Dr. Priya Shah', 'Ana Ruiz'] },
+    ]);
+    await json('POST', `/api/imports/files/${file.id}/columns`, cookie, { sheet: 'Visitors', col: 1, field: 'contactName' });
+    expect((await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } })).questions).toEqual([]);
     // A total in the contact column is still not a lead (nothing to reach), a repeated header still is.
     expect(after[4].status).toBe('Not a lead');
     expect(after[5].status).toBe('Not a lead');
@@ -378,6 +443,66 @@ describe('step-2 API', () => {
     expect(responses.map((r) => r.json().error)).toEqual(Array(5).fill('batch_locked'));
     // Reading still works.
     expect((await json('GET', `/api/imports/batches/${batch.id}/rows`, cookie)).statusCode).toBe(200);
+  });
+
+  it('a tick and an edit made during a re-evaluation are kept (I-3)', async () => {
+    const { batch, rows } = await staged();
+    stageHooks.beforeEvaluationWrite = async () => {
+      stageHooks.beforeEvaluationWrite = undefined;
+      await updateRow(rows[0].id, { include: false });
+      await updateRow(rows[1].id, { field: 'email', value: 'priya@brightlinedental.ca' });
+    };
+    await refreshBatch(batch.id);
+    const [a, b] = await Promise.all([rows[0].id, rows[1].id].map((id) => prisma.importRow.findUniqueOrThrow({ where: { id } })));
+    expect([a!.include, a!.includeTouched]).toEqual([false, true]);
+    expect([fieldsOf(b!).email, b!.status]).toEqual(['priya@brightlinedental.ca', 'Ready']);
+  });
+
+  it('an untouched tick still follows a new status during the same refresh (I-3)', async () => {
+    const { batch, rows } = await staged();
+    await makeCompany({ name: 'Al Noor', website: 'alnoorlogistics.ae', country: 'United Arab Emirates' });
+    await refreshBatch(batch.id);
+    expect(await prisma.importRow.findUniqueOrThrow({ where: { id: rows[0].id } })).toMatchObject({ status: 'Already in CRM', include: false });
+  });
+
+  it('an edit made while a file is re-sorted wins (I-3)', async () => {
+    const { file, rows } = await staged();
+    await prisma.importFile.update({ where: { id: file.id }, data: { columnMap: { [columnKey('Visitors', 0)]: 'ignore', [columnKey('Visitors', 2)]: 'email' } } });
+    stageHooks.beforeResortWrite = async () => {
+      stageHooks.beforeResortWrite = undefined;
+      await applyRowEdit(rows[0].id, { field: 'city', value: 'Dubai' });
+    };
+    await resortFile(file.id);
+    expect(fieldsOf(await prisma.importRow.findUniqueOrThrow({ where: { id: rows[0].id } })))
+      .toEqual({ email: 'omar.h@alnoorlogistics.ae', city: 'Dubai' });
+  });
+
+  it('two quick edits of one row both stay (I-3)', async () => {
+    const { cookie, rows } = await staged();
+    await Promise.all([
+      json('PATCH', `/api/imports/rows/${rows[1].id}`, cookie, { field: 'email', value: 'priya@brightlinedental.ca' }),
+      json('PATCH', `/api/imports/rows/${rows[1].id}`, cookie, { field: 'city', value: 'Toronto' }),
+      json('PATCH', `/api/imports/rows/${rows[1].id}`, cookie, { field: 'designation', value: 'Owner' }),
+    ]);
+    const row = await prisma.importRow.findUniqueOrThrow({ where: { id: rows[1].id } });
+    expect(fieldsOf(row)).toMatchObject({ email: 'priya@brightlinedental.ca', city: 'Toronto', designation: 'Owner' });
+    expect([...(row.edited as string[])].sort()).toEqual(['city', 'designation', 'email']);
+    expect(row.status).toBe('Ready');
+  });
+
+  it('two answers at once both stay (M-3)', async () => {
+    const { cookie } = await as('ADMINISTRATOR');
+    const batch = await newBatch();
+    const file = await newFile(batch.id, 'two.csv');
+    await stageTable(file.id, table({ two: [['Firma', 'Nombre', 'Email'], ['Acme', 'Ana', 'a@acme.es']] }));
+    expect((await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } })).questions).toHaveLength(2);
+    await Promise.all([
+      json('POST', `/api/imports/files/${file.id}/columns`, cookie, { sheet: 'two', col: 0, field: 'companyName' }),
+      json('POST', `/api/imports/files/${file.id}/columns`, cookie, { sheet: 'two', col: 1, field: 'skip' }),
+    ]);
+    const after = await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } });
+    expect(after.questions).toEqual([]);
+    expect(after.columnMap).toMatchObject({ [columnKey('two', 0)]: 'companyName', [columnKey('two', 1)]: 'ignore' });
   });
 
   it('Sales Representatives get 403', async () => {

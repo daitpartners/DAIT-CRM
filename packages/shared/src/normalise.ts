@@ -26,7 +26,37 @@ export const FREE_MAIL_DOMAINS: ReadonlySet<string> = new Set([
   'aol.com', 'protonmail.com', 'proton.me', 'gmx.com', 'gmx.de', 'gmx.net', 'web.de', 'mail.com',
   'zoho.com', 'zohomail.in', 'yandex.com', 'yandex.ru', 'mail.ru', 'qq.com', '163.com', '126.com',
   'sify.com', 'in.com', 'indiatimes.com', 'fastmail.com', 'hey.com', 'tutanota.com',
+  // National ISPs' mailboxes (Spain, France, Latin America, and the other common ones).
+  'orange.fr', 'wanadoo.fr', 'wanadoo.es', 'free.fr', 'sfr.fr', 'neuf.fr', 'laposte.net', 'club-internet.fr', 'bbox.fr',
+  'numericable.fr', 'aliceadsl.fr', 'telefonica.net', 'movistar.es', 'ono.com', 'prodigy.net.mx', 'infinitummail.com',
+  'uol.com.br', 'bol.com.br', 'ig.com.br', 'latinmail.com', 'cantv.net', 'arnet.com.ar', 'fibertel.com.ar',
+  'speedy.com.ar', 'vtr.net', 'entelchile.net', 'une.net.co', 'etb.net.co',
+  'bigpond.com', 'bigpond.net.au', 't-online.de', 'freenet.de', 'arcor.de', 'btinternet.com', 'sky.com',
+  'virginmedia.com', 'talktalk.net', 'comcast.net', 'verizon.net', 'att.net', 'sbcglobal.net', 'cox.net', 'shaw.ca',
+  'rogers.com', 'sympatico.ca', 'videotron.ca', 'inbox.ru', 'list.ru', 'bk.ru', 'rambler.ru', 'seznam.cz', 'wp.pl',
+  'o2.pl', 'interia.pl', 'libero.it', 'virgilio.it', 'alice.it', 'tiscali.it', 'tin.it', 'aim.com', 'tutanota.de', 'tuta.io',
 ]);
+
+/**
+ * Mailbox providers whose every country domain is free mail (hotmail.es, yahoo.com.mx, outlook.fr …): the name followed
+ * by a country or generic suffix of one or two labels.
+ */
+const FREE_MAIL_FAMILIES: ReadonlySet<string> = new Set([
+  'hotmail', 'outlook', 'live', 'msn', 'windowslive', 'yahoo', 'ymail', 'rocketmail', 'gmail', 'googlemail', 'aol',
+  'gmx', 'proton', 'protonmail', 'yandex', 'terra', 'icloud',
+]);
+const SUFFIX_WORDS: ReadonlySet<string> = new Set(['com', 'net', 'org', 'co']);
+const isSuffixLabel = (label: string) => label.length <= 3 || SUFFIX_WORDS.has(label);
+
+/** True when `domain` (or a parent of it) is a free-mail family name on a public suffix ("mail.hotmail.es"). */
+function inFamily(domain: string): boolean {
+  const labels = domain.split('.');
+  for (let i = 0; i < labels.length - 1; i += 1) {
+    const rest = labels.slice(i + 1);
+    if (FREE_MAIL_FAMILIES.has(labels[i]!) && rest.length <= 2 && rest.every(isSuffixLabel)) return true;
+  }
+  return false;
+}
 
 /**
  * Hosts shared by many unrelated businesses (social profiles, site builders, marketplaces,
@@ -53,9 +83,12 @@ function inList(list: ReadonlySet<string>, domain: string): boolean {
   }
 }
 
-/** True for consumer mailbox providers (and their subdomains), whose domain says nothing about the company. */
+/**
+ * True for consumer mailbox providers (and their subdomains), whose domain says nothing about the company: the listed
+ * domains, national ISPs, and every country domain of the big providers (hotmail.es, yahoo.com.mx, outlook.fr …).
+ */
 export function isFreeMail(domain: string): boolean {
-  return inList(FREE_MAIL_DOMAINS, domain);
+  return inList(FREE_MAIL_DOMAINS, domain) || inFamily(domain.trim().toLowerCase());
 }
 
 /** True for shared hosts (and their subdomains), whose domain says nothing about the company. */
@@ -63,14 +96,27 @@ export function isSharedHost(domain: string): boolean {
   return inList(SHARED_HOST_DOMAINS, domain);
 }
 
-const LEGAL_SUFFIX = /\b(pvt|private|ltd|limited|llc|inc|gmbh|plc|spa|sl|pty|co|corp|corporation|company|group)\b\.?/g;
+const LEGAL_SUFFIX = new RegExp(
+  '\\b(pvt|private|ltd|limited|llc|llp|lp|inc|gmbh|ag|kg|plc|spa|sl|slu|sa|sau|sas|sasu|sarl|eurl|srl|bv|nv|ltda|lda|'
+  + 'sapi|pty|co|corp|corporation|company|group)\\b\\.?', 'g',
+);
 
 /**
- * Company name key for duplicate matching: lower-case, legal suffixes removed, punctuation collapsed.
+ * Company name key for duplicate matching: accents folded, lower-case, dotted initials joined ("S.A." → "sa"), legal
+ * forms removed (Ltd, GmbH, S.L., S.A. de C.V., SARL, SAS, S.r.l., AG, B.V. …), punctuation collapsed.
  * Can be '' (e.g. "Company Group Ltd"); callers must treat '' as no key.
+ * Migration 20 holds the same steps in SQL (`normalise_company_name`) to back-fill `companies.name_normalised`; a test
+ * keeps the two equal, so change both together.
  */
 export function normaliseCompanyName(name: string): string {
-  return name.toLowerCase().replace(LEGAL_SUFFIX, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  return name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/[^a-z0-9.]+/g, ' ')
+    .replace(/\b([a-z])\. (?=[a-z]\.)/g, '$1.')
+    .replace(/\b([a-z])\.(?=[a-z]\.| |$)/g, '$1')
+    .replace(/\bde (cv|rl)\b/g, ' ')
+    .replace(LEGAL_SUFFIX, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 }
 
 /**

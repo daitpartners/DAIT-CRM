@@ -15,6 +15,13 @@ describe('matchHeader', () => {
     expect(matchHeader('  Company Name ')).toEqual({ target: 'companyName', strength: 'strong' });
     expect(matchHeader('Nom')).toEqual({ target: 'contactName', strength: 'weak' });
     expect(matchHeader('Ref')).toBeNull();
+    expect(matchHeader('Mobile No.')).toEqual({ target: 'phone', strength: 'strong' });
+    expect(matchHeader('Contact No')).toEqual({ target: 'phone', strength: 'strong' });
+    expect(matchHeader('Name of company')).toEqual({ target: 'companyName', strength: 'strong' });
+    expect(matchHeader('Nombre de la empresa')).toEqual({ target: 'companyName', strength: 'strong' });
+    expect(matchHeader('Nom de la société')).toEqual({ target: 'companyName', strength: 'strong' });
+    expect(matchHeader('Número de teléfono')).toEqual({ target: 'phone', strength: 'strong' });
+    expect(matchHeader('Numéro de téléphone')).toEqual({ target: 'phone', strength: 'strong' });
     expect(matchHeader('')).toBeNull();
   });
 
@@ -98,6 +105,13 @@ describe('findHeaderRow', () => {
     expect(findHeaderRow([['Title'], ['Organización del stand', 'Persona responsable'], ['Acme', 'Ana']])).toBe(1);
     expect(findHeaderRow([['Total visitors', '412'], ['Countries', '23']])).toBe(-1);
   });
+
+  it('a sheet that starts with data has no header (I-4)', () => {
+    expect(findHeaderRow([['Acme Ltd', 'info@acme.com', 'Spain'], ['Beta SL', 'b@beta.es', 'Spain']], KNOWN)).toBe(-1);
+    expect(findHeaderRow([['Acme Ltd', 'acme.com', 'Madrid'], ['Beta SL', 'beta.es', 'Sevilla']], KNOWN)).toBe(-1);
+    expect(findHeaderRow([['Acme Ltd', '+34 91 555 0100'], ['Beta SL', '+34 95 555 0101']], KNOWN)).toBe(-1);
+    expect(findHeaderRow([['Acme Ltd', 'Spain', 'Madrid'], ['Beta SL', 'Spain', 'Sevilla']], KNOWN)).toBe(-1);
+  });
 });
 
 describe('matchCountry', () => {
@@ -171,11 +185,19 @@ describe('rows', () => {
     const header = ['Firma', 'Contact', 'E-mail'];
     expect(isNotALead({}, ['', ''], header)).toBe(true);
     expect(isNotALead({ companyName: 'TOTAL VISITORS DAY 2' }, ['TOTAL VISITORS DAY 2'], header)).toBe(true);
-    expect(isNotALead({ companyName: 'Grand total', email: 'x@y.com' }, ['Grand total', '', 'x@y.com'], header)).toBe(true);
+    expect(isNotALead({ companyName: 'Grand total' }, ['Grand total'], header)).toBe(true);
+    expect(isNotALead({ companyName: 'Total: 45', phone: '45' }, ['Total: 45'], header)).toBe(true);
+    expect(isNotALead({ companyName: 'Total' }, ['Total'], header)).toBe(true);
     expect(isNotALead({ companyName: 'Total général' }, ['Total général'], header)).toBe(true);
     expect(isNotALead({ companyName: 'Firma', contactName: 'Contact' }, ['Firma', 'Contact', 'E-mail'], header)).toBe(true);
     expect(isNotALead({ contactName: 'Omar', city: 'Dubai' }, ['', 'Omar'], header)).toBe(true);
     expect(isNotALead({ companyName: 'Totalcare Ltd' }, ['Totalcare Ltd'], header)).toBe(false);
+    // Companies whose name starts with a total word (I-2).
+    expect(isNotALead({ companyName: 'Total Care Ltd', email: 'info@totalcare.co.uk' }, ['Total Care Ltd'], header)).toBe(false);
+    expect(isNotALead({ companyName: 'Suma Seguros', email: 'info@sumaseguros.es' }, ['Suma Seguros'], header)).toBe(false);
+    expect(isNotALead({ companyName: 'Total Energies', website: 'totalenergies.com' }, ['Total Energies'], header)).toBe(false);
+    expect(isNotALead({ companyName: 'Total Care Ltd', phone: '+44 20 5555 0100' }, ['Total Care Ltd'], header)).toBe(false);
+    expect(isNotALead({ companyName: 'Grand total 412', email: 'x@y.com' }, ['Grand total 412'], header)).toBe(false);
     expect(isNotALead({ website: 'acme.com' }, ['', '', 'acme.com'], null)).toBe(false);
   });
 });

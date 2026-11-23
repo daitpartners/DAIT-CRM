@@ -27,6 +27,7 @@ previous release keeps working against it. Release shas are the commits that wer
 | 17 | `20261204100000_ai_research` | Tables `enrichment_runs`, `enrichment_suggestions`, `source_records`, `enrichment_settings` (single row, CHECK id = 1, seeded); `companies.ai_research_status` default becomes `Not started` and never-researched companies are back-filled to it | 4 AI research (`fa12206`) |
 | 18 | `20261205100000_claude_code_run_cap` | `enrichment_settings.claude_monthly_run_cap` (default 0 = Claude off) | Claude Code engine (`08ee5da`) |
 | 19 | `20261206100000_import_leads` | Tables `import_batches`, `import_files`, `import_rows` (Import leads + Data manager) | Import leads (not yet released) |
+| 20 | `20261207100000_company_name_normalise` | Function `normalise_company_name(text)` (the SQL twin of shared `normaliseCompanyName`: accents folded, es/fr legal forms removed); back-fills `companies.name_normalised` with it (derived key only; `updated_at` untouched) | Import leads (not yet released) |
 
 ## Known leftover
 

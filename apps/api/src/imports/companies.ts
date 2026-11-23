@@ -4,13 +4,24 @@
  * same country. Not `findCompanyMatches`: that one sends name hits to a person's review; an import decides on its own.
  */
 import type { Prisma, PrismaClient } from '@prisma/client';
-import { checkDomain, normaliseCompanyName, type RowFields } from '@dait-crm/shared';
+import { checkDomain, isFreeMail, normaliseCompanyName, type RowFields } from '@dait-crm/shared';
 
 export type Db = Prisma.TransactionClient | PrismaClient;
 export type CompanyRef = { id: number; number: string };
 
 const lower = (s: string | undefined): string => (s ?? '').trim().toLowerCase();
-const domainKey = (f: RowFields): string | null => checkDomain({ website: f.website, businessEmail: f.email });
+/**
+ * The row's company domain: website, else a business email. A free-mail domain is never one, not even as a website
+ * ("hotmail.es"), so it never groups rows and never meets a CRM company that was given one by mistake.
+ */
+function domainKey(f: RowFields): string | null {
+  const domain = checkDomain({ website: f.website, businessEmail: f.email });
+  if (domain && !isFreeMail(domain)) return domain;
+  if (!domain) return null;
+  // The website was free mail: the business email may still name the company.
+  const fromEmail = checkDomain({ businessEmail: f.email });
+  return fromEmail && !isFreeMail(fromEmail) ? fromEmail : null;
+}
 
 /**
  * The key that makes two rows one company: `d:<domain>` (website, else a business email that is not free mail), else

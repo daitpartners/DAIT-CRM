@@ -21,7 +21,8 @@ const STRONG: Record<ColumnTarget, string[]> = {
   companyName: [
     'company', 'companyname', 'organisation', 'organization', 'organisationname', 'organizationname', 'business',
     'businessname', 'empresa', 'nombredelaempresa', 'razonsocial', 'societe', 'entreprise', 'nomdelentreprise',
-    'exhibitor', 'exhibitorname', 'expositor', 'exposant', 'account', 'accountname',
+    'exhibitor', 'exhibitorname', 'expositor', 'exposant', 'account', 'accountname', 'nameofcompany', 'nameofthecompany',
+    'nombreempresa', 'nombredeempresa', 'nomdelasociete', 'nomsociete',
   ],
   website: ['website', 'web', 'url', 'site', 'sitioweb', 'siteweb', 'paginaweb', 'siteinternet', 'websiteurl', 'companywebsite', 'homepage'],
   country: ['country', 'pais', 'pays', 'countryregion'],
@@ -35,11 +36,13 @@ const STRONG: Record<ColumnTarget, string[]> = {
   designation: ['designation', 'title', 'jobtitle', 'position', 'role', 'cargo', 'puesto', 'poste', 'fonction'],
   email: [
     'email', 'mail', 'emailaddress', 'emailid', 'correo', 'correoelectronico', 'courriel', 'adressemail', 'adresseemail',
-    'businessemail', 'workemail', 'contactemail',
+    'businessemail', 'workemail', 'contactemail', 'companyemail', 'emailempresa', 'correoempresa',
   ],
   phone: [
     'phone', 'phonenumber', 'telephone', 'telephonenumber', 'tel', 'mobile', 'mobilenumber', 'mobilephone', 'cell',
-    'cellphone', 'movil', 'celular', 'telefono', 'portable', 'whatsapp', 'contactnumber',
+    'cellphone', 'movil', 'celular', 'telefono', 'portable', 'whatsapp', 'contactnumber', 'mobileno', 'phoneno',
+    'contactno', 'telno', 'cellno', 'numerodetelefono', 'nodetelefono', 'numerodecelular', 'numerodemovil',
+    'numerodetelephone', 'numerodeportable', 'telportable',
   ],
   industry: ['industry', 'sector', 'industria', 'secteur', 'secteurdactivite'],
   notes: ['notes', 'note', 'comments', 'comment', 'comentarios', 'remarques', 'remarks', 'notas', 'observaciones'],
@@ -97,17 +100,23 @@ export function sniffColumn(values: string[], knownCountries: readonly string[])
 const HEADER_SCAN = 10;
 const NUMERIC_RE = /^[\d\s.,+\-()%$€£]+$/;
 
+/** A cell that is a value, never a header word: a number, an email, a website, a phone or a country of the list. */
+function isValueCell(c: string, knownCountries: readonly string[]): boolean {
+  return NUMERIC_RE.test(c) || looksLikeEmail(c) || looksLikeWebsite(c) || looksLikePhone(c) || matchCountry(c, knownCountries) !== null;
+}
+
 /**
  * The header row: the first of the first 10 rows with at least two strong header words; else the first of them with
- * at least two filled cells, none of them a number; else -1 (no header: every column is decided by its values).
+ * at least two filled cells, none of them a value (number, email, website, phone or known country), so a sheet that
+ * starts straight with data keeps its first row; else -1 (no header: every column is decided by its values).
  */
-export function findHeaderRow(rows: string[][]): number {
+export function findHeaderRow(rows: string[][], knownCountries: readonly string[] = []): number {
   const scan = rows.slice(0, HEADER_SCAN);
   const strong = scan.findIndex((r) => r.filter((c) => matchHeader(c)?.strength === 'strong').length >= 2);
   if (strong >= 0) return strong;
   return scan.findIndex((r) => {
     const filled = r.map((c) => c.trim()).filter((c) => c !== '');
-    return filled.length >= 2 && filled.every((c) => !NUMERIC_RE.test(c));
+    return filled.length >= 2 && filled.every((c) => !isValueCell(c, knownCountries));
   });
 }
 

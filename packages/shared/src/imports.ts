@@ -59,6 +59,8 @@ export type RowProblem = { code: ProblemCode; field?: ImportField; level: 'missi
 export type FileMeta = {
   sheets?: number; rows?: number; pages?: number; lines?: number; textFound?: boolean; noClaude?: 'off' | 'cap';
   headers?: Record<string, string[] | null>;
+  /** Column keys (sheet, U+001F, index) a person answered: never asked about again as a duplicate. */
+  answered?: string[];
 };
 /** An unsure column: the guess is applied at once; a person may confirm another field or skip it. */
 export type ColumnQuestion = { sheet: string; col: number; header: string; guess: ImportField; samples: string[] };

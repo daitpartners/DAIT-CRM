@@ -34,3 +34,21 @@ test('isSharedHost covers social, builder and marketplace hosts and their subdom
   expect(isSharedHost('myfacebook.com')).toBe(false);
 });
 test.each([['+91 98220 41178', '9822041178'], ['98220 41178', '9822041178'], ['020 6710', ''], [null, '']])('normalisePhone(%s)', (i, o) => expect(normalisePhone(i)).toBe(o));
+test('isFreeMail knows provider families on any country suffix, and national ISPs', () => {
+  for (const d of [
+    'hotmail.es', 'yahoo.es', 'outlook.es', 'hotmail.fr', 'live.com.mx', 'yahoo.com.mx', 'outlook.com.br', 'gmx.fr',
+    'aol.fr', 'msn.es', 'yandex.ua', 'protonmail.ch', 'googlemail.de', 'terra.com.mx', 'terra.es',
+    'orange.fr', 'wanadoo.fr', 'free.fr', 'sfr.fr', 'laposte.net', 'neuf.fr', 'telefonica.net', 'movistar.es',
+    'prodigy.net.mx', 'bigpond.com', 't-online.de', 'mail.ru', 'web.de', 'libero.it', 'mail.hotmail.es',
+  ]) expect(isFreeMail(d), d).toBe(true);
+  for (const d of ['acme.es', 'live.acme.com', 'hotmailer.com', 'orange.com', 'yahooligans-tours.es', 'terrazas.mx']) {
+    expect(isFreeMail(d), d).toBe(false);
+  }
+});
+test.each([
+  ['Acme S.L.', 'acme'], ['Acme SL', 'acme'], ['Acme S. A.', 'acme'], ['Construcciones Ibéricas S.A. de C.V.', 'construcciones ibericas'],
+  ['Société Générale', 'societe generale'], ['Societe Generale SAS', 'societe generale'], ['Dupont SARL', 'dupont'],
+  ['Rossi S.r.l.', 'rossi'], ['Müller AG', 'muller'], ['Van Dijk B.V.', 'van dijk'], ['Acme Corp.', 'acme'],
+  ['Acme Pvt. Ltd.', 'acme'], ['A.Smith Trading', 'a smith trading'], ['J. Booth & Sons', 'j booth sons'],
+  ['Banco de España', 'banco de espana'], ['Meridian Textiles Limited', 'meridian textiles'],
+])('normaliseCompanyName folds accents and es/fr legal forms: %s', (input, out) => expect(normaliseCompanyName(input)).toBe(out));

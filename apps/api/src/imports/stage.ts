@@ -15,7 +15,7 @@ import { prisma } from '../db.js';
 import { NotFoundError } from '../validate.js';
 import { ImportError, isLocked } from './batches.js';
 import { classifyColumns, columnName, findHeaderRow, looksLikeEmail, looksLikeWebsite, squash, type ColumnTarget } from './columns.js';
-import { findExistingCompanies, type CompanyRef } from './companies.js';
+import { findExistingCompanies, type CompanyRef, type Db } from './companies.js';
 import { matchCountry } from './countries.js';
 import type { TableExtract } from './read/index.js';
 
@@ -59,13 +59,26 @@ export function buildFields(cells: string[], targets: readonly (ColumnTarget | n
   return fields;
 }
 
-/** "Total", "Totals", "Subtotal", "Grand total", "Suma", "Total général" at the start of the company cell. */
-const TOTAL_RE = /^(grand ?total|sub-? ?total|totals?|suma)(?![a-z0-9])/;
-const plain = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+/** "Total", "Totals", "Subtotal", "Grand total", "Total général", "Suma" at the start of the company cell; group 2 is the rest. */
+const TOTAL_RE = /^(grand ?total|sub-? ?total|total general|totals?|suma)(?![a-z0-9])(.*)$/;
+const plain = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
+/** A summary line: a total word that is the whole cell or is followed by ":" or a number ("Total: 45", "TOTAL VISITORS DAY 2"). */
+function isTotalLine(company: string): boolean {
+  const m = TOTAL_RE.exec(plain(company));
+  if (!m) return false;
+  const rest = m[2]!.trim();
+  return rest === '' || rest.startsWith(':') || /\d/.test(rest);
+}
+
+/** Longest header cell kept (and compared) for a sheet. */
+export const MAX_HEADER_CELL = 200;
+/** Longest raw cell kept on a staged row. */
+export const MAX_RAW_CELL = 2000;
 
 function sameCells(a: string[], b: string[]): boolean {
   const norm = (cells: string[]) => {
-    const out = cells.map((c) => squash(c ?? ''));
+    const out = cells.map((c) => squash((c ?? '').slice(0, MAX_HEADER_CELL)));
     while (out.length > 0 && out[out.length - 1] === '') out.pop();
     return out;
   };
@@ -75,13 +88,14 @@ function sameCells(a: string[], b: string[]): boolean {
 }
 
 /**
- * Not a lead (ruling 7): a blank line, the header row repeated, a company cell that starts with a total word, or a row
- * with no company, email, phone or website.
+ * Not a lead (ruling 7): a blank line, the header row repeated, a summary line (a total word as the whole company cell
+ * or followed by ":" or a number, on a row with no email and no website: "Total Care Ltd" and "Suma Seguros" are
+ * companies), or a row with no company, email, phone or website.
  */
 export function isNotALead(fields: RowFields, cells: string[], headerCells: string[] | null): boolean {
   if (isBlankCells(cells) && Object.values(fields).every((v) => !has(v))) return true;
   if (headerCells && sameCells(cells, headerCells)) return true;
-  if (has(fields.companyName) && TOTAL_RE.test(plain(fields.companyName))) return true;
+  if (has(fields.companyName) && !has(fields.email) && !has(fields.website) && isTotalLine(fields.companyName)) return true;
   return !has(fields.companyName) && !has(fields.email) && !has(fields.phone) && !has(fields.website);
 }
 
@@ -145,11 +159,11 @@ export async function stageTable(fileId: number, extract: TableExtract): Promise
   for (const { name, rows: cellsRead } of extract.sheets) {
     // jsonb cannot hold U+0000 (a stray NUL in a CSV or an old .xls).
     const sheet = { name: name.replace(/\u0000/g, '').slice(0, 100) };
-    const rows = cellsRead.map((r) => r.map((c) => (c ?? '').replace(/\u0000/g, '').trim()));
+    const rows = cellsRead.map((r) => r.map((c) => (c ?? '').replace(/\u0000/g, '').trim().slice(0, MAX_RAW_CELL)));
     let end = rows.length;
     while (end > 0 && isBlankCells(rows[end - 1]!)) end -= 1;
-    const h = findHeaderRow(rows.slice(0, end));
-    const headerCells = h >= 0 ? rows[h]! : null;
+    const h = findHeaderRow(rows.slice(0, end), known);
+    const headerCells = h >= 0 ? rows[h]!.map((c) => c.slice(0, MAX_HEADER_CELL)) : null;
     let start = h + 1;
     while (start < end && isBlankCells(rows[start]!)) start += 1;
     const data = rows.slice(start, end);
@@ -202,24 +216,41 @@ export async function stageTable(fileId: number, extract: TableExtract): Promise
   await refreshBatch(file.batchId, ids.map((r) => r.id));
 }
 
-type RowUpdate = { id: number; status: string; include: boolean; problems: RowProblem[]; fields: RowFields; matched: number | null };
+type RowUpdate = {
+  id: number; status: string; include: boolean; problems: RowProblem[]; fields: RowFields; prev: RowFields; matched: number | null;
+};
 
+/** Test seams: run just before a re-evaluation or a re-sort writes (to interleave a person's edit). */
+export const stageHooks: { beforeEvaluationWrite?: () => Promise<void>; beforeResortWrite?: () => Promise<void> } = {};
+
+/**
+ * Writes re-evaluated rows. Nothing a person did meanwhile is lost: a row whose fields changed since they were read is
+ * skipped (the edit's own re-evaluation covers it), and the tick is only written while no person has set it.
+ */
 async function writeEvaluations(updates: RowUpdate[]): Promise<void> {
   for (let i = 0; i < updates.length; i += CHUNK) {
     const chunk = JSON.stringify(updates.slice(i, i + CHUNK));
     await prisma.$executeRaw`
       UPDATE import_rows AS r
-      SET status = v.status, include = v.include, problems = v.problems, fields = v.fields, matched_company_id = v.matched
-      FROM jsonb_to_recordset(${chunk}::jsonb) AS v(id int, status text, include boolean, problems jsonb, fields jsonb, matched int)
-      WHERE r.id = v.id`;
+      SET status = v.status, problems = v.problems, fields = v.fields, matched_company_id = v.matched,
+          include = CASE WHEN r.include_touched THEN r.include ELSE v.include END
+      FROM jsonb_to_recordset(${chunk}::jsonb)
+        AS v(id int, status text, include boolean, problems jsonb, fields jsonb, prev jsonb, matched int)
+      WHERE r.id = v.id AND r.fields = v.prev`;
   }
 }
 
-async function writeFields(updates: { id: number; fields: RowFields }[]): Promise<void> {
+/**
+ * Writes re-sorted fields; the fields a person edited keep their current value (or stay empty), read at write time,
+ * so an edit made while the file was being re-sorted wins.
+ */
+async function writeFields(db: Db, updates: { id: number; fields: RowFields }[]): Promise<void> {
   for (let i = 0; i < updates.length; i += CHUNK) {
     const chunk = JSON.stringify(updates.slice(i, i + CHUNK));
-    await prisma.$executeRaw`
-      UPDATE import_rows AS r SET fields = v.fields
+    await db.$executeRaw`
+      UPDATE import_rows AS r
+      SET fields = (v.fields - ARRAY(SELECT jsonb_array_elements_text(r.edited)))
+        || COALESCE((SELECT jsonb_object_agg(k, r.fields -> k) FROM jsonb_array_elements_text(r.edited) AS k WHERE r.fields ? k), '{}'::jsonb)
       FROM jsonb_to_recordset(${chunk}::jsonb) AS v(id int, fields jsonb)
       WHERE r.id = v.id`;
   }
@@ -252,11 +283,14 @@ export async function refreshBatch(batchId: number, rowIds?: number[]): Promise<
       const match = matchOf.get(i) ?? null;
       const e = evaluateRow(r.fields as RowFields, { knownCountries: known, match, notALead: notLead[i]! });
       const include = r.includeTouched ? r.include : defaultInclude(e.status);
-      const next: RowUpdate = { id: r.id, status: e.status, include, problems: e.problems, fields: e.fields, matched: match?.id ?? null };
+      const next: RowUpdate = {
+        id: r.id, status: e.status, include, problems: e.problems, fields: e.fields, prev: r.fields as RowFields, matched: match?.id ?? null,
+      };
       const same = r.status === next.status && r.include === next.include && r.matchedCompanyId === next.matched
         && json(r.problems) === json(next.problems) && json(r.fields) === json(next.fields);
       if (!same) updates.push(next);
     });
+    await stageHooks.beforeEvaluationWrite?.();
     await writeEvaluations(updates);
   }
   const rowCount = await prisma.importRow.count({ where: { batchId } });
@@ -278,22 +312,21 @@ function targetsBySheet(columnMap: Record<string, string>): Map<string, ColumnTa
   return out;
 }
 
+/** Rebuilds a file's fields from its cells with `columnMap` (edited fields keep their value, at write time); returns the row ids. */
+async function resortFields(db: Db, fileId: number, columnMap: Record<string, string>): Promise<{ id: number; sheet: string | null; raw: string[] }[]> {
+  const targets = targetsBySheet(columnMap);
+  const rows = await db.importRow.findMany({ where: { fileId, outcome: null }, select: { id: true, sheet: true, raw: true }, orderBy: { id: 'asc' } });
+  const updates = rows.map((r) => ({ id: r.id, fields: buildFields(r.raw as string[], targets.get(r.sheet ?? '') ?? []) }));
+  await stageHooks.beforeResortWrite?.();
+  await writeFields(db, updates);
+  return rows.map((r) => ({ id: r.id, sheet: r.sheet, raw: r.raw as string[] }));
+}
+
 /** Re-sorts a file's rows from their cells with its column map, keeping the fields a person edited; then re-evaluates them. */
 export async function resortFile(fileId: number): Promise<void> {
   const file = await prisma.importFile.findUnique({ where: { id: fileId }, select: { batchId: true, columnMap: true } });
   if (!file) throw new NotFoundError();
-  const targets = targetsBySheet(file.columnMap as Record<string, string>);
-  const rows = await prisma.importRow.findMany({ where: { fileId, outcome: null }, select: { id: true, sheet: true, raw: true, fields: true, edited: true } });
-  const updates = rows.map((r) => {
-    const fields = buildFields(r.raw as string[], targets.get(r.sheet ?? '') ?? []);
-    const current = r.fields as RowFields;
-    for (const f of r.edited as ImportField[]) {
-      if (has(current[f])) fields[f] = current[f];
-      else delete fields[f];
-    }
-    return { id: r.id, fields };
-  });
-  await writeFields(updates);
+  const rows = await resortFields(prisma, fileId, file.columnMap as Record<string, string>);
   await refreshBatch(file.batchId, rows.map((r) => r.id));
 }
 
@@ -304,19 +337,53 @@ async function batchForEdit(batchId: number) {
   return batch;
 }
 
-/** Answers an unsure column: the field it holds (or "skip", stored as ignore); the file's rows are re-sorted. */
+/**
+ * Answers an unsure column: the field it holds (or "skip", stored as ignore); the file's rows are re-sorted. Runs under
+ * the batch lock, so two answers never lose each other. A field another column of the sheet already holds (one nobody
+ * has answered yet) raises a question about that other column, so a person decides which one it is.
+ */
 export async function answerColumn(fileId: number, body: ImportColumnAnswer): Promise<{ done: string }> {
-  const file = await prisma.importFile.findUnique({ where: { id: fileId }, select: { batchId: true, columnMap: true, questions: true } });
-  if (!file) throw new NotFoundError();
-  await batchForEdit(file.batchId);
-  const questions = file.questions as ColumnQuestion[];
-  if (!questions.some((q) => q.sheet === body.sheet && q.col === body.col)) throw new NotFoundError();
-  const columnMap = { ...(file.columnMap as Record<string, string>), [columnKey(body.sheet, body.col)]: body.field === 'skip' ? 'ignore' : body.field };
-  await prisma.importFile.update({
-    where: { id: fileId },
-    data: { columnMap, questions: questions.filter((q) => !(q.sheet === body.sheet && q.col === body.col)) as unknown as Prisma.InputJsonValue },
-  });
-  await resortFile(fileId);
+  const { batchId, ids } = await prisma.$transaction(async (tx) => {
+    const file = await tx.importFile.findUnique({ where: { id: fileId }, select: { batchId: true } });
+    if (!file) throw new NotFoundError();
+    const [batch] = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM import_batches WHERE id = ${file.batchId} FOR UPDATE`;
+    if (!batch) throw new NotFoundError();
+    if (isLocked(batch.status)) throw new ImportError('batch_locked', 409);
+    const current = await tx.importFile.findUniqueOrThrow({ where: { id: fileId }, select: { columnMap: true, questions: true, meta: true } });
+    let questions = current.questions as ColumnQuestion[];
+    if (!questions.some((q) => q.sheet === body.sheet && q.col === body.col)) throw new NotFoundError();
+    const key = columnKey(body.sheet, body.col);
+    const target = body.field === 'skip' ? 'ignore' : body.field;
+    const columnMap = { ...(current.columnMap as Record<string, string>), [key]: target };
+    const meta = current.meta as FileMeta;
+    const answered = [...new Set([...(meta.answered ?? []), key])];
+    questions = questions.filter((q) => !(q.sheet === body.sheet && q.col === body.col));
+    const rows = await resortFields(tx, fileId, columnMap);
+    if (target !== 'ignore' && target !== 'notes') {
+      for (const [otherKey, otherTarget] of Object.entries(columnMap)) {
+        const at = otherKey.lastIndexOf(COLUMN_KEY_SEP);
+        const sheet = otherKey.slice(0, at);
+        const col = Number(otherKey.slice(at + 1));
+        if (otherKey === key || otherTarget !== target || sheet !== body.sheet || answered.includes(otherKey)) continue;
+        if (questions.some((q) => q.sheet === sheet && q.col === col)) continue;
+        const headerCells = meta.headers?.[sheet] ?? null;
+        const samples = rows
+          .filter((r) => r.sheet === sheet && !(headerCells && sameCells(r.raw, headerCells)))
+          .map((r) => (r.raw[col] ?? '').trim()).filter((v) => v !== '').slice(0, 3);
+        const header = headerCells?.[col]?.trim() || columnName(col);
+        questions.push({ sheet, col, header, guess: target, samples });
+      }
+    }
+    await tx.importFile.update({
+      where: { id: fileId },
+      data: {
+        columnMap, questions: questions as unknown as Prisma.InputJsonValue,
+        meta: { ...meta, answered } as Prisma.InputJsonValue,
+      },
+    });
+    return { batchId: file.batchId, ids: rows.map((r) => r.id) };
+  }, { timeout: 120_000, maxWait: 30_000 });
+  await refreshBatch(batchId, ids);
   return { done: body.field };
 }
 
@@ -354,25 +421,32 @@ function rowView(r: Prisma.ImportRowGetPayload<{ select: typeof rowSelect }>): R
   };
 }
 
-/** Edits one cell (empty clears it; the field is then kept on re-sorts) and / or the row's tick; returns the re-evaluated row. */
+/**
+ * Applies a person's cell edit and / or tick in one statement, so two quick edits of one row never lose each other
+ * (an empty value clears the field; either way the field is then kept on re-sorts).
+ */
+export async function applyRowEdit(rowId: number, body: ImportRowUpdate): Promise<void> {
+  const field = body.field ?? null;
+  const value = body.value ?? null;
+  const include = body.include ?? null;
+  await prisma.$executeRaw`
+    UPDATE import_rows SET
+      fields = CASE
+        WHEN ${field}::text IS NULL THEN fields
+        WHEN ${value}::text = '' THEN fields - ${field}::text
+        ELSE fields || jsonb_build_object(${field}::text, ${value}::text) END,
+      edited = CASE WHEN ${field}::text IS NULL OR edited ? ${field}::text THEN edited ELSE edited || to_jsonb(${field}::text) END,
+      include = COALESCE(${include}::boolean, include),
+      include_touched = include_touched OR ${include}::boolean IS NOT NULL
+    WHERE id = ${rowId}`;
+}
+
+/** Edits one cell and / or the row's tick; returns the re-evaluated row. */
 export async function updateRow(rowId: number, body: ImportRowUpdate): Promise<RowView> {
-  const row = await prisma.importRow.findUnique({ where: { id: rowId }, select: { id: true, batchId: true, fields: true, edited: true } });
+  const row = await prisma.importRow.findUnique({ where: { id: rowId }, select: { id: true, batchId: true } });
   if (!row) throw new NotFoundError();
   await batchForEdit(row.batchId);
-  const data: Prisma.ImportRowUpdateInput = {};
-  if (body.field !== undefined) {
-    const fields = { ...(row.fields as RowFields) };
-    if (body.value) fields[body.field] = body.value;
-    else delete fields[body.field];
-    const edited = row.edited as ImportField[];
-    data.fields = fields as Prisma.InputJsonValue;
-    data.edited = edited.includes(body.field) ? edited : [...edited, body.field];
-  }
-  if (body.include !== undefined) {
-    data.include = body.include;
-    data.includeTouched = true;
-  }
-  await prisma.importRow.update({ where: { id: rowId }, data });
+  await applyRowEdit(rowId, body);
   await refreshBatch(row.batchId, [rowId]);
   return rowView(await prisma.importRow.findUniqueOrThrow({ where: { id: rowId }, select: rowSelect }));
 }
