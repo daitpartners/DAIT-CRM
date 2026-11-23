@@ -104,7 +104,7 @@ export function CompanyProfile() {
   let panel;
   switch (active) {
     case 'overview':
-      panel = <OverviewTab company={company} canManage={canManage} onEdit={(s) => setEditing(s)} research={research} />;
+      panel = <OverviewTab company={company} locationCount={locations?.length} research={research} />;
       break;
     case 'contacts':
       panel = <ContactsTab company={company} canManage={canManage} />;
@@ -144,6 +144,7 @@ export function CompanyProfile() {
   return (
     <>
       <Topbar
+        className="co-top"
         title={company.legalName || company.name}
         logo={
           <span className="logo lg" aria-hidden="true">

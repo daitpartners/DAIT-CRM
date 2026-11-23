@@ -40,6 +40,16 @@ button{cursor:pointer}
 main{flex:999 1 560px;min-width:0;display:flex;flex-direction:column}
 .topbar{display:flex;align-items:center;gap:12px;padding:16px 28px;background:var(--surface);border-bottom:1px solid var(--line);flex-wrap:wrap}
 .topbar .sub{font-size:12.5px;color:var(--muted);margin-top:2px}
+/* The title block takes the room the actions leave, so at 1280 px the actions stay on the title's line and a long
+   subtitle wraps instead (review #31). */
+.topbar-t{flex:999 1 360px;min-width:0}
+/* Company profile: the actions wrap one by one after the title, as the prototype's header (Run AI research and Add
+   contact top right, the rest on the next line; review #16). */
+.co-top .topbar-t{flex:0 1 auto}
+.co-top .hdr-actions{display:contents}
+/* Long links in value columns break at their separators (breakableUrl), not mid-word. */
+.kv dd a{overflow-wrap:break-word}
+.sec-link{font-size:12px;font-weight:500}
 .topbar .crumb{font-size:12px;color:var(--muted);margin-bottom:4px}
 .grow{flex-grow:1}
 .page{padding:20px 28px 28px;display:flex;flex-direction:column;gap:16px}
@@ -188,6 +198,8 @@ a:focus-visible,button:focus-visible,[role=combobox]:focus-visible,summary:focus
   .sidebar.collapsed .signout svg{display:block;width:16px;height:16px}
 }
 @media (prefers-reduced-motion:reduce){.sidebar{transition:none}}
+/* Short laptop screens (1280×720): tighter rows so the whole menu and Sign out fit without scrolling. */
+@media (min-width:900px) and (max-height:780px){.sidebar .nav{padding-top:7px;padding-bottom:7px}.sidebar .navsec{padding-top:10px}.sidebar .brand{padding-bottom:14px}}
 .mobilebar{display:none}
 .nav-scrim{display:none}
 .subnav{display:flex;gap:8px;flex-wrap:wrap}
@@ -695,6 +707,9 @@ td.nowrap{white-space:nowrap}
   .msglist{max-width:none;flex-basis:100%;border-right:0}
   .mailside{flex-basis:100%;border-left:0;border-top:1px solid var(--line)}
 }
+/* Above phone width the four columns share one row; at 1280 px the list, reader and Linked records narrow a little
+   instead of Linked records dropping under the others (review #31). */
+@media (min-width:761px){.mail{flex-wrap:nowrap}.reader{flex-shrink:1}}
 .mail-connect{margin:16px 28px 0;padding:12px 16px;border:1px solid #F0C98A;background:#FFF8EC;border-radius:10px;font-size:13px;color:var(--body);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 @media (max-width:760px){.mail-connect{margin:12px 16px 0}}
 

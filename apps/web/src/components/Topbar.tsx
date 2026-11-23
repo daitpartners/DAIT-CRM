@@ -8,14 +8,15 @@ type TopbarProps = {
   badges?: ReactNode;
   /** Shown left of the title block (e.g. a company's initials logo). */
   logo?: ReactNode;
+  className?: string;
   children?: ReactNode;
 };
 
-export function Topbar({ title, sub, crumb, badges, logo, children }: TopbarProps) {
+export function Topbar({ title, sub, crumb, badges, logo, className, children }: TopbarProps) {
   return (
-    <header className="topbar">
+    <header className={className ? `topbar ${className}` : 'topbar'}>
       {logo}
-      <div style={{ minWidth: 0 }}>
+      <div className="topbar-t">
         {crumb ? <div className="crumb">{crumb}</div> : null}
         {badges ? (
           <div className="title-row">

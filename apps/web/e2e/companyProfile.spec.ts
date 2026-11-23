@@ -109,12 +109,15 @@ test('leads and activities tabs list the company\'s leads', async ({ page }) => 
   await expect(page.getByRole('heading', { name: 'LD-1001', level: 1 })).toBeVisible();
 });
 
-test('overview edit opens the company form at the chosen section', async ({ page }) => {
+test('Edit profile edits every Overview section (no per-section Edit, as the prototype); N locations opens Locations', async ({ page }) => {
   await openNorthwind(page);
   await expect(page.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
-  await page.getByRole('button', { name: 'Edit Size & financial' }).click();
+  await expect(page.getByRole('button', { name: /^Edit (Size|Company|Products|Digital)/ })).toHaveCount(0);
+  await page.getByRole('region', { name: 'Company address' }).getByRole('link', { name: /^\d+ locations$/ }).click();
+  await expect(page.getByRole('tab', { name: /Locations/ })).toHaveAttribute('aria-selected', 'true');
+  await page.getByRole('tab', { name: 'Overview' }).click();
+  await page.getByRole('button', { name: 'Edit profile' }).click();
   const modal = page.getByRole('dialog', { name: 'Edit company profile' });
-  await expect(modal.getByLabel('Employee count')).toBeFocused();
   await modal.getByLabel('Employee count').fill('850');
   await modal.getByLabel('Facebook').fill('facebook.com/northwind-test');
   await modal.getByRole('button', { name: 'Save' }).click();

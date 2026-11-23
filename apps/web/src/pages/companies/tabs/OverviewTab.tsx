@@ -10,10 +10,14 @@ import { useFormatDate } from '../../../hooks/useFormatDate';
 import { companyStatusText, researchStatusBadge, researchStatusText } from '../../../i18n/labels';
 import { useLang, useT } from '../../../i18n/useT';
 import { AiCard, type ResearchRunner } from '../AiCard';
-import type { CompanySection } from '../CompanyModal';
 import { ProjectsCard } from '../../projects/ProjectsCard';
 
-type Props = { company: CompanyDetail; canManage: boolean; onEdit: (section: CompanySection) => void; research: ResearchRunner };
+type Props = {
+  company: CompanyDetail;
+  /** Section B's "N locations" link to the Locations tab (prototype). */
+  locationCount?: number;
+  research: ResearchRunner;
+};
 
 /** A label, its value and the company field it shows (for the VERIFIED / AI tags). */
 type Row = [label: string, value: ReactNode, field?: string];
@@ -26,6 +30,14 @@ const OVERVIEW_LEADS = 4;
 
 const isEmpty = (v: ReactNode) => v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0);
 
+/**
+ * A URL's text with line-break chances after its separators (/ . - ? & = _), so a long link in a narrow column wraps at
+ * "linkedin.com/ company/" rather than mid-word (review #31).
+ */
+export function breakableUrl(text: string): ReactNode[] {
+  return text.split(/(?<=[/.\-?&=_])(?=.)/).flatMap((part, i) => (i ? [<wbr key={i} />, part] : [part]));
+}
+
 /** An outbound link when the value is a safe URL; otherwise the stored text (never an unsafe href). */
 export function LinkOut({ url }: { url: string | null | undefined }) {
   if (!url) return null;
@@ -33,7 +45,7 @@ export function LinkOut({ url }: { url: string | null | undefined }) {
   if (!href) return <>{url}</>;
   return (
     <a href={href} target="_blank" rel="noopener noreferrer">
-      {url.replace(/^https?:\/\//i, '')}
+      {breakableUrl(url.replace(/^https?:\/\//i, ''))}
     </a>
   );
 }
@@ -41,11 +53,11 @@ export function LinkOut({ url }: { url: string | null | undefined }) {
 const pills = (items: string[]) => (items.length ? items.map((x) => <span key={x} className="pill">{x}</span>) : null);
 
 /**
- * Overview in the prototype's layout: the legend bar, sections A–E (definition lists, each with its own Edit
- * button) in a two-column grid, and the side column: AI business intelligence, Projects,
+ * Overview in the prototype's layout: the legend bar, sections A–E (definition lists; the header's Edit profile edits
+ * them, as the prototype has no per-section Edit) in a two-column grid, and the side column: AI business intelligence, Projects,
  * Leads & prospects and Contacts.
  */
-export function OverviewTab({ company: c, canManage, onEdit, research }: Props) {
+export function OverviewTab({ company: c, locationCount, research }: Props) {
   const t = useT();
   const lang = useLang();
   const lookup = useLookupText(lang);
@@ -78,7 +90,7 @@ export function OverviewTab({ company: c, canManage, onEdit, research }: Props) 
       <div className="cols">
         <div className="col-main">
           <div className="profile-grid">
-            <Section letter="A" title={t('Company overview')} section="overview" canManage={canManage} onEdit={onEdit} tags={tags} rows={[
+            <Section letter="A" title={t('Company overview')} tags={tags} rows={[
               [t('Company name'), c.name, 'name'],
               [t('Legal name'), c.legalName, 'legalName'],
               [t('Website'), <LinkOut url={c.website} />, 'website'],
@@ -91,7 +103,11 @@ export function OverviewTab({ company: c, canManage, onEdit, research }: Props) 
               [t('Status'), companyStatusText(t, c.status)],
               [t('Description'), c.description, 'description'],
             ]} />
-            <Section letter="B" title={t('Company address')} section="address" canManage={canManage} onEdit={onEdit} tags={tags} rows={[
+            <Section
+              letter="B"
+              title={t('Company address')}
+              link={locationCount ? <Link className="sec-link" to="#locations">{t('{n} locations', { n: locationCount })}</Link> : undefined}
+              tags={tags} rows={[
               [t('Country'), lookup('country', c.country), 'country'],
               [t('State / Province'), c.state, 'state'],
               [t('City'), c.city, 'city'],
@@ -101,7 +117,7 @@ export function OverviewTab({ company: c, canManage, onEdit, research }: Props) 
               [t('Latitude, longitude'), c.lat !== null && c.lng !== null ? `${c.lat}, ${c.lng}` : null, 'lat'],
               [t('Google Maps / Places'), <LinkOut url={c.mapsUrl} />, 'mapsUrl'],
             ]} />
-            <Section letter="C" title={t('Size & financial')} note={t('all optional')} section="size" canManage={canManage} onEdit={onEdit} tags={tags} rows={[
+            <Section letter="C" title={t('Size & financial')} note={t('all optional')} tags={tags} rows={[
               [t('Employee count'), number(c.employeeCount), 'employeeCount'],
               [t('Employee range'), lookup('employee_range', c.employeeRange), 'employeeRange'],
               [t('Annual revenue'), money(c.annualRevenue), 'annualRevenue'],
@@ -111,7 +127,7 @@ export function OverviewTab({ company: c, canManage, onEdit, research }: Props) 
               [t('Stock exchange'), c.stockExchange, 'stockExchange'],
               [t('Stock symbol'), c.stockSymbol, 'stockSymbol'],
             ]} />
-            <Section letter="D" title={t('Products & services')} section="products" canManage={canManage} onEdit={onEdit} tags={tags} rows={[
+            <Section letter="D" title={t('Products & services')} tags={tags} rows={[
               [t('Main services'), c.mainServices, 'mainServices'],
               [t('Main products'), c.mainProducts, 'mainProducts'],
               [t('Business verticals'), pills(c.businessVerticals), 'businessVerticals'],
@@ -120,7 +136,7 @@ export function OverviewTab({ company: c, canManage, onEdit, research }: Props) 
               [t('Key brands'), c.keyBrands, 'keyBrands'],
               [t('Specialisation'), c.specialisation, 'specialisation'],
             ]} />
-            <Section letter="E" title={t('Digital presence')} section="digital" wide canManage={canManage} onEdit={onEdit} tags={tags} rows={[
+            <Section letter="E" title={t('Digital presence')} wide tags={tags} rows={[
               [t('LinkedIn'), <LinkOut url={c.linkedinUrl} />, 'linkedinUrl'],
               [t('Facebook'), <LinkOut url={c.socialFacebook} />, 'socialFacebook'],
               [t('Instagram'), <LinkOut url={c.socialInstagram} />, 'socialInstagram'],
@@ -218,16 +234,14 @@ type SectionProps = {
   note?: string;
   /** Extra content under the list (section E's generated notes). */
   children?: ReactNode;
-  section: CompanySection;
+  /** A link after the title (prototype section B "2 locations"). */
+  link?: ReactNode;
   rows: Row[];
-  canManage: boolean;
-  onEdit: (section: CompanySection) => void;
   tags: Tags;
   wide?: boolean;
 };
 
-function Section({ letter, title, note, section, rows, canManage, onEdit, tags, wide, children }: SectionProps) {
-  const t = useT();
+function Section({ letter, title, note, link, rows, tags, wide, children }: SectionProps) {
   const headingId = useId();
   return (
     <section className={wide ? 'card wide' : 'card'} aria-labelledby={headingId}>
@@ -235,11 +249,7 @@ function Section({ letter, title, note, section, rows, canManage, onEdit, tags, 
         <span className="pill" aria-hidden="true">{letter}</span>
         <span id={headingId}>{title}</span>
         {note ? <span className="sec-note">{note}</span> : null}
-        {canManage ? (
-          <button type="button" className="btn xs" onClick={() => onEdit(section)} aria-label={t('Edit {name}', { name: title })}>
-            {t('Edit')}
-          </button>
-        ) : null}
+        {link}
       </h2>
       {children ? (
         <div className="grid2 sec-split">
