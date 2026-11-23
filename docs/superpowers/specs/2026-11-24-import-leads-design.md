@@ -123,3 +123,10 @@ the Claude extraction prompt and schema; job design (reuse the job queue and res
 "unsure column" questions are chosen; file retention; tests (extractors on fixture files, staging, existing-company
 contact rule, import transaction, undo rules, Excel export highlighting); screenshot parity against the approved mockup
 for every step and the Data manager.
+
+## Deviations from the spec (controller rulings, 24 Nov 2026)
+
+Decided while planning (`docs/superpowers/plans/2026-11-24-import-leads.md`, "Controller rulings on the owner questions"); binding for the build, the owner may overturn them.
+
+- **Q1 — Ready rule (step 2).** "Ready" = company + country + **email** (the approved mockup's sample, not the "email or phone or website" written above). A row without an email (phone-only or website-only) is "Missing details" and goes to research. A row's status is decided on its own values; research values never change it.
+- **Q3 — Daily research limit (step 3, Limits).** Imports are **exempt** from the daily research limit. Rows researched only by the free website reader count toward nothing; every Claude call an import makes (extraction or row research) counts toward the **monthly Claude run cap** only, reserved before the call. When the cap is reached, research stops with a clear message and the rest stay "Missing details". The daily limit keeps applying to company research (release 4) exactly as today; runs an import creates to hold suggestions are not counted in it.
