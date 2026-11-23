@@ -181,30 +181,44 @@ export async function stageTable(fileId: number, extract: TableExtract): Promise
     data.forEach((cells, i) => staged.push({ sheet: sheet.name, originN: start + i + 1, raw: cells, fields: buildFields(cells, map) }));
   }
 
+  const meta: FileMeta = { ...(file.meta as FileMeta), rows: staged.length, headers };
+  await stageRows(
+    file,
+    staged.map((r) => ({ ...r, originKind: 'row' })),
+    { columnMap, questions: questions as unknown as Prisma.InputJsonValue, meta: meta as Prisma.InputJsonValue },
+  );
+}
+
+export type NewRow = { sheet: string | null; originKind: string; originN: number; raw: string[]; fields: RowFields };
+
+/**
+ * Replaces a file's staged rows with `rows` (then re-evaluated) and writes `data` on the file, under the batch lock so
+ * two files cannot both fit under the row limit. Refused (file Failed `too_many_rows`, no rows) when the batch would
+ * pass 5,000 rows.
+ */
+export async function stageRows(
+  file: { id: number; batchId: number }, rows: NewRow[], data: Prisma.ImportFileUpdateInput,
+): Promise<void> {
   const refused = await prisma.$transaction(async (tx) => {
     // One staging per batch at a time, so two files cannot both fit under the row limit.
     await tx.$queryRaw`SELECT id FROM import_batches WHERE id = ${file.batchId} FOR UPDATE`;
-    await tx.importRow.deleteMany({ where: { fileId } });
+    await tx.importRow.deleteMany({ where: { fileId: file.id } });
     const others = await tx.importRow.count({ where: { batchId: file.batchId } });
-    if (others + staged.length > IMPORT_MAX_ROWS) {
-      await tx.importFile.update({ where: { id: fileId }, data: { status: 'Failed', error: 'too_many_rows', columnMap: {}, questions: [] } });
+    if (others + rows.length > IMPORT_MAX_ROWS) {
+      await tx.importFile.update({ where: { id: file.id }, data: { status: 'Failed', error: 'too_many_rows', columnMap: {}, questions: [] } });
       return true;
     }
     const { _max } = await tx.importRow.aggregate({ where: { batchId: file.batchId }, _max: { position: true } });
     const base = (_max.position ?? 0) + 1;
-    for (let i = 0; i < staged.length; i += CHUNK) {
+    for (let i = 0; i < rows.length; i += CHUNK) {
       await tx.importRow.createMany({
-        data: staged.slice(i, i + CHUNK).map((r, j) => ({
-          batchId: file.batchId, fileId, position: base + i + j, sheet: r.sheet, originKind: 'row', originN: r.originN,
+        data: rows.slice(i, i + CHUNK).map((r, j) => ({
+          batchId: file.batchId, fileId: file.id, position: base + i + j, sheet: r.sheet, originKind: r.originKind, originN: r.originN,
           raw: r.raw, fields: r.fields as Prisma.InputJsonValue, status: 'Missing details', include: false,
         })),
       });
     }
-    const meta: FileMeta = { ...(file.meta as FileMeta), rows: staged.length, headers };
-    await tx.importFile.update({
-      where: { id: fileId },
-      data: { columnMap, questions: questions as unknown as Prisma.InputJsonValue, meta: meta as Prisma.InputJsonValue },
-    });
+    await tx.importFile.update({ where: { id: file.id }, data });
     return false;
   }, { timeout: 120_000, maxWait: 30_000 });
 
@@ -212,7 +226,7 @@ export async function stageTable(fileId: number, extract: TableExtract): Promise
     await refreshBatch(file.batchId, []);
     return;
   }
-  const ids = await prisma.importRow.findMany({ where: { fileId }, select: { id: true } });
+  const ids = await prisma.importRow.findMany({ where: { fileId: file.id }, select: { id: true } });
   await refreshBatch(file.batchId, ids.map((r) => r.id));
 }
 

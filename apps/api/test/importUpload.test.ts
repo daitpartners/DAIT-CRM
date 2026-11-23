@@ -165,11 +165,17 @@ describe('file upload', () => {
     const read = await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } });
     expect(read).toMatchObject({ status: 'Read', meta: { pages: 2, textFound: true }, error: null });
     expect(read.readAt).toBeInstanceOf(Date);
+    // Claude is off in tests: the deterministic reader stages one row per page's record.
+    expect(read.meta).toEqual({ pages: 2, textFound: true, noClaude: 'off' });
+    const staged = await prisma.importRow.findMany({ where: { fileId: file.id }, orderBy: { position: 'asc' } });
+    expect(staged.map((r) => [r.originKind, r.originN, (r.fields as { companyName?: string }).companyName])).toEqual([
+      ['page', 1, 'Acme Widgets Ltd'], ['page', 2, 'Beta LLC'],
+    ]);
 
     const list = await json('GET', `/api/imports/batches/${batch.id}/files`, cookie);
     expect(list.statusCode).toBe(200);
     expect(list.json()).toEqual({
-      items: [{ id: file.id, name: 'Expo exhibitors.PDF', ext: 'pdf', size: data.length, status: 'Read', meta: { pages: 2, textFound: true }, error: null }],
+      items: [{ id: file.id, name: 'Expo exhibitors.PDF', ext: 'pdf', size: data.length, status: 'Read', meta: { pages: 2, textFound: true, noClaude: 'off' }, error: null }],
     });
   });
 

@@ -5,18 +5,22 @@ import { readImportFile } from '../../imports/storage.js';
 import { readInWorker, type ReadInWorkerOptions } from '../../imports/read/isolated.js';
 import type { ReadResult } from '../../imports/read/index.js';
 import { refreshBatch, stageTable } from '../../imports/stage.js';
+import { stageDocument, type ImportDeps } from '../../imports/claude.js';
 import type { ImportReadFilePayload } from '../types.js';
 import type { JobContext } from '../runner.js';
 
 /** Test seam: the read process's options (timeout, memory, busy time); defaults in isolated.ts. */
 export const importReadOptions: ReadInWorkerOptions = {};
+/** Test seam: a fake Claude runner and environment for staging documents. */
+export const importReadDeps: ImportDeps = {};
 
 /**
  * `import_read_file` (Import leads): reads one stored upload in a child process (timeout, heap ceiling) and records
  * its status (Read / Scan / Failed), meta and failure code. Anything thrown marks the file Failed `unreadable` and
  * fails the job (one attempt only, so its error stays on the job for diagnosis). Results are written only while the
  * file is still Reading, so the job and the sweep never overwrite each other. A spreadsheet that was Read is then
- * staged into rows (`stageTable`, which first deletes the file's existing rows, so reading a file again is harmless).
+ * staged into rows (`stageTable`), a PDF / Word / text file through Claude or the deterministic reader (`stageDocument`);
+ * both first delete the file's existing rows, so reading a file again is harmless.
  */
 export async function importReadFileHandler(job: Job, _ctx: JobContext): Promise<void> {
   const { fileId } = job.payload as unknown as ImportReadFilePayload;
@@ -34,9 +38,11 @@ export async function importReadFileHandler(job: Job, _ctx: JobContext): Promise
     await write({ status: 'Failed', meta: {}, error: 'unreadable' });
     throw e;
   }
-  if (!written || result.status !== 'Read' || result.extract?.kind !== 'table') return;
+  const extract = result.extract;
+  if (!written || result.status !== 'Read' || !extract) return;
   try {
-    await stageTable(fileId, result.extract);
+    if (extract.kind === 'table') await stageTable(fileId, extract);
+    else await stageDocument(fileId, extract, importReadDeps);
   } catch (e) {
     // A file whose rows could not be staged is not half-staged: no rows, Failed, the error kept on the job.
     await prisma.importRow.deleteMany({ where: { fileId } });
