@@ -385,40 +385,37 @@ export interface RobotsRules {
 
 interface Rule { allow: boolean; pattern: string }
 
-/** Rules longer than this, and rules past this count per group, are ignored (bounded matching work). */
+/** Patterns longer than this are ignored. */
 const ROBOTS_PATTERN_MAX = 512;
+/** At most this many rules are kept across all the groups that apply to us (repeated groups are merged). */
 const ROBOTS_RULES_MAX = 500;
 /** Longer paths are treated as disallowed rather than matched. */
 const ROBOTS_PATH_MAX = 2048;
 
 /**
- * RFC 9309 path match: `*` matches any run of characters, a final `$` anchors the end, otherwise a prefix match.
- * Linear two-pointer glob (O(path × pattern), no backtracking regex), so a hostile robots.txt can't stall the worker.
+ * RFC 9309 path match: `*` matches any run of characters, a final `$` anchors the end (a `$` elsewhere is literal),
+ * otherwise a prefix match. Segment matcher: the pattern is split on `*`; the first segment must be a prefix, each
+ * middle segment is found leftmost from a forward-only cursor (never backtracking), and the last segment must end
+ * the path (anchored) or occur after the cursor. Leftmost matching is always sufficient for `*`-only globs, and the
+ * work per rule is a handful of indexOf scans over the path, so a hostile robots.txt can't stall the worker.
  */
 export function robotsPatternMatches(pattern: string, path: string): boolean {
   const anchored = pattern.endsWith('$');
-  let p = (anchored ? pattern.slice(0, -1) : pattern).replace(/\*+/g, '*');
-  if (!anchored && !p.endsWith('*')) p += '*';
-  let i = 0;
-  let j = 0;
-  let star = -1;
-  let mark = 0;
-  while (i < path.length) {
-    if (j < p.length && p[j] === '*') {
-      star = j++;
-      mark = i;
-    } else if (j < p.length && p[j] === path[i]) {
-      i++;
-      j++;
-    } else if (star >= 0) {
-      j = star + 1;
-      i = ++mark;
-    } else {
-      return false;
-    }
+  const segments = (anchored ? pattern.slice(0, -1) : pattern).split('*');
+  const first = segments[0]!;
+  if (segments.length === 1) return anchored ? path === first : path.startsWith(first);
+  if (!path.startsWith(first)) return false;
+  let cursor = first.length;
+  for (let k = 1; k < segments.length - 1; k++) {
+    const segment = segments[k]!;
+    if (!segment) continue;
+    const at = path.indexOf(segment, cursor);
+    if (at < 0) return false;
+    cursor = at + segment.length;
   }
-  while (j < p.length && p[j] === '*') j++;
-  return j === p.length;
+  const last = segments[segments.length - 1]!;
+  if (anchored) return path.length - last.length >= cursor && path.endsWith(last);
+  return !last || path.indexOf(last, cursor) >= 0;
 }
 
 export function parseRobots(text: string, agent = ROBOTS_AGENT): RobotsRules {
@@ -443,12 +440,11 @@ export function parseRobots(text: string, agent = ROBOTS_AGENT): RobotsRules {
     lastWasAgent = false;
     if (!current || (key !== 'allow' && key !== 'disallow')) continue;
     if (!value || value.length > ROBOTS_PATTERN_MAX) continue; // "Disallow:" with no path disallows nothing
-    if (current.rules.length >= ROBOTS_RULES_MAX) continue;
     current.rules.push({ allow: key === 'allow', pattern: value });
   }
   const ours = groups.filter((g) => g.agents.includes(agent.toLowerCase()));
   const chosen = ours.length ? ours : groups.filter((g) => g.agents.includes('*'));
-  const rules = chosen.flatMap((g) => g.rules);
+  const rules = chosen.flatMap((g) => g.rules).slice(0, ROBOTS_RULES_MAX);
   return {
     allows(path: string) {
       if (path.length > ROBOTS_PATH_MAX) return false;

@@ -229,6 +229,35 @@ describe('robots.txt', () => {
     expect(performance.now() - started).toBeLessThan(50);
   });
 
+  test('worst case: 1000 maximal rules over repeated * groups, one allows() call under 100 ms', () => {
+    const rule = 'Disallow: /*' + 'a'.repeat(509) + 'b';
+    const groups = Array.from({ length: 10 }, () => 'User-agent: *\n' + Array(100).fill(rule).join('\n')).join('\n\n');
+    const rules = parseRobots(groups);
+    const path = '/' + 'a'.repeat(2047);
+    const started = performance.now();
+    expect(rules.allows(path)).toBe(true);
+    expect(performance.now() - started).toBeLessThan(100);
+  });
+
+  test('RFC 9309 examples', () => {
+    expect(robotsPatternMatches('/fish*.php', '/fish.php')).toBe(true);
+    expect(robotsPatternMatches('/fish*.php', '/fishheads/catfish.php?parameters')).toBe(true);
+    expect(robotsPatternMatches('/fish*.php', '/Fish.PHP')).toBe(false);
+    expect(robotsPatternMatches('/*.php$', '/filename.php')).toBe(true);
+    expect(robotsPatternMatches('/*.php$', '/folder/filename.php')).toBe(true);
+    expect(robotsPatternMatches('/*.php$', '/filename.php?parameters')).toBe(false);
+    expect(robotsPatternMatches('/*.php$', '/filename.php/')).toBe(false);
+    expect(robotsPatternMatches('/*.php$', '/windows.PHP')).toBe(false);
+    expect(robotsPatternMatches('/$', '/')).toBe(true);
+    expect(robotsPatternMatches('/$', '/page')).toBe(false);
+    // A `$` that is not last is a literal character.
+    expect(robotsPatternMatches('/price$list', '/price$list/2026')).toBe(true);
+    expect(robotsPatternMatches('/price$list', '/price')).toBe(false);
+    // Anchored last segment may not overlap what the middle segments used.
+    expect(robotsPatternMatches('/*ab*ba$', '/aba')).toBe(false);
+    expect(robotsPatternMatches('/*ab*ba$', '/abba')).toBe(true);
+  });
+
   test('pattern matching: prefix, * and the $ anchor', () => {
     expect(robotsPatternMatches('/private', '/private/x')).toBe(true);
     expect(robotsPatternMatches('/private$', '/private/x')).toBe(false);
@@ -240,12 +269,17 @@ describe('robots.txt', () => {
     expect(robotsPatternMatches('*', '/')).toBe(true);
   });
 
-  test('over-long patterns and rules past the per-group cap are ignored', () => {
+  test('over-long patterns and rules past the cap (counted across all applicable groups) are ignored', () => {
     expect(parseRobots('User-agent: *\nDisallow: /' + 'x'.repeat(600) + '\n').allows('/' + 'x'.repeat(700))).toBe(true);
     const many = Array.from({ length: 500 }, (_, i) => `Disallow: /n${i}`).join('\n');
     const capped = parseRobots(`User-agent: *\n${many}\nDisallow: /late\n`);
     expect(capped.allows('/n1')).toBe(false);
     expect(capped.allows('/late')).toBe(true);
+    // The cap is across groups: 300 + 300 rules in two "*" groups keep only the first 500.
+    const g = (from: number) => 'User-agent: *\n' + Array.from({ length: 300 }, (_, i) => `Disallow: /m${from + i}$`).join('\n');
+    const split = parseRobots(`${g(0)}\n\n${g(300)}\n`);
+    expect(split.allows('/m499')).toBe(false);
+    expect(split.allows('/m500')).toBe(true);
   });
 
   test('parses groups, longest match wins, our agent group beats *', () => {
