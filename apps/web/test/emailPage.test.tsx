@@ -504,6 +504,56 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       expect(within(list).getByText('Message 1').closest('a')!.getAttribute('aria-current')).toBe('true');
     });
 
+    it('repeated rows in a later batch (mail arrived meanwhile) do not stop the list early: distinct messages are counted', async () => {
+      const all = Array.from({ length: 100 }, (_, i) => item({ id: i + 1, subject: `Message ${i + 1}`, isRead: true }));
+      stub([], { 1: detail(all[0]!) }, META, (url) => {
+        if (!url.startsWith('/api/mail?')) return undefined;
+        const page = Number(new URL(url, 'http://x').searchParams.get('page') ?? 1);
+        // The second batch starts 5 rows early (they shifted down): 46–95, then 96–100.
+        const items = page === 1 ? all.slice(0, 50) : page === 2 ? all.slice(45, 95) : all.slice(95);
+        return { items, total: page === 1 ? 100 : null, page, pageSize: 50 };
+      });
+      const w = watcher();
+      show();
+      const list = screen.getByRole('region', { name: 'Message list' });
+      expect(await within(list).findByText('Message 1')).toBeTruthy();
+      w.reach();
+      expect(await within(list).findByText('Message 95')).toBeTruthy();
+      await waitFor(() => expect(w.live()).toHaveLength(1));
+      w.reach();
+      expect(await within(list).findByText('Message 100')).toBeTruthy();
+      expect(list.querySelectorAll('a.msg')).toHaveLength(100);
+    });
+
+    it('the refresh is skipped while a batch is loading, and merges on the next tick', async () => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+      const lists = batched();
+      const w = watcher();
+      const inner = globalThis.fetch;
+      let release = () => {};
+      const gate = new Promise<void>((r) => (release = r));
+      vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+        if (url.includes('page=2')) await gate;
+        return inner(url, init);
+      });
+      show();
+      const list = screen.getByRole('region', { name: 'Message list' });
+      expect(await within(list).findByText('Message 1')).toBeTruthy();
+      w.reach();
+      await waitFor(() => expect(lists.some((q) => q.get('page') === '2')).toBe(false));
+      const before = lists.length;
+      act(() => vi.advanceTimersByTime(60_000));
+      // Batch 2 is still loading: no refresh request went out.
+      expect(lists.length).toBe(before);
+      release();
+      expect(await within(list).findByText('Message 51')).toBeTruthy();
+      const after = lists.length;
+      act(() => vi.advanceTimersByTime(60_000));
+      await waitFor(() => expect(lists.length).toBe(after + 1));
+      expect(lists.at(-1)!.get('page')).toBeNull();
+      expect(within(list).getByText('Message 51')).toBeTruthy();
+    });
+
     it('a filter change asks the new list\'s first batch once, and nothing is watched while the old rows stand in', async () => {
       const u = userEvent.setup();
       const lists = batched();

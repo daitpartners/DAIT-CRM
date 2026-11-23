@@ -125,8 +125,9 @@ export function useMailList(f: MailFilter, enabled = true) {
     queryKey,
     queryFn: ({ pageParam }) => api<MailPage>(listPath(f, pageParam)),
     initialPageParam: 1,
+    // Distinct messages: offsets shift when mail arrives, so a batch can repeat a few rows already loaded.
     getNextPageParam: (last, pages) =>
-      (pages.reduce((n, p) => n + p.items.length, 0) < (pages[0]?.total ?? 0) && last.items.length > 0 ? last.page + 1 : undefined),
+      (new Set(pages.flatMap((p) => p.items.map((m) => m.id))).size < (pages[0]?.total ?? 0) && last.items.length > 0 ? last.page + 1 : undefined),
     placeholderData: keepPreviousData,
     enabled,
   });
@@ -144,10 +145,21 @@ export function useMailList(f: MailFilter, enabled = true) {
   const keyText = JSON.stringify(queryKey);
   useEffect(() => {
     if (!live) return;
+    // Never alongside a batch being loaded (or another refresh): the merge would be written over when that batch lands,
+    // so this tick is skipped and the next one merges (security review N3).
+    const busy = () => qc.isFetching({ queryKey, exact: true }) > 0;
+    let asking = false;
     const timer = setInterval(() => {
+      if (asking || busy()) return;
+      asking = true;
       api<MailPage>(listPath(f, 1))
-        .then((head) => qc.setQueryData<MailBatches>(queryKey, (data) => (data ? mergeHead(data, head) : data)))
-        .catch(() => undefined); // the next tick tries again
+        .then((head) => {
+          if (!busy()) qc.setQueryData<MailBatches>(queryKey, (data) => (data ? mergeHead(data, head) : data));
+        })
+        .catch(() => undefined) // the next tick tries again
+        .finally(() => {
+          asking = false;
+        });
     }, sending ? 5000 : 60_000);
     return () => clearInterval(timer);
     // The filter is in keyText.
