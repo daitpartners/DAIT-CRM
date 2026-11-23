@@ -9,6 +9,7 @@ import { sendUserEmailHandler } from '../src/jobs/handlers/sendUserEmail';
 import { mailActionHandler } from '../src/jobs/handlers/mailAction';
 import { todayIn } from '../src/leads/dates';
 import { GraphError, type GraphClient } from '../src/graph/client';
+import { resetBodyFetchBackoff } from '../src/routes/mail';
 import { fakeGraph, resetDb, seedLookups } from './helpers';
 import { makeCompany, makeContact, makeLead, makeProject, makeUser, signIn } from './factory';
 
@@ -26,14 +27,14 @@ vi.mock('../src/routes/leads', async (importOriginal) => {
 });
 
 /** The routes' Graph client: each test may answer messageBody; by default Microsoft is unreachable. */
-const bodies = vi.hoisted(() => ({ calls: [] as { accountId: number; graphId: string }[], answer: null as null | GraphClient['messageBody'] }));
+const bodies = vi.hoisted(() => ({ calls: [] as { accountId: number; graphId: string; timeoutMs?: number }[], answer: null as null | GraphClient['messageBody'] }));
 let app: FastifyInstance;
 beforeAll(async () => {
   process.env.TEST_LOGIN = '1';
   app = await buildApp({
     graph: fakeGraph({
-      async messageBody(account, graphId) {
-        bodies.calls.push({ accountId: account.id, graphId });
+      async messageBody(account, graphId, opts) {
+        bodies.calls.push({ accountId: account.id, graphId, timeoutMs: opts?.timeoutMs });
         if (!bodies.answer) throw new GraphError('graph_request_failed status=503', 503);
         return bodies.answer(account, graphId);
       },
@@ -45,6 +46,7 @@ beforeEach(async () => {
   lockFault.error = null;
   bodies.calls = [];
   bodies.answer = null;
+  resetBodyFetchBackoff();
   await resetDb();
   await seedLookups();
 });
@@ -659,7 +661,7 @@ describe('formatted bodies (owner, 23 Nov 2026)', () => {
     bodies.answer = async () => ({ contentType: 'html', content: NEWSLETTER });
     const cookie = await signIn(app, rep);
     const res = (await call('GET', `/api/mail/${m.id}?peek=1`, cookie)).json();
-    expect(bodies.calls).toEqual([{ accountId: box.id, graphId: 'g-old' }]);
+    expect(bodies.calls).toEqual([{ accountId: box.id, graphId: 'g-old', timeoutMs: 4000 }]);
     expect(res.bodyHtml).toContain('<h1 class="h">News</h1>');
     expect(res.bodyHtml).not.toMatch(/onclick|script|steal/);
     expect(res.bodyText).toBe('News\n\nRead more');
@@ -710,6 +712,66 @@ describe('formatted bodies (owner, 23 Nov 2026)', () => {
     expect(bodies.calls).toHaveLength(2);
     await call('GET', `/api/mail/${m.id}`, cookie);
     expect(bodies.calls).toHaveLength(2);
+  });
+
+  it('the fetch has its own short timeout (4 s), not the 20 s of a send', async () => {
+    const { rep, box } = await setup();
+    const m = await synced(rep.id, box.id, { graphId: 'g-t' });
+    bodies.answer = async () => ({ contentType: 'html', content: '<p>x</p>' });
+    await call('GET', `/api/mail/${m.id}`, await signIn(app, rep));
+    expect(bodies.calls).toEqual([{ accountId: box.id, graphId: 'g-t', timeoutMs: 4000 }]);
+  });
+
+  it('after a 401 / 403 the mailbox is not asked again for a while, for any of its messages; the text shows', async () => {
+    for (const status of [401, 403]) {
+      resetBodyFetchBackoff();
+      bodies.calls = [];
+      await resetDb();
+      await seedLookups();
+      const { rep, box } = await setup();
+      const cookie = await signIn(app, rep);
+      const a = await synced(rep.id, box.id, { graphId: 'g-a' });
+      const b = await synced(rep.id, box.id, { graphId: 'g-b' });
+      bodies.answer = async () => {
+        throw new GraphError(`graph_request_failed status=${status}`, status);
+      };
+      expect((await call('GET', `/api/mail/${a.id}`, cookie)).json()).toMatchObject({ bodyText: 'Looks good', bodyHtml: null });
+      expect((await call('GET', `/api/mail/${a.id}`, cookie)).statusCode).toBe(200);
+      expect((await call('GET', `/api/mail/${b.id}`, cookie)).json()).toMatchObject({ bodyHtml: null });
+      expect(bodies.calls).toHaveLength(1);
+    }
+  });
+
+  it('three failures in a row pause the mailbox too; a success in between resets the count', async () => {
+    const { rep, box } = await setup();
+    const cookie = await signIn(app, rep);
+    const rows = await Promise.all([1, 2, 3, 4, 5].map((i) => synced(rep.id, box.id, { graphId: `g-f${i}` })));
+    bodies.answer = async (_a, graphId) => {
+      if (graphId === 'g-f2') return { contentType: 'html', content: '<p>ok</p>' };
+      throw new GraphError('graph_request_failed timeout', 504);
+    };
+    for (const r of rows) await call('GET', `/api/mail/${r.id}`, cookie);
+    // f1 fails, f2 succeeds (count reset), f3 f4 f5 fail: the third in a row pauses; nothing after is asked.
+    expect(bodies.calls.map((c) => c.graphId)).toEqual(['g-f1', 'g-f2', 'g-f3', 'g-f4', 'g-f5']);
+    await call('GET', `/api/mail/${rows[0]!.id}`, cookie);
+    expect(bodies.calls).toHaveLength(5);
+  });
+
+  it('a message deleted while its body was being fetched gives 404, never a 500', async () => {
+    const { rep, box } = await setup();
+    const cookie = await signIn(app, rep);
+    const gone = await synced(rep.id, box.id, { graphId: 'g-gone' });
+    bodies.answer = async () => {
+      await prisma.emailMessage.delete({ where: { id: gone.id } });
+      throw new GraphError('graph_request_failed status=404', 404);
+    };
+    expect((await call('GET', `/api/mail/${gone.id}`, cookie)).statusCode).toBe(404);
+    const removed = await synced(rep.id, box.id, { graphId: 'g-removed' });
+    bodies.answer = async () => {
+      await prisma.emailMessage.delete({ where: { id: removed.id } });
+      return { contentType: 'html', content: '<p>late</p>' };
+    };
+    expect((await call('GET', `/api/mail/${removed.id}`, cookie)).statusCode).toBe(404);
   });
 
   it('a plain-text body from the mailbox stays plain text', async () => {

@@ -89,8 +89,11 @@ export interface GraphClient {
   markRead(account: EmailAccount, graphId: string, isRead: boolean): Promise<void>;
   moveTo(account: EmailAccount, graphId: string, folder: 'archive' | 'inbox'): Promise<void>;
   reply(account: EmailAccount, graphId: string, msg: { to: string[]; cc?: string[]; html: string }): Promise<void>;
-  /** One message's body as HTML (a message synced before bodies were stored as HTML, opened in the reader). */
-  messageBody(account: EmailAccount, graphId: string): Promise<GraphBody>;
+  /**
+   * One message's body as HTML (a message synced before bodies were stored as HTML, opened in the reader); `timeoutMs`
+   * shortens the usual request timeout.
+   */
+  messageBody(account: EmailAccount, graphId: string, opts?: { timeoutMs?: number }): Promise<GraphBody>;
   /** Release 3C (the account's own calendar, read only): */
   calendarDeltaPage(account: EmailAccount, url: string): Promise<CalendarDeltaPage>;
 }
@@ -305,12 +308,14 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
   }
 
   /** One Graph request; a hung request is treated like a 5xx (retried later, the mailbox stays connected). */
-  async function request(prefix: string, token: string, url: string, init: { method: string; body?: unknown; prefer?: string }): Promise<Response> {
+  async function request(
+    prefix: string, token: string, url: string, init: { method: string; body?: unknown; prefer?: string; timeoutMs?: number },
+  ): Promise<Response> {
     let res: Response;
     try {
       res = await fetch(url, {
         method: init.method,
-        signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+        signal: AbortSignal.timeout(init.timeoutMs ?? SEND_TIMEOUT_MS),
         headers: {
           Authorization: `Bearer ${token}`,
           ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
@@ -328,9 +333,9 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
   }
 
   /** A call on the account's own mailbox (immutable ids). */
-  async function mailCall(account: EmailAccount, url: string, method: string, body?: unknown, prefer = IMMUTABLE): Promise<Response> {
+  async function mailCall(account: EmailAccount, url: string, method: string, body?: unknown, prefer = IMMUTABLE, timeoutMs?: number): Promise<Response> {
     const token = await accessToken(account, GRAPH_MAIL_SCOPES);
-    return request('graph_request_failed', token, url, { method, body, prefer });
+    return request('graph_request_failed', token, url, { method, body, prefer, timeoutMs });
   }
 
   return {
@@ -393,8 +398,8 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
       });
     },
 
-    async messageBody(account, graphId) {
-      const res = await mailCall(account, `${messageUrl(graphId)}?$select=body`, 'GET', undefined, `${IMMUTABLE}, ${HTML_BODY}`);
+    async messageBody(account, graphId, opts) {
+      const res = await mailCall(account, `${messageUrl(graphId)}?$select=body`, 'GET', undefined, `${IMMUTABLE}, ${HTML_BODY}`, opts?.timeoutMs);
       return bodyOf(((await res.json()) as { body?: unknown }).body);
     },
 

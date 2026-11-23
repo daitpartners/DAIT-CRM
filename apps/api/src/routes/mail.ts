@@ -2,10 +2,10 @@ import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
 import { Prisma, type EmailMessage, type Lead } from '@prisma/client';
 import { LeadCreate, MailCompose, MailLink, MailListQuery, MailRead, MailReply, can, checkDomain, domainOf, isFreeMail, pageArgs } from '@dait-crm/shared';
 import { audit } from '../audit.js';
-import { enqueue, errorMessage } from '../jobs/queue.js';
+import { enqueue } from '../jobs/queue.js';
 import { BODY_MAX } from '../jobs/handlers/syncMailbox.js';
-import { GraphError, type GraphClient } from '../graph/client.js';
-import { emailBodies } from '../mail/html.js';
+import { GraphError, isAuthFailure, type GraphClient } from '../graph/client.js';
+import { emailBodies, type GraphBody } from '../mail/html.js';
 import type { MailActionPayload } from '../jobs/types.js';
 import { dateOnly, todayIn, ymd } from '../leads/dates.js';
 import { auditCreatedLead, createLeadWithCompany, RuleError } from '../leads/service.js';
@@ -152,26 +152,61 @@ async function ownMessage(db: Tx | typeof prisma, user: AuthUser, rawId: string)
   return m;
 }
 
+/** The reader waits at most this long for an older message's body (a send waits 20 s). */
+const BODY_FETCH_TIMEOUT_MS = 4000;
+/** After a refusal (401/403) or FAILS_BEFORE_PAUSE failures in a row, a mailbox is not asked for bodies for this long. */
+const BODY_FETCH_PAUSE_MS = 30 * 60_000;
+const FAILS_BEFORE_PAUSE = 3;
+/** By mailbox (account id): failures in a row, and until when it is not asked. In memory: the API is one process. */
+const bodyFetchState = new Map<number, { fails: number; pausedUntil: number }>();
+
+/** Forgets every pause (tests). */
+export function resetBodyFetchBackoff(): void {
+  bodyFetchState.clear();
+}
+
+function noteBodyFetchFailure(accountId: number, err: unknown): void {
+  const state = bodyFetchState.get(accountId) ?? { fails: 0, pausedUntil: 0 };
+  state.fails += 1;
+  const refused = isAuthFailure(err) || (err instanceof GraphError && err.status === 403);
+  if (refused || state.fails >= FAILS_BEFORE_PAUSE) state.pausedUntil = Date.now() + BODY_FETCH_PAUSE_MS;
+  bodyFetchState.set(accountId, state);
+}
+
 /**
  * The HTML body of a message synced before bodies were kept as HTML (owner, 23 Nov 2026), read once when it is opened:
  * only for the caller's own message (`m` comes from ownMessage) and only from the mailbox it came from while that is
  * the caller's own connected one, never anyone else's. Sanitised and stored with the cleaner text. A message the
- * mailbox no longer has (or a plain-text one) is marked '' and not asked again; any other failure leaves the text
- * body to show and tries again next time.
+ * mailbox no longer has (or a plain-text one) is marked '' and not asked again. Any other failure leaves the text body
+ * to show; the fetch waits at most 4 s, and a mailbox that refuses (401/403) or fails three times in a row is left
+ * alone for 30 minutes (security review I3). A row deleted meanwhile gives 404.
  */
 async function fillHtmlBody(graph: GraphClient, log: FastifyBaseLogger, user: AuthUser, m: EmailMessage): Promise<EmailMessage> {
   if (m.bodyHtml !== null || !m.graphId || m.accountId === null || m.userId !== user.id) return m;
+  if ((bodyFetchState.get(m.accountId)?.pausedUntil ?? 0) > Date.now()) return m;
   const account = await prisma.emailAccount.findFirst({ where: { id: m.accountId, userId: user.id, kind: 'personal', status: 'connected' } });
   if (!account) return m;
+  let body: GraphBody | null = null;
   try {
-    const { bodyHtml, bodyText } = emailBodies(await graph.messageBody(account, m.graphId), BODY_MAX);
-    return await prisma.emailMessage.update({ where: { id: m.id }, data: { bodyHtml: bodyHtml ?? '', bodyText } });
+    body = await graph.messageBody(account, m.graphId, { timeoutMs: BODY_FETCH_TIMEOUT_MS });
   } catch (err) {
-    if (err instanceof GraphError && err.status === 404) return prisma.emailMessage.update({ where: { id: m.id }, data: { bodyHtml: '' } });
-    // The message id and Graph's status only: the mail is private to its owner.
-    log.warn({ emailMessageId: m.id, err: errorMessage(err) }, 'mail body fetch failed');
-    return m;
+    if (!(err instanceof GraphError && err.status === 404)) {
+      noteBodyFetchFailure(account.id, err);
+      // The error's kind and HTTP status only: never its message (the mail is private to its owner).
+      log.warn({ emailMessageId: m.id, errName: (err as Error)?.name, status: err instanceof GraphError ? err.status : undefined }, 'mail body fetch failed');
+      return m;
+    }
   }
+  bodyFetchState.delete(account.id);
+  const stored = body ? emailBodies(body, BODY_MAX) : null;
+  // Only a row still without its HTML (two opens at once store it once); then read back: gone meanwhile is a 404.
+  await prisma.emailMessage.updateMany({
+    where: { id: m.id, userId: user.id, bodyHtml: null },
+    data: stored ? { bodyHtml: stored.bodyHtml ?? '', bodyText: stored.bodyText } : { bodyHtml: '' },
+  });
+  const fresh = await prisma.emailMessage.findFirst({ where: { id: m.id, userId: user.id } });
+  if (!fresh) throw new NotFoundError();
+  return fresh;
 }
 
 /** Of `ids`, the projects the user can see (a tag on one they cannot see shows no id or number, as a lead's). */

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { emailBodies, htmlToText, sanitizeEmailHtml, textToHtml } from '../src/mail/html';
+import { MAX_DEPTH, RAW_MAX, emailBodies, limitNesting, htmlToText, sanitizeEmailHtml, textToHtml } from '../src/mail/html';
 
 const clean = (html: string) => sanitizeEmailHtml(html);
 
@@ -113,6 +113,100 @@ describe('sanitizeEmailHtml: XSS vectors are removed', () => {
     expect(clean('<img src="cid:image001.png@01DA" alt="Logo">')).toBe('');
     expect(clean('<img src="javascript:alert(1)">')).toBe('');
     expect(clean('<a href="data:image/png;base64,AAAA">x</a>')).toBe('<a target="_blank" rel="noopener noreferrer">x</a>');
+  });
+});
+
+describe('sanitizeEmailHtml: security review fixes (24 Nov 2026)', () => {
+  /** Nothing in the output may open a tag the browser would run or follow. */
+  const safe = (html: string) => {
+    expect(html).not.toMatch(/onerror|onload|<img[^>]*src=x|<meta|http-equiv|javascript:|<svg|<math|<template/i);
+  };
+
+  test('I1: <style> inside svg / math / foreign content cannot smuggle markup out (reviewer payloads)', () => {
+    for (const payload of [
+      '<svg><style>&lt;/style&gt;&lt;img src=x onerror=alert(1)&gt;</style></svg>',
+      '<math><style>&lt;/style&gt;&lt;img src=x onerror=alert(1)&gt;</style></math>',
+      '<svg><p><style>&lt;/style&gt;&lt;img src=x onerror=1&gt;</style></p></svg>',
+      '<template><style>&lt;/style&gt;&lt;b&gt;</style></template>',
+      '<svg><foreignObject><style>&lt;/style&gt;&lt;img onerror=1 src=x&gt;</style></foreignObject></svg>',
+      '<svg><style>&lt;/style&gt;&lt;meta http-equiv=refresh content="0;url=https://evil"&gt;&lt;a href="javascript:alert(1)"&gt;x&lt;/a&gt;</style></svg>',
+      '<svg></p><style><a id="</style><img src=1 onerror=alert(1)>">',
+      '<style>&lt;/style&gt;&lt;img src=x onerror=alert(1)&gt;</style>',
+    ]) {
+      const out = clean(payload);
+      safe(out);
+      // Every link that survives is forced to a new tab without an opener.
+      for (const a of out.match(/<a\b[^>]*>/gi) ?? []) expect(a, payload).toContain('rel="noopener noreferrer"');
+      // Stable: sanitising the output again changes nothing.
+      expect(clean(out), payload).toBe(out);
+    }
+  });
+
+  test('I2: a <style> with attributes loses them and its CSS is filtered like any other', () => {
+    expect(clean('<style id=a>@import url(https://evil/x.css); body{background:url(javascript:alert(1))} </style>')).toBe('<style> body{} </style>');
+    expect(clean('<style class="q" media="all">x{a:expression(alert(1));color:red}</style>')).toBe('<style>x{color:red}</style>');
+    expect(clean('<STYLE title="t">x{background:url(javascript:1)}</STYLE>')).toBe('<style>x{}</style>');
+  });
+
+  test('M2: position:fixed and position:sticky are dropped (inline and <style>); other positioning stays', () => {
+    const out = clean('<div style="position:fixed;inset:0;color:red">PHISH</div><p style="position:-webkit-sticky;top:0">s</p><style>.x{position: sticky;top:0}.y{position:relative}</style>');
+    expect(out).not.toMatch(/fixed|sticky/i);
+    expect(out).toContain('color:red');
+    expect(out).toContain('position:relative');
+  });
+});
+
+describe('performance: hostile or very large bodies stay fast (C1)', () => {
+  test('the reviewer\'s inputs all finish well under a second in total', () => {
+    const inputs = [
+      '<table>' + '<tr><td style="color:red">cell &amp; text</td></tr>'.repeat(5000) + '</table>',
+      '<div>x</div>'.repeat(20000),
+      '<pre>' + ' '.repeat(100000) + 'x</pre><div>a</div>',
+      '\n'.repeat(50000) + '<div>a</div>'.repeat(2000),
+      '<div>'.repeat(400000) + 'x',
+    ];
+    const started = performance.now();
+    for (const content of inputs) {
+      const b = emailBodies({ contentType: 'html', content }, 50_000);
+      expect(b.bodyHtml!.length).toBeLessThanOrEqual(50_000);
+      expect(b.bodyText.length).toBeLessThanOrEqual(50_000);
+    }
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
+  test('htmlToText alone is linear on whitespace-heavy and block-heavy input', () => {
+    const started = performance.now();
+    expect(htmlToText('<pre>' + ' '.repeat(100000) + 'x</pre><div>a</div>')).toBe('x\na');
+    expect(htmlToText('<div>x</div>'.repeat(20000)).split('\n')).toHaveLength(20000);
+    expect(htmlToText('<div>'.repeat(200000) + 'deep')).toBe('deep');
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  test('limitNesting: tags past MAX_DEPTH open elements are left out, their text kept; ordinary HTML is untouched', () => {
+    expect(MAX_DEPTH).toBe(256);
+    const deep = limitNesting('<div>'.repeat(300) + 'x' + '</div>'.repeat(300));
+    expect(deep.match(/<div>/g)).toHaveLength(256);
+    expect(deep).toContain('x');
+    const ordinary = '<!-- <div><div> --><table><tr><td a=">">1<td>2<tr><td>3</table><p>a<p>b<style>div>p{}</style><br/><img src="a>b">';
+    expect(limitNesting(ordinary)).toBe(ordinary);
+    // Old-style tables with no end tags keep every cell: a new cell or row closes the open one.
+    const rows = '<table>' + '<tr><td>a<td>b'.repeat(2000) + '</table>';
+    expect(limitNesting(rows)).toBe(rows);
+    expect(limitNesting('<ul>' + '<li>x'.repeat(1000) + '</ul>')).toBe('<ul>' + '<li>x'.repeat(1000) + '</ul>');
+    // A cell of a nested table closes only within that table.
+    const nested = '<table>' + '<tr><td><table><tr><td>in<td>in2</table>'.repeat(500) + '</table>';
+    expect(limitNesting(nested)).toBe(nested);
+  });
+
+  test('the raw body is capped before sanitising and text derivation (an oversized body keeps its start)', () => {
+    expect(RAW_MAX).toBe(1_000_000);
+    const huge = '<p>start</p>' + '<p>filler words here</p>'.repeat(100000) + '<p>THE-END-MARKER</p>';
+    const b = emailBodies({ contentType: 'html', content: huge }, 5_000_000);
+    expect(b.bodyHtml!.startsWith('<p>start</p>')).toBe(true);
+    expect(b.bodyHtml).not.toContain('THE-END-MARKER');
+    expect(b.bodyText).not.toContain('THE-END-MARKER');
+    // Cut to RAW_MAX before sanitising; closing the tags the cut left open adds a few characters.
+    expect(b.bodyHtml!.length).toBeLessThan(RAW_MAX + 100);
   });
 });
 

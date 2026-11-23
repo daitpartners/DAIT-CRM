@@ -221,6 +221,17 @@ describe('graph client — mail sync and actions (2B-2)', () => {
     expect(msalState.scopes[0]).toEqual(GRAPH_MAIL_SCOPES);
   });
 
+  test('messageBody takes a shorter timeout when asked (the reader does not wait 20 s)', async () => {
+    vi.stubGlobal('fetch', vi.fn((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+      init.signal!.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'TimeoutError' })));
+    })));
+    const started = Date.now();
+    const err = await createGraphClient(env).messageBody(await account(), 'slow', { timeoutMs: 50 }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GraphError);
+    expect((err as GraphError).status).toBe(504);
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
   test('messageBody: a message gone from the mailbox is a GraphError with status 404', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ error: { code: 'ErrorItemNotFound' } }, 404)));
     const err = await createGraphClient(env).messageBody(await account(), 'gone').catch((e: unknown) => e);
