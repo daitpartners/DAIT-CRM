@@ -3,7 +3,6 @@ import type { EmailAccount, PrismaClient } from '@prisma/client';
 import { prisma } from '../db.js';
 import { decrypt, encrypt } from '../crypto/tokens.js';
 import { readRefreshToken, type MsEnv } from '../auth/microsoft.js';
-import { nearestUtcMidnight } from '../leads/dates.js';
 
 /**
  * A file sent with a message (Graph fileAttachment, inline in the request: Graph takes at most 4 MB per request, so the
@@ -206,10 +205,10 @@ function utc(v: unknown): string | null {
 /** A calendar delta entry as a GraphEvent; null for one without readable UTC times (skipped). */
 function toEvent(v: Record<string, unknown>): GraphEvent | null {
   const isAllDay = v.isAllDay === true;
-  // An all-day event is kept as midnight to midnight UTC of its dates (see nearestUtcMidnight).
-  const day = (iso: string | null) => (iso && isAllDay ? nearestUtcMidnight(new Date(iso)).toISOString() : iso);
-  const startsAt = day(utc(v.start));
-  const endsAt = day(utc(v.end));
+  // An all-day event's times stay as sent (often its own zone's midnight in UTC): the sync puts them on the owner's
+  // dates (allDayMidnight), which needs the owner's time zone.
+  const startsAt = utc(v.start);
+  const endsAt = utc(v.end);
   if (!startsAt || !endsAt) return null;
   const organizer = v.organizer as GraphAddress;
   const organizerAddress = addressOf(organizer);

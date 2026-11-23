@@ -255,7 +255,7 @@ describe('graph client — mail sync and actions (2B-2)', () => {
     expect(msalState.scopes[0]).toEqual(GRAPH_CALENDAR_SCOPES);
   });
 
-  test('calendarDeltaPage moves an all-day event\'s times to the nearest UTC midnight (Graph may send its own zone\'s midnight)', async () => {
+  test('calendarDeltaPage keeps an all-day event\'s UTC times as sent (the sync places them on the owner\'s dates)', async () => {
     const at = (dateTime: string) => ({ dateTime, timeZone: 'UTC' });
     vi.stubGlobal('fetch', vi.fn(async () => json({
       value: [
@@ -267,8 +267,8 @@ describe('graph client — mail sync and actions (2B-2)', () => {
     })));
     const page = await createGraphClient(env).calendarDeltaPage(await account(), 'https://graph.microsoft.com/v1.0/x');
     expect(page.events.map((e) => [e.id, e.startsAt, e.endsAt])).toEqual([
-      ['east', '2030-03-10T00:00:00.000Z', '2030-03-11T00:00:00.000Z'],
-      ['west', '2030-03-20T00:00:00.000Z', '2030-03-22T00:00:00.000Z'],
+      ['east', '2030-03-09T18:30:00.000Z', '2030-03-10T18:30:00.000Z'],
+      ['west', '2030-03-20T05:00:00.000Z', '2030-03-22T05:00:00.000Z'],
       ['timed', '2030-03-09T18:30:00.000Z', '2030-03-09T19:00:00.000Z'],
     ]);
   });

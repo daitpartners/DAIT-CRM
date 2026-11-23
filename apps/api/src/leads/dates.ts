@@ -27,3 +27,21 @@ export function nearestUtcMidnight(at: Date): Date {
   const DAY_MS = 86_400_000;
   return new Date(Math.round(at.getTime() / DAY_MS) * DAY_MS);
 }
+
+/**
+ * An all-day calendar time as UTC midnight of its date: a midnight in `timezone` (the owner's) gives that local date,
+ * which also holds east of UTC+12 (New Zealand, Tonga, Kiribati) where rounding picks the day before; any other time
+ * is rounded to the nearest UTC midnight.
+ */
+export function allDayMidnight(at: Date, timezone: string): Date {
+  let local: Record<string, string> | null = null;
+  try {
+    local = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).formatToParts(at).map((p) => [p.type, p.value]));
+  } catch {
+    // An unknown zone: rounding only.
+  }
+  if (local && local.hour === '00' && local.minute === '00') return new Date(`${local.year}-${local.month}-${local.day}T00:00:00.000Z`);
+  return nearestUtcMidnight(at);
+}

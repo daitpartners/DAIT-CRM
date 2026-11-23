@@ -195,6 +195,15 @@ describe('calendar API', () => {
     expect(items.filter((i) => i.id === west.id).map((i) => i.date)).toEqual(['2030-03-20', '2030-03-21']);
   });
 
+  it('an all-day row stored at the midnight of a zone east of UTC+12 shows on its intended date for a user there', async () => {
+    const rep = await as('SALES_REPRESENTATIVE', 'Pacific/Tongatapu');
+    const box = await mailbox(rep.user);
+    // 10 Mar 2030 in Tonga (UTC+13).
+    const e = await event(rep.user, box.id, new Date('2030-03-09T11:00:00Z'), { isAllDay: true, endsAt: new Date('2030-03-10T11:00:00Z') });
+    const items = (await get(`/api/calendar?${RANGE}`, rep.cookie)).json<Body>().items;
+    expect(items.filter((i) => i.id === e.id).map((i) => i.date)).toEqual(['2030-03-10']);
+  });
+
   it('a company-only match shows the company only to someone who may see it', async () => {
     const admin = await as('ADMINISTRATOR');
     const rep = await as('SALES_REPRESENTATIVE');

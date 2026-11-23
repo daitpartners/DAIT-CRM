@@ -5,7 +5,7 @@ import { prisma } from '../db.js';
 import { parseQuery } from '../validate.js';
 import { requireUser, type AuthUser } from '../plugins/auth.js';
 import { canSeeLead } from '../leads/visibility.js';
-import { dateOnly, nearestUtcMidnight, todayIn, ymd } from '../leads/dates.js';
+import { allDayMidnight, dateOnly, todayIn, ymd } from '../leads/dates.js';
 import { visibleCompanyIds } from '../companies/visibility.js';
 import { taskWhere } from './tasks.js';
 
@@ -98,8 +98,8 @@ async function eventItems(user: AuthUser, from: string, to: string): Promise<Cal
       organizer: e.organizerName ?? e.organizerAddress, attendees,
     };
     if (e.isAllDay) {
-      const first = nearestUtcMidnight(e.startsAt);
-      const last = ymd(new Date(Math.max(first.getTime(), nearestUtcMidnight(e.endsAt).getTime() - DAY_MS)))!;
+      const first = allDayMidnight(e.startsAt, user.timezone);
+      const last = ymd(new Date(Math.max(first.getTime(), allDayMidnight(e.endsAt, user.timezone).getTime() - DAY_MS)))!;
       for (let d = ymd(first)!; d <= last; d = addDays(d, 1)) {
         if (d >= from && d <= to) out.push({ ...base, date: d, time: null, end: null });
       }

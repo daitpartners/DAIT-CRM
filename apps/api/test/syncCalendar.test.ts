@@ -65,6 +65,18 @@ async function row(userId: number, accountId: number, graphId: string, startsAt:
 }
 
 describe('calendar sync (3C)', () => {
+  test("an all-day event at its zone's midnight is stored on its date, also for users east of UTC+12 (New Zealand, Tonga)", async () => {
+    const { user, account } = await mailbox();
+    await prisma.user.update({ where: { id: user.id }, data: { timezone: 'Pacific/Auckland' } });
+    // 10–11 Mar 2030 in Auckland (UTC+13 in March) as Graph sends it in UTC.
+    const holiday = event({ subject: 'Holiday', startsAt: '2030-03-09T11:00:00.000Z', endsAt: '2030-03-10T11:00:00.000Z', isAllDay: true, attendees: [] });
+    const { graph } = scripted({ start: final([holiday]) });
+    await syncCalendarHandler(job(account.id), { graph });
+    expect(await prisma.calendarEvent.findFirstOrThrow({ where: { userId: user.id } })).toMatchObject({
+      startsAt: new Date('2030-03-10T00:00:00.000Z'), endsAt: new Date('2030-03-11T00:00:00.000Z'),
+    });
+  });
+
   test('a first run reads the 30-days-back to 180-days-ahead window and stores events with UTC times, all-day flag and lower-cased attendees', async () => {
     const { user, account } = await mailbox();
     const meeting = event({ attendees: ['Ana@Acme.com', 'bob@acme.com'] });

@@ -5,6 +5,7 @@ import { GraphError, calendarDeltaStartUrl, isAuthFailure, type GraphEvent } fro
 import { isUniqueViolation } from '../../prismaErrors.js';
 import { mailUser, matchMail } from '../../mail/match.js';
 import { dropCalendarCopy, type CalendarSyncState } from '../../calendar/schedule.js';
+import { allDayMidnight } from '../../leads/dates.js';
 import type { AuthUser } from '../../plugins/auth.js';
 import type { SyncCalendarPayload } from '../types.js';
 import type { JobContext } from '../runner.js';
@@ -35,8 +36,10 @@ async function storeEvent(account: EmailAccount, user: AuthUser, e: GraphEvent):
   const organizerAddress = e.organizer?.address.trim().toLowerCase() || null;
   const counterparts = [...attendees, ...(organizerAddress ? [organizerAddress] : [])].filter((a) => !isOwn(account, a));
   const { leadId, companyId } = await matchMail(prisma, user, { threadId: null, counterparts, ownAddress: account.address });
+  // All-day: midnight to midnight UTC of its dates in the owner's zone.
+  const when = (iso: string) => (e.isAllDay ? allDayMidnight(new Date(iso), user.timezone) : new Date(iso));
   const data = {
-    accountId: account.id, subject: e.subject.slice(0, 500), startsAt: new Date(e.startsAt), endsAt: new Date(e.endsAt), isAllDay: e.isAllDay,
+    accountId: account.id, subject: e.subject.slice(0, 500), startsAt: when(e.startsAt), endsAt: when(e.endsAt), isAllDay: e.isAllDay,
     location: e.location?.slice(0, 500) ?? null, organizerName: e.organizer?.name ? e.organizer.name.slice(0, 255) : null,
     organizerAddress: organizerAddress?.slice(0, 320) ?? null, attendeeAddresses: attendees, isOnline: e.isOnline,
     leadId, companyId,
