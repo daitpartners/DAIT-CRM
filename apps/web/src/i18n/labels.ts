@@ -108,7 +108,7 @@ export function researchSourcesText(t: TFn, sources: readonly string[]): string 
       case 'places':
         return t('Google Places');
       case 'claude':
-        return t('Claude API');
+        return t('Claude Code');
       case 'websearch':
         return t('Web search');
       default:

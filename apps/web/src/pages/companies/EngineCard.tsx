@@ -9,7 +9,7 @@ import { ApiError } from '../../api/client';
 const settingsOf = (v: EnrichmentView): EnrichmentSettingsUpdate => ({
   dailyRunLimit: v.dailyRunLimit,
   claudeEnabled: v.claudeEnabled,
-  claudeMonthlyCapUsd: v.claudeMonthlyCapUsd,
+  claudeMonthlyRunCap: v.claudeMonthlyRunCap,
   placesEnabled: v.placesEnabled,
   placesMonthlyCallCap: v.placesMonthlyCallCap,
   webSearchEnabled: v.webSearchEnabled,
@@ -17,7 +17,8 @@ const settingsOf = (v: EnrichmentView): EnrichmentSettingsUpdate => ({
 
 /**
  * "Enrichment engine" (prototype engineCard, Administrators only). The website reader is built in and always on;
- * Claude API and Google Places can be chosen only when their key is set on the server, each with a monthly cap;
+ * Claude Code (the server's CLI) can be chosen only when its token is set and the binary is there, with a monthly run
+ * cap; Google Places only when its key is set, with a monthly call cap;
  * Ollama and Apollo.io are shown but not available (deviation from the prototype, recorded for the owner).
  * Each change saves at once; number fields save when they lose focus.
  */
@@ -40,8 +41,8 @@ export function EngineCard() {
     );
   };
 
-  const claudeOn = Boolean(data?.claudeKeyPresent && data.claudeEnabled);
-  const usd = data ? new Intl.NumberFormat(lang, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(data.claudeSpentThisMonthUsd) : '';
+  const claudeOn = Boolean(data?.claudeCodeReady && data.claudeEnabled);
+  const runs = data ? new Intl.NumberFormat(lang).format(data.claudeRunsThisMonth) : '';
 
   return (
     <section className="card engine-card" aria-labelledby={headingId}>
@@ -64,28 +65,27 @@ export function EngineCard() {
               type="radio"
               name="engine"
               checked={claudeOn}
-              disabled={!data.claudeKeyPresent || save.isPending}
-              aria-describedby={data.claudeKeyPresent ? undefined : 'engine-claude-hint'}
-              onChange={() => put({ claudeEnabled: true }, t('Engine set to Claude API'))}
+              disabled={!data.claudeCodeReady || save.isPending}
+              aria-describedby={data.claudeCodeReady ? undefined : 'engine-claude-hint'}
+              onChange={() => put({ claudeEnabled: true }, t('Engine set to Claude Code'))}
             />
             <span>
-              <strong>{t('Claude API')}</strong> · {t('intelligence + web search')}
+              <strong>{t('Claude Code')}</strong> {t('on this server')} · {t('intelligence + web search')}
             </span>
           </label>
-          {data.claudeKeyPresent ? (
+          {data.claudeCodeReady ? (
             <div className="engine-sub">
               <NumberField
-                label={t('Monthly cap (USD)')}
-                value={data.claudeMonthlyCapUsd}
-                step="0.01"
+                label={t('Monthly run cap')}
+                value={data.claudeMonthlyRunCap}
                 disabled={save.isPending}
-                onSave={(n) => put({ claudeMonthlyCapUsd: n }, t('Saved'))}
+                onSave={(n) => put({ claudeMonthlyRunCap: n }, t('Saved'))}
               />
-              <span>{t('spent this month USD {n}', { n: usd })}</span>
+              <span>{t('used this month {n}', { n: runs })}</span>
             </div>
           ) : (
             <div id="engine-claude-hint" className="engine-sub">
-              {t('Add ANTHROPIC_API_KEY on the server to enable')}
+              {t('Add CLAUDE_CODE_OAUTH_TOKEN on the server to enable')}
             </div>
           )}
           <label className="sw">
@@ -108,7 +108,7 @@ export function EngineCard() {
             />
             <span>
               {t('Web search')}
-              {claudeOn ? null : <span className="engine-muted"> · {t('needs Claude API')}</span>}
+              {claudeOn ? null : <span className="engine-muted"> · {t('needs Claude Code')}</span>}
             </span>
           </label>
           <label className="sw">

@@ -69,11 +69,14 @@ export type SourceRow = {
   snapshot: string | null;
 };
 
-/** `GET /api/settings/enrichment` (Administrators): the settings, key presence (never a key) and this month's use. */
+/**
+ * `GET /api/settings/enrichment` (Administrators): the settings, whether Claude Code (token and binary) and the Places
+ * key are on the server (never the token or key) and this month's use.
+ */
 export type EnrichmentView = EnrichmentSettingsUpdate & {
-  claudeKeyPresent: boolean;
+  claudeCodeReady: boolean;
   placesKeyPresent: boolean;
-  claudeSpentThisMonthUsd: number;
+  claudeRunsThisMonth: number;
   placesCallsThisMonth: number;
 };
 

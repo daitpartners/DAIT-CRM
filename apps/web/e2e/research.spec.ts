@@ -65,9 +65,10 @@ test('run research on a company website → suggestions → accept one → verif
   await expect(page.getByRole('region', { name: /Suggestions awaiting review/ })).toContainText(
     'Nothing waiting. Run AI research to generate suggestions for unverified fields.',
   );
-  // Administrators see the engine card: the reader is on, Claude and Places wait for their keys.
+  // Administrators see the engine card: the reader is on, Claude Code waits for its token and Places for its key.
   const engine = page.getByRole('region', { name: /Enrichment engine/ });
-  await expect(engine).toContainText('Add ANTHROPIC_API_KEY on the server to enable');
+  await expect(engine).toContainText('Add CLAUDE_CODE_OAUTH_TOKEN on the server to enable');
+  await expect(engine).toContainText('Claude Code on this server · intelligence + web search');
   await expect(engine.getByRole('radio', { name: /Website reader/ })).toBeChecked();
 
   await card.getByRole('button', { name: 'Re-run research' }).click();

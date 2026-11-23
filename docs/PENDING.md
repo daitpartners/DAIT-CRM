@@ -50,8 +50,9 @@ Kept here at the owner's request; picked up when the owner says so.
   Create project dialog.
 - **Kept different from the prototype (approved design):**
   - Enrichment engine card follows the design, not the prototype, including its order: Engine — Website reader (built
-    in, free, always on), Claude API (off until ANTHROPIC_API_KEY is on the server and a monthly cap is set), Ollama
-    ("not installed on this server", disabled); Sources — Public company website (on), Web search (needs Claude API),
+    in, free, always on), Claude Code on this server (off until CLAUDE_CODE_OAUTH_TOKEN is on the server, the `claude`
+    binary is there and a monthly run cap is set), Ollama ("not installed on this server", disabled); Sources — Public
+    company website (on), Web search (needs Claude Code),
     Google Places API (off until GOOGLE_PLACES_API_KEY and a monthly call cap), Apollo.io ("not connected"); plus the
     Daily run limit field. The prototype has Ollama on, Places on, Apollo / Web search selectable.
   - No AI summary, AI classification or opportunity score until Claude is turned on: the AI card shows "Opportunity
@@ -59,20 +60,17 @@ Kept here at the owner's request; picked up when the owner says so.
     research status ("AI research Completed · Run research") instead of the prototype's AI summary.
   - The lead page AI line's "Run research" starts a run (as the design); the prototype's links to the AI tab.
 - **Owner to do:**
-  - **Claude (optional, paid):** create an API key at console.anthropic.com — this is separate from a Claude
-    subscription (Pro / Max does not include API use) and needs its own billing; set `ANTHROPIC_API_KEY` (and
-    `ANTHROPIC_MODEL`, e.g. the current Opus or Sonnet model id) in the server environment and restart; then, in a
-    company's AI Intelligence tab → Enrichment engine, turn Claude on with a monthly cap in USD. Test Web search once
-    with the real key on one company before switching Web search on.
-  - **Before turning Claude on:** check the price table `CLAUDE_PRICES_USD_PER_MTOK` (and the web search price) in
-    `apps/api/src/research/providers.ts` against https://platform.claude.com/docs/en/about-claude/pricing — the cap is
-    counted from it.
+  - **Claude (through the server's Claude Code, 23 Nov addendum):** the subscription token is already on the server
+    (`CLAUDE_CODE_OAUTH_TOKEN`, copied into the CRM's shared `.env` on 23 Nov). All that is left: in a company's AI
+    Intelligence tab → Enrichment engine, switch Claude Code on and set a monthly run cap (runs that use Claude per
+    calendar month). Optional env: `CLAUDE_MODEL` (default `sonnet`), `CLAUDE_BIN` (default `/root/.local/bin/claude`).
+    Test Web search once on the live server, on one company, before relying on it.
   - **Google Places (optional, paid):** a Google Cloud project with a billing account, a budget alert and an API quota
     for the Places API (New); create `GOOGLE_PLACES_API_KEY` (restricted to the Places API) and set it in the server
     environment; then switch "Google Places API" on in the engine card with a monthly call cap.
   - **Apollo.io:** needs a paid Apollo plan; not built (shows "not connected").
   - **Limits:** the daily run limit (default 50 across the CRM) resets at midnight UTC (05:30 IST); the Claude monthly
-    cap and the Places monthly call cap reset at midnight UTC on the 1st of the month (05:30 IST).
+    run cap and the Places monthly call cap reset at midnight UTC on the 1st of the month (05:30 IST).
 
 ## Release 3A — Quotations (22 Nov 2026) — ready on `release-3a-quotations`, not merged, not deployed
 - **Status:** branch `release-3a-quotations` (from main `4e14d50`), all tasks done and checked side by side against the
