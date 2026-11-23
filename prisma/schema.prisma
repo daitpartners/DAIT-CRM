@@ -1038,7 +1038,7 @@ model ImportFile {
   /// FileMeta (shared).
   meta        Json      @default("{}")
   error       String?   @db.VarChar(200)
-  /// "<sheet>\u0000<col>" → the column's target field (or "ignore").
+  /// "<sheet>\u001f<col>" → the column's target field (or "ignore"); U+001F because jsonb cannot hold U+0000.
   columnMap   Json      @default("{}") @map("column_map")
   /// ColumnQuestion[] (shared): the unsure columns still open.
   questions   Json      @default("[]")

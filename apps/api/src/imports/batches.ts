@@ -16,7 +16,10 @@ import { removeImportFile, saveImportFile } from './storage.js';
 
 /** A refused batch or file change; the route answers `status` with `{ error: code }`. */
 export class ImportError extends Error {
-  constructor(readonly code: 'batch_locked' | 'too_many_files' | 'file_type' | 'file_size', readonly status: number) {
+  constructor(
+    readonly code: 'batch_locked' | 'too_many_files' | 'file_type' | 'file_size' | 'files_reading' | 'no_rows',
+    readonly status: number,
+  ) {
     super(code);
   }
 }
@@ -56,7 +59,7 @@ export async function createBatch(user: AuthUser, body: ImportBatchCreate): Prom
 
 /** Statuses from which a batch's language, type and files can no longer change. */
 const LOCKED_FROM = BATCH_STATUSES.indexOf('Importing');
-const isLocked = (status: string) => BATCH_STATUSES.indexOf(status as BatchStatus) >= LOCKED_FROM;
+export const isLocked = (status: string): boolean => BATCH_STATUSES.indexOf(status as BatchStatus) >= LOCKED_FROM;
 
 export async function updateBatch(id: number, body: ImportBatchUpdate): Promise<ImportBatch> {
   return prisma.$transaction(async (tx) => {

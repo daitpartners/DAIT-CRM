@@ -51,9 +51,14 @@ export type ProblemCode = (typeof PROBLEM_CODES)[number];
 /** `level`: missing = red cell (required), questionable = amber cell (unknown or doubtful value), info = no cell colour. */
 export type RowProblem = { code: ProblemCode; field?: ImportField; level: 'missing' | 'questionable' | 'info'; value?: string };
 
-/** `ImportFile.meta`: what the file list says about a read file; `noClaude` = read without Claude (switched off / cap). */
+/**
+ * `ImportFile.meta`: what the file list says about a read file; `noClaude` = read without Claude (switched off / cap).
+ * `rows` of a spreadsheet = its staged rows; `headers` = each sheet's header row cells (null when the sheet has none),
+ * kept so a repeated header row stays "Not a lead" when the file's columns are re-sorted.
+ */
 export type FileMeta = {
   sheets?: number; rows?: number; pages?: number; lines?: number; textFound?: boolean; noClaude?: 'off' | 'cap';
+  headers?: Record<string, string[] | null>;
 };
 /** An unsure column: the guess is applied at once; a person may confirm another field or skip it. */
 export type ColumnQuestion = { sheet: string; col: number; header: string; guess: ImportField; samples: string[] };
@@ -143,7 +148,9 @@ export function importSource(number: string): string {
  * Why a file could not be read: the stable code stored in `import_files.error` (the screen shows it in the user's
  * language with `importFileErrorText`). `invalid` reads with the file's extension.
  */
-export const IMPORT_FILE_ERRORS = ['invalid', 'too_large', 'password', 'old_doc', 'timeout', 'unreadable', 'interrupted'] as const;
+export const IMPORT_FILE_ERRORS = [
+  'invalid', 'too_large', 'password', 'old_doc', 'timeout', 'unreadable', 'interrupted', 'too_many_rows',
+] as const;
 export type ImportFileError = (typeof IMPORT_FILE_ERRORS)[number];
 
 const FILE_ERROR_TEXT: Record<Lang, Record<ImportFileError, string>> = {
@@ -155,6 +162,7 @@ const FILE_ERROR_TEXT: Record<Lang, Record<ImportFileError, string>> = {
     timeout: 'This file took too long to read',
     unreadable: 'Could not read this file',
     interrupted: 'Reading was interrupted; upload the file again',
+    too_many_rows: 'This import would have more than 5,000 rows',
   },
   es: {
     invalid: 'Este archivo no es un archivo .{ext} válido',
@@ -164,6 +172,7 @@ const FILE_ERROR_TEXT: Record<Lang, Record<ImportFileError, string>> = {
     timeout: 'Este archivo tardó demasiado en leerse',
     unreadable: 'No se pudo leer este archivo',
     interrupted: 'La lectura se interrumpió; vuelve a subir el archivo',
+    too_many_rows: 'Esta importación tendría más de 5.000 filas',
   },
   fr: {
     invalid: 'Ce fichier n’est pas un fichier .{ext} valide',
@@ -173,6 +182,7 @@ const FILE_ERROR_TEXT: Record<Lang, Record<ImportFileError, string>> = {
     timeout: 'La lecture de ce fichier a pris trop de temps',
     unreadable: 'Impossible de lire ce fichier',
     interrupted: 'La lecture a été interrompue ; importez à nouveau le fichier',
+    too_many_rows: 'Cette importation dépasserait 5 000 lignes',
   },
 };
 

@@ -1,12 +1,14 @@
 import type { FastifyError, FastifyPluginAsync, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import {
-  IMPORT_MAX_FILE_BYTES, IMPORT_MAX_FILES, IMPORT_MAX_ROWS, ImportBatchCreate, ImportBatchUpdate, OUTREACH_LANGUAGES,
+  IMPORT_MAX_FILE_BYTES, IMPORT_MAX_FILES, IMPORT_MAX_ROWS, ImportBatchCreate, ImportBatchUpdate, ImportColumnAnswer,
+  ImportIncludeAll, ImportRowUpdate, ImportRowsQuery, OUTREACH_LANGUAGES,
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { NotFoundError, parseBody, parseQuery } from '../validate.js';
 import { requireRight } from '../plugins/auth.js';
 import { ImportError, addFile, createBatch, listFiles, updateBatch } from '../imports/batches.js';
+import { answerColumn, includeAll, listRows, rematchBatch, sortBatch, updateRow } from '../imports/stage.js';
 import { loadEnrichmentSettings, monthTotals } from '../research/service.js';
 import { claudeCodeConfig, claudeCodeReady } from '../research/providers.js';
 
@@ -38,7 +40,11 @@ async function firstNames(ids: number[]): Promise<string[]> {
   return ids.map((id) => byId.get(id)).filter((n): n is string => Boolean(n));
 }
 
-/** Import leads (step 1): options, batches and file uploads. Administrators and Managers (`import_leads`). */
+/**
+ * Import leads (steps 1 and 2): options, batches, file uploads, and the staged rows (list, edit, tick, column
+ * questions, re-matching). Administrators and Managers (`import_leads`). Changes are refused (409 `batch_locked`) once
+ * the batch is Importing or later.
+ */
 export const importBatchRoutes: FastifyPluginAsync = async (app) => {
   const canImport = { preHandler: [requireRight('import_leads')] };
 
@@ -113,5 +119,39 @@ export const importBatchRoutes: FastifyPluginAsync = async (app) => {
 
   app.get<{ Params: { id: string } }>('/imports/batches/:id/files', canImport, async (request) => {
     return { items: await listFiles(idOf(request.params.id)) };
+  });
+
+  /** Step 1 → step 2 (Uploading → Sorting): every file read, at least one row staged. */
+  app.post<{ Params: { id: string } }>('/imports/batches/:id/sort', canImport, async (request, reply) => {
+    const id = idOf(request.params.id);
+    return guard(reply, async () => batchView(await sortBatch(id)));
+  });
+
+  app.get<{ Params: { id: string } }>('/imports/batches/:id/rows', canImport, async (request) => {
+    return listRows(idOf(request.params.id), parseQuery(ImportRowsQuery, request.query));
+  });
+
+  app.patch<{ Params: { id: string } }>('/imports/rows/:id', canImport, async (request, reply) => {
+    const id = idOf(request.params.id);
+    const body = parseBody(ImportRowUpdate, request.body);
+    return guard(reply, () => updateRow(id, body));
+  });
+
+  app.post<{ Params: { id: string } }>('/imports/batches/:id/include', canImport, async (request, reply) => {
+    const id = idOf(request.params.id);
+    const body = parseBody(ImportIncludeAll, request.body);
+    return guard(reply, () => includeAll(id, body));
+  });
+
+  app.post<{ Params: { id: string } }>('/imports/files/:id/columns', canImport, async (request, reply) => {
+    const id = idOf(request.params.id);
+    const body = parseBody(ImportColumnAnswer, request.body);
+    return guard(reply, () => answerColumn(id, body));
+  });
+
+  /** Country and company matching again for the whole batch (e.g. after "Add these countries"). */
+  app.post<{ Params: { id: string } }>('/imports/batches/:id/rematch', canImport, async (request, reply) => {
+    const id = idOf(request.params.id);
+    return guard(reply, async () => ({ tiles: await rematchBatch(id) }));
   });
 };

@@ -61,6 +61,7 @@ describe('importFileErrorText', () => {
     expect(importFileErrorText('old_doc', 'docx', 'en')).toBe("Old .doc files can't be read; save it as .docx");
     expect(importFileErrorText('unreadable', 'csv', 'en')).toBe('Could not read this file');
     expect(importFileErrorText('interrupted', 'csv', 'en')).toBe('Reading was interrupted; upload the file again');
+    expect(importFileErrorText('too_many_rows', 'xlsx', 'en')).toBe('This import would have more than 5,000 rows');
     expect(importFileErrorText('invalid', 'docx', 'fr')).toContain('.docx');
     expect(importFileErrorText('invalid', 'xls', 'es')).toContain('.xls');
   });
