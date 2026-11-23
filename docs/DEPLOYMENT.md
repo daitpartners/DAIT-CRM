@@ -43,6 +43,8 @@ See the processes with `! ssh root@88.222.213.73 'sudo -iu daitcrm pm2 ls'`. (In
 | `backups/` | Database dumps (see Backups) |
 | `.pm2/logs/` | Process logs (see Logs) |
 
+**Memory limits (PM2 `max_memory_restart`, `deploy/ecosystem.config.cjs`):** the api restarts at 400M, the worker at 1G. The worker reads each Import leads file in a worker thread with its own 512 MB heap limit (and a 2-minute timeout), and that memory counts toward the worker process; 1G leaves room for a heavy read next to mail and research (the server has 32 GB).
+
 **There is no test copy on the server.** `~/test`, the `crm-test` / `crm-test-worker` apps, the `dait_crm_test`
 database and crm-test.daitpartners.com were planned but never set up (see "If you later want a test copy" at the end).
 Every release so far was checked locally (unit, API, end-to-end and prototype-parity screenshots) and then deployed

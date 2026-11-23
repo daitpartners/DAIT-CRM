@@ -23,7 +23,9 @@ function app(env, kind, port) {
       STORAGE_DIR: `${root}/${env}/shared/storage`,
       RELEASE: release(cwd),
     },
-    max_memory_restart: '400M',
+    // The worker reads Import leads files in a thread with up to 512 MB of its own heap, counted in the process's
+    // memory: 1G leaves room for that next to mail and research. The api stays at 400M.
+    max_memory_restart: worker ? '1G' : '400M',
     // A worker may be mid-send when it is told to stop; the api only has to finish requests.
     kill_timeout: worker ? 30000 : 10000,
   };
