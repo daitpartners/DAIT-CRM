@@ -34,7 +34,7 @@ function msg(over: Partial<GraphMessage> = {}): GraphMessage {
   return {
     id: `g${n}`, subject: 'Hello', from: { name: 'Ana Ruiz', address: 'ana@acme.com' }, to: [ADDRESS], cc: [],
     receivedAt: '2026-11-20T10:00:00.000Z', sentAt: '2026-11-20T09:59:00.000Z', isRead: false, isDraft: false,
-    conversationId: `conv-${n}`, internetMessageId: `<m${n}@acme.com>`, hasAttachments: false, bodyText: 'Hi Maya', ...over,
+    conversationId: `conv-${n}`, internetMessageId: `<m${n}@acme.com>`, hasAttachments: false, body: { contentType: 'text', content: 'Hi Maya' }, ...over,
   };
 }
 
@@ -282,9 +282,52 @@ describe('mail sync (2B-2)', () => {
 
   test('long bodies are cut to 50,000 characters', async () => {
     const { account } = await mailbox();
-    const { graph } = scripted({ 'start:inbox': final('inbox', [msg({ bodyText: 'x'.repeat(60_000) })]) });
+    const { graph } = scripted({ 'start:inbox': final('inbox', [msg({ body: { contentType: 'text', content: 'x'.repeat(60_000) } })]) });
     await syncMailboxHandler(job(account.id), { graph });
     expect((await prisma.emailMessage.findFirstOrThrow()).bodyText).toHaveLength(50_000);
+  });
+
+  test('an HTML body is stored sanitised, with text derived from it (no CSS or markup); a long one is capped too', async () => {
+    const { account } = await mailbox();
+    const html = `<html><head><title>Offer</title><style>.btn{color:#fff;background:#0a66c2} p{margin:0}</style></head>
+      <body><p>Hello <b>Maya</b>,</p><p>Our <a class="btn" href="https://acme.com/offer" onclick="track()">offer</a> is ready.</p>
+      <script>steal()</script><img src="cid:logo@01" alt="logo"></body></html>`;
+    const long = `<div>${'<p>Paragraph text here.</p>'.repeat(5000)}</div>`;
+    const { graph } = scripted({
+      'start:inbox': final('inbox', [msg({ subject: 'Offer', body: { contentType: 'html', content: html } }), msg({ subject: 'Long', body: { contentType: 'html', content: long } })]),
+    });
+    await syncMailboxHandler(job(account.id), { graph });
+    const row = await prisma.emailMessage.findFirstOrThrow({ where: { subject: 'Offer' } });
+    expect(row.bodyText).toBe('Hello Maya,\n\nOur offer is ready.');
+    expect(row.bodyHtml).toContain('<b>Maya</b>');
+    expect(row.bodyHtml).toContain('<style>.btn{color:#fff;background:#0a66c2} p{margin:0}</style>');
+    expect(row.bodyHtml).toContain('href="https://acme.com/offer" target="_blank" rel="noopener noreferrer"');
+    expect(row.bodyHtml).not.toMatch(/onclick|script|steal|cid:|Offer<\/title>/);
+    const big = await prisma.emailMessage.findFirstOrThrow({ where: { subject: 'Long' } });
+    expect(big.bodyHtml!.length).toBeLessThanOrEqual(50_000);
+    expect(big.bodyText.length).toBeLessThanOrEqual(50_000);
+  });
+
+  test('a plain-text body is stored as text with no HTML', async () => {
+    const { account } = await mailbox();
+    const { graph } = scripted({ 'start:inbox': final('inbox', [msg({ body: { contentType: 'text', content: 'Line 1\nLine 2' } })]) });
+    await syncMailboxHandler(job(account.id), { graph });
+    expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ bodyText: 'Line 1\nLine 2', bodyHtml: null });
+  });
+
+  test('a row synced before HTML bodies gets its HTML (and cleaner text) when the message comes again; one that has it keeps it', async () => {
+    const { user, account } = await mailbox();
+    const old = msg({ id: 'old-1' });
+    const kept = msg({ id: 'kept-1' });
+    const base = { userId: user.id, accountId: account.id, folder: 'inbox', status: 'received', source: 'sync', fromAddress: 'ana@acme.com', subject: 'Hello' };
+    await prisma.emailMessage.create({ data: { ...base, graphId: 'old-1', bodyText: '.x{color:red} Hello' } });
+    await prisma.emailMessage.create({ data: { ...base, graphId: 'kept-1', bodyText: 'Kept', bodyHtml: '<p>Kept</p>' } });
+    const { graph } = scripted({
+      'start:inbox': final('inbox', [{ ...old, body: { contentType: 'html', content: '<style>.x{color:red}</style><p>Hello</p>' } }, { ...kept, body: { contentType: 'html', content: '<p>New</p>' } }]),
+    });
+    await syncMailboxHandler(job(account.id), { graph });
+    expect(await prisma.emailMessage.findFirstOrThrow({ where: { graphId: 'old-1' } })).toMatchObject({ bodyHtml: '<style>.x{color:red}</style><p>Hello</p>', bodyText: 'Hello' });
+    expect(await prisma.emailMessage.findFirstOrThrow({ where: { graphId: 'kept-1' } })).toMatchObject({ bodyHtml: '<p>Kept</p>', bodyText: 'Kept' });
   });
 });
 

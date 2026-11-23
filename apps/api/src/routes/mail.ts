@@ -1,8 +1,11 @@
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
 import { Prisma, type EmailMessage, type Lead } from '@prisma/client';
 import { LeadCreate, MailCompose, MailLink, MailListQuery, MailRead, MailReply, can, checkDomain, domainOf, isFreeMail, pageArgs } from '@dait-crm/shared';
 import { audit } from '../audit.js';
-import { enqueue } from '../jobs/queue.js';
+import { enqueue, errorMessage } from '../jobs/queue.js';
+import { BODY_MAX } from '../jobs/handlers/syncMailbox.js';
+import { GraphError, type GraphClient } from '../graph/client.js';
+import { emailBodies } from '../mail/html.js';
 import type { MailActionPayload } from '../jobs/types.js';
 import { dateOnly, todayIn, ymd } from '../leads/dates.js';
 import { auditCreatedLead, createLeadWithCompany, RuleError } from '../leads/service.js';
@@ -147,6 +150,28 @@ async function ownMessage(db: Tx | typeof prisma, user: AuthUser, rawId: string)
   const m = Number.isInteger(id) ? await db.emailMessage.findFirst({ where: { id, userId: user.id } }) : null;
   if (!m) throw new NotFoundError();
   return m;
+}
+
+/**
+ * The HTML body of a message synced before bodies were kept as HTML (owner, 23 Nov 2026), read once when it is opened:
+ * only for the caller's own message (`m` comes from ownMessage) and only from the mailbox it came from while that is
+ * the caller's own connected one, never anyone else's. Sanitised and stored with the cleaner text. A message the
+ * mailbox no longer has (or a plain-text one) is marked '' and not asked again; any other failure leaves the text
+ * body to show and tries again next time.
+ */
+async function fillHtmlBody(graph: GraphClient, log: FastifyBaseLogger, user: AuthUser, m: EmailMessage): Promise<EmailMessage> {
+  if (m.bodyHtml !== null || !m.graphId || m.accountId === null || m.userId !== user.id) return m;
+  const account = await prisma.emailAccount.findFirst({ where: { id: m.accountId, userId: user.id, kind: 'personal', status: 'connected' } });
+  if (!account) return m;
+  try {
+    const { bodyHtml, bodyText } = emailBodies(await graph.messageBody(account, m.graphId), BODY_MAX);
+    return await prisma.emailMessage.update({ where: { id: m.id }, data: { bodyHtml: bodyHtml ?? '', bodyText } });
+  } catch (err) {
+    if (err instanceof GraphError && err.status === 404) return prisma.emailMessage.update({ where: { id: m.id }, data: { bodyHtml: '' } });
+    // The message id and Graph's status only: the mail is private to its owner.
+    log.warn({ emailMessageId: m.id, err: errorMessage(err) }, 'mail body fetch failed');
+    return m;
+  }
 }
 
 /** Of `ids`, the projects the user can see (a tag on one they cannot see shows no id or number, as a lead's). */
@@ -298,7 +323,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Params: { id: string }; Querystring: { peek?: string } }>('/mail/:id', pre, async (request, reply) => {
     const user = request.user!;
     return guard(reply, async () => {
-      let m = await ownMessage(prisma, user, request.params.id);
+      let m = await fillHtmlBody(app.graph, request.log, user, await ownMessage(prisma, user, request.params.id));
       if (!m.isRead && request.query.peek !== '1') {
         m = await prisma.emailMessage.update({ where: { id: m.id }, data: { isRead: true } });
         await tellMailbox(prisma, m, 'read');
@@ -314,7 +339,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
       ]);
       return {
         ...listItem({ ...m, lead: lead ? { id: lead.id, number: lead.number } : null, project: m.projectId ? projects.get(m.projectId) ?? null : null }),
-        ccAddresses: m.ccAddresses as string[], bodyText: m.bodyText, attachmentNames: m.attachmentNames as string[], loggedAt: m.loggedAt,
+        ccAddresses: m.ccAddresses as string[], bodyText: m.bodyText, bodyHtml: m.bodyHtml || null, attachmentNames: m.attachmentNames as string[], loggedAt: m.loggedAt,
         lead: lead ? { id: lead.id, number: lead.number, status: lead.status, priority: lead.priority, nextFollowUp: ymd(lead.nextFollowUp), companyId: lead.companyId } : null,
         contact: contact ? { id: contact.id, name: `${contact.firstName} ${contact.lastName}`.trim() } : null,
         company,

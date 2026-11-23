@@ -8,7 +8,7 @@ import { recordOnLead } from '../../mail/outgoing.js';
 import { notifyUser } from '../../leads/notify.js';
 import { sendBlock } from '../../mailer/rules.js';
 import { queueStep, startOfDayIn, startOfNextDayIn } from '../../mailer/schedule.js';
-import { textToHtml } from './sendUserEmail.js';
+import { textToHtml } from '../../mail/html.js';
 import type { JobContext } from '../runner.js';
 
 /** Nobody can be sent now (working hours): never look again sooner than this. */
@@ -93,9 +93,10 @@ export async function campaignStepHandler(job: Job, ctx: JobContext): Promise<vo
   const ctxFill = { firstName: lead.contact?.firstName || 'there', company: lead.companyName, me: user.name, leadNumber: lead.number };
   const subject = fillTemplate(c.subject, ctxFill).slice(0, 500);
   const text = fillTemplate(c.body, ctxFill) + (c.unsubscribeLine ? (UNSUBSCRIBE[c.language] ?? UNSUBSCRIBE.en) : '');
+  const html = textToHtml(text);
   try {
     await ctx.graph.sendMail(account, {
-      to: [r.toAddress], ...(c.cc.length ? { cc: c.cc } : {}), ...(c.bcc.length ? { bcc: c.bcc } : {}), subject, html: textToHtml(text), text,
+      to: [r.toAddress], ...(c.cc.length ? { cc: c.cc } : {}), ...(c.bcc.length ? { bcc: c.bcc } : {}), subject, html, text,
     });
   } catch (err) {
     const reason = errorMessage(err);
@@ -125,7 +126,7 @@ export async function campaignStepHandler(job: Job, ctx: JobContext): Promise<vo
       data: {
         userId: c.senderId, accountId: account.id, leadId: lead.id, contactId: lead.contactId, companyId: lead.companyId, campaignId: c.id,
         folder: 'sent', status: 'sent', source: 'crm', fromAddress: account.address, toAddresses: [r.toAddress], ccAddresses: c.cc, bccAddresses: c.bcc,
-        subject, bodyText: text, occurredAt: new Date(),
+        subject, bodyText: text, bodyHtml: html, occurredAt: new Date(),
       },
     });
     await recordOnLead(tx, user, lead, msg, subject);

@@ -62,6 +62,9 @@ describe('Mailer step: one email per step from the sender’s mailbox (release 2
     expect(rs.map((r) => r.status)).toEqual(['Sent', 'Queued']);
     const msg = await prisma.emailMessage.findUniqueOrThrow({ where: { id: rs[0]!.emailMessageId! } });
     expect(msg).toMatchObject({ userId: sender.id, campaignId: c.id, folder: 'sent', status: 'sent', source: 'crm', bccAddresses: ['deepak@daitpartners.com'], leadId: lead.id });
+    // The HTML that went out is stored too, so the reader shows it as sent.
+    expect(msg.bodyHtml).toBe(sent[0]!.html);
+    expect(msg.bodyHtml).toContain('Hola Ana0 de Andino.<br>');
     expect(lead.status).toBe('Contacted');
     expect(await prisma.leadActivity.findFirst({ where: { leadId: lead.id, activityType: 'email' } })).toMatchObject({ title: 'Email sent · Hola Ana0', relatedType: 'email_message', byUserId: sender.id });
     const after = await prisma.emailCampaign.findUniqueOrThrow({ where: { id: c.id } });

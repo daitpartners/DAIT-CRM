@@ -8,6 +8,7 @@ import { audit } from '../audit.js';
 import { dateOnly, todayIn } from '../leads/dates.js';
 import { RuleError, applyStatusChange, syncFollowUpTask } from '../leads/service.js';
 import { projectWhere } from '../projects/visibility.js';
+import { textToHtml } from './html.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -67,7 +68,7 @@ export async function queueOutgoing(tx: Tx, user: AuthUser, account: EmailAccoun
     data: {
       userId: user.id, accountId: account.id, leadId: lead?.id ?? null, ...links,
       folder: 'sent', status: 'queued', source: 'crm', fromAddress: account.address, toAddresses: o.to, ccAddresses: o.cc,
-      subject: o.subject, bodyText: o.body, replyToId: o.replyToId ?? null, threadId: o.threadId ?? null, projectId: o.projectId ?? null,
+      subject: o.subject, bodyText: o.body, bodyHtml: textToHtml(o.body), replyToId: o.replyToId ?? null, threadId: o.threadId ?? null, projectId: o.projectId ?? null,
       attachmentNames: (o.attachments ?? []).map((a) => a.name),
     },
   });

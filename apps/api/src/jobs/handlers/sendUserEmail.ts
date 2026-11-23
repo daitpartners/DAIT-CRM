@@ -5,12 +5,7 @@ import { isAuthFailure } from '../../graph/client.js';
 import type { SendUserEmailPayload } from '../types.js';
 import type { JobContext } from '../runner.js';
 import { onQuotationSendFailed, onQuotationSent } from '../../quotations/send.js';
-
-/** Plain text as simple HTML: escaped, line breaks kept. */
-export function textToHtml(text: string): string {
-  const escaped = text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
-  return `<div>${escaped.replace(/\r?\n/g, '<br>')}</div>`;
-}
+import { textToHtml } from '../../mail/html.js';
 
 /**
  * A message that will not be sent: marked `failed`, and its "Email sent" history line removed (it never left; the

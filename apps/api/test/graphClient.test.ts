@@ -167,14 +167,14 @@ describe('graph client — mail sync and actions (2B-2)', () => {
     expect(q.get('$select')!.split(',')).toEqual(expect.arrayContaining(['subject', 'from', 'toRecipients', 'ccRecipients', 'receivedDateTime', 'isRead', 'conversationId', 'hasAttachments', 'body', 'isDraft']));
   });
 
-  test('deltaPage maps messages, removals and links, with immutable ids, text bodies and pages of 50', async () => {
+  test('deltaPage maps messages, removals and links, with immutable ids, HTML bodies and pages of 50', async () => {
     const fetchMock = vi.fn(async () => json({
       value: [
         {
           id: 'g1', subject: 'Re: Proposal', from: { emailAddress: { name: 'Ana Ruiz', address: 'Ana@Acme.com' } },
           toRecipients: [{ emailAddress: { address: 'maya@daitpartners.com' } }], ccRecipients: [{ emailAddress: { address: 'cc@acme.com' } }],
           receivedDateTime: '2026-11-20T10:00:00Z', sentDateTime: '2026-11-20T09:59:00Z', isRead: false, isDraft: false,
-          conversationId: 'conv-1', internetMessageId: '<m1@acme.com>', hasAttachments: true, body: { contentType: 'text', content: 'Hello' },
+          conversationId: 'conv-1', internetMessageId: '<m1@acme.com>', hasAttachments: true, body: { contentType: 'html', content: '<p>Hello</p>' },
         },
         { id: 'g2', '@removed': { reason: 'deleted' } },
       ],
@@ -186,7 +186,7 @@ describe('graph client — mail sync and actions (2B-2)', () => {
       messages: [{
         id: 'g1', subject: 'Re: Proposal', from: { name: 'Ana Ruiz', address: 'ana@acme.com' }, to: ['maya@daitpartners.com'], cc: ['cc@acme.com'],
         receivedAt: '2026-11-20T10:00:00Z', sentAt: '2026-11-20T09:59:00Z', isRead: false, isDraft: false, conversationId: 'conv-1',
-        internetMessageId: '<m1@acme.com>', hasAttachments: true, bodyText: 'Hello',
+        internetMessageId: '<m1@acme.com>', hasAttachments: true, body: { contentType: 'html', content: '<p>Hello</p>' },
       }],
       removed: ['g2'],
       nextLink: 'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages/delta?$skiptoken=abc',
@@ -196,8 +196,36 @@ describe('graph client — mail sync and actions (2B-2)', () => {
     expect(url).toBe('https://graph.microsoft.com/v1.0/x');
     expect(headers(init).Prefer).toContain('IdType="ImmutableId"');
     expect(headers(init).Prefer).toContain('odata.maxpagesize=50');
-    expect(headers(init).Prefer).toContain('outlook.body-content-type="text"');
+    expect(headers(init).Prefer).toContain('outlook.body-content-type="html"');
     expect(msalState.scopes[0]).toEqual(GRAPH_MAIL_SCOPES);
+  });
+
+  test('deltaPage keeps a plain-text body as text, and a missing body as empty text', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({
+      value: [{ id: 'g1', body: { contentType: 'text', content: 'Hi' } }, { id: 'g2' }],
+      '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/d',
+    })));
+    const page = await createGraphClient(env).deltaPage(await account(), 'https://graph.microsoft.com/v1.0/x');
+    expect(page.messages.map((m) => m.body)).toEqual([{ contentType: 'text', content: 'Hi' }, { contentType: 'text', content: '' }]);
+  });
+
+  test('messageBody reads one message\'s HTML body from the account\'s own mailbox (immutable id, mail scopes)', async () => {
+    const fetchMock = vi.fn(async () => json({ id: 'id/1', body: { contentType: 'html', content: '<p>Hi</p>' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await createGraphClient(env).messageBody(await account(), 'id/1')).toEqual({ contentType: 'html', content: '<p>Hi</p>' });
+    const [url, init] = call(fetchMock);
+    expect(url).toBe('https://graph.microsoft.com/v1.0/me/messages/id%2F1?$select=body');
+    expect(init.method).toBe('GET');
+    expect(headers(init).Prefer).toContain('IdType="ImmutableId"');
+    expect(headers(init).Prefer).toContain('outlook.body-content-type="html"');
+    expect(msalState.scopes[0]).toEqual(GRAPH_MAIL_SCOPES);
+  });
+
+  test('messageBody: a message gone from the mailbox is a GraphError with status 404', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ error: { code: 'ErrorItemNotFound' } }, 404)));
+    const err = await createGraphClient(env).messageBody(await account(), 'gone').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GraphError);
+    expect((err as GraphError).status).toBe(404);
   });
 
   test('deltaPage refuses a link that is not Graph (never sends the token elsewhere)', async () => {

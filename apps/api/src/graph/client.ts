@@ -3,6 +3,7 @@ import type { EmailAccount, PrismaClient } from '@prisma/client';
 import { prisma } from '../db.js';
 import { decrypt, encrypt } from '../crypto/tokens.js';
 import { readRefreshToken, type MsEnv } from '../auth/microsoft.js';
+import type { GraphBody } from '../mail/html.js';
 
 /**
  * A file sent with a message (Graph fileAttachment, inline in the request: Graph takes at most 4 MB per request, so the
@@ -43,7 +44,8 @@ export interface GraphMessage {
   conversationId: string | null;
   internetMessageId: string | null;
   hasAttachments: boolean;
-  bodyText: string;
+  /** HTML as Graph sends it (asked for with `outlook.body-content-type="html"`); sync sanitises it before storing. */
+  body: GraphBody;
 }
 
 /** One page of a delta query: changed messages, removed ids, and the link to continue from. */
@@ -87,6 +89,8 @@ export interface GraphClient {
   markRead(account: EmailAccount, graphId: string, isRead: boolean): Promise<void>;
   moveTo(account: EmailAccount, graphId: string, folder: 'archive' | 'inbox'): Promise<void>;
   reply(account: EmailAccount, graphId: string, msg: { to: string[]; cc?: string[]; html: string }): Promise<void>;
+  /** One message's body as HTML (a message synced before bodies were stored as HTML, opened in the reader). */
+  messageBody(account: EmailAccount, graphId: string): Promise<GraphBody>;
   /** Release 3C (the account's own calendar, read only): */
   calendarDeltaPage(account: EmailAccount, url: string): Promise<CalendarDeltaPage>;
 }
@@ -117,6 +121,8 @@ const SYNC_FIELDS = [
 ];
 /** Immutable ids survive moves between folders, so a message keeps its row when archived. */
 const IMMUTABLE = 'IdType="ImmutableId"';
+/** Bodies as HTML, so the reader can show them formatted as Outlook does (owner, 23 Nov 2026). */
+const HTML_BODY = 'outlook.body-content-type="html"';
 
 /** Start of a folder's delta query: messages received since `since`. */
 export function deltaStartUrl(folder: MailFolder, since: Date): string {
@@ -165,11 +171,16 @@ const addressOf = (r: GraphAddress): string => (typeof r?.emailAddress?.address 
 const addressList = (list: unknown): string[] => (Array.isArray(list) ? list.map((r) => addressOf(r as GraphAddress)).filter(Boolean) : []);
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 
+/** Graph's body object; anything but HTML is taken as text. */
+function bodyOf(v: unknown): GraphBody {
+  const body = v as { contentType?: unknown; content?: unknown } | null | undefined;
+  return { contentType: str(body?.contentType)?.toLowerCase() === 'html' ? 'html' : 'text', content: str(body?.content) ?? '' };
+}
+
 /** A delta entry as a GraphMessage. */
 function toMessage(v: Record<string, unknown>): GraphMessage {
   const from = v.from as GraphAddress;
   const fromAddress = addressOf(from);
-  const body = v.body as { content?: unknown } | undefined;
   return {
     id: String(v.id),
     subject: str(v.subject) ?? '',
@@ -183,7 +194,7 @@ function toMessage(v: Record<string, unknown>): GraphMessage {
     conversationId: str(v.conversationId),
     internetMessageId: str(v.internetMessageId),
     hasAttachments: v.hasAttachments === true,
-    bodyText: str(body?.content) ?? '',
+    body: bodyOf(v.body),
   };
 }
 
@@ -350,7 +361,7 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
     async deltaPage(account, url) {
       // Stored links come from Graph; never send the token anywhere else.
       if (!url.startsWith(`${GRAPH}/`)) throw new Error('not_a_graph_link');
-      const res = await mailCall(account, url, 'GET', undefined, `${IMMUTABLE}, odata.maxpagesize=50, outlook.body-content-type="text"`);
+      const res = await mailCall(account, url, 'GET', undefined, `${IMMUTABLE}, odata.maxpagesize=50, ${HTML_BODY}`);
       const page = (await res.json()) as { value?: Record<string, unknown>[]; '@odata.nextLink'?: string; '@odata.deltaLink'?: string };
       const messages: GraphMessage[] = [];
       const removed: string[] = [];
@@ -380,6 +391,11 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
         comment: msg.html,
         message: { toRecipients: recipients(msg.to), ccRecipients: recipients(msg.cc) },
       });
+    },
+
+    async messageBody(account, graphId) {
+      const res = await mailCall(account, `${messageUrl(graphId)}?$select=body`, 'GET', undefined, `${IMMUTABLE}, ${HTML_BODY}`);
+      return bodyOf(((await res.json()) as { body?: unknown }).body);
     },
 
     async calendarDeltaPage(account, url) {

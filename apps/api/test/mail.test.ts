@@ -8,6 +8,7 @@ import { runOnce } from '../src/jobs/runner';
 import { sendUserEmailHandler } from '../src/jobs/handlers/sendUserEmail';
 import { mailActionHandler } from '../src/jobs/handlers/mailAction';
 import { todayIn } from '../src/leads/dates';
+import { GraphError, type GraphClient } from '../src/graph/client';
 import { fakeGraph, resetDb, seedLookups } from './helpers';
 import { makeCompany, makeContact, makeLead, makeProject, makeUser, signIn } from './factory';
 
@@ -24,14 +25,26 @@ vi.mock('../src/routes/leads', async (importOriginal) => {
   };
 });
 
+/** The routes' Graph client: each test may answer messageBody; by default Microsoft is unreachable. */
+const bodies = vi.hoisted(() => ({ calls: [] as { accountId: number; graphId: string }[], answer: null as null | GraphClient['messageBody'] }));
 let app: FastifyInstance;
 beforeAll(async () => {
   process.env.TEST_LOGIN = '1';
-  app = await buildApp();
+  app = await buildApp({
+    graph: fakeGraph({
+      async messageBody(account, graphId) {
+        bodies.calls.push({ accountId: account.id, graphId });
+        if (!bodies.answer) throw new GraphError('graph_request_failed status=503', 503);
+        return bodies.answer(account, graphId);
+      },
+    }),
+  });
 });
 afterAll(() => app.close());
 beforeEach(async () => {
   lockFault.error = null;
+  bodies.calls = [];
+  bodies.answer = null;
   await resetDb();
   await seedLookups();
 });
@@ -80,6 +93,17 @@ describe('compose and reply (2B-2)', () => {
     expect(m).toMatchObject({ userId: rep.id, accountId: box.id, folder: 'sent', status: 'queued', source: 'crm', toAddresses: ['ana@acme.com'], contactId: contact.id, companyId: company.id, leadId: null });
     expect(await prisma.job.count({ where: { type: 'send_user_email' } })).toBe(1);
     expect(await prisma.leadActivity.count({ where: { activityType: 'email' } })).toBe(0);
+  });
+
+  it('compose and reply store the HTML that is sent, so the reader shows it as sent', async () => {
+    const { rep, box } = await setup();
+    const cookie = await signIn(app, rep);
+    const res = await call('POST', '/api/mail', cookie, { to: 'ana@acme.com', cc: [], subject: 'Hello', body: 'Hi Ana,\n<b>not bold</b> & more' });
+    const m = await prisma.emailMessage.findUniqueOrThrow({ where: { id: res.json().id } });
+    expect(m.bodyHtml).toBe('<div>Hi Ana,<br>&lt;b&gt;not bold&lt;/b&gt; &amp; more</div>');
+    const original = await synced(rep.id, box.id);
+    const r = await call('POST', `/api/mail/${original.id}/reply`, cookie, { cc: [], body: 'Thanks' });
+    expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: r.json().id } })).bodyHtml).toBe('<div>Thanks</div>');
   });
 
   it('compose on a lead writes the history line and moves New to Contacted', async () => {
@@ -615,5 +639,95 @@ describe('project-tagged email (3B)', () => {
       { id: managed.id, number: managed.number, name: 'Managed', companyId: other.id },
       { id: mine.id, number: mine.number, name: 'Website', companyId: company.id },
     ]);
+  });
+});
+
+describe('formatted bodies (owner, 23 Nov 2026)', () => {
+  const NEWSLETTER = '<html><head><style>.h{color:#0a66c2}</style></head><body><h1 class="h">News</h1><p onclick="x()">Read <a href="https://acme.com">more</a></p><script>steal()</script></body></html>';
+
+  it('a stored HTML body is served as it is, with no call to the mailbox', async () => {
+    const { rep, box } = await setup();
+    const m = await synced(rep.id, box.id, { bodyText: 'News', bodyHtml: '<h1>News</h1>' });
+    const res = (await call('GET', `/api/mail/${m.id}`, await signIn(app, rep))).json();
+    expect(res).toMatchObject({ bodyText: 'News', bodyHtml: '<h1>News</h1>' });
+    expect(bodies.calls).toEqual([]);
+  });
+
+  it('a message synced before HTML bodies is read once from its owner\'s own mailbox, sanitised, stored and returned', async () => {
+    const { rep, box } = await setup();
+    const m = await synced(rep.id, box.id, { bodyText: '.h{color:#0a66c2} News Read more', graphId: 'g-old' });
+    bodies.answer = async () => ({ contentType: 'html', content: NEWSLETTER });
+    const cookie = await signIn(app, rep);
+    const res = (await call('GET', `/api/mail/${m.id}?peek=1`, cookie)).json();
+    expect(bodies.calls).toEqual([{ accountId: box.id, graphId: 'g-old' }]);
+    expect(res.bodyHtml).toContain('<h1 class="h">News</h1>');
+    expect(res.bodyHtml).not.toMatch(/onclick|script|steal/);
+    expect(res.bodyText).toBe('News\n\nRead more');
+    expect(await prisma.emailMessage.findUniqueOrThrow({ where: { id: m.id } })).toMatchObject({ bodyHtml: res.bodyHtml, bodyText: 'News\n\nRead more' });
+    // Once: the next open uses what was stored.
+    await call('GET', `/api/mail/${m.id}`, cookie);
+    expect(bodies.calls).toHaveLength(1);
+  });
+
+  it("another user's message is never fetched, administrators included (404, the mailbox is not asked)", async () => {
+    const { rep, admin, box } = await setup();
+    const m = await synced(rep.id, box.id, { graphId: 'g-private' });
+    bodies.answer = async () => ({ contentType: 'html', content: '<p>secret</p>' });
+    expect((await call('GET', `/api/mail/${m.id}`, await signIn(app, admin))).statusCode).toBe(404);
+    const other = await makeUser({ role: 'MANAGER' });
+    expect((await call('GET', `/api/mail/${m.id}`, await signIn(app, other))).statusCode).toBe(404);
+    expect(bodies.calls).toEqual([]);
+    expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: m.id } })).bodyHtml).toBeNull();
+  });
+
+  it('only the owner\'s own connected mailbox is used: a disconnected one, or one now connected to someone else, is not asked', async () => {
+    const { rep, admin, box } = await setup();
+    bodies.answer = async () => ({ contentType: 'html', content: '<p>x</p>' });
+    const cookie = await signIn(app, rep);
+    const a = await synced(rep.id, box.id, { graphId: 'g-a' });
+    await prisma.emailAccount.update({ where: { id: box.id }, data: { status: 'disconnected' } });
+    expect((await call('GET', `/api/mail/${a.id}`, cookie)).json()).toMatchObject({ bodyText: 'Looks good', bodyHtml: null });
+    // The mailbox row passed to the administrator (connected for them): Maya's old message is still hers, and is not fetched with it.
+    await prisma.emailAccount.update({ where: { id: box.id }, data: { status: 'connected', userId: admin.id, address: 'shared@daitpartners.com' } });
+    expect((await call('GET', `/api/mail/${a.id}`, cookie)).json()).toMatchObject({ bodyHtml: null });
+    // A CRM-written message with no mailbox id has nothing to fetch.
+    const crm = await synced(rep.id, null, { graphId: null, source: 'crm', status: 'sent', folder: 'sent' });
+    expect((await call('GET', `/api/mail/${crm.id}`, cookie)).json()).toMatchObject({ bodyHtml: null });
+    expect(bodies.calls).toEqual([]);
+  });
+
+  it('when Microsoft fails the text body is shown and the next open tries again; a message gone from the mailbox is not asked again', async () => {
+    const { rep, box } = await setup();
+    const cookie = await signIn(app, rep);
+    const m = await synced(rep.id, box.id, { graphId: 'g-flaky' });
+    const res = await call('GET', `/api/mail/${m.id}`, cookie);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ bodyText: 'Looks good', bodyHtml: null });
+    bodies.answer = async () => {
+      throw new GraphError('graph_request_failed status=404 code=ErrorItemNotFound', 404);
+    };
+    expect((await call('GET', `/api/mail/${m.id}`, cookie)).json()).toMatchObject({ bodyText: 'Looks good', bodyHtml: null });
+    expect(bodies.calls).toHaveLength(2);
+    await call('GET', `/api/mail/${m.id}`, cookie);
+    expect(bodies.calls).toHaveLength(2);
+  });
+
+  it('a plain-text body from the mailbox stays plain text', async () => {
+    const { rep, box } = await setup();
+    const m = await synced(rep.id, box.id, { graphId: 'g-text' });
+    bodies.answer = async () => ({ contentType: 'text', content: 'Line 1\nLine 2' });
+    const cookie = await signIn(app, rep);
+    expect((await call('GET', `/api/mail/${m.id}`, cookie)).json()).toMatchObject({ bodyText: 'Line 1\nLine 2', bodyHtml: null });
+    await call('GET', `/api/mail/${m.id}`, cookie);
+    expect(bodies.calls).toHaveLength(1);
+  });
+
+  it('the list never carries bodies', async () => {
+    const { rep, box } = await setup();
+    await synced(rep.id, box.id, { bodyHtml: '<p>Looks good</p>' });
+    const item = (await call('GET', '/api/mail?view=inbox', await signIn(app, rep))).json().items[0];
+    expect(item.bodyHtml).toBeUndefined();
+    expect(item.preview).toBe('Looks good');
+    expect(bodies.calls).toEqual([]);
   });
 });
