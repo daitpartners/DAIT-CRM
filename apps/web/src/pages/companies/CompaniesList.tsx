@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { COMPANY_SORTS, COMPANY_TABS, CompanyStatus, VERIFICATION_STATUSES, lookupLabel, safeUrl, type CompanyTab } from '@dait-crm/shared';
 import { ApiError, api } from '../../api/client';
-import { useCompanies, type CompanyListQuery, type CompanyListRow, type CompanySort, type VerificationStatus } from '../../api/companies';
+import { clientName, useCompanies, type CompanyListQuery, type CompanyListRow, type CompanySort, type VerificationStatus } from '../../api/companies';
 import { keys, useLookups, type LookupValue } from '../../api/queries';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Combobox, type ComboOption } from '../../components/Combobox';
@@ -172,7 +172,8 @@ export function CompaniesList() {
   return (
     <>
       <Topbar title={t('Companies')} sub={t('Master database of every organisation. A company is not a lead.')}>
-        <label className="search">
+        {/* Wide enough for its hint (review #07). */}
+        <label className="search search-wide">
           {Icons.search}
           <span className="sr">{t('Search companies')}</span>
           <input type="search" value={search.text} onChange={(e) => search.setText(e.target.value)} placeholder={t('Search name, domain or number…')} />
@@ -202,13 +203,13 @@ export function CompaniesList() {
             label={t('AI research queue')}
             value={tiles ? tiles.aiPending + tiles.aiProcessing + tiles.aiFailed : '—'}
             meta={tiles ? t('{pending} pending · {processing} processing · {failed} failed', { pending: tiles.aiPending, processing: tiles.aiProcessing, failed: tiles.aiFailed }) : undefined}
-            metaClass="warn"
+            metaClass={tiles && tiles.aiPending + tiles.aiProcessing + tiles.aiFailed ? 'warn' : undefined}
           />
           <Tile
             label={t('Possible duplicates')}
             value={tiles?.possibleDuplicates ?? '—'}
             meta={t('awaiting manual review')}
-            metaClass="bad"
+            metaClass={tiles?.possibleDuplicates ? 'bad' : undefined}
             to="/companies?tab=dups"
           />
         </div>
@@ -366,7 +367,7 @@ type RowProps = {
   size: string | null;
 };
 
-/** A list row in the prototype's columns; the CO- number sits under the name so it stays searchable at a glance. */
+/** A list row in the prototype's columns: the legal name where set, as the prototype (review #07). */
 function CompanyRow({ c, selectable, selected, onToggle, onOpen, industry, country, size }: RowProps) {
   const t = useT();
   const dim = <span className="dim">—</span>;
@@ -386,7 +387,7 @@ function CompanyRow({ c, selectable, selected, onToggle, onOpen, industry, count
           <div>
             {/* The link makes the row reachable by keyboard; mouse users can click anywhere on the row. */}
             <Link to={`/companies/${c.id}`} className="row-link" onClick={(e) => e.stopPropagation()}>
-              {c.name}
+              {clientName(c)}
             </Link>
             {c.isClient ? (
               <>
@@ -394,7 +395,6 @@ function CompanyRow({ c, selectable, selected, onToggle, onOpen, industry, count
                 <span className="badge b-ok">{t('Client')}</span>
               </>
             ) : null}
-            <span className="cell-sub">{c.number}</span>
           </div>
         </div>
       </td>

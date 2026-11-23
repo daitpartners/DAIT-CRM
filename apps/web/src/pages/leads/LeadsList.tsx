@@ -273,7 +273,7 @@ export function LeadsList() {
             label={t('Follow-ups due today')}
             value={tiles?.followUpsDueToday ?? '—'}
             meta={tiles ? t('{n} overdue|task', { n: tiles.overdue }) : undefined}
-            metaClass="bad"
+            metaClass={tiles?.overdue ? 'bad' : undefined}
             to="/tasks"
           />
           <Tile

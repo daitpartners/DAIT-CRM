@@ -117,7 +117,8 @@ export function Dashboard() {
             label={t('Follow-ups due today')}
             value={tiles?.tasksDueToday ?? '—'}
             meta={tiles ? t('{n} overdue', { n: tiles.overdue }) : undefined}
-            metaClass="bad"
+            // Review #07: red only when something is overdue.
+            metaClass={tiles?.overdue ? 'bad' : undefined}
             to="/tasks"
           />
           <Tile

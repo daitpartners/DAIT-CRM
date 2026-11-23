@@ -70,7 +70,7 @@ export function QuotationsPage() {
             label={t('Expiring within 7 days')}
             value={tiles?.expiringSoon.length ?? '—'}
             meta={tiles ? tiles.expiringSoon.map((x) => `${x.number} · ${x.validUntil ? day(x.validUntil) : '—'}`).join(', ') || '—' : undefined}
-            metaClass="bad"
+            metaClass={tiles?.expiringSoon.length ? 'bad' : undefined}
           />
           <Tile
             label={t('Win rate')}
