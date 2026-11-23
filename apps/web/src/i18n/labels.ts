@@ -345,6 +345,36 @@ export function taskKindText(t: TFn, kind: TaskKind): string {
 }
 
 /**
+ * A quotation history line (stored in English by the server) in the reader's language. `status` / `rest` split a
+ * "<Status> · …" line so the editor's status steps can show the part after the status; `full` is the whole line.
+ * A line it does not know is shown as stored.
+ */
+export function quoteHistoryText(t: TFn, text: string): { status: string | null; rest: string; full: string } {
+  const line = (rest: string, status: string | null = null) => ({ status, rest, full: status ? `${quoteStatusText(t, status)} · ${rest}` : rest });
+  let m: RegExpExecArray | null;
+  if ((m = /^Draft created by (.+) · copy of (\S+)$/.exec(text))) return line(t('Draft created by {name} · copy of {number}', { name: m[1]!, number: m[2]! }));
+  if ((m = /^Draft created by (.+)$/.exec(text))) return line(t('Draft created by {name}', { name: m[1]! }));
+  if ((m = /^Revision (\d+) opened for editing$/.exec(text))) return line(t('Revision {n} opened for editing', { n: m[1]! }));
+  if ((m = /^Revision (\d+) discarded \(unsent changes\)$/.exec(text))) return line(t('Revision {n} discarded (unsent changes)', { n: m[1]! }));
+  if ((m = /^Sent · rev (\d+) · emailed as PDF to (.+)$/.exec(text))) return line(t('rev {n} · emailed as PDF to {name}', { n: m[1]!, name: m[2]! }), 'Sent');
+  if ((m = /^Sent again · rev (\d+) · emailed as PDF to (.+)$/.exec(text))) return line(t('Sent again · rev {n} · emailed as PDF to {name}', { n: m[1]!, name: m[2]! }));
+  if ((m = /^(Negotiating|Accepted|Rejected) · by (.+)$/.exec(text))) return line(t('by {name}', { name: m[2]! }), m[1]!);
+  if ((m = /^Expired · valid until (\S+)$/.exec(text))) return line(t('valid until {date}', { date: m[1]! }), 'Expired');
+  if ((m = /^(Linked to project|Converted to project|Unlinked from project) (\S+)$/.exec(text))) {
+    const number = m[2]!;
+    return line(m[1] === 'Linked to project' ? t('Linked to project {number}', { number }) : m[1] === 'Converted to project' ? t('Converted to project {number}', { number }) : t('Unlinked from project {number}', { number }));
+  }
+  switch (text) {
+    case 'Send failed': return line(t('Send failed'));
+    case 'Send failed · may not have been sent — check Sent Items before sending again':
+      return line(t('Send failed · may not have been sent — check Sent Items before sending again'));
+    case 'Emailed, but the send could not be recorded — check the status and lead before sending again':
+      return line(t('Emailed, but the send could not be recorded — check the status and lead before sending again'));
+    default: return line(text);
+  }
+}
+
+/**
  * When a task happens, shown beside its title: "Call · 10:00–10:30" / "Meeting · 14:00–15:00" for calls and
  * meetings, the time alone for a timed follow-up, '' for an untimed one.
  */

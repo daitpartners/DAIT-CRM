@@ -15,7 +15,7 @@ import { useConfirm } from '../../components/ConfirmDialog';
 import { useToast } from '../../components/Toast';
 import { Topbar } from '../../components/Topbar';
 import { useFormatDate } from '../../hooks/useFormatDate';
-import { errorText, leadStatusText, quoteStatusBadge, quoteStatusText } from '../../i18n/labels';
+import { errorText, leadStatusText, quoteHistoryText, quoteStatusBadge, quoteStatusText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
 import { LinesTable, amount, blankLine, newLineKey, num, type DraftLine } from './LinesTable';
 import { PdfPreviewModal } from './PdfPreviewModal';
@@ -541,7 +541,7 @@ function Editor({ q, crumb, refetch }: { q: QuotationDetail; crumb: React.ReactN
                     <span className={idx >= i ? 'd on' : 'd'} />
                     <span className={idx >= i ? undefined : 'q-m'}>
                       <strong>{quoteStatusText(t, s)}</strong>
-                      {h ? ` · ${relative(h.at)} · ${h.text.replace(`${s} · `, '')}` : null}
+                      {h ? ` · ${relative(h.at)} · ${((x) => (x.status === s ? x.rest : x.full))(quoteHistoryText(t, h.text))}` : null}
                     </span>
                   </div>
                 );
@@ -608,7 +608,7 @@ function Editor({ q, crumb, refetch }: { q: QuotationDetail; crumb: React.ReactN
             <div className="q-hist">
               {q.history.slice().reverse().map((h, i) => (
                 <div key={i}>
-                  {relative(h.at)} · {h.text}
+                  {relative(h.at)} · {quoteHistoryText(t, h.text).full}
                 </div>
               ))}
             </div>

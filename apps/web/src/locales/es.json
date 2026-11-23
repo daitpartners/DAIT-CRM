@@ -1597,5 +1597,19 @@
   "VERIFIED": "VERIFICADO",
   "Web search": "Búsqueda web",
   "Website reader": "Lector de sitios web",
-  "Field already filled": "Campo ya completado"
+  "Field already filled": "Campo ya completado",
+  "Draft created by {name}": "Borrador creado por {name}",
+  "Draft created by {name} · copy of {number}": "Borrador creado por {name} · copia de {number}",
+  "Revision {n} opened for editing": "Revisión {n} abierta para editar",
+  "Revision {n} discarded (unsent changes)": "Revisión {n} descartada (cambios sin enviar)",
+  "rev {n} · emailed as PDF to {name}": "rev. {n} · enviado en PDF a {name}",
+  "Sent again · rev {n} · emailed as PDF to {name}": "Reenviado · rev. {n} · enviado en PDF a {name}",
+  "by {name}": "por {name}",
+  "valid until {date}": "válido hasta {date}",
+  "Linked to project {number}": "Vinculado al proyecto {number}",
+  "Converted to project {number}": "Convertido en proyecto {number}",
+  "Unlinked from project {number}": "Desvinculado del proyecto {number}",
+  "Send failed": "Error al enviar",
+  "Send failed · may not have been sent — check Sent Items before sending again": "Error al enviar · puede que no se haya enviado: revise Elementos enviados antes de volver a enviarlo",
+  "Emailed, but the send could not be recorded — check the status and lead before sending again": "Enviado por correo, pero no se pudo registrar el envío: revise el estado y el lead antes de volver a enviarlo"
 }

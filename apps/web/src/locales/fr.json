@@ -1597,5 +1597,19 @@
   "VERIFIED": "VÉRIFIÉ",
   "Web search": "Recherche web",
   "Website reader": "Lecteur de site web",
-  "Field already filled": "Champ déjà renseigné"
+  "Field already filled": "Champ déjà renseigné",
+  "Draft created by {name}": "Brouillon créé par {name}",
+  "Draft created by {name} · copy of {number}": "Brouillon créé par {name} · copie de {number}",
+  "Revision {n} opened for editing": "Révision {n} ouverte pour modification",
+  "Revision {n} discarded (unsent changes)": "Révision {n} abandonnée (modifications non envoyées)",
+  "rev {n} · emailed as PDF to {name}": "rév. {n} · envoyé en PDF à {name}",
+  "Sent again · rev {n} · emailed as PDF to {name}": "Renvoyé · rév. {n} · envoyé en PDF à {name}",
+  "by {name}": "par {name}",
+  "valid until {date}": "valable jusqu’au {date}",
+  "Linked to project {number}": "Lié au projet {number}",
+  "Converted to project {number}": "Converti en projet {number}",
+  "Unlinked from project {number}": "Délié du projet {number}",
+  "Send failed": "Échec de l’envoi",
+  "Send failed · may not have been sent — check Sent Items before sending again": "Échec de l’envoi · peut-être non envoyé : vérifiez les Éléments envoyés avant de renvoyer",
+  "Emailed, but the send could not be recorded — check the status and lead before sending again": "Envoyé par e-mail, mais l’envoi n’a pas pu être enregistré : vérifiez le statut et le lead avant de renvoyer"
 }
