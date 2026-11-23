@@ -38,7 +38,7 @@ const ROWS: ProjectRow[] = [
 const LIST: ProjectList = {
   items: ROWS,
   total: 2,
-  tiles: { active: 1, clients: 3, totals: [{ currency: 'USD', amount: 12000 }, { currency: 'INR', amount: 450000 }], completedThisYear: 4, onHold: 1 },
+  tiles: { active: 1, activeClients: 1, clients: 3, totals: [{ currency: 'USD', amount: 12000 }, { currency: 'INR', amount: 450000 }], completedThisYear: 4, onHold: 1 },
 };
 
 const OPTIONS: ProjectFormOptions = {
@@ -127,7 +127,8 @@ describe('Projects list (prototype V.projects)', () => {
     expect(screen.getByRole('link', { name: 'Email a project' })).toHaveAttribute('href', '/email?compose=1');
     expect(screen.getByRole('button', { name: 'Create project' })).toBeTruthy();
     await waitFor(() => expect(tile('Active projects').querySelector('.v')).toHaveTextContent('1'));
-    expect(tile('Active projects').querySelector('.m')).toHaveTextContent('3 clients');
+    // Review #25: the clients of the active projects (one here), not every client company.
+    expect(tile('Active projects').querySelector('.m')).toHaveTextContent(/^for 1 client$/);
     expect(tile('Total value').querySelector('.v')).toHaveTextContent('USD 12,000 · INR 4,50,000');
     expect(tile('Total value').querySelector('.m')).toHaveTextContent('across all projects');
     expect(tile('Completed').querySelector('.v')).toHaveTextContent('4');

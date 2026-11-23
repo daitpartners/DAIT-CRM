@@ -59,7 +59,7 @@ const idOf = (raw: string) => {
 export const projectRoutes: FastifyPluginAsync = async (app) => {
   /**
    * The Projects list: visible projects (newest first) narrowed by the Client / Status filters; tiles over every
-   * visible project, `clients` = client companies the user can see.
+   * visible project, `clients` = client companies the user can see, `activeClients` = those with an active project.
    */
   app.get('/projects', { preHandler: [requireUser] }, async (request) => {
     const query = parseQuery(projectListQuerySchema, request.query);
@@ -75,6 +75,7 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
       total: items.length,
       tiles: {
         active: all.filter((p) => p.status === 'Active').length,
+        activeClients: new Set(all.filter((p) => p.status === 'Active').map((p) => p.company.id)).size,
         clients,
         totals: sumsByCurrency(all.flatMap((p) => (p.value === null ? [] : [{ currency: p.currency as 'USD' | 'CAD' | 'INR', total: p.value }]))),
         completedThisYear: all.filter((p) => p.completedAt !== null && todayIn(user.timezone, new Date(p.completedAt)).slice(0, 4) === year).length,

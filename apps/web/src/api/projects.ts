@@ -34,7 +34,7 @@ export type CurrencyAmount = { currency: QuoteCurrency; amount: number };
 export type ProjectList = {
   items: ProjectRow[];
   total: number;
-  tiles: { active: number; clients: number; totals: CurrencyAmount[]; completedThisYear: number; onHold: number };
+  tiles: { active: number; activeClients: number; clients: number; totals: CurrencyAmount[]; completedThisYear: number; onHold: number };
 };
 
 export type ProjectListQuery = { company?: number; status?: ProjectStatus };

@@ -441,9 +441,14 @@ describe('projects API — list, company tab, form options', () => {
     expect(all.items.map((r: Row) => r.name)).toEqual(['Old', 'D', 'C', 'B', 'A']);
     expect(all.total).toBe(5);
     expect(all.tiles).toEqual({
-      active: 2, clients: 2, onHold: 1, completedThisYear: 1,
+      active: 2, activeClients: 2, clients: 2, onHold: 1, completedThisYear: 1,
       totals: [{ currency: 'USD', amount: 12000 }, { currency: 'INR', amount: 500000.5 }],
     });
+    // Review #25: the Active tile counts the clients of the active projects, not every client company.
+    const held = await edit(admin.cookie, a, { status: 'On hold' });
+    expect(held.statusCode).toBe(200);
+    expect((await req('GET', '/api/projects', admin.cookie)).json().tiles).toMatchObject({ active: 1, activeClients: 1, clients: 2 });
+    expect((await edit(admin.cookie, held.json(), { status: 'Active' })).statusCode).toBe(200);
 
     const filtered = (await req('GET', `/api/projects?company=${t.company.id}&status=On%20hold`, admin.cookie)).json();
     expect(filtered.items.map((r: Row) => r.id)).toEqual([b.id]);

@@ -1624,5 +1624,8 @@
   "Where leads come from and how website enquiries turn into leads": "De dónde vienen los leads y cómo las consultas web se convierten en leads",
   "No website enquiries have reached the CRM yet.": "Todavía no ha llegado ninguna consulta web al CRM.",
   "Engine: the Website reader, plus Claude Code when an administrator switches it on. Suggestions are kept in the research history and applied only to unverified fields.": "Motor: el Lector de sitios web, más Claude Code cuando un administrador lo activa. Las sugerencias se guardan en el historial de investigación y solo se aplican a campos no verificados.",
-  "This date has passed: the lead stays overdue. Pick a new date.": "Esta fecha ya pasó: el lead sigue vencido. Elija una nueva fecha."
+  "This date has passed: the lead stays overdue. Pick a new date.": "Esta fecha ya pasó: el lead sigue vencido. Elija una nueva fecha.",
+  "for 1 client": "para 1 cliente",
+  "for {n} clients": "para {n} clientes",
+  "1 project": "1 proyecto"
 }

@@ -75,7 +75,12 @@ export function ProjectsPage() {
       </Topbar>
       <div className="page">
         <div className="tiles">
-          <Tile label={t('Active projects')} value={tiles?.active ?? '—'} meta={tiles ? t('{n} clients', { n: tiles.clients }) : undefined} />
+          {/* Review #25: the clients of the active projects, not every client company. */}
+          <Tile
+            label={t('Active projects')}
+            value={tiles?.active ?? '—'}
+            meta={tiles ? (tiles.activeClients === 1 ? t('for 1 client') : t('for {n} clients', { n: tiles.activeClients })) : undefined}
+          />
           <Tile
             label={t('Total value')}
             value={tiles ? tiles.totals.map((x) => projectMoney(x.amount, x.currency)).join(' · ') || '—' : '—'}
@@ -117,7 +122,7 @@ export function ProjectsPage() {
               </Link>
             ) : null}
             <div className="grow" />
-            {data ? <span className="pj-count">{t('{n} projects', { n: data.total })}</span> : null}
+            {data ? <span className="pj-count">{data.total === 1 ? t('1 project') : t('{n} projects', { n: data.total })}</span> : null}
           </div>
           {error ? (
             <div className="empty" role="alert">
