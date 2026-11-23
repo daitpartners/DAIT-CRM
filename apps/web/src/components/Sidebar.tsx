@@ -103,7 +103,7 @@ export function Sidebar({ me, open, onNavigate, collapsed = false, onCollapse }:
         <div className="who">
           <div className="nm">{me.name}</div>
           <small>{roleText(t, me.role)}</small>
-          <button type="button" className="signout" onClick={signOut} aria-label={t('Sign out')} title={collapsed ? t('Sign out') : undefined}>
+          <button type="button" className="signout" onClick={signOut} aria-label={t('Sign out')} title={collapsed ? `${t('Sign out')} · ${me.name}` : undefined}>
             {Icons.signout}
             <span className="nav-l">{t('Sign out')}</span>
           </button>

@@ -229,6 +229,12 @@ a:focus-visible,button:focus-visible,[role=combobox]:focus-visible,summary:focus
 @media (prefers-reduced-motion:reduce){.sidebar{transition:none}}
 /* Short laptop screens (1280×720): tighter rows so the whole menu and Sign out fit without scrolling. */
 @media (min-width:900px) and (max-height:780px){.sidebar .nav{padding-top:7px;padding-bottom:7px}.sidebar .navsec{padding-top:10px}.sidebar .brand{padding-bottom:14px}}
+/* The icon rail on a short screen: smaller gaps and no avatar (the name is the Sign out tooltip), so Sign out fits. */
+@media (min-width:900px) and (max-height:780px){
+  .sidebar.collapsed .brand{gap:4px;padding-bottom:8px}
+  .sidebar.collapsed .navsec{margin:6px}
+  .sidebar.collapsed .me .av{display:none}
+}
 .mobilebar{display:none}
 .nav-scrim{display:none}
 .subnav{display:flex;gap:8px;flex-wrap:wrap}
