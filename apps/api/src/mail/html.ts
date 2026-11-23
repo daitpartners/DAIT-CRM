@@ -285,6 +285,9 @@ export function fallbackText(html: string, max: number): string {
 /** Characters of a raw body read at most (about 1 MB): bounds the time any one email can take (security review C1). */
 export const RAW_MAX = 1_000_000;
 
+/** How much of the depth-limited HTML is sanitised, in multiples of the HTML kept (see emailBodies). */
+const HTML_WINDOW = 3;
+
 /** A message body as Graph returns it. */
 export interface GraphBody {
   contentType: 'html' | 'text';
@@ -303,7 +306,9 @@ export function emailBodies(body: GraphBody, max: number, opts: { deadline?: num
   const raw = body.content.slice(0, RAW_MAX);
   // The one parse that can take long (deep nesting); sanitising and the text read the limited result.
   const limited = limitNesting(raw, MAX_DEPTH, opts.deadline);
-  const full = sanitizeEmailHtml(limited);
+  // At most `max` characters of HTML are kept, and sanitising only ever shortens markup that has lost its comments
+  // (limitNesting drops them): three times that is plenty, and sanitising a whole megabyte to keep 50,000 is not.
+  const full = sanitizeEmailHtml(limited.slice(0, max * HTML_WINDOW));
   let bodyHtml = full;
   // Closing the tags left open by the cut adds a little, so cut a little shorter each time until it fits.
   for (let cut = max; bodyHtml.length > max; cut -= Math.max(200, Math.ceil(max / 20))) {
