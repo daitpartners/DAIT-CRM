@@ -39,6 +39,9 @@ function stub(res: Partial<CalendarResponse> = {}, me: Me = rep) {
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     calls.push({ method: init?.method ?? 'GET', url, body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined });
     if (url.startsWith('/api/calendar')) return Response.json({ items: ITEMS, overdue: OVERDUE, outlook: { syncOn: false }, ...res });
+    if (url === '/api/leads/5') {
+      return Response.json({ id: 5, number: 'LD-1005', companyName: 'Meridian Textiles', contact: { id: 9, name: 'Tom Hale', email: null }, company: null, status: 'New', archivedAt: null, activities: [], tasks: [], assignments: [] });
+    }
     if (url.startsWith('/api/leads')) {
       return Response.json({
         items: [
@@ -142,6 +145,14 @@ describe('Calendar page', () => {
     await waitFor(() => expect(calls.some((c) => c.url === '/api/calendar?from=2026-10-26&to=2026-12-06&who=all')).toBe(true));
     expect(screen.getByTestId('where').textContent).toContain('who=all');
     expect(screen.getByRole('link', { name: 'Everyone' }).className).toBe('on');
+  });
+
+  it('?new=1&lead= (Email "Create meeting", prototype) opens New follow-up for that lead on the shown day', async () => {
+    stub();
+    renderPage('/calendar?d=2026-11-23&new=1&lead=5');
+    const dialog = await screen.findByRole('dialog', { name: 'New follow-up' });
+    await waitFor(() => expect((within(dialog).getByRole('combobox', { name: /Lead/ }) as HTMLInputElement).value).toBe('LD-1005 · Meridian Textiles · Tom Hale'));
+    expect((within(dialog).getByLabelText(/^Date/) as HTMLInputElement).value).toBe('2026-11-23');
   });
 
   it('clicking an empty day opens New follow-up on that date', async () => {

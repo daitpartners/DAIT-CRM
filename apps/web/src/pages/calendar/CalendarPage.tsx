@@ -62,7 +62,9 @@ export function CalendarPage() {
   // Until the first answer arrives the counts are unknown: say nothing rather than "0 open items" / "Nothing overdue.".
   const loading = !cal.data && !cal.error;
 
-  const [adding, setAdding] = useState<string | null>(null);
+  // `?new=1&lead=<id>` (the Email reader's Create meeting, prototype) opens New follow-up for that lead on `d`.
+  const newLead = searchParams.get('new') === '1' ? Number(searchParams.get('lead')) || undefined : undefined;
+  const [adding, setAdding] = useState<string | null>(searchParams.get('new') === '1' ? d : null);
   const [info, setInfo] = useState<CalendarItem | null>(null);
 
   const link = (patch: Record<string, string>) => {
@@ -296,7 +298,7 @@ export function CalendarPage() {
           </div>
         </div>
       </div>
-      {adding ? <NewFollowUpModal date={adding} names={names} onClose={() => setAdding(null)} /> : null}
+      {adding ? <NewFollowUpModal date={adding} leadId={newLead} names={names} onClose={() => setAdding(null)} /> : null}
       {info ? <EventInfoModal item={info} names={names} onClose={() => setInfo(null)} /> : null}
     </>
   );

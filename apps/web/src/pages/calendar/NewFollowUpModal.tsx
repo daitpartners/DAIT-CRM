@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { isClosedStatus, type TaskKind } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
-import { useLeads, type LeadSummary } from '../../api/leads';
+import { useLead, useLeads, type LeadSummary } from '../../api/leads';
 import { useUsers } from '../../api/queries';
 import { useSaveTask } from '../../api/tasks';
 import { useCurrentUser } from '../../api/useCurrentUser';
@@ -20,7 +20,7 @@ const leadLabel = (l: LeadSummary) => [l.number, l.companyName, l.contact?.name]
  * (a call or meeting needs a time) with a "planned" entry on the lead's timeline. Checked as the prototype, one
  * message at a time.
  */
-export function NewFollowUpModal({ date, names, onClose }: { date: string; names: CalendarNames; onClose: () => void }) {
+export function NewFollowUpModal({ date, leadId, names, onClose }: { date: string; leadId?: number; names: CalendarNames; onClose: () => void }) {
   const t = useT();
   const me = useCurrentUser();
   const toast = useToast();
@@ -35,6 +35,16 @@ export function NewFollowUpModal({ date, names, onClose }: { date: string; names
   const { data } = useLeads({ q: debounced || undefined, pageSize: 25, tab: 'all', open: '1' });
   const found = (data?.items ?? []).filter((l) => !l.archivedAt && !isClosedStatus(l.status));
   const leads = !q.trim() && chosen && !found.some((l) => l.id === chosen.id) ? [chosen, ...found] : found;
+  // Opened for a lead (`?new=1&lead=`): that lead is chosen when it is one that could be picked (open, not archived).
+  const preset = useLead(leadId ?? NaN).data;
+  useEffect(() => {
+    if (!preset || preset.archivedAt || isClosedStatus(preset.status)) return;
+    const c = preset.contact;
+    setChosen((was) => was ?? {
+      ...preset, company: preset.company ? { id: preset.company.id, number: preset.company.number, name: preset.company.name } : null,
+      contact: c ? { id: c.id, name: c.name, email: c.email, linkedinUrl: null } : null,
+    });
+  }, [preset]);
 
   const [title, setTitle] = useState('');
   const [kind, setKind] = useState<TaskKind>('followup');

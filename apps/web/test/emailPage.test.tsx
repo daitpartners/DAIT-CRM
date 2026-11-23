@@ -192,7 +192,8 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     expect(screen.getByRole('link', { name: /Lead\s*LD-1005/ })).toBeTruthy();
     expect(screen.getByRole('link', { name: /Company\s*Acme/ })).toBeTruthy();
     expect(screen.getByText(/Next follow-up on this lead/)).toBeTruthy();
-    expect(within(reader).getByRole('button', { name: 'Create meeting' })).toHaveProperty('disabled', true);
+    // Prototype: Create meeting opens the calendar's New follow-up for this lead.
+    expect(within(reader).getByRole('link', { name: 'Create meeting' }).getAttribute('href')).toBe('/calendar?new=1&lead=5');
     await u.click(within(reader).getByRole('button', { name: 'Log as activity' }));
     await u.click(within(reader).getByRole('button', { name: 'Add follow-up task' }));
     await waitFor(() => expect(posts.map((p) => p.url)).toEqual(['/api/mail/1/log', '/api/mail/1/task']));

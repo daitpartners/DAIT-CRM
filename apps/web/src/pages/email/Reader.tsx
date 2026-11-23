@@ -103,9 +103,10 @@ export function Reader({ id, peek = false, connected, onReply, onArchived }: Pro
               {t('Suggested actions:')}
               {m.lead ? (
                 <>
-                  <button type="button" className="btn sm" disabled title={t('Calendar arrives in release 3')}>
+                  {/* Prototype: the calendar's New follow-up for this lead. */}
+                  <Link className="btn sm" to={`/calendar?new=1&lead=${m.lead.id}`}>
                     {t('Create meeting')}
-                  </button>
+                  </Link>
                   {m.lead.companyId ? (
                     <Link className="btn sm" to={`/companies/${m.lead.companyId}?tab=contacts`}>
                       {t('Add contact')}
