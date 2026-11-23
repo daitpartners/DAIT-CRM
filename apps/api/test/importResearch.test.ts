@@ -10,7 +10,7 @@ import { monthTotals } from '../src/research/service';
 import { ClaudeRunError, type ClaudeRunRequest, type ClaudeRunner } from '../src/research/providers';
 import type { ImportClaude, ImportDeps } from '../src/imports/claude';
 import {
-  estimateMinutes, pauseResearch, researchNextRow, researchRow, resumeResearch, startBatchResearch, sweepImportResearch,
+  estimateMinutes, foundWebsiteOk, pauseResearch, researchNextRow, researchRow, resumeResearch, startBatchResearch, sweepImportResearch,
 } from '../src/imports/research';
 import { importResearchDeps, importResearchHandler } from '../src/jobs/handlers/importResearch';
 import { runOnce } from '../src/jobs/runner';
@@ -290,10 +290,13 @@ describe('import research · Claude', () => {
     const batch = await batchWith([
       { companyName: 'No Mail Ltd', country: 'India', website: page },
       { companyName: 'No Mail Ltd (2)', country: 'India', website: page },
+      { companyName: 'No Mail Ltd (3)', country: 'India', website: page },
     ]);
     const answers: Answer[] = [
       { email: { value: 'Sales@NoMail.test', sourceUrl: page }, phone: { value: '+91 20 5555 0199', sourceUrl: page } },
       { email: { value: 'ceo@nomail.test', sourceUrl: page }, phone: { value: '+91 22 4000 1111', sourceUrl: page } },
+      // "Hall 12 34, stand 5678 90": the digits 3456789 run across two unrelated numbers; never a phone on the page.
+      { phone: { value: '345 6789', sourceUrl: page } },
     ];
     let call = 0;
     const runner: ClaudeRunner = async (req) => {
@@ -304,7 +307,9 @@ describe('import research · Claude', () => {
     await startBatchResearch(batch.id, onDeps(runner));
     await researchNextRow(batch.id, onDeps(runner));
     await researchNextRow(batch.id, onDeps(runner));
-    const [ok, invented] = await rowsOf(batch.id);
+    await researchNextRow(batch.id, onDeps(runner));
+    const [ok, invented, joined] = await rowsOf(batch.id);
+    expect(researchOf(joined!).phone).toBeUndefined();
     expect(researchOf(ok!).email).toMatchObject({ value: 'sales@nomail.test', sourceUrl: page });
     expect(researchOf(ok!).phone).toMatchObject({ value: '+91 20 5555 0199' });
     expect(researchOf(invented!).email).toBeUndefined();
@@ -376,6 +381,35 @@ describe('import research · Claude', () => {
     expect(row.researchedAt).toBeNull();
     expect(row.claudeAt).not.toBeNull(); // the spend still counts
     expect((await batchOf(batch.id))).toMatchObject({ status: 'Importing', researchDone: 0 });
+  });
+});
+
+describe('foundWebsiteOk: a website found by search must be a home page its source vouches for', () => {
+  it('registrable domains: public suffixes dropped, a company on a private suffix kept', () => {
+    expect(foundWebsiteOk('https://co.uk/', 'https://www.acme.co.uk/contact', [])).toBe(false);
+    expect(foundWebsiteOk('com.mx', 'https://ferreteria.com.mx/', ['https://ferreteria.com.mx/'])).toBe(false);
+    expect(foundWebsiteOk('https://myshopify.com', 'https://acme.myshopify.com/pages/contact', [])).toBe(false);
+    expect(foundWebsiteOk('https://acme.myshopify.com/', 'https://acme.myshopify.com/pages/contact', [])).toBe(true);
+    expect(foundWebsiteOk('https://acme.co.uk/', 'https://www.acme.co.uk/about', [])).toBe(true);
+    // A deeper subdomain is not the company's site; nor is a site its sources never mention.
+    expect(foundWebsiteOk('https://shop.acme.com/', 'https://acme.com/', [])).toBe(false);
+    expect(foundWebsiteOk('https://acme.com/', 'https://directory.example/acme', ['https://directory.example/acme'])).toBe(false);
+  });
+
+  it('a normal site citing its own contact page (or a search result on it) is kept', () => {
+    expect(foundWebsiteOk('https://acme.com', 'https://acme.com/contact', [])).toBe(true);
+    expect(foundWebsiteOk('www.acme.com', 'https://news.example/story', ['https://www.acme.com/about-us'])).toBe(true);
+  });
+
+  it('directory, social and search listings are never a company website; neither is a page below the home page', () => {
+    expect(foundWebsiteOk('https://www.yelp.com/biz/acme-toronto', 'https://www.yelp.com/biz/acme-toronto', [])).toBe(false);
+    expect(foundWebsiteOk('https://yelp.co.uk/', 'https://yelp.co.uk/', [])).toBe(false);
+    expect(foundWebsiteOk('https://www.linkedin.com/company/acme', 'https://www.linkedin.com/company/acme', [])).toBe(false);
+    expect(foundWebsiteOk('https://www.linkedin.com/', 'https://www.linkedin.com/company/acme', [])).toBe(false);
+    expect(foundWebsiteOk('https://x.com/', 'https://x.com/acme', [])).toBe(false);
+    expect(foundWebsiteOk('https://en.wikipedia.org/', 'https://en.wikipedia.org/wiki/Acme', [])).toBe(false);
+    expect(foundWebsiteOk('https://acme.com/about', 'https://acme.com/about', [])).toBe(false);
+    expect(foundWebsiteOk('https://acme.com/?ref=ad', 'https://acme.com/', [])).toBe(false);
   });
 });
 

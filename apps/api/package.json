@@ -37,6 +37,7 @@
     "pdfjs-dist": "6.5.438",
     "pdfkit": "0.20.2",
     "prisma": "6.19.3",
+    "tldts": "6.1.86",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {

@@ -115,7 +115,8 @@ export async function startFixtureServer(): Promise<FixtureServer> {
       // Import research: an email and a phone written as text only (no mailto, no JSON-LD), for Claude to cite.
       if (path !== '/') { res.writeHead(404).end(); return; }
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><html><head><title>No Mail Ltd</title></head>
-<body><h1>No Mail Ltd</h1><p>Sales: sales@nomail.test, or ring +91 (20) 5555-0199.</p></body></html>`);
+<body><h1>No Mail Ltd</h1><p>Sales: sales@nomail.test, or ring +91 (20) 5555-0199.</p>
+<p>Hall 12 34, stand 5678 90.</p></body></html>`);
       return;
     }
     if (host === 'freight.test') {

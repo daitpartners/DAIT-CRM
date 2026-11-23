@@ -13,6 +13,7 @@
  * - Pause / Resume, and a worker restart (`sweepImportResearch`) never lose or repeat a row.
  */
 import { Prisma, type ImportRow } from '@prisma/client';
+import { getDomain, getDomainWithoutSuffix } from 'tldts';
 import { z } from 'zod';
 import {
   domainOf, type ImportActivity, type ImportField, type ResearchClaudeFailure, type ResearchEngine, type ResearchNotePart,
@@ -164,29 +165,72 @@ function cleanValue(field: TargetField, raw: string, countries: readonly string[
 // ---------------------------------------------------------------------------------------------------------------
 // One row
 
-/** `host` is `domain` or one of its subdomains. */
-const withinDomain = (host: string | null, domain: string | null) =>
-  !!host && !!domain && (host === domain || host.endsWith(`.${domain}`));
+/** Registrable domain (public suffix list, private suffixes such as myshopify.com included), or null. */
+const registrable = (hostOrUrl: string): string | null => getDomain(hostOrUrl, { allowPrivateDomains: true });
 
 /**
- * A found website is kept only when it is the site of its source: its domain is the domain of its sourceUrl or of a
- * web search result (a directory or social profile citing another company's address never passes).
+ * Directories, social networks, search engines and company databases: a listing there is never the company's own
+ * website. Matched by the name before the public suffix (yelp.com, yelp.co.uk), or by the exact registrable domain for
+ * names too short or too common to match alone.
  */
-function websiteMatchesSource(value: string, sourceUrl: string, searchUrls: string[]): boolean {
-  const domain = domainOf(value);
-  return [sourceUrl, ...searchUrls].some((u) => withinDomain(domainOf(u), domain));
+const NOT_A_COMPANY_SITE_NAMES = new Set([
+  'linkedin', 'facebook', 'instagram', 'twitter', 'youtube', 'tiktok', 'yelp', 'crunchbase', 'zoominfo', 'glassdoor',
+  'wikipedia', 'google', 'bing', 'duckduckgo', 'justdial', 'indiamart', 'tradeindia', 'yellowpages', 'kompass',
+  'opencorporates',
+]);
+const NOT_A_COMPANY_SITE_DOMAINS = new Set(['x.com', 'dnb.com', 'bloomberg.com']);
+
+function absoluteUrl(v: string): URL | null {
+  try {
+    return new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(v) ? v : `https://${v}`);
+  } catch {
+    return null;
+  }
 }
 
 /**
- * A value citing a page read must be written in that page: an email (ignoring case) or a phone (by its digits). Other
- * fields, and values citing a web search result (only its URL comes back), are kept on their source alone.
+ * A website Claude found is kept only when it is a company's home page vouched for by its source:
+ * - it is a home page (no path beyond "/", no query);
+ * - its registrable domain is known and is the site itself (`www.` aside): never a bare public suffix such as co.uk or
+ *   myshopify.com, never a deeper subdomain;
+ * - it is not a directory, social, search or company-database site;
+ * - that registrable domain is the registrable domain of its sourceUrl or of a web search result.
+ */
+export function foundWebsiteOk(value: string, sourceUrl: string, searchUrls: string[]): boolean {
+  const url = absoluteUrl(value.trim());
+  if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:')) return false;
+  if ((url.pathname !== '/' && url.pathname !== '') || url.search) return false;
+  const domain = registrable(url.hostname);
+  if (!domain || domain !== domainOf(url.hostname)) return false;
+  const name = getDomainWithoutSuffix(url.hostname, { allowPrivateDomains: true });
+  if (NOT_A_COMPANY_SITE_DOMAINS.has(domain) || (name && NOT_A_COMPANY_SITE_NAMES.has(name))) return false;
+  return [sourceUrl, ...searchUrls].some((u) => {
+    const host = absoluteUrl(u)?.hostname;
+    return !!host && registrable(host) === domain;
+  });
+}
+
+/** Phone-like runs in a text (digits with spaces, dots, dashes, slashes or brackets between them), as digits. */
+const phoneTokens = (text: string): string[] =>
+  (text.match(/\+?\d[\d \t().\-/]{4,}\d/g) ?? []).map(digits).filter((d) => d.length >= 7);
+
+/** The phone is one written on the page: the same digits as one phone-like run (or one ends the other, 8+ digits). */
+function phoneOnPage(value: string, text: string): boolean {
+  const d = digits(value);
+  if (d.length < 7) return false;
+  return phoneTokens(text).some((t) => t === d || (Math.min(t.length, d.length) >= 8 && (t.endsWith(d) || d.endsWith(t))));
+}
+
+/**
+ * A value citing a page read must be written in that page: an email (ignoring case) or a phone (as one phone-like run
+ * of digits, never digits joined across the page). Other fields, and values citing a web search result (only its URL
+ * comes back), are kept on their source alone.
  */
 function inCitedPage(field: TargetField, value: string, page: PageRead | undefined): boolean {
   if (!page || (field !== 'email' && field !== 'phone')) return true;
   const text = `${page.title}\n${page.text}`;
   if (field === 'email') return text.toLowerCase().includes(value.toLowerCase());
-  const d = digits(value);
-  return d.length >= 6 && digits(text).includes(d);
+  return phoneOnPage(value, text);
 }
 
 /**
@@ -263,7 +307,7 @@ export async function researchRow(row: ImportRow, c: ImportClaude | null, deps: 
             if (!allowed.has(source)) continue;
             const value = cleanValue(field, f.value, countries);
             if (!value || !inCitedPage(field, value, pageByUrl.get(source))) continue;
-            if (field === 'website' && !websiteMatchesSource(value, f.sourceUrl, results)) continue;
+            if (field === 'website' && !foundWebsiteOk(value, f.sourceUrl, results)) continue;
             const sourceLabel = field === 'website' ? WEBSITE_SEARCH_LABEL : `AI analysis · ${labelOf(f.sourceUrl)}`;
             values[field] = { value, sourceUrl: f.sourceUrl, sourceLabel, confidence };
             if (field === 'website') foundBySearch = true;
