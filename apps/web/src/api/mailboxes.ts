@@ -18,7 +18,8 @@ export type Mailbox = {
 export type MailboxOptions = Partial<Pick<Mailbox, 'syncMail' | 'syncCalendar' | 'sharedMailboxes'>>;
 
 /** Under the `mailboxes` prefix with the 1A system mailbox, so one invalidation refreshes both. */
-const KEY = ['mailboxes', 'personal'] as const;
+export const MAILBOXES_KEY = ['mailboxes', 'personal'] as const;
+const KEY = MAILBOXES_KEY;
 
 /** Where "Connect Microsoft 365" sends the browser (a full navigation to the API, then Microsoft). */
 export const CONNECT_PERSONAL_URL = '/api/auth/microsoft/connect?mode=personal';

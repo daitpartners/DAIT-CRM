@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -28,13 +29,13 @@ const TEMPLATE = { id: 3, name: 'Intro ES', language: 'es', subject: 'Hola {firs
 
 const CARLOS = { id: 4, name: 'Carlos Torres', email: 'carlos@daitpartners.com', role: 'Administrator', language: 'es', timezone: 'UTC', isActive: true, lastLoginAt: null };
 
-function stub(campaign?: CampaignDetail, rows: RecipientCheck[] = ROWS, users: unknown[] = [CARLOS]) {
+function stub(campaign?: CampaignDetail, rows: RecipientCheck[] = ROWS, users: unknown[] = [CARLOS], mailbox: { address: string } | null = { address: 'arjun@daitpartners.com' }) {
   const posts: { url: string; body: unknown }[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     if (url === '/api/mailer/check') {
       posts.push({ url, body });
-      return Response.json({ mailbox: { address: 'arjun@daitpartners.com' }, rows });
+      return Response.json({ mailbox, rows });
     }
     if (init?.method === 'POST') {
       posts.push({ url, body });
@@ -182,6 +183,15 @@ describe('Send via mailer from the Leads bulk bar (prototype V.mailerWizard guar
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it('a mailbox disconnected since the page loaded is refused on Send via mailer, before the wizard', async () => {
+    const u = userEvent.setup();
+    stub(undefined, ROWS, [CARLOS], null);
+    wrap(<SendViaMailerButton leadIds={[5]} onQueued={() => undefined} />);
+    await u.click(screen.getByRole('button', { name: 'Send via mailer' }));
+    expect(await screen.findByText('Connect your Microsoft 365 mailbox in Settings to send email from the CRM.')).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   it('more than 500 ticked leads shows the limit', async () => {
     const u = userEvent.setup();
     const posts = stub();
@@ -225,6 +235,27 @@ describe('Leads bulk bar (prototype views-leads2.js .mbulk, parity 6.10)', () =>
     const send = within(region).getByRole('button', { name: 'Send via mailer' }) as HTMLButtonElement;
     expect(send.disabled).toBe(true);
     expect(send.title).toBe('Connect your Microsoft 365 mailbox in Settings to use the mailer.');
+  });
+
+  it('the wizard stays open when the ticked leads clear (the Leads list refreshed)', async () => {
+    const u = userEvent.setup();
+    stub();
+    function Harness() {
+      const [ids, setIds] = useState([5, 6]);
+      return (
+        <>
+          <button type="button" onClick={() => setIds([])}>Refresh</button>
+          {bar({ leadIds: ids })}
+        </>
+      );
+    }
+    wrap(<Harness />);
+    await u.click(screen.getByRole('button', { name: 'Send via mailer' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Send via mailer' });
+    // A list refresh clears the ticks while the wizard is open (the click goes through, as a refetch would).
+    dialog.ownerDocument.querySelectorAll('button').forEach((b) => b.textContent === 'Refresh' && b.click());
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Bulk actions' })).toBeNull());
+    expect(screen.getByRole('dialog', { name: 'Send via mailer' })).toBeTruthy();
   });
 
   it('without the mailer right there is no Send via mailer and no hint', () => {

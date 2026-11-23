@@ -1,10 +1,10 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useT } from '../../i18n/useT';
-import { SendViaMailerButton } from '../mailer/MailerWizard';
+import { MailerButton, useSendViaMailer } from '../mailer/MailerWizard';
 
 type Props = {
-  /** The ticked leads (the bar shows only while there are some). */
+  /** The ticked leads (the bar shows only while there are some; an open wizard outlives them). */
   leadIds: number[];
   /** The user may use the mailer (`use_email`). */
   canMail: boolean;
@@ -23,6 +23,9 @@ type Props = {
 export function LeadsBulkBar({ leadIds, canMail, mailboxConnected, onClear, onQueued, children }: Props) {
   const t = useT();
   const n = leadIds.length;
+  const mailer = useSendViaMailer(leadIds, onQueued);
+  // A Leads list refresh clears the ticks: the bar goes, an open Send via mailer wizard stays.
+  if (!n) return mailer.wizard;
   const gate = canMail && mailboxConnected === false ? t('Connect your Microsoft 365 mailbox in Settings to use the mailer.') : null;
   // "<strong>n</strong> selected" in any word order: split the translated phrase at the number.
   const [before, after] = t('{n} selected', { n: '\u0000' }).split('\u0000');
@@ -48,8 +51,9 @@ export function LeadsBulkBar({ leadIds, canMail, mailboxConnected, onClear, onQu
       </button>
       {canMail ? (
         // Release 2C: Send via mailer for the ticked leads; checks them before the wizard opens.
-        <SendViaMailerButton leadIds={leadIds} disabled={mailboxConnected !== true || !n} title={gate ?? undefined} onQueued={onQueued} />
+        <MailerButton disabled={mailboxConnected !== true || mailer.pending} title={gate ?? undefined} onClick={mailer.start} />
       ) : null}
+      {mailer.wizard}
     </div>
   );
 }

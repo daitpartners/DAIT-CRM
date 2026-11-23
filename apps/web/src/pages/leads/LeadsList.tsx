@@ -376,7 +376,8 @@ export function LeadsList() {
               <div className="grow" />
               {data && counts ? <span className="muted filters-count">{t('Showing {n} of {total}', { n: data.total, total: counts.all })}</span> : null}
             </div>
-            {canManage && selected.size > 0 ? (
+            {/* Mounted with no ticks too: an open Send via mailer wizard survives the list refreshing. */}
+            {canManage ? (
               <LeadsBulkBar
                 leadIds={[...selected]}
                 canMail={me.rights.includes('use_email')}

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { LAWFUL_BASES, MAILER_INTERVALS, fillTemplate } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
 import { useCreateCampaign, useMailerCheck, type MailerCheckResult } from '../../api/mailer';
+import { MAILBOXES_KEY } from '../../api/mailboxes';
 import { useUsers } from '../../api/queries';
 import { useTemplates } from '../../api/templates';
 import { useCurrentUser } from '../../api/useCurrentUser';
@@ -37,11 +39,14 @@ const MAX_LEADS = 500;
 
 /**
  * Leads bulk bar "Send via mailer" (prototype V.mailerWizard guard): checks the ticked leads first and only opens
- * the wizard when at least one can be emailed; otherwise it says why, as the prototype does.
+ * the wizard when at least one can be emailed; otherwise it says why, as the prototype does. A mailbox disconnected
+ * since the page loaded is refused here, not at Queue. The wizard keeps its own copy of the leads: render `wizard`
+ * where it survives the ticks clearing (a Leads list refresh).
  */
-export function SendViaMailerButton({ leadIds, disabled, title, onQueued }: { leadIds: number[]; disabled?: boolean; title?: string; onQueued: () => void }) {
+export function useSendViaMailer(leadIds: number[], onQueued: () => void) {
   const t = useT();
   const toast = useToast();
+  const qc = useQueryClient();
   const check = useMailerCheck();
   const [open, setOpen] = useState<{ leadIds: number[]; check: MailerCheckResult } | null>(null);
 
@@ -50,6 +55,11 @@ export function SendViaMailerButton({ leadIds, disabled, title, onQueued }: { le
     const ids = [...leadIds];
     check.mutate(ids, {
       onSuccess: (data) => {
+        if (!data.mailbox) {
+          // The bulk bar's hint and disabled button follow once the mailbox state is fetched again.
+          void qc.invalidateQueries({ queryKey: MAILBOXES_KEY });
+          return toast(errorText(t, 'no_mailbox'), 'warn');
+        }
         const rows = data.rows;
         if (!rows.some((r) => !r.block)) {
           const reason = rows.length ? t(rows[0]!.block ?? '').toLowerCase() + (rows.length > 1 ? ', …' : '') : '';
@@ -61,14 +71,28 @@ export function SendViaMailerButton({ leadIds, disabled, title, onQueued }: { le
     });
   }
 
+  const wizard = open ? <MailerWizard leadIds={open.leadIds} check={open.check} onClose={() => setOpen(null)} onQueued={onQueued} /> : null;
+  return { start, pending: check.isPending, wizard };
+}
+
+export function SendViaMailerButton({ leadIds, disabled, title, onQueued }: { leadIds: number[]; disabled?: boolean; title?: string; onQueued: () => void }) {
+  const mailer = useSendViaMailer(leadIds, onQueued);
   return (
     <>
-      <button type="button" className="btn sm primary" disabled={disabled || check.isPending} title={title} onClick={start}>
-        {Icons.send}
-        {t('Send via mailer')}
-      </button>
-      {open ? <MailerWizard leadIds={open.leadIds} check={open.check} onClose={() => setOpen(null)} onQueued={onQueued} /> : null}
+      <MailerButton disabled={disabled || mailer.pending} title={title} onClick={mailer.start} />
+      {mailer.wizard}
     </>
+  );
+}
+
+/** The bulk bar's primary "Send via mailer" button. */
+export function MailerButton({ disabled, title, onClick }: { disabled?: boolean; title?: string; onClick: () => void }) {
+  const t = useT();
+  return (
+    <button type="button" className="btn sm primary" disabled={disabled} title={title} onClick={onClick}>
+      {Icons.send}
+      {t('Send via mailer')}
+    </button>
   );
 }
 
