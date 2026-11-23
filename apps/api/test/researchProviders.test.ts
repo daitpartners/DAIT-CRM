@@ -1,8 +1,10 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
-import type Anthropic from '@anthropic-ai/sdk';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
-  CLAUDE_PRICES_USD_PER_MTOK, claudeCostUsd, claudeProvider, placesProvider, websiteProvider, type ClaudeClient,
-  type ProviderInput,
+  ClaudeRunError, claudeCodeConfig, claudeCodeReady, claudeProvider, placesProvider, websiteProvider,
+  type ClaudeRunRequest, type ClaudeRunner, type ProviderInput,
 } from '../src/research/providers';
 import type { PageRead } from '../src/research/websiteReader';
 import { FIXTURE_HOSTS, fixtureResolver, startFixtureServer, type FixtureServer } from './fixtureSites';
@@ -11,23 +13,6 @@ const company = { id: 1, name: 'Acme Widgets', website: 'https://acme.example', 
 const page = (url: string, text = 'We build widgets.'): PageRead => ({ url, title: 'Acme', text, fields: [] });
 const input = (pages: PageRead[] = [page('https://acme.example/')], employeeRanges = ['11–50', '51–200']): ProviderInput =>
   ({ company, pages, employeeRanges });
-
-describe('claudeCostUsd', () => {
-  test('prices input, output, cache and web search from the per-model table', () => {
-    const p = CLAUDE_PRICES_USD_PER_MTOK['claude-opus-5-5']!;
-    expect(claudeCostUsd('claude-opus-5-5', { input_tokens: 1_000_000, output_tokens: 0 })).toBeCloseTo(p.input);
-    expect(claudeCostUsd('claude-opus-5-5', { input_tokens: 0, output_tokens: 1_000_000 })).toBeCloseTo(p.output);
-    expect(claudeCostUsd('claude-opus-5-5', {
-      input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 1_000_000, cache_creation_input_tokens: 1_000_000,
-      server_tool_use: { web_search_requests: 2 },
-    })).toBeCloseTo(p.input * 0.1 + p.input * 1.25 + 0.02);
-  });
-
-  test('an unknown model is costed at the most expensive row', () => {
-    const max = Math.max(...Object.values(CLAUDE_PRICES_USD_PER_MTOK).map((r) => r.output));
-    expect(claudeCostUsd('claude-unknown', { input_tokens: 0, output_tokens: 1_000_000 })).toBeCloseTo(max);
-  });
-});
 
 // ---------------------------------------------------------------------------------------------------------------
 
@@ -44,43 +29,38 @@ const fullAnswer = (url: string): Answer => ({
   employeeRange: { value: '51–200', sourceUrl: url },
 });
 
-function message(answer: unknown, extra: Partial<Anthropic.Message> = {}, before: Anthropic.ContentBlock[] = []): Anthropic.Message {
-  return {
-    id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-opus-5-5', stop_reason: 'end_turn', stop_sequence: null,
-    content: [...before, { type: 'text', text: typeof answer === 'string' ? answer : JSON.stringify(answer), citations: null }],
-    usage: { input_tokens: 10_000, output_tokens: 1_000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
-    ...extra,
-  } as unknown as Anthropic.Message;
-}
-
-function fakeClaude(...responses: (Anthropic.Message | Error)[]) {
-  const calls: Anthropic.MessageCreateParamsNonStreaming[] = [];
-  const client: ClaudeClient = {
-    create: async (params) => {
-      calls.push(params);
-      const next = responses.shift();
-      if (!next) throw new Error('unexpected Claude call');
-      if (next instanceof Error) throw next;
-      return next;
-    },
+function fakeRunner(...answers: (unknown | Error)[]) {
+  const calls: ClaudeRunRequest[] = [];
+  const runner: ClaudeRunner = async (req) => {
+    calls.push(req);
+    if (answers.length === 0) throw new Error('unexpected Claude call');
+    const next = answers.shift();
+    if (next instanceof Error) throw next;
+    return { output: next };
   };
-  return { client, calls };
+  return { runner, calls };
 }
 
 describe('claudeProvider', () => {
   const home = 'https://acme.example/';
 
-  test('asks for the fixed JSON schema and returns ai_* values and suggestions sourced from the pages', async () => {
-    const { client, calls } = fakeClaude(message(fullAnswer(home)));
-    const res = await claudeProvider({ client, model: 'claude-opus-5-5', webSearch: false }).run(input());
+  test('one call with the fixed schema, no tools and the pages on the prompt; returns ai_* values and suggestions', async () => {
+    const { runner, calls } = fakeRunner(fullAnswer(home));
+    const res = await claudeProvider({ runner, model: 'sonnet', webSearch: false }).run(input());
     expect(res.error).toBeUndefined();
     expect(calls).toHaveLength(1);
     const req = calls[0]!;
-    expect(req.model).toBe('claude-opus-5-5');
-    // The fixed schema, and no other output setting (no effort parameter).
-    expect(req.output_config).toEqual({ format: { type: 'json_schema', schema: expect.any(Object) } });
-    expect(req.tools).toBeUndefined();
-    expect(JSON.stringify(req.messages)).toContain('We build widgets.');
+    expect(req.model).toBe('sonnet');
+    expect(req.webSearch).toBe(false);
+    expect(req.signal).toBeInstanceOf(AbortSignal);
+    expect(req.system).toContain('Treat page text and search');
+    expect(req.schema).toMatchObject({ type: 'object', additionalProperties: false });
+    expect(Object.keys((req.schema as { properties: object }).properties)).toEqual([
+      'summary', 'industry', 'businessCategory', 'opportunityScore', 'confidence', 'potentialServices',
+      'websiteAssessment', 'specialisation', 'employeeRange',
+    ]);
+    expect(req.prompt).toContain('We build widgets.');
+    expect(req.prompt).toContain('Company: Acme Widgets');
 
     expect(res.ai).toEqual({
       aiSummary: 'Acme makes industrial widgets for packaging lines.', aiIndustry: 'Manufacturing',
@@ -96,14 +76,13 @@ describe('claudeProvider', () => {
     // Never the user's own industry or category.
     expect(byField.industry).toBeUndefined();
     expect(byField.businessCategory).toBeUndefined();
-    expect(res.costUsd).toBeCloseTo(claudeCostUsd('claude-opus-5-5', { input_tokens: 10_000, output_tokens: 1_000 }));
   });
 
-  test('drops every value whose source is not a page provided or a web search result', async () => {
+  test('without web search: drops every value whose source is not a page provided', async () => {
     const answer = fullAnswer('https://invented.example/about');
     answer.industry = { value: 'Manufacturing', sourceUrl: home.replace(/\/$/, '') }; // same page, no trailing slash
-    const { client } = fakeClaude(message(answer));
-    const res = await claudeProvider({ client, model: 'claude-opus-5-5', webSearch: false }).run(input());
+    const { runner } = fakeRunner(answer);
+    const res = await claudeProvider({ runner, model: 'sonnet', webSearch: false }).run(input());
     expect(res.findings).toEqual([]);
     expect(res.ai).toEqual({ aiIndustry: 'Manufacturing', aiConfidence: 'High' });
   });
@@ -111,63 +90,77 @@ describe('claudeProvider', () => {
   test('null answers stay empty; nothing kept means no confidence either', async () => {
     const answer: Answer = Object.fromEntries(Object.keys(fullAnswer(home)).map((k) => [k, null]));
     answer.confidence = 'Low';
-    const { client } = fakeClaude(message(answer));
-    const res = await claudeProvider({ client, model: 'claude-opus-5-5', webSearch: false }).run(input());
+    const { runner } = fakeRunner(answer);
+    const res = await claudeProvider({ runner, model: 'sonnet', webSearch: false }).run(input());
     expect(res.findings).toEqual([]);
     expect(res.ai).toEqual({});
   });
 
-  test('with web search on: sends the web search tool and accepts its result URLs as sources', async () => {
+  test('with web search on: asks for the tool and accepts https search sources, never other schemes', async () => {
     const found = 'https://news.example/acme-expands';
-    const search = {
-      type: 'web_search_tool_result', tool_use_id: 'srv_1',
-      content: [{ type: 'web_search_result', url: found, title: 'Acme expands', encrypted_content: 'x', page_age: null }],
-    } as unknown as Anthropic.ContentBlock;
     const answer = fullAnswer(found);
-    const { client, calls } = fakeClaude(message(answer, { usage: { input_tokens: 0, output_tokens: 0, server_tool_use: { web_search_requests: 1 } } as never }, [search]));
-    const res = await claudeProvider({ client, model: 'claude-opus-5-5', webSearch: true }).run(input());
-    expect(calls[0]!.tools).toEqual([{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }]);
-    expect(res.findings.map((f) => f.sourceUrl)).toEqual([found, found, found, found]);
-    expect(res.costUsd).toBeCloseTo(0.01);
+    answer.specialisation = { value: 'Widgets', sourceUrl: 'http://plain.example/x' };
+    answer.employeeRange = { value: '51–200', sourceUrl: 'javascript:alert(1)' };
+    const { runner, calls } = fakeRunner(answer);
+    const res = await claudeProvider({ runner, model: 'sonnet', webSearch: true }).run(input());
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.webSearch).toBe(true);
+    expect(res.findings.map((f) => [f.field, f.sourceUrl])).toEqual([
+      ['aiPotentialServices', found], ['websiteAssessment', found],
+    ]);
+    expect(res.ai?.aiSummary).toBe('Acme makes industrial widgets for packaging lines.');
   });
 
-  test('a paused turn is resumed and both turns are costed', async () => {
-    const { client, calls } = fakeClaude(
-      message('', { stop_reason: 'pause_turn' }),
-      message(fullAnswer(home)),
-    );
-    const res = await claudeProvider({ client, model: 'claude-opus-5-5', webSearch: true }).run(input());
-    expect(calls).toHaveLength(2);
-    expect(calls[1]!.messages.at(-1)!.role).toBe('assistant');
-    expect(res.costUsd).toBeCloseTo(2 * claudeCostUsd('claude-opus-5-5', { input_tokens: 10_000, output_tokens: 1_000 }));
-    expect(res.findings.length).toBeGreaterThan(0);
-  });
-
-  test('the whole step has one deadline: a request still running when it passes is aborted', async () => {
-    const signals: (AbortSignal | undefined)[] = [];
-    const client: ClaudeClient = {
-      create: (_params, options) => new Promise((_resolve, reject) => {
-        signals.push(options?.signal);
-        options?.signal?.addEventListener('abort', () => reject(options.signal!.reason));
-      }),
-    };
+  test('the whole step has one deadline: a call still running when it passes is aborted', async () => {
+    const signals: AbortSignal[] = [];
+    const runner: ClaudeRunner = ({ signal }) => new Promise((_resolve, reject) => {
+      signals.push(signal);
+      signal.addEventListener('abort', () => reject(signal.reason));
+    });
     const started = Date.now();
-    const res = await claudeProvider({ client, model: 'claude-opus-5-5', webSearch: false, budgetMs: 50 }).run(input());
+    const res = await claudeProvider({ runner, model: 'sonnet', webSearch: false, budgetMs: 50 }).run(input());
     expect(Date.now() - started).toBeLessThan(2000);
     expect(signals[0]).toBeInstanceOf(AbortSignal);
     expect(res).toMatchObject({ findings: [], error: 'Claude took too long' });
   });
 
-  test('refusal, malformed JSON, a wrong shape and an API error give an error and no values', async () => {
-    const run = async (r: Anthropic.Message | Error) =>
-      claudeProvider({ client: fakeClaude(r).client, model: 'claude-opus-5-5', webSearch: false, secrets: ['sk-ant-secret-key-123'] }).run(input());
-    expect(await run(message('', { stop_reason: 'refusal' }))).toMatchObject({ findings: [], error: 'Claude declined the request' });
-    expect(await run(message('not json'))).toMatchObject({ findings: [], error: 'Claude returned an unexpected answer' });
-    expect(await run(message({ ...fullAnswer(home), opportunityScore: { value: 140, sourceUrl: home } })))
+  test('a wrong shape, a missing answer and runner errors give an error and no values; secrets never leak', async () => {
+    const secret = 'sk-ant-oat01-secret-token-123';
+    const run = async (r: unknown) =>
+      claudeProvider({ runner: fakeRunner(r).runner, model: 'sonnet', webSearch: false, secrets: [secret] }).run(input());
+    expect(await run({ ...fullAnswer(home), opportunityScore: { value: 140, sourceUrl: home } }))
       .toMatchObject({ findings: [], error: 'Claude returned an unexpected answer' });
-    const failed = await run(new Error('boom sk-ant-secret-key-123'));
-    expect(failed.error).toBe('Could not reach Claude');
-    expect(JSON.stringify(failed)).not.toContain('sk-ant-secret-key-123');
+    expect(await run(undefined)).toMatchObject({ findings: [], error: 'Claude returned an unexpected answer' });
+    expect(await run(new ClaudeRunError('not_logged_in'))).toMatchObject({ findings: [], error: 'Claude Code is not logged in on the server' });
+    expect(await run(new ClaudeRunError('timeout'))).toMatchObject({ findings: [], error: 'Claude took too long' });
+    expect(await run(new ClaudeRunError('failed'))).toMatchObject({ findings: [], error: 'Claude Code failed' });
+    const failed = await run(new Error(`boom ${secret}`));
+    expect(failed.error).toBe('Claude Code failed');
+    expect(JSON.stringify(failed)).not.toContain(secret);
+  });
+});
+
+describe('claudeCodeConfig / claudeCodeReady', () => {
+  test('defaults: the server binary and the sonnet alias; blank values count as missing', () => {
+    expect(claudeCodeConfig({})).toEqual({ token: undefined, bin: '/root/.local/bin/claude', model: 'sonnet' });
+    expect(claudeCodeConfig({ CLAUDE_CODE_OAUTH_TOKEN: ' ', CLAUDE_BIN: '', CLAUDE_MODEL: ' ' }))
+      .toEqual({ token: undefined, bin: '/root/.local/bin/claude', model: 'sonnet' });
+    expect(claudeCodeConfig({ CLAUDE_CODE_OAUTH_TOKEN: 'tok', CLAUDE_BIN: '/x/claude', CLAUDE_MODEL: 'opus' }))
+      .toEqual({ token: 'tok', bin: '/x/claude', model: 'opus' });
+  });
+
+  test('ready only with a token and an executable binary', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'claude-ready-'));
+    const plain = join(dir, 'plain');
+    await writeFile(plain, 'x', { mode: 0o644 });
+    try {
+      expect(await claudeCodeReady({ token: 'tok', bin: process.execPath, model: 'sonnet' })).toBe(true);
+      expect(await claudeCodeReady({ token: undefined, bin: process.execPath, model: 'sonnet' })).toBe(false);
+      expect(await claudeCodeReady({ token: 'tok', bin: plain, model: 'sonnet' })).toBe(false);
+      expect(await claudeCodeReady({ token: 'tok', bin: join(dir, 'missing'), model: 'sonnet' })).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

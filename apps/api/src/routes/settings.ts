@@ -6,18 +6,21 @@ import { parseBody } from '../validate.js';
 import { requireRight } from '../plugins/auth.js';
 import { loadCompanySettings } from '../quotations/service.js';
 import { loadEnrichmentSettings, monthTotals } from '../research/service.js';
+import { claudeCodeConfig, claudeCodeReady } from '../research/providers.js';
 
 /**
- * The enrichment engine card: the settings plus whether each API key is present on the server (never the key itself)
- * and this month's Claude spend and Places calls.
+ * The enrichment engine card: the settings plus whether Claude Code (token and executable binary) and the Places key
+ * are present on the server (never the token or key itself), and this month's Claude runs and Places calls.
  */
 async function enrichmentView(db: Parameters<typeof loadEnrichmentSettings>[0]) {
-  const [settings, totals] = await Promise.all([loadEnrichmentSettings(db), monthTotals(db)]);
+  const [settings, totals, claudeCodeOk] = await Promise.all([
+    loadEnrichmentSettings(db), monthTotals(db), claudeCodeReady(claudeCodeConfig(process.env)),
+  ]);
   return {
     ...settings,
-    claudeKeyPresent: Boolean(process.env.ANTHROPIC_API_KEY),
+    claudeCodeReady: claudeCodeOk,
     placesKeyPresent: Boolean(process.env.GOOGLE_PLACES_API_KEY),
-    claudeSpentThisMonthUsd: Math.round(totals.claudeUsd * 100) / 100,
+    claudeRunsThisMonth: totals.claudeRuns,
     placesCallsThisMonth: totals.placesCalls,
   };
 }

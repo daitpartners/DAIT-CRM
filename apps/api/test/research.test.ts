@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import type Anthropic from '@anthropic-ai/sdk';
+import { fileURLToPath } from 'node:url';
+import { ClaudeRunError, type ClaudeRunner } from '../src/research/providers';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '../src/db';
 import { buildApp } from '../src/app';
@@ -25,7 +26,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await resetDb();
   vi.stubEnv('RESEARCH_TEST_ALLOW_HOSTS', FIXTURE_HOSTS.join(','));
-  vi.stubEnv('ANTHROPIC_API_KEY', '');
+  vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
   vi.stubEnv('GOOGLE_PLACES_API_KEY', '');
 });
 afterEach(() => {
@@ -42,6 +43,11 @@ async function as(role: 'ADMINISTRATOR' | 'MANAGER' | 'SALES_REPRESENTATIVE' | '
 }
 
 const readerDeps = (extra: Partial<ResearchDeps> = {}): ResearchDeps => ({ reader: { resolve: fixtureResolver() }, env: {}, ...extra });
+/** An existing file that is not executable. */
+const fixtureFile = fileURLToPath(import.meta.url);
+/** Claude Code available: a token and an executable binary (this Node binary stands in; the runner is faked). */
+const claudeEnv = (extra: Record<string, string> = {}) =>
+  ({ CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-test-token', CLAUDE_BIN: process.execPath, ...extra });
 
 /** A company on the fixture site (JSON-LD org page + About + Contact). */
 const siteCompany = (over: Parameters<typeof makeCompany>[0] = {}) =>
@@ -131,25 +137,21 @@ describe('research runs · website reader', () => {
 
   it('a run released while working (marked Interrupted) writes nothing when it finishes', async () => {
     const admin = await as('ADMINISTRATOR');
-    await prisma.enrichmentSettings.create({ data: { id: 1, claudeEnabled: true, claudeMonthlyCapUsd: 5 } });
+    await prisma.enrichmentSettings.create({ data: { id: 1, claudeEnabled: true, claudeMonthlyRunCap: 5 } });
     const c = await siteCompany();
     const res = await req('POST', `/api/companies/${c.id}/research`, admin.cookie);
     const runId = res.json().runId as number;
     // While Claude works, the run outlives the stale limit and a new start marks it Interrupted.
-    const claude = {
-      create: async () => {
-        await prisma.enrichmentRun.update({ where: { id: runId }, data: { status: 'Failed', result: 'Interrupted' } });
-        return {
-          id: 'm', type: 'message', role: 'assistant', model: 'x', stop_reason: 'end_turn', stop_sequence: null,
-          content: [{ type: 'text', citations: null, text: JSON.stringify({
-            summary: { value: 'Late summary.', sourceUrl: site.url('site.test') }, industry: null, businessCategory: null,
-            opportunityScore: null, confidence: 'Low', potentialServices: null, websiteAssessment: null, specialisation: null, employeeRange: null,
-          }) }],
-          usage: { input_tokens: 1, output_tokens: 1 },
-        } as unknown as Anthropic.Message;
-      },
+    const claude: ClaudeRunner = async () => {
+      await prisma.enrichmentRun.update({ where: { id: runId }, data: { status: 'Failed', result: 'Interrupted' } });
+      return {
+        output: {
+          summary: { value: 'Late summary.', sourceUrl: site.url('site.test') }, industry: null, businessCategory: null,
+          opportunityScore: null, confidence: 'Low', potentialServices: null, websiteAssessment: null, specialisation: null, employeeRange: null,
+        },
+      };
     };
-    await runResearch(runId, readerDeps({ claude, env: { ANTHROPIC_API_KEY: 'sk-test' } }));
+    await runResearch(runId, readerDeps({ claude, env: claudeEnv() }));
     expect(await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: runId } })).toMatchObject({ status: 'Failed', result: 'Interrupted' });
     const company = await prisma.company.findUniqueOrThrow({ where: { id: c.id } });
     expect(company.aiSummary).toBeNull();
@@ -450,7 +452,7 @@ describe('automatic runs', () => {
 });
 
 describe('paid providers', () => {
-  const answer = (url: string) => JSON.stringify({
+  const answer = (url: string) => ({
     summary: { value: 'Acme makes industrial widgets.', sourceUrl: url },
     industry: { value: 'Manufacturing', sourceUrl: url },
     businessCategory: { value: 'Widget manufacturer', sourceUrl: url },
@@ -462,61 +464,66 @@ describe('paid providers', () => {
     employeeRange: null,
   });
   const fakeClaude = (url: string) => {
-    const calls: unknown[] = [];
-    return {
-      calls,
-      client: {
-        create: async (params: unknown) => {
-          calls.push(params);
-          return {
-            id: 'm', type: 'message', role: 'assistant', model: 'claude-sonnet-5-5', stop_reason: 'end_turn', stop_sequence: null,
-            content: [{ type: 'text', text: answer(url), citations: null }],
-            usage: { input_tokens: 20_000, output_tokens: 2_000 },
-          } as unknown as Anthropic.Message;
-        },
-      },
+    const calls: Parameters<ClaudeRunner>[0][] = [];
+    const runner: ClaudeRunner = async (request) => {
+      calls.push(request);
+      return { output: answer(url) };
     };
+    return { calls, runner };
   };
-  const claudeOn = async (cap: number) => prisma.enrichmentSettings.create({ data: { id: 1, claudeEnabled: true, claudeMonthlyCapUsd: cap } });
+  const claudeOn = async (cap: number) => prisma.enrichmentSettings.create({ data: { id: 1, claudeEnabled: true, claudeMonthlyRunCap: cap } });
+  const engineOf = async (runId: number) => (await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: runId } })).engine;
 
-  it('no key, cap 0, or cap reached: no Claude call and engine "Website reader"', async () => {
+  it('no token, no executable binary, cap 0, cap reached or switched off: no Claude call and engine "Website reader"', async () => {
     const admin = await as('ADMINISTRATOR');
     const c = await siteCompany();
     const fake = fakeClaude(site.url('site.test'));
-    // Cap set, but no key.
+    // Cap set, but no token.
     await claudeOn(5);
-    let runId = await startAndRun(c.id, admin.cookie, readerDeps({ claude: fake.client }));
-    expect((await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: runId } })).engine).toBe('Website reader');
-    // Key, cap 0.
-    await prisma.enrichmentSettings.update({ where: { id: 1 }, data: { claudeMonthlyCapUsd: 0 } });
-    runId = await startAndRun(c.id, admin.cookie, readerDeps({ claude: fake.client, env: { ANTHROPIC_API_KEY: 'sk-test' } }));
-    expect((await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: runId } })).engine).toBe('Website reader');
-    // Key, cap 1, this month's spend already 1.
-    await prisma.enrichmentSettings.update({ where: { id: 1 }, data: { claudeMonthlyCapUsd: 1 } });
-    await prisma.enrichmentRun.update({ where: { id: runId }, data: { costUsd: 1 } });
-    runId = await startAndRun(c.id, admin.cookie, readerDeps({ claude: fake.client, env: { ANTHROPIC_API_KEY: 'sk-test' } }));
-    expect((await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: runId } })).engine).toBe('Website reader');
-    // Key and cap, but the Claude engine switched off.
-    await prisma.enrichmentSettings.update({ where: { id: 1 }, data: { claudeMonthlyCapUsd: 50, claudeEnabled: false } });
-    runId = await startAndRun(c.id, admin.cookie, readerDeps({ claude: fake.client, env: { ANTHROPIC_API_KEY: 'sk-test' } }));
-    expect((await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: runId } })).engine).toBe('Website reader');
+    let runId = await startAndRun(c.id, admin.cookie, readerDeps({ claude: fake.runner, env: { CLAUDE_BIN: process.execPath } }));
+    expect(await engineOf(runId)).toBe('Website reader');
+    // Token, but the binary is missing (the default path does not exist here) or not executable.
+    runId = await startAndRun(c.id, admin.cookie, readerDeps({ claude: fake.runner, env: { CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-test-token' } }));
+    expect(await engineOf(runId)).toBe('Website reader');
+    runId = await startAndRun(c.id, admin.cookie, readerDeps({ claude: fake.runner, env: claudeEnv({ CLAUDE_BIN: fixtureFile }) }));
+    expect(await engineOf(runId)).toBe('Website reader');
+    // Token and binary, cap 0.
+    await prisma.enrichmentSettings.update({ where: { id: 1 }, data: { claudeMonthlyRunCap: 0 } });
+    runId = await startAndRun(c.id, admin.cookie, readerDeps({ claude: fake.runner, env: claudeEnv() }));
+    expect(await engineOf(runId)).toBe('Website reader');
+    // Cap 1, and one run this month already used Claude.
+    await prisma.enrichmentSettings.update({ where: { id: 1 }, data: { claudeMonthlyRunCap: 1 } });
+    await prisma.enrichmentRun.update({ where: { id: runId }, data: { sources: ['website', 'claude'] } });
+    runId = await startAndRun(c.id, admin.cookie, readerDeps({ claude: fake.runner, env: claudeEnv() }));
+    expect(await engineOf(runId)).toBe('Website reader');
+    // Runs of an earlier month do not count; the switch still has to be on.
+    await prisma.enrichmentRun.updateMany({ data: { createdAt: new Date(Date.UTC(2020, 0, 15)) } });
+    await prisma.enrichmentSettings.update({ where: { id: 1 }, data: { claudeEnabled: false } });
+    runId = await startAndRun(c.id, admin.cookie, readerDeps({ claude: fake.runner, env: claudeEnv() }));
+    expect(await engineOf(runId)).toBe('Website reader');
     expect(fake.calls).toHaveLength(0);
+    await prisma.enrichmentSettings.update({ where: { id: 1 }, data: { claudeEnabled: true } });
+    runId = await startAndRun(c.id, admin.cookie, readerDeps({ claude: fake.runner, env: claudeEnv() }));
+    expect(await engineOf(runId)).toBe('Website reader + Claude Code sonnet');
+    expect(fake.calls).toHaveLength(1);
   });
 
-  it('with a key and a cap: Claude writes ai_* columns, proposes services, and the cost is recorded', async () => {
+  it('with Claude Code ready and a run cap: Claude writes ai_* columns and proposes services; the run counts', async () => {
     const admin = await as('ADMINISTRATOR');
     await seedLookups();
     const c = await siteCompany();
     await claudeOn(5);
     const fake = fakeClaude(site.url('site.test'));
     const runId = await startAndRun(c.id, admin.cookie, readerDeps({
-      claude: fake.client, env: { ANTHROPIC_API_KEY: 'sk-test', ANTHROPIC_MODEL: 'claude-sonnet-5-5' },
+      claude: fake.runner, env: claudeEnv({ CLAUDE_MODEL: 'opus' }),
     }));
     expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0]).toMatchObject({ model: 'opus', webSearch: false });
+    expect(fake.calls[0]!.prompt).toContain('Acme Widgets');
     const run = await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: runId } });
-    expect(run.engine).toBe('Website reader + Claude claude-sonnet-5-5');
+    expect(run.engine).toBe('Website reader + Claude Code opus');
     expect(run.sources).toEqual(['website', 'claude']);
-    expect(run.costUsd.toNumber()).toBeCloseTo((20_000 * 2 + 2_000 * 10) / 1_000_000, 4);
+    expect(run.costUsd.toNumber()).toBe(0);
     const company = await prisma.company.findUniqueOrThrow({ where: { id: c.id } });
     expect(company).toMatchObject({
       aiSummary: 'Acme makes industrial widgets.', aiIndustry: 'Manufacturing', aiBusinessCategory: 'Widget manufacturer',
@@ -526,6 +533,30 @@ describe('paid providers', () => {
     expect(services).toMatchObject({ value: ['Website Creation'], display: 'Website Creation', confidence: 70 });
     expect((await req('POST', `/api/research/suggestions/${services.id}/accept`, admin.cookie)).statusCode).toBe(200);
     expect((await prisma.company.findUniqueOrThrow({ where: { id: c.id } })).aiPotentialServices).toEqual(['Website Creation']);
+  });
+
+  it('web search on: the runner gets the tool and the run lists it; a Claude Code failure is a note, the token never shown', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const c = await siteCompany();
+    await prisma.enrichmentSettings.create({ data: { id: 1, claudeEnabled: true, claudeMonthlyRunCap: 5, webSearchEnabled: true } });
+    const fake = fakeClaude(site.url('site.test'));
+    let runId = await startAndRun(c.id, admin.cookie, readerDeps({ claude: fake.runner, env: claudeEnv() }));
+    expect(fake.calls[0]).toMatchObject({ webSearch: true });
+    expect((await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: runId } })).sources).toEqual(['website', 'claude', 'websearch']);
+
+    const token = 'sk-ant-oat01-test-token';
+    const failing: ClaudeRunner = async () => {
+      throw new ClaudeRunError('not_logged_in');
+    };
+    runId = await startAndRun(c.id, admin.cookie, readerDeps({ claude: failing, env: claudeEnv() }));
+    const run = await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: runId } });
+    expect(run).toMatchObject({ status: 'Completed', error: 'Claude Code is not logged in on the server' });
+    expect(run.result).toContain('Claude Code is not logged in on the server');
+    const leaky: ClaudeRunner = async () => {
+      throw new Error(`spawn failed with ${token}`);
+    };
+    runId = await startAndRun(c.id, admin.cookie, readerDeps({ claude: leaky, env: claudeEnv() }));
+    expect(JSON.stringify(await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: runId } }))).not.toContain(token);
   });
 
   it('Google Places with a key, on and under the cap: suggestions and the call counted; refused at the cap', async () => {
@@ -583,24 +614,40 @@ describe('enrichment settings', () => {
     const rep = await as('MANAGER');
     expect((await req('GET', '/api/settings/enrichment', rep.cookie)).statusCode).toBe(403);
     const admin = await as('ADMINISTRATOR');
-    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-very-secret-0001');
+    const token = 'sk-ant-oat01-very-secret-0001';
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', token);
+    vi.stubEnv('CLAUDE_BIN', process.execPath);
     const c = await makeCompany();
-    await prisma.enrichmentRun.create({ data: { companyId: c.id, trigger: 't', engine: 'e', costUsd: 0.25, placesCalls: 3 } });
+    await prisma.enrichmentRun.create({ data: { companyId: c.id, trigger: 't', engine: 'e', placesCalls: 3, sources: ['website', 'claude'] } });
+    await prisma.enrichmentRun.create({ data: { companyId: c.id, trigger: 't', engine: 'e', sources: ['website', 'claude', 'websearch'] } });
+    await prisma.enrichmentRun.create({ data: { companyId: c.id, trigger: 't', engine: 'e', sources: ['website'] } });
+    await prisma.enrichmentRun.create({ data: { companyId: c.id, trigger: 't', engine: 'e', sources: ['website', 'claude'], createdAt: new Date(Date.UTC(2020, 0, 1)) } });
     const get = await req('GET', '/api/settings/enrichment', admin.cookie);
     expect(get.statusCode).toBe(200);
     expect(get.json()).toMatchObject({
-      dailyRunLimit: 50, claudeEnabled: false, claudeMonthlyCapUsd: 0, placesEnabled: false, placesMonthlyCallCap: 0,
-      webSearchEnabled: false, claudeKeyPresent: true, placesKeyPresent: false, claudeSpentThisMonthUsd: 0.25, placesCallsThisMonth: 3,
+      dailyRunLimit: 50, claudeEnabled: false, claudeMonthlyRunCap: 0, placesEnabled: false, placesMonthlyCallCap: 0,
+      webSearchEnabled: false, claudeCodeReady: true, placesKeyPresent: false, claudeRunsThisMonth: 2, placesCallsThisMonth: 3,
     });
-    expect(get.body).not.toContain('sk-ant-very-secret-0001');
+    expect(get.body).not.toContain(token);
+    // Not ready without an executable binary, or without the token.
+    vi.stubEnv('CLAUDE_BIN', fixtureFile);
+    expect((await req('GET', '/api/settings/enrichment', admin.cookie)).json().claudeCodeReady).toBe(false);
+    vi.stubEnv('CLAUDE_BIN', process.execPath);
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
+    expect((await req('GET', '/api/settings/enrichment', admin.cookie)).json().claudeCodeReady).toBe(false);
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', token);
 
     const put = await req('PUT', '/api/settings/enrichment', admin.cookie, {
-      dailyRunLimit: 20, claudeEnabled: true, claudeMonthlyCapUsd: 12.345, placesEnabled: false, placesMonthlyCallCap: 0,
-      webSearchEnabled: true, anthropicApiKey: 'nope',
+      dailyRunLimit: 20, claudeEnabled: true, claudeMonthlyRunCap: 200, placesEnabled: false, placesMonthlyCallCap: 0,
+      webSearchEnabled: true, claudeCodeOauthToken: 'nope',
     });
     expect(put.statusCode).toBe(200);
-    expect(put.json()).toMatchObject({ dailyRunLimit: 20, claudeEnabled: true, claudeMonthlyCapUsd: 12.35, webSearchEnabled: true });
-    expect(put.body).not.toContain('sk-ant-very-secret-0001');
+    expect(put.json()).toMatchObject({ dailyRunLimit: 20, claudeEnabled: true, claudeMonthlyRunCap: 200, webSearchEnabled: true });
+    expect(put.body).not.toContain(token);
+    expect(put.body).not.toContain('nope');
+    expect((await req('PUT', '/api/settings/enrichment', admin.cookie, {
+      dailyRunLimit: 20, claudeEnabled: true, claudeMonthlyRunCap: 1.5, placesEnabled: false, placesMonthlyCallCap: 0, webSearchEnabled: true,
+    })).statusCode).toBe(400);
     expect((await req('PUT', '/api/settings/enrichment', rep.cookie, {})).statusCode).toBe(403);
   });
 });

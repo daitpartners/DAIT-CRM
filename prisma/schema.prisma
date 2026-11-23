@@ -790,7 +790,7 @@ model EnrichmentRun {
   leadId       Int?      @map("lead_id")
   /// "Manual · <user>" / "New lead LD-…".
   trigger      String    @db.VarChar(120)
-  /// "Website reader" / "Website reader + Claude <model>".
+  /// "Website reader" / "Website reader + Claude Code <model>".
   engine       String    @db.VarChar(120)
   /// string[]: the sources used (website, places, websearch).
   sources      Json      @default("[]")
@@ -800,7 +800,7 @@ model EnrichmentRun {
   /// RUN_STATUSES (shared): Pending | Processing | Completed | Failed.
   status       String    @default("Pending") @db.VarChar(20)
   error        String?   @db.Text
-  /// Claude spend for this run (from the API's token usage); summed per month against the cap.
+  /// Unused since Claude runs through Claude Code (a subscription has no per-call price); always 0.
   costUsd      Decimal   @default(0) @map("cost_usd") @db.Decimal(10, 4)
   /// Google Places Place Details calls made by this run; summed per month against the call cap.
   placesCalls  Int       @default(0) @map("places_calls")
@@ -879,8 +879,8 @@ model EnrichmentSettings {
   /// Research runs per day across the CRM; automatic runs are skipped and manual ones refused once reached.
   dailyRunLimit        Int      @default(50) @map("daily_run_limit")
   claudeEnabled        Boolean  @default(false) @map("claude_enabled")
-  /// USD per calendar month; 0 = Claude off.
-  claudeMonthlyCapUsd  Decimal  @default(0) @map("claude_monthly_cap_usd") @db.Decimal(10, 2)
+  /// Research runs that use Claude Code per calendar month (UTC); 0 = Claude off.
+  claudeMonthlyRunCap  Int      @default(0) @map("claude_monthly_run_cap")
   placesEnabled        Boolean  @default(false) @map("places_enabled")
   /// Place Details calls per calendar month; 0 = Google Places off.
   placesMonthlyCallCap Int      @default(0) @map("places_monthly_call_cap")

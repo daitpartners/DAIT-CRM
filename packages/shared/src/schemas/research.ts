@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { optionalText, optionalUrl } from './common.js';
 import { MANUAL_SOURCE_TYPES } from '../research.js';
-import { round2 } from '../quotations.js';
 
 /**
  * `PUT /settings/enrichment` (Administrators). API keys are never part of it: they live in server environment
@@ -10,8 +9,8 @@ import { round2 } from '../quotations.js';
 export const EnrichmentSettingsUpdate = z.object({
   dailyRunLimit: z.number().int().min(0).max(100_000),
   claudeEnabled: z.boolean(),
-  /** USD per calendar month; 0 = Claude off. Rounded to cents as the Decimal(10,2) column stores it. */
-  claudeMonthlyCapUsd: z.number().min(0).max(100_000).transform(round2),
+  /** Research runs that use Claude Code per calendar month (UTC); 0 = Claude off. */
+  claudeMonthlyRunCap: z.number().int().min(0).max(10_000),
   placesEnabled: z.boolean(),
   /** Place Details calls per calendar month; 0 = Google Places off. */
   placesMonthlyCallCap: z.number().int().min(0).max(1_000_000),

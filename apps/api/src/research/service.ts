@@ -19,8 +19,8 @@ import { NotFoundError } from '../validate.js';
 import type { AuthUser } from '../plugins/auth.js';
 import type { Finding, ReadWebsiteOptions } from './websiteReader.js';
 import {
-  DEFAULT_CLAUDE_MODEL, claudeProvider, createClaudeClient, placesProvider, redact, websiteProvider,
-  type AiClassification, type ClaudeClient, type ProviderInput, type ProviderResult, type ResearchProvider, type SourceDraft,
+  claudeCodeConfig, claudeCodeReady, claudeProvider, createClaudeCodeRunner, placesProvider, redact, websiteProvider,
+  type AiClassification, type ClaudeRunner, type ProviderInput, type ProviderResult, type ResearchProvider, type SourceDraft,
 } from './providers.js';
 
 type Db = Prisma.TransactionClient | PrismaClient;
@@ -35,10 +35,10 @@ export class ResearchError extends Error {
   }
 }
 
-/** Test seams: the reader's resolver, fake Claude / Places clients and the environment (keys, model). */
+/** Test seams: the reader's resolver, a fake Claude runner / Places fetch and the environment (keys, token, model). */
 export interface ResearchDeps {
   reader?: ReadWebsiteOptions;
-  claude?: ClaudeClient;
+  claude?: ClaudeRunner;
   placesFetch?: typeof fetch;
   env?: Record<string, string | undefined>;
 }
@@ -53,7 +53,7 @@ const RESEARCH_FIELD_KEYS = new Set<string>(RESEARCH_FIELDS.map((f) => f.field))
 // Settings and month totals
 
 export type EnrichmentSettingsValues = {
-  dailyRunLimit: number; claudeEnabled: boolean; claudeMonthlyCapUsd: number;
+  dailyRunLimit: number; claudeEnabled: boolean; claudeMonthlyRunCap: number;
   placesEnabled: boolean; placesMonthlyCallCap: number; webSearchEnabled: boolean;
 };
 
@@ -62,7 +62,7 @@ export async function loadEnrichmentSettings(db: Db): Promise<EnrichmentSettings
   const row = await db.enrichmentSettings.findUnique({ where: { id: 1 } });
   if (!row) return { ...ENRICHMENT_SETTINGS_DEFAULTS };
   return {
-    dailyRunLimit: row.dailyRunLimit, claudeEnabled: row.claudeEnabled, claudeMonthlyCapUsd: row.claudeMonthlyCapUsd.toNumber(),
+    dailyRunLimit: row.dailyRunLimit, claudeEnabled: row.claudeEnabled, claudeMonthlyRunCap: row.claudeMonthlyRunCap,
     placesEnabled: row.placesEnabled, placesMonthlyCallCap: row.placesMonthlyCallCap, webSearchEnabled: row.webSearchEnabled,
   };
 }
@@ -70,12 +70,14 @@ export async function loadEnrichmentSettings(db: Db): Promise<EnrichmentSettings
 const startOfUtcDay = (now: Date) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 const startOfUtcMonth = (now: Date) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 
-/** Claude spend (USD) and Places Details calls recorded on runs this calendar month (UTC). */
-export async function monthTotals(db: Db, now = new Date()): Promise<{ claudeUsd: number; placesCalls: number }> {
-  const sum = await db.enrichmentRun.aggregate({
-    where: { createdAt: { gte: startOfUtcMonth(now) } }, _sum: { costUsd: true, placesCalls: true },
-  });
-  return { claudeUsd: sum._sum.costUsd?.toNumber() ?? 0, placesCalls: sum._sum.placesCalls ?? 0 };
+/** Runs that used Claude and Places Details calls recorded on runs this calendar month (UTC). */
+export async function monthTotals(db: Db, now = new Date()): Promise<{ claudeRuns: number; placesCalls: number }> {
+  const since = startOfUtcMonth(now);
+  const [sum, claudeRuns] = await Promise.all([
+    db.enrichmentRun.aggregate({ where: { createdAt: { gte: since } }, _sum: { placesCalls: true } }),
+    db.enrichmentRun.count({ where: { createdAt: { gte: since }, sources: { array_contains: ['claude'] } } }),
+  ]);
+  return { claudeRuns, placesCalls: sum._sum.placesCalls ?? 0 };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -215,7 +217,7 @@ export async function startResearch(opts: StartOptions): Promise<number | null> 
       },
     });
     await setResearchStatus(tx, opts.companyId, 'Pending');
-    // One attempt: a retry could spend on Claude twice; a failed run is simply run again by hand.
+    // One attempt: a retry could use Claude twice; a failed run is simply run again by hand.
     await enqueue(tx, 'research_company', { runId: run.id }, { maxAttempts: 1 });
     return run.id;
   });
@@ -326,12 +328,12 @@ export async function runResearch(runId: number, deps: ResearchDeps = {}): Promi
   if (claimed.count === 0) return;
   const run = await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: runId } });
   const env = deps.env ?? process.env;
-  const secrets = [env.ANTHROPIC_API_KEY, env.GOOGLE_PLACES_API_KEY];
+  const secrets = [env.CLAUDE_CODE_OAUTH_TOKEN, env.GOOGLE_PLACES_API_KEY];
   try {
     await setResearchStatus(prisma, run.companyId, 'Processing');
     const company = await prisma.company.findUniqueOrThrow({ where: { id: run.companyId } });
     if (!company.website) {
-      await complete(run.id, company.id, { result: 'No website on file', sources: [], engine: 'Website reader', findings: [], drafts: [], costUsd: 0, placesCalls: 0 });
+      await complete(run.id, company.id, { result: 'No website on file', sources: [], engine: 'Website reader', findings: [], drafts: [], placesCalls: 0 });
       return;
     }
 
@@ -357,20 +359,20 @@ export async function runResearch(runId: number, deps: ResearchDeps = {}): Promi
       if (places.error) notes.push(`Google Places: ${places.error}`);
     }
 
-    const claudeKey = env.ANTHROPIC_API_KEY;
-    if (claudeKey && settings.claudeEnabled && settings.claudeMonthlyCapUsd > 0 && totals.claudeUsd < settings.claudeMonthlyCapUsd) {
-      const model = env.ANTHROPIC_MODEL?.trim() || DEFAULT_CLAUDE_MODEL;
+    const { token, bin, model } = claudeCodeConfig(env);
+    if (settings.claudeEnabled && settings.claudeMonthlyRunCap > 0 && totals.claudeRuns < settings.claudeMonthlyRunCap
+      && token && await claudeCodeReady({ token, bin, model })) {
       input.employeeRanges = (await prisma.lookupValue.findMany({
         where: { group: 'employee_range', isActive: true }, orderBy: { sortOrder: 'asc' }, select: { value: true },
       })).map((v) => v.value);
       const provider: ResearchProvider = claudeProvider({
-        client: deps.claude ?? createClaudeClient(claudeKey), model, webSearch: settings.webSearchEnabled, secrets: [claudeKey],
+        runner: deps.claude ?? createClaudeCodeRunner({ bin, token }), model, webSearch: settings.webSearchEnabled, secrets: [token],
       });
       const claude = await provider.run(input);
       results.push(claude);
       used.push('claude');
       if (settings.webSearchEnabled) used.push('websearch');
-      engine = `Website reader + Claude ${model}`.slice(0, 120);
+      engine = `Website reader + Claude Code ${model}`.slice(0, 120);
       if (claude.error) notes.push(claude.error);
     }
 
@@ -380,7 +382,6 @@ export async function runResearch(runId: number, deps: ResearchDeps = {}): Promi
       findings: bestPerField(results.flatMap((r) => r.findings)),
       drafts: results.flatMap((r) => r.sources),
       ai: Object.assign({}, ...results.map((r) => r.ai ?? {})) as AiClassification,
-      costUsd: results.reduce((n, r) => n + (r.costUsd ?? 0), 0),
       placesCalls: results.reduce((n, r) => n + (r.placesCalls ?? 0), 0),
       notes,
     });
@@ -395,7 +396,6 @@ type Outcome = {
   findings: Finding[];
   drafts: SourceDraft[];
   ai?: AiClassification;
-  costUsd: number;
   placesCalls: number;
   /** Fixed result text (no suggestions counted). */
   result?: string;
@@ -443,7 +443,7 @@ async function completeTx(runId: number, companyId: number, o: Outcome): Promise
     const result = o.result ?? [counted, ...(o.notes ?? [])].join(' · ');
     const now = new Date();
     await endRun(tx, runId, {
-      status: 'Completed', engine: o.engine, sources: o.sources, result, finishedAt: now, costUsd: o.costUsd, placesCalls: o.placesCalls,
+      status: 'Completed', engine: o.engine, sources: o.sources, result, finishedAt: now, placesCalls: o.placesCalls,
       error: o.notes?.length ? o.notes.join(' · ') : null,
     });
     // Bookkeeping and Claude's own ai_* columns: updatedAt kept (the company row is locked, so it is the current one).

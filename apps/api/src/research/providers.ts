@@ -5,12 +5,17 @@
  * - `websiteProvider`: the free website reader (always on).
  * - `placesProvider`: Google Places API (New), only the two fixed Google endpoints; built but off until
  *   GOOGLE_PLACES_API_KEY is set and an Administrator turns it on with a monthly call cap.
- * - `claudeProvider`: Claude through the official SDK, structured output validated with zod; built but off until
- *   ANTHROPIC_API_KEY is set and an Administrator sets a monthly cap above 0.
+ * - `claudeProvider`: Claude through the server's Claude Code CLI (`claude -p`), structured output validated with zod;
+ *   built but off until CLAUDE_CODE_OAUTH_TOKEN is set, the binary is executable and an Administrator turns it on
+ *   with a monthly run cap above 0.
  *
- * API keys never leave this module: they are not returned, stored, logged or put in an error message.
+ * API keys and the token never leave this module: they are not returned, stored, logged or put in an error message.
  */
-import Anthropic from '@anthropic-ai/sdk';
+import { spawn } from 'node:child_process';
+import { constants as fsConstants } from 'node:fs';
+import { access, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { z } from 'zod';
 import type { Company } from '@prisma/client';
 import { readWebsite, type Finding, type PageRead, type ReadWebsiteOptions } from './websiteReader.js';
@@ -43,7 +48,6 @@ export type ProviderResult = {
   /** The website reader's pages (passed on to Claude). */
   pages?: PageRead[];
   ai?: AiClassification;
-  costUsd?: number;
   placesCalls?: number;
 };
 
@@ -214,51 +218,148 @@ export function placesProvider({ apiKey, fetchImpl = fetch }: PlacesProviderOpti
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Claude API
+// Claude, through the server's Claude Code CLI (`claude -p`, logged in with a subscription token)
+
+/** The binary as installed on the server (used as is: nothing is installed, updated or configured). */
+export const DEFAULT_CLAUDE_BIN = '/root/.local/bin/claude';
+/** Claude Code's model alias; env CLAUDE_MODEL overrides it. */
+export const DEFAULT_CLAUDE_MODEL = 'sonnet';
+
+export type ClaudeCodeConfig = { token: string | undefined; bin: string; model: string };
+
+/** Claude Code settings from the environment (CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_BIN, CLAUDE_MODEL). */
+export function claudeCodeConfig(env: Record<string, string | undefined>): ClaudeCodeConfig {
+  return {
+    token: env.CLAUDE_CODE_OAUTH_TOKEN?.trim() || undefined,
+    bin: env.CLAUDE_BIN?.trim() || DEFAULT_CLAUDE_BIN,
+    model: env.CLAUDE_MODEL?.trim() || DEFAULT_CLAUDE_MODEL,
+  };
+}
+
+/** Claude can run: the token is set and the binary is executable by this process's user. */
+export async function claudeCodeReady(config: ClaudeCodeConfig): Promise<boolean> {
+  if (!config.token) return false;
+  try {
+    await access(config.bin, fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** A Claude Code run that did not give an answer; the message is fixed text, safe to store and show. */
+export class ClaudeRunError extends Error {
+  constructor(readonly kind: 'not_logged_in' | 'failed' | 'timeout') {
+    super(kind === 'not_logged_in' ? 'Claude Code is not logged in on the server'
+      : kind === 'timeout' ? 'Claude took too long' : 'Claude Code failed');
+  }
+}
+
+export type ClaudeRunRequest = {
+  system: string;
+  /** Sent on stdin (it carries untrusted page text), never in argv. */
+  prompt: string;
+  /** JSON schema of the structured output. */
+  schema: object;
+  /** Gives Claude its WebSearch tool (the only tool it can ever get). */
+  webSearch: boolean;
+  model: string;
+  signal: AbortSignal;
+};
+
+/** One Claude call: the schema-shaped answer, or a ClaudeRunError. A fake in tests. */
+export type ClaudeRunner = (req: ClaudeRunRequest) => Promise<{ output: unknown }>;
+
+/** Per call; the whole Claude step is further bounded by CLAUDE_STEP_BUDGET_MS. */
+export const CLAUDE_CALL_TIMEOUT_MS = 120_000;
+/** stdout / stderr kept per call; a child writing more is killed. */
+const CLAUDE_OUTPUT_MAX_BYTES = 2 * 1024 * 1024;
+/** After SIGTERM, a child still running this long gets SIGKILL. */
+const CLAUDE_KILL_GRACE_MS = 2000;
+const NOT_LOGGED_IN = /not logged in|please run \/login|oauth|authenticat/i;
+
+export interface ClaudeCodeRunnerOptions {
+  bin: string;
+  token: string;
+  timeoutMs?: number;
+}
 
 /**
- * USD per million tokens, per model. THIS TABLE MUST BE UPDATED IF ANTHROPIC CHANGES ITS PRICES
- * (https://platform.claude.com/docs/en/about-claude/pricing). A model missing here is costed at the most expensive
- * row, so the monthly cap is never under-counted.
+ * Runs `claude -p` once per call: as this process's user, with ONLY HOME, PATH and the token in its environment (never
+ * DATABASE_URL or any other CRM secret), in a fresh empty temp directory removed afterwards, with user/project
+ * settings and MCP servers off, no tools (or WebSearch alone) and no session saved.
  */
-export const CLAUDE_PRICES_USD_PER_MTOK: Record<string, { input: number; output: number }> = {
-  'claude-fable-5-1': { input: 10, output: 50 },
-  'claude-fable-5': { input: 10, output: 50 },
-  'claude-opus-5-5': { input: 4, output: 20 },
-  'claude-opus-5': { input: 5, output: 25 },
-  'claude-opus-4-8': { input: 5, output: 25 },
-  'claude-sonnet-5-5': { input: 2, output: 10 },
-  'claude-sonnet-5': { input: 2, output: 10 },
-  'claude-sonnet-4-6': { input: 3, output: 15 },
-  'claude-haiku-5-5': { input: 0.1, output: 0.5 },
-  'claude-haiku-4-5': { input: 1, output: 5 },
-};
-/** Web search: USD 10 per 1,000 searches (also in the pricing page above). */
-export const CLAUDE_WEB_SEARCH_USD = 0.01;
-/** Cache writes cost 1.25× and cache reads 0.1× the input price. */
-const CACHE_WRITE_FACTOR = 1.25;
-const CACHE_READ_FACTOR = 0.1;
-
-export const DEFAULT_CLAUDE_MODEL = 'claude-opus-5-5';
-
-type UsageLike = {
-  input_tokens: number;
-  output_tokens: number;
-  cache_creation_input_tokens?: number | null;
-  cache_read_input_tokens?: number | null;
-  server_tool_use?: { web_search_requests?: number | null } | null;
-};
-
-/** USD cost of one response, from its token usage. */
-export function claudeCostUsd(model: string, usage: UsageLike): number {
-  const rows = Object.values(CLAUDE_PRICES_USD_PER_MTOK);
-  const price = CLAUDE_PRICES_USD_PER_MTOK[model]
-    ?? rows.reduce((a, b) => (b.input + b.output > a.input + a.output ? b : a));
-  const input = usage.input_tokens
-    + (usage.cache_creation_input_tokens ?? 0) * CACHE_WRITE_FACTOR
-    + (usage.cache_read_input_tokens ?? 0) * CACHE_READ_FACTOR;
-  const tokens = (input * price.input + usage.output_tokens * price.output) / 1_000_000;
-  return tokens + (usage.server_tool_use?.web_search_requests ?? 0) * CLAUDE_WEB_SEARCH_USD;
+export function createClaudeCodeRunner({ bin, token, timeoutMs = CLAUDE_CALL_TIMEOUT_MS }: ClaudeCodeRunnerOptions): ClaudeRunner {
+  return async ({ system, prompt, schema, webSearch, model, signal }) => {
+    const cwd = await mkdtemp(join(tmpdir(), 'dait-claude-'));
+    try {
+      return await new Promise<{ output: unknown }>((resolve, reject) => {
+        const args = [
+          '-p', '--output-format', 'json', '--json-schema', JSON.stringify(schema), '--model', model,
+          '--system-prompt', system, '--strict-mcp-config', '--setting-sources', '', '--no-session-persistence',
+          ...(webSearch ? ['--tools', 'WebSearch', '--allowedTools', 'WebSearch'] : ['--tools', '']),
+        ];
+        const child = spawn(bin, args, {
+          cwd,
+          env: { HOME: process.env.HOME ?? cwd, PATH: '/usr/bin:/bin', CLAUDE_CODE_OAUTH_TOKEN: token },
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        const out: Buffer[] = [];
+        let bytes = 0;
+        let failure: ClaudeRunError | null = null;
+        let settled = false;
+        let killTimer: NodeJS.Timeout | undefined;
+        const stop = (err: ClaudeRunError) => {
+          failure ??= err;
+          if (killTimer) return;
+          child.kill('SIGTERM');
+          killTimer = setTimeout(() => child.kill('SIGKILL'), CLAUDE_KILL_GRACE_MS);
+        };
+        const onAbort = () => stop(new ClaudeRunError('timeout'));
+        const timer = setTimeout(onAbort, timeoutMs);
+        if (signal.aborted) onAbort();
+        else signal.addEventListener('abort', onAbort, { once: true });
+        const finish = (fn: () => void) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          clearTimeout(killTimer);
+          signal.removeEventListener('abort', onAbort);
+          fn();
+        };
+        const count = (chunk: Buffer) => {
+          bytes += chunk.length;
+          if (bytes > CLAUDE_OUTPUT_MAX_BYTES) stop(new ClaudeRunError('failed'));
+        };
+        child.stdout.on('data', (chunk: Buffer) => {
+          count(chunk);
+          if (bytes <= CLAUDE_OUTPUT_MAX_BYTES) out.push(chunk);
+        });
+        // stderr is never stored or shown (it could echo the environment); only its size is bounded.
+        child.stderr.on('data', count);
+        child.stdin.on('error', () => undefined); // the child may exit before reading stdin
+        child.on('error', () => finish(() => reject(new ClaudeRunError('failed'))));
+        child.on('close', (code) => finish(() => {
+          if (failure) return reject(failure);
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(Buffer.concat(out).toString('utf8'));
+          } catch {
+            return reject(new ClaudeRunError('failed'));
+          }
+          const r = parsed && typeof parsed === 'object' ? parsed as { is_error?: unknown; result?: unknown; structured_output?: unknown } : {};
+          if (r.is_error === true) {
+            return reject(new ClaudeRunError(typeof r.result === 'string' && NOT_LOGGED_IN.test(r.result) ? 'not_logged_in' : 'failed'));
+          }
+          if (code !== 0) return reject(new ClaudeRunError('failed'));
+          resolve({ output: r.structured_output });
+        }));
+        child.stdin.end(prompt);
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  };
 }
 
 /** DAIT Partners' services (daitpartners.com service list); Claude may only propose these. */
@@ -275,19 +376,8 @@ export const DAIT_SERVICES = [
   'Brand Identity & Logo Design', 'White Papers, Case Studies & Reports', 'Social & Campaign Creatives',
 ] as const;
 
-/** The part of the SDK client a run uses (a fake in tests). */
-export type ClaudeClient = {
-  create(params: Anthropic.MessageCreateParamsNonStreaming, options?: { signal?: AbortSignal }): Promise<Anthropic.Message>;
-};
-
-/** Per request: 2 minutes, one retry. The whole Claude step is further bounded by CLAUDE_STEP_BUDGET_MS. */
-export function createClaudeClient(apiKey: string): ClaudeClient {
-  const client = new Anthropic({ apiKey, maxRetries: 1, timeout: 120_000 });
-  return { create: (params, options) => client.messages.create(params, { signal: options?.signal }) };
-}
-
 /**
- * One deadline for the whole Claude step (every turn and retry): with the website read (≤ ~100 s) a run stays well
+ * One deadline for the whole Claude step: with the website read (≤ ~100 s) a run stays well
  * inside the queue's 15-minute stale limit, after which a run may be released and started again.
  */
 export const CLAUDE_STEP_BUDGET_MS = 5 * 60_000;
@@ -295,7 +385,6 @@ export const CLAUDE_STEP_BUDGET_MS = 5 * 60_000;
 /** Suggestion confidence from Claude's overall confidence. */
 const CLAUDE_CONFIDENCE = { High: 85, Medium: 70, Low: 55 } as const;
 const PAGE_TEXT_MAX = 4000;
-const MAX_TURNS = 3;
 const TEXT_MAX = 2000;
 
 const sourced = <T extends z.ZodTypeAny>(value: T) => z.object({ value, sourceUrl: z.string() }).nullable();
@@ -360,7 +449,7 @@ Fields:
 - employeeRange: only if the sources state the company's size.`;
 
 export interface ClaudeProviderOptions {
-  client: ClaudeClient;
+  runner: ClaudeRunner;
   model: string;
   webSearch: boolean;
   /** Secrets to keep out of error messages. */
@@ -371,7 +460,7 @@ export interface ClaudeProviderOptions {
 
 const normaliseUrl = (u: string) => u.trim().replace(/#.*$/, '').replace(/\/+$/, '');
 
-export function claudeProvider({ client, model, webSearch, secrets = [], budgetMs = CLAUDE_STEP_BUDGET_MS }: ClaudeProviderOptions): ResearchProvider {
+export function claudeProvider({ runner, model, webSearch, secrets = [], budgetMs = CLAUDE_STEP_BUDGET_MS }: ClaudeProviderOptions): ResearchProvider {
   return {
     source: 'claude',
     async run({ company, pages, employeeRanges }) {
@@ -383,50 +472,21 @@ export function claudeProvider({ client, model, webSearch, secrets = [], budgetM
         company.city ? `City: ${company.city}` : '',
         `Website: ${company.website ?? ''}`,
       ].filter(Boolean).join('\n');
-      const messages: Anthropic.MessageParam[] = [{
-        role: 'user',
-        content: `${intro}\n\nPages read from the company's website:\n\n${pageBlocks.join('\n\n') || '(none)'}`,
-      }];
+      const prompt = `${intro}\n\nPages read from the company's website:\n\n${pageBlocks.join('\n\n') || '(none)'}`;
       const allowed = new Set(pages.map((p) => normaliseUrl(p.url)));
-      let costUsd = 0;
       const deadline = AbortSignal.timeout(budgetMs);
       try {
-        let response: Anthropic.Message | null = null;
-        for (let turn = 0; turn < MAX_TURNS; turn += 1) {
-          if (deadline.aborted) throw deadline.reason;
-          response = await client.create({
-            model,
-            max_tokens: 16000,
-            system: SYSTEM_PROMPT,
-            messages,
-            output_config: { format: { type: 'json_schema', schema: jsonSchema } },
-            ...(webSearch ? { tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }] } : {}),
-          }, { signal: deadline });
-          costUsd += claudeCostUsd(model, response.usage);
-          for (const block of response.content) {
-            if (block.type === 'web_search_tool_result' && Array.isArray(block.content)) {
-              for (const r of block.content) if (r.type === 'web_search_result') allowed.add(normaliseUrl(r.url));
-            }
-          }
-          if (response.stop_reason !== 'pause_turn') break;
-          messages.push({ role: 'assistant', content: response.content });
-        }
-        if (!response) throw new Error('Claude gave no answer');
-        if (response.stop_reason === 'refusal') return { findings: [], sources: [], costUsd, error: 'Claude declined the request' };
-        if (response.stop_reason === 'max_tokens') return { findings: [], sources: [], costUsd, error: 'Claude answer was cut off' };
-        const text = response.content.filter((b) => b.type === 'text').map((b) => (b as Anthropic.TextBlock).text).pop() ?? '';
-        let raw: unknown;
-        try {
-          raw = JSON.parse(text);
-        } catch {
-          return { findings: [], sources: [], costUsd, error: 'Claude returned an unexpected answer' };
-        }
-        const parsed = zodSchema.safeParse(raw);
-        if (!parsed.success) return { findings: [], sources: [], costUsd, error: 'Claude returned an unexpected answer' };
+        // One call: Claude Code runs its own web search loop.
+        const { output } = await runner({ system: SYSTEM_PROMPT, prompt, schema: jsonSchema, webSearch, model, signal: deadline });
+        const parsed = zodSchema.safeParse(output);
+        if (!parsed.success) return { findings: [], sources: [], error: 'Claude returned an unexpected answer' };
         const out = parsed.data;
-        /** A value is kept only when its source is one of the pages given or a web search result. */
+        /**
+         * A value is kept only when its source is one of the pages given or, with web search on, an https URL (Claude
+         * Code's JSON output does not list the search results, so they cannot be matched one by one).
+         */
         const keep = <V>(f: { value: V; sourceUrl: string } | null): { value: V; sourceUrl: string } | null =>
-          f && allowed.has(normaliseUrl(f.sourceUrl)) ? f : null;
+          f && (allowed.has(normaliseUrl(f.sourceUrl)) || (webSearch && isHttpsUrl(f.sourceUrl))) ? f : null;
 
         const ai: AiClassification = {};
         const summary = keep(out.summary);
@@ -457,11 +517,10 @@ export function claudeProvider({ client, model, webSearch, secrets = [], budgetM
         add('specialisation', keep(out.specialisation));
         add('employeeRange', keep(out.employeeRange));
         if (Object.keys(ai).length > 0 || findings.length > 0) ai.aiConfidence = out.confidence;
-        return { findings, sources: [], ai, costUsd };
+        return { findings, sources: [], ai };
       } catch (err) {
-        const msg = deadline.aborted ? 'Claude took too long'
-          : err instanceof Anthropic.APIError ? `Claude API error ${err.status ?? ''}`.trim() : 'Could not reach Claude';
-        return { findings: [], sources: [], costUsd, error: redact(msg, secrets) };
+        const msg = err instanceof ClaudeRunError ? err.message : deadline.aborted ? 'Claude took too long' : 'Claude Code failed';
+        return { findings: [], sources: [], error: redact(msg, secrets) };
       }
     },
   };

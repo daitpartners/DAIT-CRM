@@ -58,7 +58,7 @@ describe('research constants', () => {
 
   test('settings defaults match the migration seed: everything that costs money is off', () => {
     expect(ENRICHMENT_SETTINGS_DEFAULTS).toEqual({
-      dailyRunLimit: 50, claudeEnabled: false, claudeMonthlyCapUsd: 0,
+      dailyRunLimit: 50, claudeEnabled: false, claudeMonthlyRunCap: 0,
       placesEnabled: false, placesMonthlyCallCap: 0, webSearchEnabled: false,
     });
   });
@@ -66,24 +66,25 @@ describe('research constants', () => {
 
 describe('EnrichmentSettingsUpdate', () => {
   const valid = { ...ENRICHMENT_SETTINGS_DEFAULTS };
-  test('accepts the defaults and rounds the USD cap to cents', () => {
+  test('accepts the defaults and a whole monthly Claude run cap', () => {
     expect(EnrichmentSettingsUpdate.parse(valid)).toEqual(valid);
-    expect(EnrichmentSettingsUpdate.parse({ ...valid, claudeEnabled: true, claudeMonthlyCapUsd: 12.345 }).claudeMonthlyCapUsd).toBe(12.35);
+    expect(EnrichmentSettingsUpdate.parse({ ...valid, claudeEnabled: true, claudeMonthlyRunCap: 200 }).claudeMonthlyRunCap).toBe(200);
   });
   test('rejects negative or fractional limits and missing fields', () => {
     expect(EnrichmentSettingsUpdate.safeParse({ ...valid, dailyRunLimit: -1 }).success).toBe(false);
     expect(EnrichmentSettingsUpdate.safeParse({ ...valid, dailyRunLimit: 1.5 }).success).toBe(false);
     expect(EnrichmentSettingsUpdate.safeParse({ ...valid, dailyRunLimit: 100_001 }).success).toBe(false);
-    expect(EnrichmentSettingsUpdate.safeParse({ ...valid, claudeMonthlyCapUsd: -0.01 }).success).toBe(false);
-    expect(EnrichmentSettingsUpdate.safeParse({ ...valid, claudeMonthlyCapUsd: 1_000_000 }).success).toBe(false);
+    expect(EnrichmentSettingsUpdate.safeParse({ ...valid, claudeMonthlyRunCap: -1 }).success).toBe(false);
+    expect(EnrichmentSettingsUpdate.safeParse({ ...valid, claudeMonthlyRunCap: 2.5 }).success).toBe(false);
+    expect(EnrichmentSettingsUpdate.safeParse({ ...valid, claudeMonthlyRunCap: 10_001 }).success).toBe(false);
     expect(EnrichmentSettingsUpdate.safeParse({ ...valid, placesMonthlyCallCap: 2.5 }).success).toBe(false);
     expect(EnrichmentSettingsUpdate.safeParse({ ...valid, placesEnabled: 'yes' }).success).toBe(false);
     const { webSearchEnabled: _w, ...missing } = valid;
     expect(EnrichmentSettingsUpdate.safeParse(missing).success).toBe(false);
   });
-  test('never carries an API key', () => {
-    const p = EnrichmentSettingsUpdate.parse({ ...valid, anthropicApiKey: 'sk-ant-x', googlePlacesApiKey: 'k' });
-    expect(p).not.toHaveProperty('anthropicApiKey');
+  test('never carries an API key or token', () => {
+    const p = EnrichmentSettingsUpdate.parse({ ...valid, claudeCodeOauthToken: 'sk-ant-oat-x', googlePlacesApiKey: 'k' });
+    expect(p).not.toHaveProperty('claudeCodeOauthToken');
     expect(p).not.toHaveProperty('googlePlacesApiKey');
   });
 });

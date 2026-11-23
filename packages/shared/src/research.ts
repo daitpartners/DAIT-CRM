@@ -63,17 +63,18 @@ export const MANUAL_SOURCE_TYPES = [
 ] as const;
 
 /**
- * The enrichment engine settings as seeded by migration 20261204100000_ai_research: everything that costs money is
- * off (caps 0). The migration's INSERT must match; the API falls back to these when the row is missing.
+ * The enrichment engine settings as seeded by migration 20261204100000_ai_research (the Claude run cap since
+ * 20261205100000_claude_code_run_cap): everything that costs money is off (caps 0). The migrations must match; the API
+ * falls back to these when the row is missing.
  */
 export const ENRICHMENT_SETTINGS_DEFAULTS = {
   dailyRunLimit: 50,
   claudeEnabled: false,
-  claudeMonthlyCapUsd: 0,
+  claudeMonthlyRunCap: 0,
   placesEnabled: false,
   placesMonthlyCallCap: 0,
   webSearchEnabled: false,
 } as const satisfies {
-  dailyRunLimit: number; claudeEnabled: boolean; claudeMonthlyCapUsd: number;
+  dailyRunLimit: number; claudeEnabled: boolean; claudeMonthlyRunCap: number;
   placesEnabled: boolean; placesMonthlyCallCap: number; webSearchEnabled: boolean;
 };
