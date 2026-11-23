@@ -635,6 +635,13 @@ td.nowrap{white-space:nowrap}
 .mail-search input{border:0;outline:0;background:none;flex:1;min-width:0;font:inherit;font-size:13px}
 .mail{display:flex;flex-wrap:wrap;align-items:stretch;flex-grow:1}
 .folders{flex:0 0 190px;padding:18px 14px;border-right:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;gap:2px}
+/* Owner addition (23 Nov 2026): « in the column's head folds folders and templates to a strip with ». */
+.folders-head{display:flex;justify-content:flex-end;margin:-10px -6px 0}
+.folders-toggle{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;flex:0 0 auto;border:0;border-radius:8px;background:none;color:var(--muted);padding:0}
+.folders-toggle:hover{background:var(--tint);color:var(--purple)}
+.folders-toggle svg{width:16px;height:16px}
+.folders.collapsed{flex:0 0 44px;padding:12px 8px;align-items:center}
+.folders.collapsed .folders-toggle{transform:rotate(180deg)}
 .fold{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;font-size:13px;font-weight:500;color:var(--body);border:0;background:none;text-align:left;cursor:pointer;text-decoration:none}
 .fold.on{background:var(--tint);color:#4B0A9A;font-weight:600}
 .fold .cnt{margin-left:auto;font-size:11px;background:#822CDB;color:#fff;border-radius:999px;padding:1px 7px}
@@ -652,6 +659,8 @@ td.nowrap{white-space:nowrap}
 .msglist .pager>button,.msglist .pager>label:last-of-type{order:2}
 .msg{display:flex;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line-2);cursor:pointer;color:var(--text);width:100%;text-align:left;text-decoration:none}
 .msg.on{background:var(--tint)}
+/* The open (and hovered) row keeps its dark text, as the prototype's selected row (review #20). */
+.msg:hover,.msg.on{color:var(--text)}
 .msg.unread .who{font-weight:800}
 .msg .av{flex:0 0 auto}
 .msg-main{min-width:0;flex-grow:1}

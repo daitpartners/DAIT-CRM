@@ -635,4 +635,30 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     // "(stakeholders)" is a muted, normal-weight note in the Cc label, as in the prototype.
     expect(within(dialog).getByText('(stakeholders)').className).toBe('lbl-note');
   });
+
+  it('« folds the folders column to a strip and » opens it, keeping the folder and filters; remembered per browser', async () => {
+    const u = userEvent.setup();
+    localStorage.clear();
+    stub([item()], {});
+    const first = show('/email?folder=sent&company=4');
+    const folders = screen.getByRole('navigation', { name: 'Mail folders' });
+    const fold = within(folders).getByRole('button', { name: 'Collapse folders' });
+    expect(fold).toHaveAttribute('aria-expanded', 'true');
+    await u.click(fold);
+    expect(folders).toHaveClass('collapsed');
+    expect(within(folders).queryByRole('link', { name: 'Inbox' })).toBeNull();
+    expect(within(folders).getByRole('button', { name: 'Expand folders' })).toHaveAttribute('aria-expanded', 'false');
+    // The list keeps the open folder and filter.
+    expect(screen.getByTestId('where').textContent).toBe('/email?folder=sent&company=4');
+    expect(within(screen.getByRole('region', { name: 'Message list' })).getByText('Sent')).toBeTruthy();
+    expect(localStorage.getItem('dait-mail-folders-collapsed')).toBe('1');
+    first.unmount();
+
+    show('/email?folder=sent');
+    const again = screen.getByRole('navigation', { name: 'Mail folders' });
+    expect(again).toHaveClass('collapsed');
+    await u.click(within(again).getByRole('button', { name: 'Expand folders' }));
+    expect(within(again).getByRole('link', { name: 'Sent' })).toHaveAttribute('aria-current', 'page');
+    expect(localStorage.getItem('dait-mail-folders-collapsed')).toBe('0');
+  });
 });

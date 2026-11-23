@@ -1616,5 +1616,7 @@
   "Expand sidebar": "Expandir la barra lateral",
   "1 live": "1 activa",
   "1 overdue": "1 vencida",
-  "1 new": "1 nueva"
+  "1 new": "1 nueva",
+  "Collapse folders": "Contraer las carpetas",
+  "Expand folders": "Expandir las carpetas"
 }

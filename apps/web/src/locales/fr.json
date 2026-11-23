@@ -1616,5 +1616,7 @@
   "Expand sidebar": "Déplier la barre latérale",
   "1 live": "1 en cours",
   "1 overdue": "1 en retard",
-  "1 new": "1 nouvelle"
+  "1 new": "1 nouvelle",
+  "Collapse folders": "Réduire les dossiers",
+  "Expand folders": "Déplier les dossiers"
 }

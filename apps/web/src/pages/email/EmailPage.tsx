@@ -9,6 +9,7 @@ import { Pager } from '../../components/Pager';
 import { Topbar } from '../../components/Topbar';
 import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
+import { useStoredFlag } from '../../hooks/useStoredFlag';
 import { initials } from '../../i18n/labels';
 import { useT, type TFn } from '../../i18n/useT';
 import { fillTemplate } from '../../lib/mergeFields';
@@ -119,8 +120,26 @@ export function EmailPage() {
     // Only new data should trigger this.
   }, [list]);
 
+  // Owner addition (23 Nov 2026): the folders / templates column folds to a strip, remembered in this browser. The
+  // folder and filters live in the address, so folding loses neither.
+  const [foldersClosed, setFoldersClosed] = useStoredFlag('dait-mail-folders-collapsed');
+  const foldName = foldersClosed ? t('Expand folders') : t('Collapse folders');
+  const foldButton = (
+    <button
+      type="button"
+      className="folders-toggle"
+      aria-expanded={!foldersClosed}
+      aria-controls="mail-folders"
+      aria-label={foldName}
+      title={foldName}
+      onClick={() => setFoldersClosed(!foldersClosed)}
+    >
+      {Icons.fold}
+    </button>
+  );
+
   const folder = (v: MailView, count?: number, hot = false) => (
-    <Link key={v} className={view === v ? 'fold on' : 'fold'} to={href({ folder: v === 'inbox' ? undefined : v })}>
+    <Link key={v} className={view === v ? 'fold on' : 'fold'} to={href({ folder: v === 'inbox' ? undefined : v })} aria-current={view === v ? 'page' : undefined}>
       {viewLabel(t, v)}
       {count ? <span className={hot ? 'cnt hot' : 'cnt'}>{count}</span> : null}
     </Link>
@@ -254,34 +273,41 @@ export function EmailPage() {
       </div>
 
       <div className="mail">
-        <nav className="folders" aria-label={t('Mail folders')}>
-          {folder('inbox', meta?.unread)}
-          {folder('sent')}
-          {folder('drafts')}
-          {folder('archive')}
-          <div className="navsec mail-sec">{t('Smart views')}</div>
-          {folder('unlinked', meta?.unlinked, true)}
-          {folder('awaiting')}
-          {folder('mine')}
-          <div className="navsec mail-sec">{t('Templates')}</div>
-          {shownTemplates.map((tp) => (
-            <button
-              key={tp.id}
-              type="button"
-              className="fold"
-              title={tp.subject}
-              onClick={() => {
-                const ctx = { firstName: '', company: '', me: me.name, leadNumber: '' };
-                setCompose({ subject: fillTemplate(tp.subject, ctx), body: fillTemplate(tp.body, ctx) });
-              }}
-            >
-              {tp.name}
-              {tp.sourceType === 'oft' ? <span className="mail-oft">.oft</span> : null}
-            </button>
-          ))}
-          <Link className="fold mail-manage" to="/settings/templates">
-            {t('Manage templates…')}
-          </Link>
+        <nav id="mail-folders" className={foldersClosed ? 'folders collapsed' : 'folders'} aria-label={t('Mail folders')}>
+          {foldersClosed ? (
+            foldButton
+          ) : (
+            <>
+              <div className="folders-head">{foldButton}</div>
+              {folder('inbox', meta?.unread)}
+              {folder('sent')}
+              {folder('drafts')}
+              {folder('archive')}
+              <div className="navsec mail-sec">{t('Smart views')}</div>
+              {folder('unlinked', meta?.unlinked, true)}
+              {folder('awaiting')}
+              {folder('mine')}
+              <div className="navsec mail-sec">{t('Templates')}</div>
+              {shownTemplates.map((tp) => (
+                <button
+                  key={tp.id}
+                  type="button"
+                  className="fold"
+                  title={tp.subject}
+                  onClick={() => {
+                    const ctx = { firstName: '', company: '', me: me.name, leadNumber: '' };
+                    setCompose({ subject: fillTemplate(tp.subject, ctx), body: fillTemplate(tp.body, ctx) });
+                  }}
+                >
+                  {tp.name}
+                  {tp.sourceType === 'oft' ? <span className="mail-oft">.oft</span> : null}
+                </button>
+              ))}
+              <Link className="fold mail-manage" to="/settings/templates">
+                {t('Manage templates…')}
+              </Link>
+            </>
+          )}
         </nav>
 
         <section className="msglist" aria-label={t('Message list')} ref={listRef}>
