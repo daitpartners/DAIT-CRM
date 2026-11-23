@@ -95,9 +95,17 @@ describe('Send via mailer wizard (release 2C, prototype V.mailerWizard)', () => 
     expect(within(table).getByText(/· America\/Santiago$/)).toBeTruthy();
     expect(within(table).getByText('No email address')).toBeTruthy();
     expect(within(table).getByText('United States — all zones')).toBeTruthy();
+    // Review #21: Legitimate interest is pre-selected (prototype); clearing it marks the field itself, and the
+    // summary no longer says the emails will be queued.
+    const law = within(dialog).getByLabelText(/Lawful basis/);
+    expect(law).toHaveValue('Legitimate interest (B2B outreach relevant to their role)');
+    await u.selectOptions(law, '');
     await u.click(within(dialog).getByRole('button', { name: 'Queue 1 email' }));
-    expect(within(dialog).getByRole('alert').textContent).toContain('Choose the lawful basis before sending');
-    await u.selectOptions(within(dialog).getByLabelText(/Lawful basis/), 'Consent (they asked to be contacted)');
+    expect(law).toHaveAttribute('aria-invalid', 'true');
+    expect(within(dialog).getByText('Choose the lawful basis before sending')).toHaveClass('err-msg');
+    expect(within(dialog).queryByText('1 email will be queued.')).toBeNull();
+    await u.selectOptions(law, 'Consent (they asked to be contacted)');
+    expect(within(dialog).getByText('1 email will be queued.')).toBeTruthy();
     await u.click(within(dialog).getByRole('button', { name: 'Queue 1 email' }));
     await waitFor(() => expect(posts[1]).toMatchObject({
       url: '/api/mailer',

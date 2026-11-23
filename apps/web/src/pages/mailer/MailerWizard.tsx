@@ -113,9 +113,10 @@ export function MailerWizard({ leadIds, check, onClose, onQueued }: Props) {
   const { data: users } = useUsers();
   const [step, setStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [lawMissing, setLawMissing] = useState(false);
   const [st, setSt] = useState({
     name: '', templateId: 0, cc: '', bcc: '', when: 'now' as 'now' | 'later', startAt: nextHour(), intervalMinutes: 3,
-    workingHoursOnly: false, unsubscribeLine: true, lawfulBasis: '',
+    workingHoursOnly: false, unsubscribeLine: true, lawfulBasis: LAWFUL_BASES[0] as string,
   });
   const ccRef = useRef<HTMLInputElement>(null);
   // The prototype focuses the first field of each step; the dialog itself focuses step 1's on opening.
@@ -155,7 +156,10 @@ export function MailerWizard({ leadIds, check, onClose, onQueued }: Props) {
     }
     if (step === 2 && st.when === 'later' && !st.startAt) return setError(t('Choose a start date and time'));
     if (step < 3) return setStep(step + 1);
-    if (!st.lawfulBasis) return setError(t('Choose the lawful basis before sending'));
+    if (!st.lawfulBasis) {
+      setLawMissing(true);
+      return document.getElementById('mw-law')?.focus();
+    }
     create.mutate(
       {
         leadIds, name: st.name.trim(), templateId: tpl!.id, cc: list(st.cc), bcc: list(st.bcc),
@@ -346,12 +350,23 @@ export function MailerWizard({ leadIds, check, onClose, onQueued }: Props) {
             <div className="grid2">
               <div>
                 <label className="lbl" htmlFor="mw-law">{t('Lawful basis for contacting these leads')} <span className="req">*</span></label>
-                <select id="mw-law" className="in" value={st.lawfulBasis} onChange={(e) => set({ lawfulBasis: e.target.value })}>
+                <select
+                  id="mw-law"
+                  className={lawMissing ? 'in err' : 'in'}
+                  value={st.lawfulBasis}
+                  aria-invalid={lawMissing || undefined}
+                  aria-describedby={lawMissing ? 'mw-law-err' : undefined}
+                  onChange={(e) => {
+                    set({ lawfulBasis: e.target.value });
+                    setLawMissing(false);
+                  }}
+                >
                   <option value="">{t('— choose —')}</option>
                   {LAWFUL_BASES.map((x) => (
                     <option key={x} value={x}>{t(x)}</option>
                   ))}
                 </select>
+                {lawMissing ? <div id="mw-law-err" className="err-msg" role="alert">{t('Choose the lawful basis before sending')}</div> : null}
               </div>
               <div>
                 <div className="lbl">{t('Opt-out')}</div>
@@ -360,11 +375,14 @@ export function MailerWizard({ leadIds, check, onClose, onQueued }: Props) {
                 </label>
               </div>
             </div>
-            <div className={skipped.length ? 'note warn' : 'note ok'}>
-              <strong>{n === 1 ? t('1 email will be queued.') : t('{n} emails will be queued.', { n })}</strong>
-              {skipped.length ? ` ${skipped.length === 1 ? t('1 lead skipped (see the table).') : t('{n} leads skipped (see the table).', { n: skipped.length })}` : ''}{' '}
-              {t('Leads that reply, unsubscribe or close before their turn are skipped automatically.')}
-            </div>
+            {/* Review #21: no green "will be queued" while the lawful basis is still missing. */}
+            {lawMissing ? null : (
+              <div className={skipped.length ? 'note warn' : 'note ok'}>
+                <strong>{n === 1 ? t('1 email will be queued.') : t('{n} emails will be queued.', { n })}</strong>
+                {skipped.length ? ` ${skipped.length === 1 ? t('1 lead skipped (see the table).') : t('{n} leads skipped (see the table).', { n: skipped.length })}` : ''}{' '}
+                {t('Leads that reply, unsubscribe or close before their turn are skipped automatically.')}
+              </div>
+            )}
           </>
         ) : null}
         {error ? <div className="note warn" role="alert">{error}</div> : null}
