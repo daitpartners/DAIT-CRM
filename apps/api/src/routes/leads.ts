@@ -279,8 +279,11 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
         prisma.task.findMany({ where: { leadId: id, isDone: false }, include: taskInclude, orderBy: [{ dueDate: 'asc' }, { id: 'asc' }] }),
       ]);
       if (!row) throw new NotFoundError();
+      // The AI line's Run research: only when the user can see the company (an unassigned lead's may be hidden).
+      const companyVisible = row.companyId !== null && (await visibleCompanyIds(prisma, user, [row.companyId])).has(row.companyId);
       return {
         ...leadDetail(row, today),
+        companyVisible,
         activities: activities.map((a) => activityRow(a, user.id)),
         activityTotal,
         callCount,

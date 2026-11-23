@@ -28,7 +28,8 @@ export type ResearchRun = {
   createdAt: string;
   trigger: string;
   engine: string;
-  sources: string | null;
+  /** Providers used: website, places, claude, websearch. */
+  sources: string[];
   result: string | null;
   appliedCount: number;
   status: string;

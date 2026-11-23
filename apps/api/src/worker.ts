@@ -14,6 +14,7 @@ import { scheduleCampaigns } from './mailer/schedule.js';
 import { scheduleMailSync } from './mail/schedule.js';
 import { scheduleCalendarSync } from './calendar/schedule.js';
 import { scheduleQuotationExpiry } from './jobs/quotationExpiry.js';
+import { sweepStuckRuns } from './research/service.js';
 
 export { runOnce, runForever } from './jobs/runner.js';
 
@@ -69,7 +70,11 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<void> 
     scheduleCampaigns().catch(warn('mailer schedule')),
     scheduleCalendarSync().catch(warn('calendar schedule')),
     scheduleQuotationExpiry().catch(warn('quotation expiry')),
+    // AI research (release 4): runs a worker will never finish become Failed "Interrupted".
+    sweepStuckRuns().catch(warn('research sweep')),
   ]);
+  // At startup no research job is running yet, so every Processing run was interrupted.
+  await sweepStuckRuns({ startup: true }).catch(warn('research startup sweep'));
   void schedule();
   const scheduler = setInterval(schedule, SCHEDULE_EVERY_MS);
   // Old done / failed job rows are deleted at start and hourly.

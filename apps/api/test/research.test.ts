@@ -3,7 +3,8 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '../src/db';
 import { buildApp } from '../src/app';
-import { runResearch, type ResearchDeps } from '../src/research/service';
+import { runResearch, startResearch, sweepStuckRuns, type ResearchDeps } from '../src/research/service';
+import { STALE_AFTER_MS } from '../src/jobs/queue';
 import { researchCompanyHandler } from '../src/jobs/handlers/researchCompany';
 import { fakeGraph, resetDb, seedLookups } from './helpers';
 import { RIGHTS, type Action } from '@dait-crm/shared';
@@ -96,7 +97,7 @@ describe('research runs · website reader', () => {
     expect(body.canEdit).toBe(true);
     expect(body.company).toMatchObject({ aiResearchStatus: 'Completed', verificationStatus: 'Unverified', verifiedFields: {} });
     expect(body.runs).toHaveLength(1);
-    expect(body.runs[0]).toMatchObject({ status: 'Completed', engine: 'Website reader', appliedCount: 0 });
+    expect(body.runs[0]).toMatchObject({ status: 'Completed', engine: 'Website reader', appliedCount: 0, sources: ['website'] });
     const city = body.pending.find((s: { field: string }) => s.field === 'city');
     expect(city).toMatchObject({ value: 'Sheffield', currentValue: null, locked: false });
     expect(JSON.stringify(body)).not.toContain('costUsd');
@@ -601,5 +602,108 @@ describe('enrichment settings', () => {
     expect(put.json()).toMatchObject({ dailyRunLimit: 20, claudeEnabled: true, claudeMonthlyCapUsd: 12.35, webSearchEnabled: true });
     expect(put.body).not.toContain('sk-ant-very-secret-0001');
     expect((await req('PUT', '/api/settings/enrichment', rep.cookie, {})).statusCode).toBe(403);
+  });
+});
+
+describe('final review fixes', () => {
+  const ago = (ms: number) => new Date(Date.now() - ms);
+
+  it('worker startup sweep: every Processing run is Interrupted (company and triggering lead Failed); fresh Pending kept', async () => {
+    const a = await siteCompany();
+    const b = await makeCompany({ website: null });
+    const lead = await makeLead({ companyId: a.id });
+    const processing = await prisma.enrichmentRun.create({
+      data: { companyId: a.id, leadId: lead.id, trigger: 't', engine: 'e', status: 'Processing', startedAt: new Date() },
+    });
+    await prisma.company.update({ where: { id: a.id }, data: { aiResearchStatus: 'Processing' } });
+    const pending = await prisma.enrichmentRun.create({ data: { companyId: b.id, trigger: 't', engine: 'e', status: 'Pending' } });
+    await prisma.company.update({ where: { id: b.id }, data: { aiResearchStatus: 'Pending' } });
+
+    expect(await sweepStuckRuns({ startup: true })).toBe(1);
+    expect(await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: processing.id } }))
+      .toMatchObject({ status: 'Failed', result: 'Interrupted', error: 'Interrupted' });
+    expect((await prisma.company.findUniqueOrThrow({ where: { id: a.id } })).aiResearchStatus).toBe('Failed');
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).enrichmentStatus).toBe('Failed');
+    expect((await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: pending.id } })).status).toBe('Pending');
+    expect((await prisma.company.findUniqueOrThrow({ where: { id: b.id } })).aiResearchStatus).toBe('Pending');
+  });
+
+  it('scheduler sweep: only Processing past the stale limit and Pending past the pending limit are Interrupted', async () => {
+    const mk = async (status: string, at: Date) => {
+      const c = await makeCompany({ website: null });
+      await prisma.company.update({ where: { id: c.id }, data: { aiResearchStatus: status } });
+      const run = await prisma.enrichmentRun.create({
+        data: { companyId: c.id, trigger: 't', engine: 'e', status, createdAt: at, startedAt: status === 'Processing' ? at : null },
+      });
+      return { c, run };
+    };
+    const oldProcessing = await mk('Processing', ago(STALE_AFTER_MS + 60_000));
+    const freshProcessing = await mk('Processing', ago(60_000));
+    const oldPending = await mk('Pending', ago(24 * 3600_000));
+    const freshPending = await mk('Pending', ago(60_000));
+
+    expect(await sweepStuckRuns()).toBe(2);
+    const status = async (x: { c: { id: number }; run: { id: number } }) => [
+      (await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: x.run.id } })).status,
+      (await prisma.company.findUniqueOrThrow({ where: { id: x.c.id } })).aiResearchStatus,
+    ];
+    expect(await status(oldProcessing)).toEqual(['Failed', 'Failed']);
+    expect(await status(oldPending)).toEqual(['Failed', 'Failed']);
+    expect(await status(freshProcessing)).toEqual(['Processing', 'Processing']);
+    expect(await status(freshPending)).toEqual(['Pending', 'Pending']);
+  });
+
+  it('research status writes do not change the company updatedAt: an open edit still saves after a run', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const c = await siteCompany();
+    const before = c.updatedAt.toISOString();
+    await startAndRun(c.id, admin.cookie);
+    const after = await prisma.company.findUniqueOrThrow({ where: { id: c.id } });
+    expect(after.aiResearchStatus).toBe('Completed');
+    expect(after.updatedAt.toISOString()).toBe(before);
+    const patch = await req('PATCH', `/api/companies/${c.id}`, admin.cookie, { name: 'Acme Widgets Group', updatedAt: before });
+    expect(patch.statusCode).toBe(200);
+
+    // A failed run too.
+    const blocked = await makeCompany({ website: site.url('blocked.test') });
+    await startAndRun(blocked.id, admin.cookie);
+    const b = await prisma.company.findUniqueOrThrow({ where: { id: blocked.id } });
+    expect(b.aiResearchStatus).toBe('Failed');
+    expect(b.updatedAt.toISOString()).toBe(blocked.updatedAt.toISOString());
+  });
+
+  it('a Closed company cannot be researched (409 company_inactive)', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const c = await siteCompany();
+    await prisma.company.update({ where: { id: c.id }, data: { status: 'Closed' } });
+    const res = await req('POST', `/api/companies/${c.id}/research`, admin.cookie);
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: 'company_inactive' });
+    expect(await prisma.enrichmentRun.count()).toBe(0);
+  });
+
+  it('a failed run sets the triggering lead\'s enrichment status to Failed', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const c = await makeCompany({ website: site.url('blocked.test') });
+    const lead = await makeLead({ companyId: c.id });
+    const other = await makeLead({ companyId: c.id });
+    const runId = (await startResearch({ companyId: c.id, trigger: 't', userId: admin.user.id, leadId: lead.id }))!;
+    await runResearch(runId, readerDeps());
+    expect((await prisma.enrichmentRun.findUniqueOrThrow({ where: { id: runId } })).status).toBe('Failed');
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).enrichmentStatus).toBe('Failed');
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: other.id } })).enrichmentStatus).toBe('Pending');
+  });
+
+  it('lead detail says whether the user can see the lead\'s company (companyVisible)', async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const admin = await as('ADMINISTRATOR');
+    const hidden = await makeCompany({ website: null });
+    const pool = await makeLead({ companyId: hidden.id, assignedToId: null });
+    const asRep = await req('GET', `/api/leads/${pool.id}`, rep.cookie);
+    expect(asRep.statusCode).toBe(200);
+    expect(asRep.json().companyVisible).toBe(false);
+    expect((await req('GET', `/api/leads/${pool.id}`, admin.cookie)).json().companyVisible).toBe(true);
+    const mine = await makeLead({ companyId: hidden.id, assignedToId: rep.user.id });
+    expect((await req('GET', `/api/leads/${mine.id}`, rep.cookie)).json().companyVisible).toBe(true);
   });
 });

@@ -5,7 +5,7 @@ import { useAcceptHigh, useDecideSuggestion, useSources, type ResearchSuggestion
 import { useCurrentUser } from '../../../api/useCurrentUser';
 import { useToast } from '../../../components/Toast';
 import { useFormatDate } from '../../../hooks/useFormatDate';
-import { researchFieldText, researchStatusBadge, researchStatusText, sourceTypeText } from '../../../i18n/labels';
+import { researchFieldText, researchSourcesText, researchStatusBadge, researchStatusText, sourceTypeText } from '../../../i18n/labels';
 import { useT } from '../../../i18n/useT';
 import { AddSourceModal } from '../AddSourceModal';
 import { AiCard, researchErrorText, type ResearchRunner } from '../AiCard';
@@ -146,7 +146,7 @@ export function AiTab({ company, research }: { company: CompanyDetail; research:
                       <td>{dateTime(r.createdAt)}</td>
                       <td>{r.trigger}</td>
                       <td>{r.engine}</td>
-                      <td className="wrap">{r.sources ?? ''}</td>
+                      <td className="wrap">{researchSourcesText(t, r.sources)}</td>
                       <td className="wrap">{r.result ?? ''}</td>
                       <td>{r.appliedCount}</td>
                       <td>

@@ -151,7 +151,7 @@ function CompanyCard({ lead }: { lead: LeadFull }) {
 /**
  * The company card's AI line (prototype views-lead-detail.js): the AI summary with its confidence once research has
  * produced one; otherwise the research status ("No AI research yet." before the first run) and "Run research" for
- * users who may edit companies. While a run is queued the research view polls; when it finishes the lead refreshes.
+ * users who may edit companies and can see the company. While a run is queued the research view polls; when it finishes the lead refreshes.
  */
 function AiLine({ lead }: { lead: LeadFull }) {
   const t = useT();
@@ -186,7 +186,7 @@ function AiLine({ lead }: { lead: LeadFull }) {
           {t('AI research')} <span className={researchStatusBadge(status)}>{researchStatusText(t, status)}</span>
         </>
       )}{' '}
-      {me.can('manage_companies') ? (
+      {me.can('manage_companies') && lead.companyVisible !== false ? (
         <button
           type="button"
           className="linkish"

@@ -27,7 +27,10 @@ type Db = Prisma.TransactionClient | PrismaClient;
 
 /** A refused start or decision; the route answers `status` with `{ error: code }`. */
 export class ResearchError extends Error {
-  constructor(readonly code: 'research_running' | 'daily_limit' | 'locked' | 'already_decided' | 'forbidden', readonly status: number) {
+  constructor(
+    readonly code: 'research_running' | 'daily_limit' | 'locked' | 'already_decided' | 'forbidden' | 'company_inactive',
+    readonly status: number,
+  ) {
     super(code);
   }
 }
@@ -111,6 +114,58 @@ function verificationStatus(company: Company, verified: Record<string, boolean>)
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// Research bookkeeping (never changes updated_at: an Edit profile form or lead edit opened meanwhile must still save)
+
+/** The company's research status (and last research time) by raw update, so `updated_at` is left as it is. */
+async function setResearchStatus(db: Db, companyId: number, status: string, lastResearchAt?: Date): Promise<void> {
+  if (lastResearchAt) {
+    await db.$executeRaw`UPDATE companies SET ai_research_status = ${status}, ai_last_research_at = ${lastResearchAt} WHERE id = ${companyId}`;
+  } else {
+    await db.$executeRaw`UPDATE companies SET ai_research_status = ${status} WHERE id = ${companyId}`;
+  }
+}
+
+/** The run's triggering lead becomes enrichment Failed (raw update: the lead's `updated_at` is left as it is). */
+async function failTriggeringLead(db: Db, leadId: number | null): Promise<void> {
+  if (leadId !== null) await db.$executeRaw`UPDATE leads SET enrichment_status = 'Failed' WHERE id = ${leadId}`;
+}
+
+type StuckRun = { id: number; companyId: number; leadId: number | null; status: string };
+
+/** Marks a Pending / Processing run Failed "Interrupted" (company and triggering lead Failed); false if it moved on. */
+async function interruptRun(tx: Prisma.TransactionClient, run: StuckRun, now: Date): Promise<boolean> {
+  const ended = await tx.enrichmentRun.updateMany({
+    where: { id: run.id, status: run.status }, data: { status: 'Failed', result: 'Interrupted', error: 'Interrupted', finishedAt: now },
+  });
+  if (ended.count === 0) return false;
+  await tx.$executeRaw`UPDATE companies SET ai_research_status = 'Failed' WHERE id = ${run.companyId} AND ai_research_status IN ('Pending', 'Processing')`;
+  await failTriggeringLead(tx, run.leadId);
+  return true;
+}
+
+/**
+ * Releases runs a worker will never finish (crash, restart, host sleep), so their Run buttons work again. Called by the
+ * worker at startup (`startup`: every Processing run, as the research lane runs one job at a time and none is running
+ * yet) and on its scheduler (Processing past STALE_AFTER_MS). Pending runs never picked up within PENDING_STALE_MS are
+ * released either way. Returns how many were released.
+ */
+export async function sweepStuckRuns(opts: { startup?: boolean } = {}, now = new Date()): Promise<number> {
+  const staleBefore = new Date(now.getTime() - STALE_AFTER_MS);
+  const processing: Prisma.EnrichmentRunWhereInput = opts.startup
+    ? { status: 'Processing' }
+    : { status: 'Processing', OR: [{ startedAt: { lt: staleBefore } }, { startedAt: null, createdAt: { lt: staleBefore } }] };
+  const stuck = await prisma.enrichmentRun.findMany({
+    where: { OR: [processing, { status: 'Pending', createdAt: { lt: new Date(now.getTime() - PENDING_STALE_MS) } }] },
+    select: { id: true, companyId: true, leadId: true, status: true }, orderBy: { id: 'asc' },
+  });
+  let released = 0;
+  for (const run of stuck) {
+    if (await prisma.$transaction((tx) => interruptRun(tx, run, now))) released += 1;
+  }
+  return released;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // Starting a run
 
 export interface StartOptions {
@@ -123,13 +178,19 @@ export interface StartOptions {
 }
 
 /**
- * Queues a run: refuses (or, for automatic runs, skips) while the company has one Pending / Processing, or once the
- * day's run limit is reached. A run interrupted long ago (worker crash, host sleep) is marked Failed and no longer blocks.
+ * Queues a run: refuses (or, for automatic runs, skips) a Closed company, while the company has one Pending /
+ * Processing, or once the day's run limit is reached. A run interrupted long ago (worker crash, host sleep) is marked
+ * Failed and no longer blocks.
  */
 export async function startResearch(opts: StartOptions): Promise<number | null> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${START_LOCK})`;
     const now = new Date();
+    const company = await tx.company.findUniqueOrThrow({ where: { id: opts.companyId }, select: { status: true } });
+    if (company.status === 'Closed') {
+      if (opts.auto) return null;
+      throw new ResearchError('company_inactive', 409);
+    }
     const active = await tx.enrichmentRun.findMany({ where: { companyId: opts.companyId, status: { in: ['Pending', 'Processing'] } } });
     for (const run of active) {
       const stale = run.status === 'Processing'
@@ -139,7 +200,7 @@ export async function startResearch(opts: StartOptions): Promise<number | null> 
         if (opts.auto) return null;
         throw new ResearchError('research_running', 409);
       }
-      await tx.enrichmentRun.update({ where: { id: run.id }, data: { status: 'Failed', result: 'Interrupted', error: 'Interrupted', finishedAt: now } });
+      await interruptRun(tx, run, now);
     }
     const settings = await loadEnrichmentSettings(tx);
     const today = await tx.enrichmentRun.count({ where: { createdAt: { gte: startOfUtcDay(now) } } });
@@ -153,7 +214,7 @@ export async function startResearch(opts: StartOptions): Promise<number | null> 
         status: 'Pending', createdById: opts.userId,
       },
     });
-    await tx.company.update({ where: { id: opts.companyId }, data: { aiResearchStatus: 'Pending' } });
+    await setResearchStatus(tx, opts.companyId, 'Pending');
     // One attempt: a retry could spend on Claude twice; a failed run is simply run again by hand.
     await enqueue(tx, 'research_company', { runId: run.id }, { maxAttempts: 1 });
     return run.id;
@@ -243,8 +304,9 @@ async function finishFailed(runId: number, companyId: number, message: string): 
       const company = await lockCompany(tx, companyId);
       const now = new Date();
       await endRun(tx, runId, { status: 'Failed', result: message, error: message, finishedAt: now });
-      await tx.company.update({ where: { id: companyId }, data: { aiResearchStatus: 'Failed', aiLastResearchAt: now } });
+      await setResearchStatus(tx, companyId, 'Failed', now);
       const run = await tx.enrichmentRun.findUniqueOrThrow({ where: { id: runId } });
+      await failTriggeringLead(tx, run.leadId);
       const to = await runRecipient(tx, run, companyId);
       if (to) await notifyUser(tx, to, `AI research failed · ${company.name}`, message, `/companies/${companyId}#ai`);
     });
@@ -266,7 +328,8 @@ export async function runResearch(runId: number, deps: ResearchDeps = {}): Promi
   const env = deps.env ?? process.env;
   const secrets = [env.ANTHROPIC_API_KEY, env.GOOGLE_PLACES_API_KEY];
   try {
-    const company = await prisma.company.update({ where: { id: run.companyId }, data: { aiResearchStatus: 'Processing' } });
+    await setResearchStatus(prisma, run.companyId, 'Processing');
+    const company = await prisma.company.findUniqueOrThrow({ where: { id: run.companyId } });
     if (!company.website) {
       await complete(run.id, company.id, { result: 'No website on file', sources: [], engine: 'Website reader', findings: [], drafts: [], costUsd: 0, placesCalls: 0 });
       return;
@@ -383,8 +446,12 @@ async function completeTx(runId: number, companyId: number, o: Outcome): Promise
       status: 'Completed', engine: o.engine, sources: o.sources, result, finishedAt: now, costUsd: o.costUsd, placesCalls: o.placesCalls,
       error: o.notes?.length ? o.notes.join(' · ') : null,
     });
-    await tx.company.update({ where: { id: companyId }, data: { aiResearchStatus: 'Completed', aiLastResearchAt: now, ...(o.ai ?? {}) } });
-    await tx.lead.updateMany({ where: { companyId, enrichmentStatus: { not: 'Completed' } }, data: { enrichmentStatus: 'Completed' } });
+    // Bookkeeping and Claude's own ai_* columns: updatedAt kept (the company row is locked, so it is the current one).
+    await tx.company.update({
+      where: { id: companyId },
+      data: { aiResearchStatus: 'Completed', aiLastResearchAt: now, ...(o.ai ?? {}), updatedAt: company.updatedAt },
+    });
+    await tx.$executeRaw`UPDATE leads SET enrichment_status = 'Completed' WHERE company_id = ${companyId} AND enrichment_status <> 'Completed'`;
 
     const to = await runRecipient(tx, run, companyId);
     if (to) await notifyUser(tx, to, `AI research completed · ${company.name}`, `${counted} to review`, `/companies/${companyId}#ai`);

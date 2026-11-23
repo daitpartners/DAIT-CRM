@@ -99,6 +99,25 @@ export function researchStatusText(t: TFn, status: string): string {
   }
 }
 
+/** A research run's sources (enrichment history "Sources"): provider keys as labels, comma separated. */
+export function researchSourcesText(t: TFn, sources: readonly string[]): string {
+  const label = (key: string) => {
+    switch (key) {
+      case 'website':
+        return t('Website');
+      case 'places':
+        return t('Google Places');
+      case 'claude':
+        return t('Claude API');
+      case 'websearch':
+        return t('Web search');
+      default:
+        return key;
+    }
+  };
+  return sources.map(label).join(', ');
+}
+
 /** Badge class for a research or run status (prototype badge): Pending / Processing amber, Completed green, Failed red. */
 export function researchStatusBadge(status: string): string {
   switch (status) {

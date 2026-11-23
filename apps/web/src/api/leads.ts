@@ -57,6 +57,8 @@ export type LeadDetail = Omit<LeadSummary, 'company' | 'contact'> & {
     /** The lead page's AI line (release 4). */
     aiResearchStatus?: string; aiSummary?: string | null; aiConfidence?: string | null;
   } | null;
+  /** `GET /api/leads/:id`: the user can see the lead's company (else the AI line offers no Run research). */
+  companyVisible?: boolean;
   /** The contact's full profile (`contactProfile`) plus `name` / `email` kept for the older screens. */
   contact: (ContactProfileView & { name: string; email: string | null }) | null;
   createdBy: Ref | null;

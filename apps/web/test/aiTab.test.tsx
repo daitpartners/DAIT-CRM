@@ -37,7 +37,7 @@ const SUGGESTIONS: ResearchView['pending'] = [
 ];
 
 const RUN: ResearchView['runs'][number] = {
-  id: 3, createdAt: '2026-11-23T09:00:00.000Z', trigger: 'Manual · Maya Pillai', engine: 'Website reader', sources: 'northwind.in (3 pages)',
+  id: 3, createdAt: '2026-11-23T09:00:00.000Z', trigger: 'Manual · Maya Pillai', engine: 'Website reader', sources: ['website', 'places', 'claude', 'websearch'],
   result: '3 suggestions', appliedCount: 1, status: 'Completed', startedAt: null, finishedAt: null,
 };
 
@@ -152,7 +152,7 @@ describe('AI Intelligence tab (prototype views-companies.js tab ai)', () => {
     expect(within(zip).queryByRole('button')).toBeNull();
     expect(within(suggestions()).getByRole('heading')).toHaveTextContent('Suggestions awaiting review 4');
     const run = screen.getByRole('row', { name: /Manual · Maya Pillai/ });
-    expect(run).toHaveTextContent('Manual · Maya PillaiWebsite readernorthwind.in (3 pages)3 suggestions1Completed');
+    expect(run).toHaveTextContent('Manual · Maya PillaiWebsite readerWebsite, Google Places, Claude API, Web search3 suggestions1Completed');
   });
 
   it('accept, reject and Accept all ≥ 80% call the API and toast as the prototype', async () => {

@@ -235,4 +235,16 @@ describe('Company card AI line (prototype views-lead-detail.js)', () => {
     expect(co).toHaveTextContent('Textile mill in Surat.');
     expect(within(co).queryByRole('button', { name: 'Run research' })).toBeNull();
   });
+
+  it('no run button when the user cannot see the lead\'s company (companyVisible false)', () => {
+    stub();
+    render(
+      <Wrap qc={makeClient(seller)}>
+        <SideColumn lead={{ ...makeLead(), companyVisible: false }} live />
+      </Wrap>,
+    );
+    const co = screen.getByRole('region', { name: 'Meridian Textiles' });
+    expect(co).toHaveTextContent('No AI research yet.');
+    expect(within(co).queryByRole('button', { name: 'Run research' })).toBeNull();
+  });
 });

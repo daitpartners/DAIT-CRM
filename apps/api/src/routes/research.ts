@@ -13,7 +13,10 @@ import {
 const RUNS_SHOWN = 50;
 
 const runRow = (r: EnrichmentRun) => ({
-  id: r.id, createdAt: r.createdAt, trigger: r.trigger, engine: r.engine, sources: r.sources, result: r.result,
+  id: r.id, createdAt: r.createdAt, trigger: r.trigger, engine: r.engine,
+  // Provider keys (website, places, claude, websearch); the screen shows them as labels.
+  sources: Array.isArray(r.sources) ? r.sources.filter((k): k is string => typeof k === 'string') : [],
+  result: r.result,
   appliedCount: r.appliedCount, status: r.status, startedAt: r.startedAt, finishedAt: r.finishedAt,
 });
 
