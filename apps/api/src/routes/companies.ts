@@ -20,6 +20,24 @@ const columns = <T extends { contacts?: unknown; _count?: unknown; createdBy?: u
   return rest;
 };
 
+/** A stored column value in a form comparable with a request value: Decimal → number, undefined → null. */
+const comparable = (v: unknown): unknown => (v === undefined ? null : Prisma.Decimal.isDecimal(v) ? v.toNumber() : v);
+
+/**
+ * Fields a hand edit marks verified: every key present in the PATCH body whose value differs from the stored one
+ * (release 4 — verified fields are never suggested by AI research).
+ */
+function changedFields(before: object, body: object): string[] {
+  const was = before as Record<string, unknown>;
+  return Object.entries(body)
+    .filter(([k, v]) => v !== undefined && JSON.stringify(comparable(v)) !== JSON.stringify(comparable(was[k])))
+    .map(([k]) => k);
+}
+
+/** `verified_fields` as stored ({ field: true }); anything else reads as none. */
+const verifiedMap = (v: Prisma.JsonValue): Record<string, boolean> =>
+  v && typeof v === 'object' && !Array.isArray(v) ? { ...(v as Record<string, boolean>) } : {};
+
 /** Duplicate-check domain key from optional schema values (null means cleared). */
 const domainFor = (website: string | null | undefined, businessEmail: string | null | undefined) =>
   checkDomain({ website: website ?? undefined, businessEmail: businessEmail ?? undefined });
@@ -200,6 +218,12 @@ export const companyRoutes: FastifyPluginAsync = async (app) => {
             body.businessEmail !== undefined ? body.businessEmail : before.businessEmail,
           );
           data.domain = domain;
+        }
+        const changed = changedFields(before, body);
+        if (changed.length > 0) {
+          const verified = verifiedMap(before.verifiedFields);
+          for (const k of changed) verified[k] = true;
+          data.verifiedFields = verified;
         }
         // Matching updatedAt in the where makes a concurrent write since `before` a P2025 (stale).
         const after = await tx.company.update({ where: { id, updatedAt: before.updatedAt }, data, include: companyDetailInclude });

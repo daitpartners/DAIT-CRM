@@ -1494,5 +1494,6 @@
   "{number} won · {company} is now a client": "{number} gagné · {company} est désormais client",
   "Only an accepted quotation can become a project.": "Seul un devis accepté peut devenir un projet.",
   "That project can't be used for this email.": "Ce projet ne peut pas être utilisé pour cet e-mail.",
-  "That quotation is already linked to another project.": "Ce devis est déjà lié à un autre projet."
+  "That quotation is already linked to another project.": "Ce devis est déjà lié à un autre projet.",
+  "Not started|research": "Non commencée"
 }

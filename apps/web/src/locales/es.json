@@ -1494,5 +1494,6 @@
   "{number} won · {company} is now a client": "{number} ganado · {company} ya es cliente",
   "Only an accepted quotation can become a project.": "Solo un presupuesto aceptado puede convertirse en proyecto.",
   "That project can't be used for this email.": "Ese proyecto no se puede usar para este correo.",
-  "That quotation is already linked to another project.": "Ese presupuesto ya está vinculado a otro proyecto."
+  "That quotation is already linked to another project.": "Ese presupuesto ya está vinculado a otro proyecto.",
+  "Not started|research": "Sin iniciar"
 }

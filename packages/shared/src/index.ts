@@ -24,3 +24,5 @@ export * from './quotations.js';
 export * from './schemas/quotation.js';
 export * from './projects.js';
 export * from './schemas/project.js';
+export * from './research.js';
+export * from './schemas/research.js';

@@ -81,9 +81,11 @@ export function verificationBadge(status: string): string {
   return status === 'Verified' ? 'badge b-ok' : status === 'Partially Verified' ? 'badge b-warn' : 'badge b-grey';
 }
 
-/** A company's AI research status (the research itself arrives in release 4). */
+/** A company's AI research status (RESEARCH_STATUSES): "Not started" = never researched, "Pending" = queued. */
 export function researchStatusText(t: TFn, status: string): string {
   switch (status) {
+    case 'Not started':
+      return t('Not started|research');
     case 'Pending':
       return t('Pending|research');
     case 'Processing':

@@ -164,6 +164,61 @@ describe('companies API', () => {
     expect(res.json()).toMatchObject({ legalName: null, website: null, domain: null });
   });
 
+  it('a hand edit marks every changed field verified, and only those; existing marks are kept', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const created = (await req('POST', '/api/companies', admin.cookie, {
+      ...acme, legalName: 'Acme Ltd', city: 'Pune', annualRevenue: 1500.5, businessVerticals: ['Retail'],
+    })).json();
+    expect(created.verifiedFields).toEqual({});
+    await prisma.company.update({ where: { id: created.id }, data: { verifiedFields: { description: true } } });
+    const fresh = await prisma.company.findUniqueOrThrow({ where: { id: created.id } });
+    const res = await req('PATCH', `/api/companies/${created.id}`, admin.cookie, {
+      legalName: 'Acme Ltd', // unchanged
+      annualRevenue: 1500.5, // unchanged (Decimal column)
+      businessVerticals: ['Retail'], // unchanged (Json column)
+      website: acme.website, // unchanged (same input, same normalised value)
+      city: 'Mumbai', // changed
+      street: '1 High Street', // was empty
+      targetMarkets: ['SMB'], // was []
+      zip: '', // nothing to clear: null stays null, unchanged
+      updatedAt: fresh.updatedAt.toISOString(),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().verifiedFields).toEqual({ description: true, city: true, street: true, targetMarkets: true });
+
+    // Clearing a filled field is a change too; earlier marks stay.
+    const again = await req('PATCH', `/api/companies/${created.id}`, admin.cookie, { legalName: '', updatedAt: res.json().updatedAt });
+    expect(again.statusCode).toBe(200);
+    expect(again.json().verifiedFields).toEqual({ description: true, city: true, street: true, targetMarkets: true, legalName: true });
+    const row = await prisma.company.findUniqueOrThrow({ where: { id: created.id } });
+    expect(row.verifiedFields).toEqual(again.json().verifiedFields);
+  });
+
+  it('a save that changes nothing leaves verified fields alone', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const created = (await req('POST', '/api/companies', admin.cookie, { ...acme, city: 'Pune', yearEstablished: 1999 })).json();
+    const res = await req('PATCH', `/api/companies/${created.id}`, admin.cookie, {
+      name: 'Acme', city: 'Pune', yearEstablished: 1999, state: null, updatedAt: created.updatedAt,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().verifiedFields).toEqual({});
+  });
+
+  it('new companies start "Not started"; the AI queue counts Pending and Processing only', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const created = (await req('POST', '/api/companies', admin.cookie, acme)).json();
+    expect(created.aiResearchStatus).toBe('Not started');
+    expect((await makeCompany()).aiResearchStatus).toBe('Not started');
+    const pending = await makeCompany();
+    const processing = await makeCompany();
+    const done = await makeCompany();
+    await prisma.company.update({ where: { id: pending.id }, data: { aiResearchStatus: 'Pending' } });
+    await prisma.company.update({ where: { id: processing.id }, data: { aiResearchStatus: 'Processing' } });
+    await prisma.company.update({ where: { id: done.id }, data: { aiResearchStatus: 'Completed' } });
+    const { tiles } = (await req('GET', '/api/companies', admin.cookie)).json();
+    expect(tiles).toMatchObject({ total: 5, aiQueue: 2, aiPending: 1, aiProcessing: 1, aiFailed: 0 });
+  });
+
   it('check-duplicates returns auto on domain and review on name + country', async () => {
     const admin = await as('ADMINISTRATOR');
     const acmeRow = await makeCompany({ name: 'Acme', website: 'https://acme.co.uk', createdById: admin.user.id });

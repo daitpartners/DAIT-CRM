@@ -56,6 +56,9 @@ model User {
   managedProjects Project[]        @relation("ProjectManager")
   createdProjects Project[]        @relation("ProjectCreator")
 
+  enrichmentRuns     EnrichmentRun[]
+  decidedSuggestions EnrichmentSuggestion[]
+
   @@map("users")
 }
 
@@ -366,7 +369,8 @@ model Company {
   aiPotentialServices Json      @default("[]") @map("ai_potential_services")
   aiOpportunityScore  Int?      @map("ai_opportunity_score") @db.SmallInt
   aiConfidence        String?   @map("ai_confidence")
-  aiResearchStatus    String    @default("Pending") @map("ai_research_status")
+  /// RESEARCH_STATUSES (shared): Not started (never researched) | Pending (queued) | Processing | Completed | Failed.
+  aiResearchStatus    String    @default("Not started") @map("ai_research_status")
   aiLastResearchAt    DateTime? @map("ai_last_research_at")
   verificationStatus  String    @default("Unverified") @map("verification_status")
   verifiedFields      Json      @default("{}") @map("verified_fields")
@@ -384,6 +388,10 @@ model Company {
   calendarEvents CalendarEvent[]
   quotations     Quotation[]
   projects       Project[]
+
+  enrichmentRuns        EnrichmentRun[]
+  enrichmentSuggestions EnrichmentSuggestion[]
+  sourceRecords         SourceRecord[]
 
   @@index([name])
   @@index([nameNormalised, country])
@@ -518,6 +526,9 @@ model Lead {
   calendarEvents     CalendarEvent[]
   quotations         Quotation[]
   projects           Project[]
+
+  enrichmentRuns EnrichmentRun[]
+  sourceRecords  SourceRecord[]
 
   @@index([status])
   @@index([assignedToId])
@@ -769,6 +780,114 @@ model CompanySettings {
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   @@map("company_settings")
+}
+
+/// Release 4 AI research: one row per research run on a company (docs/data-model.md enrichment_history).
+model EnrichmentRun {
+  id           Int       @id @default(autoincrement())
+  companyId    Int       @map("company_id")
+  /// The lead whose creation triggered an automatic run.
+  leadId       Int?      @map("lead_id")
+  /// "Manual · <user>" / "New lead LD-…".
+  trigger      String    @db.VarChar(120)
+  /// "Website reader" / "Website reader + Claude <model>".
+  engine       String    @db.VarChar(120)
+  /// string[]: the sources used (website, places, websearch).
+  sources      Json      @default("[]")
+  /// "n suggestions", "No website on file", or the error shown in the history.
+  result       String    @default("") @db.Text
+  appliedCount Int       @default(0) @map("applied_count")
+  /// RUN_STATUSES (shared): Pending | Processing | Completed | Failed.
+  status       String    @default("Pending") @db.VarChar(20)
+  error        String?   @db.Text
+  /// Claude spend for this run (from the API's token usage); summed per month against the cap.
+  costUsd      Decimal   @default(0) @map("cost_usd") @db.Decimal(10, 4)
+  /// Google Places Place Details calls made by this run; summed per month against the call cap.
+  placesCalls  Int       @default(0) @map("places_calls")
+  startedAt    DateTime? @map("started_at")
+  finishedAt   DateTime? @map("finished_at")
+  createdById  Int?      @map("created_by_id")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  company     Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  lead        Lead?                  @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  createdBy   User?                  @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  suggestions EnrichmentSuggestion[]
+
+  @@index([companyId, createdAt])
+  @@index([createdAt])
+  @@map("enrichment_runs")
+}
+
+/// A value a run proposes for one empty, unverified company field, with the page it came from.
+model EnrichmentSuggestion {
+  id          Int       @id @default(autoincrement())
+  runId       Int       @map("run_id")
+  companyId   Int       @map("company_id")
+  /// RESEARCH_FIELDS (shared) key.
+  field       String    @db.VarChar(40)
+  label       String    @db.VarChar(80)
+  value       Json
+  /// How the value reads in the table when it is not a plain string (e.g. a list of services).
+  display     String?   @db.Text
+  /// 0–100.
+  confidence  Int       @db.SmallInt
+  sourceUrl   String    @map("source_url") @db.Text
+  sourceLabel String    @map("source_label") @db.VarChar(200)
+  /// SUGGESTION_DECISIONS (shared): pending | accepted | rejected | superseded.
+  decision    String    @default("pending") @db.VarChar(12)
+  decidedById Int?      @map("decided_by_id")
+  decidedAt   DateTime? @map("decided_at")
+
+  run       EnrichmentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  company   Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  decidedBy User?         @relation(fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@index([runId])
+  @@index([companyId, decision])
+  @@map("enrichment_suggestions")
+}
+
+/// Every URL and dataset a company profile was built from (Research Sources tab).
+model SourceRecord {
+  id              Int      @id @default(autoincrement())
+  companyId       Int      @map("company_id")
+  leadId          Int?     @map("lead_id")
+  title           String   @db.VarChar(200)
+  url             String?  @db.VarChar(500)
+  /// SOURCE_TYPES (shared), or a MANUAL_SOURCE_TYPES value for a manual record.
+  sourceType      String   @map("source_type") @db.VarChar(40)
+  collectedAt     DateTime @default(now()) @map("collected_at")
+  /// "Enrichment worker" / "<user> (manual)".
+  collectedBy     String   @map("collected_by") @db.VarChar(120)
+  fieldsPopulated String   @default("") @map("fields_populated") @db.VarChar(500)
+  confidence      String   @default("") @db.VarChar(20)
+  /// Read-only text extract (first 4,000 visible characters of a page, or manual notes).
+  snapshot        String?  @db.Text
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  lead    Lead?   @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, collectedAt])
+  @@map("source_records")
+}
+
+/// Enrichment engine settings (Administrators): one row, id = 1 (CHECK in the migration SQL), seeded with
+/// ENRICHMENT_SETTINGS_DEFAULTS (shared). API keys are never stored here: they live in server env variables.
+model EnrichmentSettings {
+  id                   Int      @id @default(1)
+  /// Research runs per day across the CRM; automatic runs are skipped and manual ones refused once reached.
+  dailyRunLimit        Int      @default(50) @map("daily_run_limit")
+  claudeEnabled        Boolean  @default(false) @map("claude_enabled")
+  /// USD per calendar month; 0 = Claude off.
+  claudeMonthlyCapUsd  Decimal  @default(0) @map("claude_monthly_cap_usd") @db.Decimal(10, 2)
+  placesEnabled        Boolean  @default(false) @map("places_enabled")
+  /// Place Details calls per calendar month; 0 = Google Places off.
+  placesMonthlyCallCap Int      @default(0) @map("places_monthly_call_cap")
+  webSearchEnabled     Boolean  @default(false) @map("web_search_enabled")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@map("enrichment_settings")
 }
 
 /// Release 2C Mailer: a personalised template sent to selected leads, one by one, from the sender's mailbox.
