@@ -168,6 +168,9 @@ model EmailMessage {
   projectId       Int?      @map("project_id")
   subject         String    @db.VarChar(500)
   bodyText        String    @default("") @map("body_text")
+  /// Sanitised HTML body (mail/html.ts), shown in the reader's sandboxed frame; null for plain text or not fetched yet,
+  /// '' when the mailbox no longer has the message (not asked again).
+  bodyHtml        String?   @map("body_html")
   /// Graph immutable id (2B-2 sync); unique per user.
   graphId         String?   @map("graph_id") @db.VarChar(255)
   /// RFC message id and Graph conversation id, filled by sync (2B-2).
