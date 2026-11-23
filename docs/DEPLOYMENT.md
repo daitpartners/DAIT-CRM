@@ -185,11 +185,15 @@ always pass the database: `backup.sh dait_crm`. Cron line for `daitcrm` (`cronta
 30 2 * * * PGUSER=<db-user> /home/daitcrm/live/current/deploy/backup.sh dait_crm >> /home/daitcrm/backups/backup.log 2>&1
 ```
 
-**Checked on the server, 23 Nov 2026: the daily backup is NOT set up.** `daitcrm` has no crontab, there is no
-`~/.pgpass`, rclone is not installed, and `~/backups` holds only the hand-made pre-release dumps. Until a daily job
-exists, data entered between releases has no backup, and every dump is on this one server. The database `dait_crm` is
-owned by the PostgreSQL role `dait_crm`. Check again with `sudo -iu daitcrm crontab -l`, `ls -l ~/backups`,
-`tail ~/backups/backup.log`.
+**What actually runs (set up 23 Nov 2026, owner approved):** `deploy/backup.sh` above is NOT used on the server (no
+`~/.pgpass`, no rclone). Instead a root-owned script `/usr/local/sbin/dait-crm-backup.sh`, run nightly at 02:30 server
+time (UTC) by `/etc/cron.d/dait-crm-backup`, dumps `dait_crm` through the `postgres` user (peer auth, no password
+stored) to `~/backups/dait_crm-daily-<YYYYmmdd-HHMM>.dump` (owner `daitcrm`, mode 640) and deletes daily dumps older
+than 14 days; the hand-made `dait_crm-pre-*.dump` files are never deleted. Log: `/var/log/dait-crm-backup.log`. The
+script is root-owned so the `daitcrm` user cannot change what root runs. Both files belong to the CRM only; remove them
+to stop it. Every dump still sits on this one server — an off-server copy (e.g. rclone to OneDrive) needs the owner to
+sign in once and is not set up. The database `dait_crm` is owned by the PostgreSQL role `dait_crm`. Check with
+`tail /var/log/dait-crm-backup.log` and `ls -l /home/daitcrm/backups`.
 
 ## Restoring
 
