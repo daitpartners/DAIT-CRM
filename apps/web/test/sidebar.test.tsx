@@ -72,7 +72,7 @@ describe('collapsible sidebar', () => {
     unmount();
     view({ ...rep, language: 'fr' }, { ...counts, overdueTasks: 2 });
     expect(screen.getByText('2 en retard')).toBeInTheDocument();
-    expect(screen.getByText('3 nouvelles')).toBeInTheDocument();
+    expect(screen.getByText('3 nouv.')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /^Leads/ })).toBeInTheDocument();
   });
 });

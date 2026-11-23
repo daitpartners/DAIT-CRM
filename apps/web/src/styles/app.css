@@ -30,10 +30,9 @@ button{cursor:pointer}
 .nav{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;color:var(--nav-text);font-size:13.5px;font-weight:500}
 .nav:hover{background:var(--nav-hover);color:#fff}.nav.on{background:var(--nav-on);color:#fff}
 .nav svg{width:18px;height:18px;flex:0 0 auto}
-/* The label never wraps; a long badge ("3 nouvelles") takes the gap down a little instead of leaving the item. */
+/* The label never wraps; a long badge ("3 nouvelles") is abbreviated in the dictionaries (fr "3 nouv."). */
 .nav-l{white-space:nowrap}
 .nav .cnt{margin-left:auto;flex-shrink:0}
-.nav:has(.cnt){gap:8px}
 .nav .cnt{margin-left:auto;font-size:11px;font-weight:600;background:#5A2BB0;color:#fff;border-radius:999px;padding:2px 6px;white-space:nowrap}
 .nav .cnt.hot{background:var(--peach);color:var(--ink)}
 .navsec{font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--nav-sub);padding:14px 10px 6px}
