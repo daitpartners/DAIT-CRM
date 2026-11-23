@@ -644,9 +644,13 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     const folders = screen.getByRole('navigation', { name: 'Mail folders' });
     const fold = within(folders).getByRole('button', { name: 'Collapse folders' });
     expect(fold).toHaveAttribute('aria-expanded', 'true');
-    await u.click(fold);
+    // From the keyboard: the same button stays focused in both states (review M-3).
+    fold.focus();
+    await u.keyboard('{Enter}');
     expect(folders).toHaveClass('collapsed');
-    expect(within(folders).queryByRole('link', { name: 'Inbox' })).toBeNull();
+    expect(document.activeElement).toBe(within(folders).getByRole('button', { name: 'Expand folders' }));
+    // The list is hidden by CSS (wider screens only; a phone always shows the folders).
+    expect(folders.querySelector('.folders-list')).toBeTruthy();
     expect(within(folders).getByRole('button', { name: 'Expand folders' })).toHaveAttribute('aria-expanded', 'false');
     // The list keeps the open folder and filter.
     expect(screen.getByTestId('where').textContent).toBe('/email?folder=sent&company=4');

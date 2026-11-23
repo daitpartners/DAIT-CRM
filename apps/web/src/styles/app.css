@@ -694,8 +694,15 @@ td.nowrap{white-space:nowrap}
 .folders-toggle{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;flex:0 0 auto;border:0;border-radius:8px;background:none;color:var(--muted);padding:0}
 .folders-toggle:hover{background:var(--tint);color:var(--purple)}
 .folders-toggle svg{width:16px;height:16px}
-.folders.collapsed{flex:0 0 44px;padding:12px 8px;align-items:center}
-.folders.collapsed .folders-toggle{transform:rotate(180deg)}
+.folders-list{display:contents}
+@media (min-width:761px){
+  .folders.collapsed{flex:0 0 44px;padding:12px 8px;align-items:center}
+  .folders.collapsed .folders-toggle{transform:rotate(180deg)}
+  .folders.collapsed .folders-head{margin:0}
+  .folders.collapsed .folders-list{display:none}
+}
+/* Phone: the folders are a row of chips above the list; folding does not apply there (review M-6). */
+@media (max-width:760px){.folders-head{display:none}}
 .fold{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;font-size:13px;font-weight:500;color:var(--body);border:0;background:none;text-align:left;cursor:pointer;text-decoration:none}
 .fold.on{background:var(--tint);color:#4B0A9A;font-weight:600}
 .fold .cnt{margin-left:auto;font-size:11px;background:#822CDB;color:#fff;border-radius:999px;padding:1px 7px}
@@ -749,9 +756,12 @@ td.nowrap{white-space:nowrap}
   .msglist{max-width:none;flex-basis:100%;border-right:0}
   .mailside{flex-basis:100%;border-left:0;border-top:1px solid var(--line)}
 }
-/* Above phone width the four columns share one row; at 1280 px the list, reader and Linked records narrow a little
+/* From 1100 px the four columns share one row; at 1280 px the list, reader and Linked records narrow a little
    instead of Linked records dropping under the others (review #31). */
-@media (min-width:761px){.mail{flex-wrap:nowrap}.reader{flex-shrink:1}}
+@media (min-width:1100px){.mail{flex-wrap:nowrap}.reader{flex-shrink:1}}
+/* 761–1099 px (review M-5): folders, list and reader share the first row (the reader may narrow to 280 px) and
+   Linked records takes its own row under them, instead of four squeezed columns. */
+@media (min-width:761px) and (max-width:1099.98px){.reader{flex-basis:280px}.msglist{max-width:none}.mailside{flex:1 1 100%;border-left:0;border-top:1px solid var(--line)}}
 .mail-connect{margin:16px 28px 0;padding:12px 16px;border:1px solid #F0C98A;background:#FFF8EC;border-radius:10px;font-size:13px;color:var(--body);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 @media (max-width:760px){.mail-connect{margin:12px 16px 0}}
 

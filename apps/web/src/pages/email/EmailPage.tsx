@@ -274,40 +274,38 @@ export function EmailPage() {
 
       <div className="mail">
         <nav id="mail-folders" className={foldersClosed ? 'folders collapsed' : 'folders'} aria-label={t('Mail folders')}>
-          {foldersClosed ? (
-            foldButton
-          ) : (
-            <>
-              <div className="folders-head">{foldButton}</div>
-              {folder('inbox', meta?.unread)}
-              {folder('sent')}
-              {folder('drafts')}
-              {folder('archive')}
-              <div className="navsec mail-sec">{t('Smart views')}</div>
-              {folder('unlinked', meta?.unlinked, true)}
-              {folder('awaiting')}
-              {folder('mine')}
-              <div className="navsec mail-sec">{t('Templates')}</div>
-              {shownTemplates.map((tp) => (
-                <button
-                  key={tp.id}
-                  type="button"
-                  className="fold"
-                  title={tp.subject}
-                  onClick={() => {
-                    const ctx = { firstName: '', company: '', me: me.name, leadNumber: '' };
-                    setCompose({ subject: fillTemplate(tp.subject, ctx), body: fillTemplate(tp.body, ctx) });
-                  }}
-                >
-                  {tp.name}
-                  {tp.sourceType === 'oft' ? <span className="mail-oft">.oft</span> : null}
-                </button>
-              ))}
-              <Link className="fold mail-manage" to="/settings/templates">
-                {t('Manage templates…')}
-              </Link>
-            </>
-          )}
+          {/* One toggle in both states, so it keeps the keyboard focus when pressed. */}
+          <div className="folders-head">{foldButton}</div>
+          {/* Folded, the list is hidden by CSS on wider screens; on a phone the folders always show (no lone strip). */}
+          <div className="folders-list">
+            {folder('inbox', meta?.unread)}
+            {folder('sent')}
+            {folder('drafts')}
+            {folder('archive')}
+            <div className="navsec mail-sec">{t('Smart views')}</div>
+            {folder('unlinked', meta?.unlinked, true)}
+            {folder('awaiting')}
+            {folder('mine')}
+            <div className="navsec mail-sec">{t('Templates')}</div>
+            {shownTemplates.map((tp) => (
+              <button
+                key={tp.id}
+                type="button"
+                className="fold"
+                title={tp.subject}
+                onClick={() => {
+                  const ctx = { firstName: '', company: '', me: me.name, leadNumber: '' };
+                  setCompose({ subject: fillTemplate(tp.subject, ctx), body: fillTemplate(tp.body, ctx) });
+                }}
+              >
+                {tp.name}
+                {tp.sourceType === 'oft' ? <span className="mail-oft">.oft</span> : null}
+              </button>
+            ))}
+            <Link className="fold mail-manage" to="/settings/templates">
+              {t('Manage templates…')}
+            </Link>
+          </div>
         </nav>
 
         <section className="msglist" aria-label={t('Message list')} ref={listRef}>
