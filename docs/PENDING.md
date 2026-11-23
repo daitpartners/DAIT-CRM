@@ -135,6 +135,11 @@ Small issues found in reviews and not fixed yet.
 - Companies list keeps row tick boxes (they drive the bulk status change); the prototype has none — keep?
 
 **Known, small, left as they are for now:**
+- Email reader (HTML bodies, 23 Nov): pictures embedded in an email (Outlook "inline" images, `cid:`) are not fetched
+  yet, so they are hidden rather than shown broken; remote pictures show, as in Outlook. A body is stored up to 50,000
+  characters, so a very long newsletter is cut (still shown formatted, up to the cut). The HTML body sits in a sandboxed
+  frame that fills the reader and scrolls on its own: with no scripts and no same-origin access the CRM cannot measure
+  the email to grow the frame to its height.
 - Quotation stays on "Sending…" if the database is down for the whole last send attempt (an administrator retries the
   job); a re-send uses today's logo from Company details. A line taller than a page is cut to one page (as the
   prototype).
