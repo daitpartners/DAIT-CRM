@@ -38,6 +38,11 @@ const EMAIL_RE = /^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]{2,}$/;
 
 type Person = { email: string; name: string; sub: string };
 
+/** Fields the form marks when they are empty or the server rejects them. */
+const EMAIL_FIELDS = ['to', 'subject', 'body'] as const;
+type EmailField = (typeof EMAIL_FIELDS)[number];
+const FIELD_ID: Record<EmailField, string> = { to: 'em-to', subject: EMAIL_SUBJECT_ID, body: 'em-body' };
+
 /**
  * The prototype's Email panel (views-lead-detail.js `data-cpanel="email"`, laid out by views-leads2.js):
  * To | Cc stakeholders, Project | Template, Subject, Message, "Set follow-up in", Send email.
@@ -118,6 +123,24 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
     setBody(fillTemplate(tpl.body, ctx));
   }
   const [days, setDays] = useState<number>(3);
+  // Review #12: fields the user must fix are marked (red border, message, aria-invalid), not only named in a toast.
+  const [bad, setBad] = useState<Partial<Record<EmailField, string>>>({});
+  const fieldMsg = (f: EmailField) =>
+    f === 'to' ? t('Enter who the email goes to') : f === 'subject' ? t('Enter a subject') : t('Enter a message');
+  const clearBad = (f: EmailField) => setBad((b) => (b[f] ? { ...b, [f]: undefined } : b));
+  const markBad = (fields: EmailField[]) => {
+    if (!fields.length) return;
+    setBad(Object.fromEntries(fields.map((f) => [f, fieldMsg(f)])));
+    document.getElementById(FIELD_ID[fields[0]!])?.focus();
+  };
+  const invalid = (f: EmailField) =>
+    bad[f] ? { 'aria-invalid': true as const, 'aria-describedby': `${FIELD_ID[f]}-err` } : {};
+  const errLine = (f: EmailField) =>
+    bad[f] ? (
+      <div id={`${FIELD_ID[f]}-err`} className="err-msg" role="alert">
+        {bad[f]}
+      </div>
+    ) : null;
 
   return (
     <form
@@ -127,7 +150,9 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
       onSubmit={(e) => {
         e.preventDefault();
         if (noMailbox || send.isPending) return;
-        if (!to.trim()) return toast(t('Enter who the email goes to'), 'warn');
+        const empty = (['to', 'subject', 'body'] as const).filter((f) => !{ to, subject, body }[f].trim());
+        if (empty.length) return markBad(empty);
+        setBad({});
         send.mutate(
           {
             to: to.trim(), cc, subject, body, followUpDays: follow ? (days as 2 | 3 | 7) : null, projectId: projectId ?? null,
@@ -145,7 +170,13 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
               setSubject(intro.subject);
               setBody(intro.body);
             },
-            onError: (err) => toast(errorText(t, err instanceof ApiError ? err.code : 'unknown'), 'warn'),
+            onError: (err) => {
+              if (err instanceof ApiError) {
+                const fields = EMAIL_FIELDS.filter((f) => err.issues?.some((i) => i.path[0] === f));
+                markBad(fields);
+              }
+              toast(errorText(t, err instanceof ApiError ? err.code : 'unknown'), 'warn');
+            },
           },
         );
       }}
@@ -157,13 +188,18 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
           </label>
           <input
             id="em-to"
-            className="in"
+            className={bad.to ? 'in err' : 'in'}
             type="email"
             value={to}
             disabled={disabled}
             placeholder={lead.contact?.email ? '' : t('No email on file – add a contact')}
-            onChange={(e) => setTo(e.target.value)}
+            {...invalid('to')}
+            onChange={(e) => {
+              setTo(e.target.value);
+              clearBad('to');
+            }}
           />
+          {errLine('to')}
         </div>
         <CcField lead={lead} to={to} disabled={disabled} picked={cc} setPicked={setCc} />
         <div>
@@ -202,13 +238,36 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
           <label className="lbl" htmlFor={EMAIL_SUBJECT_ID}>
             {t('Subject')}
           </label>
-          <input id={EMAIL_SUBJECT_ID} className="in" value={subject} disabled={disabled} onChange={(e) => setSubject(e.target.value)} />
+          <input
+            id={EMAIL_SUBJECT_ID}
+            className={bad.subject ? 'in err' : 'in'}
+            value={subject}
+            disabled={disabled}
+            {...invalid('subject')}
+            onChange={(e) => {
+              setSubject(e.target.value);
+              clearBad('subject');
+            }}
+          />
+          {errLine('subject')}
         </div>
         <div className="span2">
           <label className="lbl" htmlFor="em-body">
             {t('Message')}
           </label>
-          <textarea id="em-body" className="in" rows={7} value={body} disabled={disabled} onChange={(e) => setBody(e.target.value)} />
+          <textarea
+            id="em-body"
+            className={bad.body ? 'in err' : 'in'}
+            rows={7}
+            value={body}
+            disabled={disabled}
+            {...invalid('body')}
+            onChange={(e) => {
+              setBody(e.target.value);
+              clearBad('body');
+            }}
+          />
+          {errLine('body')}
         </div>
       </div>
       {noMailbox ? (

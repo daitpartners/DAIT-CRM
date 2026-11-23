@@ -224,4 +224,29 @@ describe('lead email form: Project picker (release 3B)', () => {
     await u.click(screen.getByRole('button', { name: 'Send email' }));
     await waitFor(() => expect(posts[0]).toMatchObject({ url: '/api/leads/5/emails', body: { projectId: 9, cc: ['hand@meridian.in', 'cleo@meridian.in'] } }));
   });
+
+  it('an empty Subject is marked and focused instead of sending (review #12); a server field issue is marked too', async () => {
+    const u = userEvent.setup();
+    const posts = renderForm(client, { items: [], isClient: true });
+    const subject = screen.getByRole('textbox', { name: 'Subject' });
+    await u.clear(subject);
+    await u.click(screen.getByRole('button', { name: 'Send email' }));
+    expect(subject).toHaveAttribute('aria-invalid', 'true');
+    expect(subject).toHaveClass('err');
+    expect(subject).toHaveFocus();
+    expect(screen.getByText('Enter a subject')).toBeInTheDocument();
+    expect(posts).toEqual([]);
+    await u.type(subject, 'Hello');
+    expect(subject).not.toHaveAttribute('aria-invalid', 'true');
+
+    // The server rejects the message body: Message is marked, and the toast's "highlighted fields" is true.
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return Response.json({ error: 'validation', issues: [{ path: ['body'], message: 'Too big' }] }, { status: 400 });
+      if (url === '/api/mailboxes') return Response.json({ mine: { id: 7, address: 'arjun@daitpartners.com', status: 'connected' } });
+      return Response.json({ items: [], total: 0, page: 1, pageSize: 100, isClient: true });
+    }));
+    await u.click(screen.getByRole('button', { name: 'Send email' }));
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAttribute('aria-invalid', 'true'));
+  });
 });
+
