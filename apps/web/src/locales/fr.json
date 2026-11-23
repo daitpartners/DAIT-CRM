@@ -1688,5 +1688,7 @@
   "1 unread email": "1 e-mail non lu",
   "{n} unread emails": "{n} e-mails non lus",
   "1 mailer run in progress": "1 envoi du mailer en cours",
-  "{n} mailer runs in progress": "{n} envois du mailer en cours"
+  "{n} mailer runs in progress": "{n} envois du mailer en cours",
+  "1 new since yesterday": "1 nouveau depuis hier",
+  "1 upcoming": "1 à venir"
 }

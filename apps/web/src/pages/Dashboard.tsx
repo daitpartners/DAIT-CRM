@@ -111,13 +111,13 @@ export function Dashboard() {
           <Tile
             label={t('My open leads')}
             value={tiles?.myOpenLeads ?? '—'}
-            meta={tiles ? t('{n} new since yesterday', { n: tiles.newSinceYesterday }) : undefined}
+            meta={tiles ? (tiles.newSinceYesterday === 1 ? t('1 new since yesterday') : t('{n} new since yesterday', { n: tiles.newSinceYesterday })) : undefined}
             to="/leads?tab=mine"
           />
           <Tile
             label={t('Follow-ups due today')}
             value={tiles?.tasksDueToday ?? '—'}
-            meta={tiles ? t('{n} overdue', { n: tiles.overdue }) : undefined}
+            meta={tiles ? (tiles.overdue === 1 ? t('1 overdue') : t('{n} overdue', { n: tiles.overdue })) : undefined}
             // Review #07: red only when something is overdue.
             metaClass={tiles?.overdue ? 'bad' : undefined}
             to="/tasks"
@@ -147,9 +147,9 @@ export function Dashboard() {
                 <h2 id="dash-tasks">{t('Tasks & follow-ups')}</h2>
                 {tiles ? (
                   <div className="dash-badges">
-                    <span className="badge b-bad">{t('{n} overdue', { n: tiles.overdue })}</span>
+                    <span className="badge b-bad">{tiles.overdue === 1 ? t('1 overdue') : t('{n} overdue', { n: tiles.overdue })}</span>
                     <span className="badge b-purple">{t('{n} today', { n: tiles.tasksDueToday })}</span>
-                    <span className="badge b-grey">{t('{n} upcoming', { n: tiles.upcoming })}</span>
+                    <span className="badge b-grey">{tiles.upcoming === 1 ? t('1 upcoming') : t('{n} upcoming', { n: tiles.upcoming })}</span>
                   </div>
                 ) : null}
               </div>
