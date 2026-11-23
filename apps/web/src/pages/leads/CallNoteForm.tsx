@@ -8,6 +8,8 @@ import { useToast } from '../../components/Toast';
 import { applyServerIssues } from '../../forms/applyServerIssues';
 import { leadStatusText } from '../../i18n/labels';
 import { useT, type TFn } from '../../i18n/useT';
+import { useCurrentUser } from '../../api/useCurrentUser';
+import { todayIn } from '../calendar/dates';
 import { useActionError } from './staleToast';
 
 type Values = { outcome: CallOutcome; minutes: string; body: string; statusAfter: string; nextFollowUp: string };
@@ -60,6 +62,10 @@ export function CallNoteForm({ lead, statuses, disabled }: { lead: LeadFull; sta
     .sort((a, b) => a.sortOrder - b.sortOrder);
   // A closed lead keeps no follow-up unless the call reopens it.
   const followUpAllowed = !isClosedStatus(lead.status) || watch('statusAfter') !== '';
+  // Review #13: a follow-up date that has passed is kept as it is, so say so (the lead stays overdue).
+  const me = useCurrentUser();
+  const nextFollowUp = watch('nextFollowUp');
+  const passed = followUpAllowed && nextFollowUp !== '' && nextFollowUp < todayIn(me.timezone);
 
   function submit(v: Values) {
     setFormError(null);
@@ -135,6 +141,7 @@ export function CallNoteForm({ lead, statuses, disabled }: { lead: LeadFull; sta
             {...aria('nextFollowUp')}
             {...register('nextFollowUp')}
           />
+          {passed && !errors.nextFollowUp ? <div className="fu-passed">{t('This date has passed: the lead stays overdue. Pick a new date.')}</div> : null}
         </FormField>
       </fieldset>
       {formError ? (
