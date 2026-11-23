@@ -228,6 +228,8 @@ export function htmlToText(html: string): string {
     .trim();
 }
 
+/** How far after an "&" its ";" is looked for. */
+const ENTITY_REACH = 10;
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', '#39': "'" };
 /** Elements whose content is not text a reader sees. */
 const HIDDEN = ['script', 'style', 'head', 'title'];
@@ -235,7 +237,8 @@ const HIDDEN = ['script', 'style', 'head', 'title'];
 /**
  * Text of an HTML body without any parser, for when the full processing failed or ran out of time (mail/bodies.ts):
  * one forward pass that drops tags (and the content of script / style / head / title), decodes a few common entities
- * and collapses whitespace, at most `max` characters. No regular expressions over the input, so nothing can backtrack.
+ * and collapses whitespace, at most `max` characters. No regular expressions over the input, so nothing can backtrack,
+ * and every search is either bounded or moves the pass forward to where it stopped (linear in the input).
  */
 export function fallbackText(html: string, max: number): string {
   const lower = html.toLowerCase();
@@ -268,9 +271,12 @@ export function fallbackText(html: string, max: number): string {
       continue;
     }
     if (c === '&') {
-      const semi = html.indexOf(';', i + 1);
-      const name = semi > i && semi - i <= 6 ? lower.slice(i + 1, semi) : '';
-      if (name in ENTITIES) {
+      // Looks at most ENTITY_REACH characters ahead, by hand: a search to the end of the body for every "&" made a
+      // megabyte of them take over a second (final review F1).
+      let semi = i + 1;
+      while (semi < html.length && semi <= i + ENTITY_REACH && html[semi] !== ';') semi += 1;
+      const name = html[semi] === ';' ? lower.slice(i + 1, semi) : '';
+      if (name && Object.hasOwn(ENTITIES, name)) {
         add(ENTITIES[name]!);
         i = semi + 1;
         continue;
@@ -314,5 +320,8 @@ export function emailBodies(body: GraphBody, max: number, opts: { deadline?: num
   for (let cut = max; bodyHtml.length > max; cut -= Math.max(200, Math.ceil(max / 20))) {
     bodyHtml = cut > 0 ? sanitizeEmailHtml(full.slice(0, cut)) : '';
   }
-  return { bodyHtml, bodyText: htmlToText(limited).slice(0, max) };
+  const bodyText = htmlToText(limited).slice(0, max);
+  // Markup that swallows everything after it (an unclosed <iframe>) would leave an empty message: show its text plainly.
+  if (!bodyHtml && !bodyText && raw.trim()) return { bodyHtml, bodyText: fallbackText(raw, max) };
+  return { bodyHtml, bodyText };
 }

@@ -10,6 +10,7 @@ import { mailActionHandler } from '../src/jobs/handlers/mailAction';
 import { todayIn } from '../src/leads/dates';
 import { GraphError, type GraphClient } from '../src/graph/client';
 import { resetBodyFetchBackoff } from '../src/routes/mail';
+import { setBodyWorkerMemoryForTests } from '../src/mail/bodies';
 import { fakeGraph, resetDb, seedLookups } from './helpers';
 import { makeCompany, makeContact, makeLead, makeProject, makeUser, signIn } from './factory';
 
@@ -793,6 +794,26 @@ describe('formatted bodies (owner, 23 Nov 2026)', () => {
     expect((await call('GET', `/api/mail/${m.id}`, cookie)).json()).toMatchObject({ bodyHtml: null, bodyText: 'Hello there' });
     await call('GET', `/api/mail/${m.id}`, cookie);
     expect(bodies.calls).toHaveLength(1);
+  });
+
+  it('a body whose worker crashed shows plain text and is tried once more on the next open, then kept as text', async () => {
+    const { rep, box } = await setup();
+    const m = await synced(rep.id, box.id, { graphId: 'g-crash-open' });
+    bodies.answer = async () => ({ contentType: 'html', content: '<p>big words</p>'.repeat(50_000) });
+    const cookie = await signIn(app, rep);
+    setBodyWorkerMemoryForTests(16);
+    try {
+      const first = (await call('GET', `/api/mail/${m.id}`, cookie)).json();
+      expect(first.bodyHtml).toBeNull();
+      expect(first.bodyText.startsWith('big words')).toBe(true);
+      expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: m.id } })).bodyHtml).toBeNull();
+      await call('GET', `/api/mail/${m.id}`, cookie);
+      expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: m.id } })).bodyHtml).toBe('');
+      await call('GET', `/api/mail/${m.id}`, cookie);
+      expect(bodies.calls).toHaveLength(2);
+    } finally {
+      setBodyWorkerMemoryForTests(null);
+    }
   });
 
   it('a plain-text body from the mailbox stays plain text', async () => {

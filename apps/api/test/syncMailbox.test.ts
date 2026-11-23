@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, test } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import type { Job } from '@prisma/client';
 import { prisma } from '../src/db';
 import { encrypt } from '../src/crypto/tokens';
 import { GraphError, type DeltaPage, type GraphMessage } from '../src/graph/client';
 import { syncMailboxHandler } from '../src/jobs/handlers/syncMailbox';
+import { setBodyWorkerMemoryForTests } from '../src/mail/bodies';
 import { requestSync, scheduleMailSync } from '../src/mail/schedule';
 import { fakeGraph, resetDb } from './helpers';
 import { makeCompany, makeContact, makeLead, makeProject, makeUser } from './factory';
@@ -317,6 +318,33 @@ describe('mail sync (2B-2)', () => {
     await syncMailboxHandler(job(account.id), { graph });
     expect(await prisma.emailMessage.findFirstOrThrow({ where: { subject: 'Hostile' } })).toMatchObject({ bodyHtml: '', bodyText: 'Read me' });
     expect(await prisma.emailMessage.findFirstOrThrow({ where: { subject: 'Next' } })).toMatchObject({ bodyHtml: '<p>fine</p>', bodyText: 'fine' });
+  });
+
+  test('a body whose worker crashed is kept for one retry (null), then plain text (\'\'); each fallback is logged by id and reason only', async () => {
+    const { account } = await mailbox();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const big = msg({ id: 'g-crash', subject: 'Big', body: { contentType: 'html', content: '<p>big secret words</p>'.repeat(40_000) } });
+    const { graph } = scripted({ 'start:inbox': final('inbox', [big]) });
+    setBodyWorkerMemoryForTests(16);
+    try {
+      await syncMailboxHandler(job(account.id), { graph });
+      const row = await prisma.emailMessage.findFirstOrThrow({ where: { graphId: 'g-crash' } });
+      expect(row.bodyHtml).toBeNull();
+      expect(row.bodyText.startsWith('big secret words')).toBe(true);
+      // The next sync brings it again: the one retry crashes too, and it stays plain text.
+      await prisma.emailAccount.update({ where: { id: account.id }, data: { syncState: {} } });
+      await syncMailboxHandler(job(account.id), { graph });
+      expect((await prisma.emailMessage.findFirstOrThrow({ where: { graphId: 'g-crash' } })).bodyHtml).toBe('');
+      const lines = warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('fell back'));
+      expect(lines).toEqual([
+        `sync_mailbox: email_message ${row.id}: body fell back to plain text (crash)`,
+        `sync_mailbox: email_message ${row.id}: body fell back to plain text (crash)`,
+      ]);
+      expect(lines.join(' ')).not.toContain('secret');
+    } finally {
+      setBodyWorkerMemoryForTests(null);
+      warn.mockRestore();
+    }
   });
 
   test('a plain-text body is stored as text with no HTML', async () => {

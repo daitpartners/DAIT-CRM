@@ -200,11 +200,14 @@ async function fillHtmlBody(graph: GraphClient, log: FastifyBaseLogger, user: Au
   }
   bodyFetchState.delete(account.id);
   // Parsed in a worker thread with a time limit, so a hostile email cannot hold up the API for everyone.
-  const stored = body ? storedColumns(await processEmailBody(body, BODY_MAX)) : null;
-  // Only a row still without its HTML (two opens at once store it once); then read back: gone meanwhile is a 404.
+  const result = body ? await processEmailBody(body, BODY_MAX, { retryKey: `${user.id}:${m.graphId}` }) : null;
+  if (result?.fellBack) log.warn({ emailMessageId: m.id, reason: result.reason }, 'mail body fell back to plain text');
+  const stored = result ? storedColumns(result) : null;
+  // Only a row still without its HTML (two opens at once store it once); then read back: gone meanwhile is a 404. A
+  // plain-text body is marked '' (not asked again); a first timeout or crash stays null, to be tried once more.
   await prisma.emailMessage.updateMany({
     where: { id: m.id, userId: user.id, bodyHtml: null },
-    data: stored ? { bodyHtml: stored.bodyHtml ?? '', bodyText: stored.bodyText } : { bodyHtml: '' },
+    data: stored ? { bodyHtml: result!.retry ? null : (stored.bodyHtml ?? ''), bodyText: stored.bodyText } : { bodyHtml: '' },
   });
   const fresh = await prisma.emailMessage.findFirst({ where: { id: m.id, userId: user.id } });
   if (!fresh) throw new NotFoundError();

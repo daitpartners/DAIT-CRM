@@ -68,6 +68,17 @@ async function inheritedProject(userId: number, threadId: string | null): Promis
   return tagged?.projectId ?? null;
 }
 
+/** The message id and the reason only: the mail is private to its owner. */
+const warnFallback = (emailMessageId: number, reason: string | undefined) =>
+  console.warn(`sync_mailbox: email_message ${emailMessageId}: body fell back to plain text (${reason})`);
+
+/** A message's body columns, worked out in the body worker (with one retry after a timeout or crash). */
+async function bodyColumns(userId: number, m: GraphMessage, emailMessageId: number) {
+  const result = await processEmailBody(m.body, BODY_MAX, { retryKey: `${userId}:${m.id}` });
+  if (result.fellBack) warnFallback(emailMessageId, result.reason);
+  return storedColumns(result);
+}
+
 async function storeMessage(account: EmailAccount, user: AuthUser, folder: string, m: GraphMessage, ctx: JobContext): Promise<void> {
   const existing = await prisma.emailMessage.findUnique({ where: { userId_graphId: { userId: user.id, graphId: m.id } } });
   const outbound = m.isDraft || folder === 'sent' || folder === 'drafts' || isOwn(account, m.from?.address);
@@ -76,7 +87,7 @@ async function storeMessage(account: EmailAccount, user: AuthUser, folder: strin
     // Links the user (or matching) set are kept; only Outlook's state follows. A draft sent from Outlook becomes Sent.
     const sentDraft = existing.status === 'draft' && !m.isDraft ? { status: outbound ? 'sent' : 'received', occurredAt } : {};
     // A row stored before bodies came as HTML takes the HTML (and the cleaner text) now that it is here anyway.
-    const bodies = existing.bodyHtml === null && m.body.contentType === 'html' ? storedColumns(await processEmailBody(m.body, BODY_MAX)) : {};
+    const bodies = existing.bodyHtml === null && m.body.contentType === 'html' ? await bodyColumns(user.id, m, existing.id) : {};
     await prisma.emailMessage.update({ where: { id: existing.id }, data: { folder, isRead: outbound ? true : m.isRead, ...sentDraft, ...bodies } });
     return;
   }
@@ -91,9 +102,10 @@ async function storeMessage(account: EmailAccount, user: AuthUser, folder: strin
   const attachmentNames = m.hasAttachments ? await ctx.graph.attachmentNames(account, m.id).catch(() => []) : [];
   const projectId = await inheritedProject(user.id, threadId);
   // In a worker thread with a time limit: no email can hold up the sync (or the jobs that share its process).
-  const { bodyHtml, bodyText } = storedColumns(await processEmailBody(m.body, BODY_MAX));
+  const result = await processEmailBody(m.body, BODY_MAX, { retryKey: `${user.id}:${m.id}` });
+  const { bodyHtml, bodyText } = storedColumns(result);
   try {
-    await prisma.emailMessage.create({
+    const row = await prisma.emailMessage.create({
       data: {
         userId: user.id, accountId: account.id, graphId: m.id, source: 'sync', folder,
         status: m.isDraft ? 'draft' : outbound ? 'sent' : 'received',
@@ -104,6 +116,7 @@ async function storeMessage(account: EmailAccount, user: AuthUser, folder: strin
         attachmentNames, projectId, ...links,
       },
     });
+    if (result.fellBack) warnFallback(row.id, result.reason);
   } catch (err) {
     if (!isUniqueViolation(err)) throw err; // a concurrent run stored it first
   }

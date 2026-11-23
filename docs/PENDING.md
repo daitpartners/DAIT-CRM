@@ -140,7 +140,9 @@ Small issues found in reviews and not fixed yet.
   characters, so a very long newsletter is cut (still shown formatted, up to the cut). Before anything reads it, a body
   is cut to its first 1,000,000 characters and to 256 nested elements (security review 24 Nov: keeps one hostile email
   from blocking the CRM). Every body is parsed in a worker thread with a 3-second limit; one that takes longer (only a
-  deliberately malformed email does) is kept as plain text with no formatting. The pause on asking Microsoft for older
+  deliberately malformed email does) is kept as plain text with no formatting. When the limit was hit because the server
+  was busy (a time-out or a crashed parsing thread, not an email too deep to read), it is tried once more on the next
+  sync or open before staying plain text; each such case is logged with the message id and the reason only. The pause on asking Microsoft for older
   bodies (after a refusal or three failures) is kept per process: fine with today's single API process (see
   `docs/DEPLOYMENT.md`). The HTML body sits in a sandboxed
   frame that fills the reader and scrolls on its own: with no scripts and no same-origin access the CRM cannot measure

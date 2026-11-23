@@ -1,6 +1,27 @@
 import { describe, expect, test } from 'vitest';
-import { BODY_TIMEOUT_MS, processEmailBody } from '../src/mail/bodies';
-import { RAW_MAX, fallbackText } from '../src/mail/html';
+import { BODY_TIMEOUT_MS, processEmailBody, setBodyWorkerMemoryForTests, storedColumns } from '../src/mail/bodies';
+import { RAW_MAX, emailBodies, fallbackText } from '../src/mail/html';
+
+/**
+ * Like longestStall, but the timer keeps ticking for 60 ms after `p` settles: work done on the calling thread when the
+ * result comes back (the fallback text is made there) shows up too (final review F1).
+ */
+async function lagThrough<T>(p: Promise<T>): Promise<{ value: T; lag: number }> {
+  let last = performance.now();
+  let lag = 0;
+  const timer = setInterval(() => {
+    const now = performance.now();
+    lag = Math.max(lag, now - last);
+    last = now;
+  }, 10);
+  try {
+    const value = await p;
+    await new Promise((r) => setTimeout(r, 60));
+    return { value, lag: Math.max(lag, performance.now() - last) };
+  } finally {
+    clearInterval(timer);
+  }
+}
 
 /** Runs `p` while a 10 ms timer ticks; returns the longest gap between ticks (the caller's event loop staying free). */
 async function longestStall<T>(p: Promise<T>): Promise<{ value: T; stall: number; ms: number }> {
@@ -67,7 +88,7 @@ describe('email bodies are processed in a worker thread with a time limit (secur
   test('over the time limit: the worker is stopped, no HTML, the fallback text; the next body works on a new worker', async () => {
     const slow = '<style>.x{color:red}</style><p>Hello &amp; welcome</p>' + divs(150_000) + 'end';
     const r = await processEmailBody({ contentType: 'html', content: slow }, 50_000, { timeoutMs: 100 });
-    expect(r).toEqual({ bodyHtml: null, bodyText: 'Hello & welcome end', fellBack: true });
+    expect(r).toEqual({ bodyHtml: null, bodyText: 'Hello & welcome end', fellBack: true, reason: 'timeout' });
     expect(await processEmailBody({ contentType: 'html', content: '<p>after</p>' }, 50_000)).toEqual({ bodyHtml: '<p>after</p>', bodyText: 'after' });
   });
 
@@ -81,10 +102,71 @@ describe('email bodies are processed in a worker thread with a time limit (secur
   });
 });
 
+describe('fallbacks never block the calling thread, and are retried once when not the email\'s fault (final review)', () => {
+  test('F1: fallbackText on 1 MB of "&" takes well under 100 ms', () => {
+    const started = performance.now();
+    expect(fallbackText('&'.repeat(RAW_MAX), 50_000)).toHaveLength(50_000);
+    expect(performance.now() - started).toBeLessThan(100);
+  });
+
+  test.each([
+    ['"&" x 50k + <x \'> + <div> x 190k', '&'.repeat(50_000) + "<x '>" + '<div>'.repeat(190_000)],
+    ['deep divs + 590 KB of "&"', "<x '>" + '<div>'.repeat(80_000) + '&'.repeat(590_000)],
+  ])('F1: %s through processEmailBody: under 100 ms of lag, the fallback included', async (_name, content) => {
+    const { value, lag } = await lagThrough(processEmailBody({ contentType: 'html', content }, 50_000));
+    expect(lag).toBeLessThan(100);
+    expect(value.bodyText.length).toBeLessThanOrEqual(50_000);
+  }, 15_000);
+
+  test('F1: a forced timeout on deep divs + 590 KB of "&" (the fallback made on the calling thread): under 100 ms of lag', async () => {
+    const content = "<x '>" + '<div>'.repeat(80_000) + '&'.repeat(590_000);
+    const { value, lag } = await lagThrough(processEmailBody({ contentType: 'html', content }, 50_000, { timeoutMs: 30 }));
+    expect(value).toMatchObject({ fellBack: true, reason: 'timeout' });
+    expect(value.bodyText).toHaveLength(50_000);
+    expect(lag).toBeLessThan(100);
+  });
+
+  test('F2: a worker that runs out of memory gives the fallback (and the next body a fresh worker)', async () => {
+    setBodyWorkerMemoryForTests(16);
+    try {
+      const r = await processEmailBody({ contentType: 'html', content: '<p>big</p>'.repeat(90_000) }, 50_000, { retryKey: 'oom-1' });
+      expect(r).toMatchObject({ bodyHtml: null, fellBack: true, reason: 'crash' });
+      expect(r.bodyText.startsWith('big big')).toBe(true);
+    } finally {
+      setBodyWorkerMemoryForTests(null);
+    }
+    expect(await processEmailBody({ contentType: 'html', content: '<p>ok</p>' }, 50_000)).toEqual({ bodyHtml: '<p>ok</p>', bodyText: 'ok' });
+  });
+
+  test('F4: a timeout or crash is retried once (null stored), then kept as plain text (\'\'); a budget fallback is final at once', async () => {
+    const slow = '<p>Hi</p>' + '<div>'.repeat(150_000);
+    const first = await processEmailBody({ contentType: 'html', content: slow }, 50_000, { timeoutMs: 50, retryKey: 'u1:g-timeout' });
+    expect(first).toMatchObject({ fellBack: true, reason: 'timeout', retry: true });
+    expect(storedColumns(first)).toEqual({ bodyHtml: null, bodyText: 'Hi' });
+    const second = await processEmailBody({ contentType: 'html', content: slow }, 50_000, { timeoutMs: 50, retryKey: 'u1:g-timeout' });
+    expect(second.retry).toBeUndefined();
+    expect(storedColumns(second)).toEqual({ bodyHtml: '', bodyText: 'Hi' });
+    const budget = await processEmailBody({ contentType: 'html', content: "<p>Hi</p><x '>" + '<div>'.repeat(200_000) }, 50_000, { retryKey: 'u1:g-budget' });
+    expect(budget).toMatchObject({ fellBack: true, reason: 'budget' });
+    expect(budget.retry).toBeUndefined();
+    expect(storedColumns(budget).bodyHtml).toBe('');
+  }, 15_000);
+
+  test('F5: when the sanitised HTML and its text both come out empty, the text is the plain fallback', () => {
+    expect(emailBodies({ contentType: 'html', content: '<iframe><p>Hello there</p><div>more' }, 50_000)).toEqual({ bodyHtml: '', bodyText: 'Hello there more' });
+    // Nothing to read at all stays empty.
+    expect(emailBodies({ contentType: 'html', content: '<div></div>' }, 50_000)).toEqual({ bodyHtml: '<div></div>', bodyText: '' });
+  });
+});
+
 describe('fallbackText (no parser, one pass)', () => {
   test('drops tags and the content of script / style / head / title; decodes common entities; collapses whitespace', () => {
     expect(fallbackText('<html><head><title>T</title><style>.a{color:red}</style></head><body><p>Fish &amp; chips&nbsp;&lt;3</p>\n\n<div>next   line</div><script>x()</script>&unknown;</body>', 1000))
       .toBe('Fish & chips <3 next line &unknown;');
+  });
+
+  test('an "&" looks at most 10 characters ahead for its ";"; unknown names (even ones on Object.prototype) stay as typed', () => {
+    expect(fallbackText('a &amp; b &toString; c &valueOf; &nbsp;x &verylongname; &amp', 1000)).toBe('a & b &toString; c &valueOf; x &verylongname; &amp');
   });
 
   test('caps the length and is fast on hostile input', () => {
