@@ -5,7 +5,8 @@ import { audit } from '../audit.js';
 import { enqueue } from '../jobs/queue.js';
 import { BODY_MAX } from '../jobs/handlers/syncMailbox.js';
 import { GraphError, isAuthFailure, type GraphClient } from '../graph/client.js';
-import { emailBodies, type GraphBody } from '../mail/html.js';
+import type { GraphBody } from '../mail/html.js';
+import { processEmailBody, storedColumns } from '../mail/bodies.js';
 import type { MailActionPayload } from '../jobs/types.js';
 import { dateOnly, todayIn, ymd } from '../leads/dates.js';
 import { auditCreatedLead, createLeadWithCompany, RuleError } from '../leads/service.js';
@@ -198,7 +199,8 @@ async function fillHtmlBody(graph: GraphClient, log: FastifyBaseLogger, user: Au
     }
   }
   bodyFetchState.delete(account.id);
-  const stored = body ? emailBodies(body, BODY_MAX) : null;
+  // Parsed in a worker thread with a time limit, so a hostile email cannot hold up the API for everyone.
+  const stored = body ? storedColumns(await processEmailBody(body, BODY_MAX)) : null;
   // Only a row still without its HTML (two opens at once store it once); then read back: gone meanwhile is a 404.
   await prisma.emailMessage.updateMany({
     where: { id: m.id, userId: user.id, bodyHtml: null },

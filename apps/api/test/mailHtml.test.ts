@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { MAX_DEPTH, RAW_MAX, emailBodies, limitNesting, htmlToText, sanitizeEmailHtml, textToHtml } from '../src/mail/html';
+import { BodyTooComplexError, MAX_DEPTH, RAW_MAX, emailBodies, limitNesting, htmlToText, sanitizeEmailHtml, textToHtml } from '../src/mail/html';
 
 const clean = (html: string) => sanitizeEmailHtml(html);
 
@@ -148,54 +148,64 @@ describe('sanitizeEmailHtml: security review fixes (24 Nov 2026)', () => {
     expect(clean('<STYLE title="t">x{background:url(javascript:1)}</STYLE>')).toBe('<style>x{}</style>');
   });
 
-  test('M2: position:fixed and position:sticky are dropped (inline and <style>); other positioning stays', () => {
-    const out = clean('<div style="position:fixed;inset:0;color:red">PHISH</div><p style="position:-webkit-sticky;top:0">s</p><style>.x{position: sticky;top:0}.y{position:relative}</style>');
-    expect(out).not.toMatch(/fixed|sticky/i);
+  test('M2: only static / relative positioning stays; fixed, sticky, absolute and z-index go (inline and <style>)', () => {
+    const out = clean('<div style="position:fixed;inset:0;color:red">PHISH</div><p style="position:-webkit-sticky;top:0">s</p>'
+      + '<div style="position:absolute;z-index:99;width:100%">A</div><div style="position: static">B</div>'
+      + '<style>.x{position: sticky;top:0}.y{position:relative}.z{position:ABSOLUTE;z-index:5;color:blue}.w{position:relative !important}</style>');
+    expect(out).not.toMatch(/fixed|sticky|absolute|z-index/i);
     expect(out).toContain('color:red');
-    expect(out).toContain('position:relative');
+    expect(out).toContain('position:static');
+    expect(out).toContain('.y{position:relative}');
+    expect(out).toContain('.z{color:blue}');
+    expect(out).toContain('position:relative !important');
+  });
+
+  test('N2: a declaration with an entity goes whole (no half string left to swallow the next rules)', () => {
+    expect(clean('<style>x{content:"&lt;/style&gt;"}y{color:red}</style>')).toBe('<style>x{}y{color:red}</style>');
+    expect(clean('<style>x{font-family:"a&#x3c;b";color:blue}</style>')).toBe('<style>x{color:blue}</style>');
   });
 });
 
-describe('performance: hostile or very large bodies stay fast (C1)', () => {
-  test('the reviewer\'s inputs all finish well under a second in total', () => {
-    const inputs = [
+describe('size and speed (C1; deep nesting is bounded by the worker, see mailBodies.test.ts)', () => {
+  test('wide (not deep) bodies are fast: a 260 KB newsletter, 20k divs, <pre> with 100k spaces, 50k newlines + divs', () => {
+    const started = performance.now();
+    for (const content of [
       '<table>' + '<tr><td style="color:red">cell &amp; text</td></tr>'.repeat(5000) + '</table>',
       '<div>x</div>'.repeat(20000),
       '<pre>' + ' '.repeat(100000) + 'x</pre><div>a</div>',
       '\n'.repeat(50000) + '<div>a</div>'.repeat(2000),
-      '<div>'.repeat(400000) + 'x',
-    ];
-    const started = performance.now();
-    for (const content of inputs) {
+    ]) {
       const b = emailBodies({ contentType: 'html', content }, 50_000);
       expect(b.bodyHtml!.length).toBeLessThanOrEqual(50_000);
-      expect(b.bodyText.length).toBeLessThanOrEqual(50_000);
     }
     expect(performance.now() - started).toBeLessThan(1000);
   });
 
-  test('htmlToText alone is linear on whitespace-heavy and block-heavy input', () => {
+  test('htmlToText reads whitespace- and block-heavy input in one pass', () => {
     const started = performance.now();
     expect(htmlToText('<pre>' + ' '.repeat(100000) + 'x</pre><div>a</div>')).toBe('x\na');
     expect(htmlToText('<div>x</div>'.repeat(20000)).split('\n')).toHaveLength(20000);
-    expect(htmlToText('<div>'.repeat(200000) + 'deep')).toBe('deep');
     expect(performance.now() - started).toBeLessThan(500);
   });
 
-  test('limitNesting: tags past MAX_DEPTH open elements are left out, their text kept; ordinary HTML is untouched', () => {
+  test('limitNesting (htmlparser2\'s own reading): elements past MAX_DEPTH are left out, their text kept', () => {
     expect(MAX_DEPTH).toBe(256);
     const deep = limitNesting('<div>'.repeat(300) + 'x' + '</div>'.repeat(300));
     expect(deep.match(/<div>/g)).toHaveLength(256);
+    expect(deep.match(/<\/div>/g)).toHaveLength(256);
     expect(deep).toContain('x');
-    const ordinary = '<!-- <div><div> --><table><tr><td a=">">1<td>2<tr><td>3</table><p>a<p>b<style>div>p{}</style><br/><img src="a>b">';
-    expect(limitNesting(ordinary)).toBe(ordinary);
-    // Old-style tables with no end tags keep every cell: a new cell or row closes the open one.
+    // As htmlparser2 reads them: <div/> opens a div, a <p> closes only an open <p> on top, quotes only in values.
+    expect(limitNesting('<div/>'.repeat(300) + 'x').match(/<div>/g)).toHaveLength(256);
+    expect(limitNesting('<b><p>'.repeat(200) + 'x').match(/<(b|p)>/g)).toHaveLength(256);
+    // Ordinary HTML keeps every element, attribute and entity; comments go.
+    expect(limitNesting('<!-- c --><table><tr><td a=">" b=\'q"\'>1<td>2<tr><td>3 &amp; 4</table><br><img src="a.png">'))
+      .toBe('<table><tr><td a=">" b="q&quot;">1</td><td>2</td></tr><tr><td>3 &amp; 4</td></tr></table><br><img src="a.png">');
     const rows = '<table>' + '<tr><td>a<td>b'.repeat(2000) + '</table>';
-    expect(limitNesting(rows)).toBe(rows);
-    expect(limitNesting('<ul>' + '<li>x'.repeat(1000) + '</ul>')).toBe('<ul>' + '<li>x'.repeat(1000) + '</ul>');
-    // A cell of a nested table closes only within that table.
-    const nested = '<table>' + '<tr><td><table><tr><td>in<td>in2</table>'.repeat(500) + '</table>';
-    expect(limitNesting(nested)).toBe(nested);
+    expect(limitNesting(rows).match(/<td>/g)).toHaveLength(4000);
+  });
+
+  test('a deadline gives up on reading deep nesting', () => {
+    expect(() => emailBodies({ contentType: 'html', content: '<div>'.repeat(50_000) }, 50_000, { deadline: performance.now() })).toThrow(BodyTooComplexError);
   });
 
   test('the raw body is capped before sanitising and text derivation (an oversized body keeps its start)', () => {

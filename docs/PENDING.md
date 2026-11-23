@@ -139,7 +139,10 @@ Small issues found in reviews and not fixed yet.
   yet, so they are hidden rather than shown broken; remote pictures show, as in Outlook. A body is stored up to 50,000
   characters, so a very long newsletter is cut (still shown formatted, up to the cut). Before anything reads it, a body
   is cut to its first 1,000,000 characters and to 256 nested elements (security review 24 Nov: keeps one hostile email
-  from blocking the CRM). The HTML body sits in a sandboxed
+  from blocking the CRM). Every body is parsed in a worker thread with a 3-second limit; one that takes longer (only a
+  deliberately malformed email does) is kept as plain text with no formatting. The pause on asking Microsoft for older
+  bodies (after a refusal or three failures) is kept per process: fine with today's single API process (see
+  `docs/DEPLOYMENT.md`). The HTML body sits in a sandboxed
   frame that fills the reader and scrolls on its own: with no scripts and no same-origin access the CRM cannot measure
   the email to grow the frame to its height.
 - Quotation stays on "Sending…" if the database is down for the whole last send attempt (an administrator retries the

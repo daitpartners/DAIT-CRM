@@ -87,4 +87,12 @@ for d in apps/api/dist apps/api/assets apps/worker/dist apps/web/dist packages/s
   grep -qx -- "$d" <<< "$PACK" || fail "deploy-test.yml does not pack $d"
 done
 echo "ok: release tarball contents"
+
+# 6. the email-body worker thread (apps/api/src/mail/bodyWorker.ts) is loaded by file path at run time, not imported:
+# the API build (run by `npm test` first, and packed as apps/api/dist above) must emit it next to mail/bodies.js.
+API_DIST="$HERE/../../apps/api/dist"
+[[ -f "$API_DIST/mail/bodies.js" ]] || fail "apps/api is not built (run npm run build -w apps/api)"
+[[ -f "$API_DIST/mail/bodyWorker.js" ]] || fail "apps/api build does not emit mail/bodyWorker.js"
+grep -q "bodyWorker.js" "$API_DIST/mail/bodies.js" || fail "mail/bodies.js does not load bodyWorker.js"
+echo "ok: email-body worker in the API build"
 echo "All release.sh tests passed"

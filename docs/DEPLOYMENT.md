@@ -27,6 +27,12 @@ every site; do it only when the CRM vhost really changed.
 | Database | PostgreSQL database `dait_crm` (owned by the app's own login role, named in `DATABASE_URL`) |
 | Env file | `/home/daitcrm/live/shared/.env` (mode 600; see `docs/ENVIRONMENT.md`) |
 
+**One API process (PM2 fork mode), on purpose.** Two things live in its memory: the Email reader's pause on asking
+Microsoft for older message bodies (30 minutes after a refusal or three failures in a row, per mailbox) and the
+worker thread that parses email bodies (one per process, in `crm-live` and in `crm-live-worker`, with a 3 s limit per
+body). Running the API in cluster mode or with several instances would give each process its own pause (more Graph
+calls while Microsoft is unhealthy) and its own parsing thread; nothing would break, but revisit this note first.
+
 See the processes with `! ssh root@88.222.213.73 'sudo -iu daitcrm pm2 ls'`. (In a non-interactive `ssh daitcrm@…
 'command'`, nvm is not loaded: prefix `source ~/.nvm/nvm.sh &&`. `sudo -iu daitcrm` runs a login shell, which loads it.)
 

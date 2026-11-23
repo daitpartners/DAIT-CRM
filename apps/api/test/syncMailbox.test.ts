@@ -308,6 +308,17 @@ describe('mail sync (2B-2)', () => {
     expect(big.bodyText.length).toBeLessThanOrEqual(50_000);
   });
 
+  test('a body too complex to process in time is stored with no HTML and plain fallback text; the sync carries on', async () => {
+    const { account } = await mailbox();
+    const hostile = '<style>p{color:red}</style><p>Read me</p>' + '<div>'.repeat(400_000) + 'past the 1 MB cap';
+    const { graph } = scripted({
+      'start:inbox': final('inbox', [msg({ subject: 'Hostile', body: { contentType: 'html', content: hostile } }), msg({ subject: 'Next', body: { contentType: 'html', content: '<p>fine</p>' } })]),
+    });
+    await syncMailboxHandler(job(account.id), { graph });
+    expect(await prisma.emailMessage.findFirstOrThrow({ where: { subject: 'Hostile' } })).toMatchObject({ bodyHtml: '', bodyText: 'Read me' });
+    expect(await prisma.emailMessage.findFirstOrThrow({ where: { subject: 'Next' } })).toMatchObject({ bodyHtml: '<p>fine</p>', bodyText: 'fine' });
+  });
+
   test('a plain-text body is stored as text with no HTML', async () => {
     const { account } = await mailbox();
     const { graph } = scripted({ 'start:inbox': final('inbox', [msg({ body: { contentType: 'text', content: 'Line 1\nLine 2' } })]) });

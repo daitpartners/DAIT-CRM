@@ -785,6 +785,16 @@ describe('formatted bodies (owner, 23 Nov 2026)', () => {
     expect((await call('GET', `/api/mail/${removed.id}`, cookie)).statusCode).toBe(404);
   });
 
+  it('a body too complex to process in time shows its plain fallback text and is not fetched again', async () => {
+    const { rep, box } = await setup();
+    const m = await synced(rep.id, box.id, { graphId: 'g-hostile' });
+    bodies.answer = async () => ({ contentType: 'html', content: '<p>Hello there</p>' + '<div>'.repeat(400_000) + 'x' });
+    const cookie = await signIn(app, rep);
+    expect((await call('GET', `/api/mail/${m.id}`, cookie)).json()).toMatchObject({ bodyHtml: null, bodyText: 'Hello there' });
+    await call('GET', `/api/mail/${m.id}`, cookie);
+    expect(bodies.calls).toHaveLength(1);
+  });
+
   it('a plain-text body from the mailbox stays plain text', async () => {
     const { rep, box } = await setup();
     const m = await synced(rep.id, box.id, { graphId: 'g-text' });

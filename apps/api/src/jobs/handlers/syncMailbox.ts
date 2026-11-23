@@ -4,7 +4,7 @@ import { enqueue, errorMessage } from '../queue.js';
 import { GraphError, deltaStartUrl, isAuthFailure, type GraphMessage, type MailFolder } from '../../graph/client.js';
 import { isUniqueViolation } from '../../prismaErrors.js';
 import { mailUser, matchMail } from '../../mail/match.js';
-import { emailBodies } from '../../mail/html.js';
+import { processEmailBody, storedColumns } from '../../mail/bodies.js';
 import type { AuthUser } from '../../plugins/auth.js';
 import type { SyncMailboxPayload } from '../types.js';
 import type { JobContext } from '../runner.js';
@@ -76,7 +76,7 @@ async function storeMessage(account: EmailAccount, user: AuthUser, folder: strin
     // Links the user (or matching) set are kept; only Outlook's state follows. A draft sent from Outlook becomes Sent.
     const sentDraft = existing.status === 'draft' && !m.isDraft ? { status: outbound ? 'sent' : 'received', occurredAt } : {};
     // A row stored before bodies came as HTML takes the HTML (and the cleaner text) now that it is here anyway.
-    const bodies = !existing.bodyHtml && m.body.contentType === 'html' ? emailBodies(m.body, BODY_MAX) : {};
+    const bodies = existing.bodyHtml === null && m.body.contentType === 'html' ? storedColumns(await processEmailBody(m.body, BODY_MAX)) : {};
     await prisma.emailMessage.update({ where: { id: existing.id }, data: { folder, isRead: outbound ? true : m.isRead, ...sentDraft, ...bodies } });
     return;
   }
@@ -90,7 +90,8 @@ async function storeMessage(account: EmailAccount, user: AuthUser, folder: strin
   const threadId = m.conversationId?.slice(0, 255) ?? null;
   const attachmentNames = m.hasAttachments ? await ctx.graph.attachmentNames(account, m.id).catch(() => []) : [];
   const projectId = await inheritedProject(user.id, threadId);
-  const { bodyHtml, bodyText } = emailBodies(m.body, BODY_MAX);
+  // In a worker thread with a time limit: no email can hold up the sync (or the jobs that share its process).
+  const { bodyHtml, bodyText } = storedColumns(await processEmailBody(m.body, BODY_MAX));
   try {
     await prisma.emailMessage.create({
       data: {
