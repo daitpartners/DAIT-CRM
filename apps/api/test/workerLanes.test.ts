@@ -12,11 +12,10 @@ const lane = (name: string) => WORKER_LANES.find((l) => l.name === name)!;
 
 describe('worker lanes', () => {
   it('research and import have lanes of their own; every job type is in exactly one lane', () => {
-    expect(lane('research').types).toEqual(['research_company']);
+    expect(lane('research').types).toEqual(['research_company', 'import_research']);
     expect(lane('mail').types).not.toContain('research_company');
     expect(lane('import').types).toEqual(['import_read_file', 'import_commit']);
-    // Task 5 adds import_research (on the research lane); it does not exist yet.
-    expect(JOB_TYPES).not.toContain('import_research');
+    expect(JOB_TYPES).toContain('import_research');
     const all = WORKER_LANES.flatMap((l) => l.types);
     expect(new Set(all).size).toBe(all.length);
     expect([...all].sort()).toEqual([...JOB_TYPES].sort());

@@ -11,6 +11,7 @@ import { ImportError, addFile, createBatch, listFiles, updateBatch } from '../im
 import { answerColumn, includeAll, listRows, rematchBatch, sortBatch, updateRow } from '../imports/stage.js';
 import { loadEnrichmentSettings, monthTotals } from '../research/service.js';
 import { claudeCodeConfig, claudeCodeReady } from '../research/providers.js';
+import { pauseResearch, researchView, resumeResearch, startBatchResearch } from '../imports/research.js';
 
 const idOf = (raw: string) => {
   const id = Number(raw);
@@ -19,6 +20,7 @@ const idOf = (raw: string) => {
 };
 
 const FileQuery = z.object({ name: z.string().trim().min(1).max(255) });
+const ResearchQuery = z.object({ page: z.coerce.number().int().min(1).default(1) });
 
 const batchView = (b: { id: number; number: string; status: string; language: string; leadType: string }) =>
   ({ id: b.id, number: b.number, status: b.status, language: b.language, leadType: b.leadType });
@@ -41,8 +43,8 @@ async function firstNames(ids: number[]): Promise<string[]> {
 }
 
 /**
- * Import leads (steps 1 and 2): options, batches, file uploads, and the staged rows (list, edit, tick, column
- * questions, re-matching). Administrators and Managers (`import_leads`). Changes are refused (409 `batch_locked`) once
+ * Import leads (steps 1 to 3): options, batches, file uploads, the staged rows (list, edit, tick, column questions,
+ * re-matching) and AI research (start, progress, pause, resume). Administrators and Managers (`import_leads`). Changes are refused (409 `batch_locked`) once
  * the batch is Importing or later.
  */
 export const importBatchRoutes: FastifyPluginAsync = async (app) => {
@@ -153,5 +155,27 @@ export const importBatchRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Params: { id: string } }>('/imports/batches/:id/rematch', canImport, async (request, reply) => {
     const id = idOf(request.params.id);
     return guard(reply, async () => ({ tiles: await rematchBatch(id) }));
+  });
+
+  /** Step 3: research the ticked rows with missing details, one at a time on the research lane. */
+  app.post<{ Params: { id: string } }>('/imports/batches/:id/research', canImport, async (request, reply) => {
+    const id = idOf(request.params.id);
+    return guard(reply, () => startBatchResearch(id));
+  });
+
+  app.post<{ Params: { id: string } }>('/imports/batches/:id/research/pause', canImport, async (request, reply) => {
+    const id = idOf(request.params.id);
+    return guard(reply, () => pauseResearch(id));
+  });
+
+  app.post<{ Params: { id: string } }>('/imports/batches/:id/research/resume', canImport, async (request, reply) => {
+    const id = idOf(request.params.id);
+    return guard(reply, () => resumeResearch(id));
+  });
+
+  app.get<{ Params: { id: string } }>('/imports/batches/:id/research', canImport, async (request) => {
+    const id = idOf(request.params.id);
+    const { page } = parseQuery(ResearchQuery, request.query);
+    return researchView(id, page);
   });
 };

@@ -3,11 +3,11 @@ import type { QuotationSnapshot } from '../quotations/service.js';
 
 export type JobType =
   | 'send_email' | 'send_user_email' | 'sync_mailbox' | 'mail_action' | 'campaign_step' | 'sync_calendar' | 'research_company'
-  | 'import_read_file' | 'import_commit';
+  | 'import_read_file' | 'import_commit' | 'import_research';
 
 export const JOB_TYPES: readonly JobType[] = [
   'send_email', 'send_user_email', 'sync_mailbox', 'mail_action', 'campaign_step', 'sync_calendar', 'research_company',
-  'import_read_file', 'import_commit',
+  'import_read_file', 'import_commit', 'import_research',
 ];
 
 export const JOB_STATUSES = ['queued', 'running', 'done', 'failed'] as const;
@@ -62,5 +62,13 @@ export interface ImportReadFilePayload {
 
 /** `import_commit` (Import leads): import a batch's approved rows, one row per transaction (resumable). */
 export interface ImportCommitPayload {
+  batchId: number;
+}
+
+/**
+ * `import_research` (Import leads): research the batch's next waiting row, then queue the next job (one row per job,
+ * on the research lane). `maxAttempts: 1`: a retry could spend Claude twice; a lost chain is restarted by the sweep.
+ */
+export interface ImportResearchPayload {
   batchId: number;
 }

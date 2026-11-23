@@ -437,14 +437,14 @@ export function fromLabel(fileName: string, ext: string, originKind: string, ori
   return `${word} ${ext} · ${(ORIGIN_LABEL[originKind] ?? ORIGIN_LABEL.row!)(originN)}`;
 }
 
-const rowSelect = {
+export const rowSelect = {
   id: true, fields: true, status: true, include: true, problems: true, originKind: true, originN: true,
   research: true, researchStatus: true,
   matchedCompany: { select: { id: true, number: true } },
   file: { select: { name: true, ext: true } },
 } satisfies Prisma.ImportRowSelect;
 
-function rowView(r: Prisma.ImportRowGetPayload<{ select: typeof rowSelect }>): RowView {
+export function rowView(r: Prisma.ImportRowGetPayload<{ select: typeof rowSelect }>): RowView {
   const research = r.research as Record<string, ResearchValue>;
   return {
     id: r.id, fields: r.fields as RowFields, status: r.status, include: r.include, problems: r.problems as RowProblem[],
