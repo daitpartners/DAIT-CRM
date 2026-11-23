@@ -1,11 +1,13 @@
 name: Deploy to test
-# Runs only after the CI workflow (name: CI) finished green for a push to main, and deploys exactly
-# the commit CI tested. Tests are not re-run here; CI already ran them against that sha.
+# Manual only (owner, 23 Nov 2026): the test copy (~/test, crm-test.daitpartners.com) is not set up on the server, so
+# an automatic deploy after every green CI run failed each time. Live is deployed by hand. To use this once the test
+# copy exists: Actions → Deploy to test → Run workflow, and give the full 40-character sha of a commit CI passed on main.
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full commit sha (CI must have passed on it)
+        required: true
 permissions:
   contents: read
 concurrency:
@@ -13,18 +15,13 @@ concurrency:
   cancel-in-progress: false
 jobs:
   deploy:
-    # Only a successful push run from this repository (not a pull request whose branch is named main).
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     env:
-      SHA: ${{ github.event.workflow_run.head_sha }}
+      SHA: ${{ inputs.sha }}
     steps:
       - uses: actions/checkout@v4.2.2
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ inputs.sha }}
       - uses: actions/setup-node@v4.4.0
         with:
           node-version: 24
