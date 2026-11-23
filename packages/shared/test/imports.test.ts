@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
-  BATCH_NUMBER_RE, IMPORT_FILE_ERRORS, IMPORT_FIELDS, IMPORT_TABLE_FIELDS, PROBLEM_CODES, importColumnLabel, importFileErrorText, importSource, problemText,
+  BATCH_NUMBER_RE, IMPORT_FILE_ERRORS, IMPORT_FIELDS, IMPORT_NO_CLAUDE, importNoClaudeText, IMPORT_TABLE_FIELDS, PROBLEM_CODES, importColumnLabel, importFileErrorText, importSource, problemText,
   type RowProblem,
 } from '../src/imports';
 import {
@@ -43,6 +43,17 @@ describe('problemText', () => {
       expect(problemText(p, 'es'), code).not.toBe(problemText(p, 'en'));
       expect(problemText(p, 'fr'), code).not.toBe(problemText(p, 'en'));
     }
+  });
+});
+
+describe('importNoClaudeText', () => {
+  test('why a document was read without Claude, in en, es and fr', () => {
+    for (const lang of LANGS) {
+      expect(new Set(IMPORT_NO_CLAUDE.map((c) => importNoClaudeText(c, lang))).size).toBe(IMPORT_NO_CLAUDE.length);
+    }
+    expect(importNoClaudeText('limit', 'en')).toBe('Long document: part read without Claude');
+    expect(importNoClaudeText('limit', 'es')).toBe('Documento largo: parte leída sin Claude');
+    expect(importNoClaudeText('limit', 'fr')).toBe('Document long : lu en partie sans Claude');
   });
 });
 

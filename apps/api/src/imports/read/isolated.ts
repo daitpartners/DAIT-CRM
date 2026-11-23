@@ -18,6 +18,12 @@ export const READ_MEMORY_MB = 512;
 
 export interface ReadInWorkerOptions {
   timeoutMs?: number;
+  /**
+   * The CRM's countries: when given, a document's deterministic reading (`draftDocument`) runs in the child too and
+   * comes back as `draft`, so its pattern matching over untrusted text is bounded by the same timeout and never runs
+   * on the worker's event loop.
+   */
+  knownCountries?: readonly string[];
   /** Heap limit of the read process (tests use a small one to reach the out-of-memory path). */
   memoryMb?: number;
   /** Test seam: the child keeps itself busy this long (synchronously) before reading, like a slow hostile file. */
@@ -88,7 +94,7 @@ export function readInWorker(
       }
     }));
     child.send({
-      ext, data: new Uint8Array(data), fileName, busyMs: opts.busyMs ?? 0, exhaustHeap: opts.exhaustHeap ?? false,
+      ext, data: new Uint8Array(data), fileName, known: opts.knownCountries ? [...opts.knownCountries] : null, busyMs: opts.busyMs ?? 0, exhaustHeap: opts.exhaustHeap ?? false,
       reportEnv: opts.reportEnv ?? false, failWith: opts.failWith ?? null,
     });
   });

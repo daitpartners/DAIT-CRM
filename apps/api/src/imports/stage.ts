@@ -194,14 +194,17 @@ export type NewRow = { sheet: string | null; originKind: string; originN: number
 /**
  * Replaces a file's staged rows with `rows` (then re-evaluated) and writes `data` on the file, under the batch lock so
  * two files cannot both fit under the row limit. Refused (file Failed `too_many_rows`, no rows) when the batch would
- * pass 5,000 rows.
+ * pass 5,000 rows. Nothing is written when, under that lock, the file turns out deleted or the batch importing.
  */
 export async function stageRows(
   file: { id: number; batchId: number }, rows: NewRow[], data: Prisma.ImportFileUpdateInput,
 ): Promise<void> {
   const refused = await prisma.$transaction(async (tx) => {
     // One staging per batch at a time, so two files cannot both fit under the row limit.
-    await tx.$queryRaw`SELECT id FROM import_batches WHERE id = ${file.batchId} FOR UPDATE`;
+    const [batch] = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM import_batches WHERE id = ${file.batchId} FOR UPDATE`;
+    const current = await tx.importFile.findUnique({ where: { id: file.id }, select: { deletedAt: true } });
+    // A file deleted meanwhile, or a batch already importing, is left as it is.
+    if (!batch || isLocked(batch.status) || !current || current.deletedAt) return 'gone';
     await tx.importRow.deleteMany({ where: { fileId: file.id } });
     const others = await tx.importRow.count({ where: { batchId: file.batchId } });
     if (others + rows.length > IMPORT_MAX_ROWS) {
@@ -222,6 +225,7 @@ export async function stageRows(
     return false;
   }, { timeout: 120_000, maxWait: 30_000 });
 
+  if (refused === 'gone') return;
   if (refused) {
     await refreshBatch(file.batchId, []);
     return;

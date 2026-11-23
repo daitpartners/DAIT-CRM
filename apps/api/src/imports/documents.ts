@@ -5,6 +5,10 @@
  * A document is split into blocks: groups of lines separated by blank lines, within a page. A Word file's text has a
  * blank line after every paragraph, so there a block ends at two or more blank lines (an empty paragraph). Each block
  * of a Word file is a card (numbered from 1), each block of a text file is known by its first line number.
+ *
+ * The text is untrusted and up to 5 M characters: every pattern here runs in linear time (bounded repetitions, a
+ * match only starts at a token start, end trims are loops), lines are cut at 1,000 characters, and the job runs this
+ * reader in the read child process (`draftDocument`, see read/child.ts), never on the worker's event loop.
  */
 import { domainOf, isFreeMail, type ImportField, type RowFields } from '@dait-crm/shared';
 import { squash } from './columns.js';
@@ -13,18 +17,32 @@ import type { TextExtract } from './read/index.js';
 
 export type OriginKind = TextExtract['unit'];
 export type DraftRow = { fields: RowFields; originKind: OriginKind; originN: number };
-/** A block: its origin (page n, card n or first line n) and its lines (non-blank, trimmed) with their line numbers. */
-export type Block = { kind: OriginKind; n: number; lines: { n: number; text: string }[] };
+/**
+ * A block: its index in the document, its origin (page n, card n or first line n) and its lines (non-blank, trimmed,
+ * at most MAX_LINE characters) with their line numbers.
+ */
+export type Block = { i: number; kind: OriginKind; n: number; lines: { n: number; text: string }[] };
+/** A deterministic row and the block it came from (so a chunk Claude could not read falls back to its own blocks' rows). */
+export type BlockRow = DraftRow & { block: number };
+/** What the read child sends back for a document: its blocks and the deterministic reader's rows. */
+export type DocumentDraft = { blocks: Block[]; rows: BlockRow[] };
 
 /** Longest value a staged cell keeps (the row edit's limit). */
 export const MAX_VALUE = 500;
+/** Longer lines are cut into pieces of this many characters: no record line is that long. */
+export const MAX_LINE = 1000;
 
 /** The document's blocks, in order. */
 export function documentBlocks(extract: TextExtract): Block[] {
   const blocks: Block[] = [];
   let card = 0;
   for (const page of extract.pages) {
-    const lines = page.text.replace(/\u0000/g, '').split('\n').map((t, i) => ({ n: i + 1, text: t.trim() }));
+    const lines: Block['lines'] = [];
+    page.text.replace(/\u0000/g, '').split('\n').forEach((t, i) => {
+      const text = t.trim();
+      if (text.length <= MAX_LINE) lines.push({ n: i + 1, text });
+      else for (let at = 0; at < text.length; at += MAX_LINE) lines.push({ n: i + 1, text: text.slice(at, at + MAX_LINE).trim() });
+    });
     // Paragraph-style text (no two non-blank lines in a row, as a Word file's): one blank line is a paragraph break.
     const paragraphs = !lines.some((l, i) => i > 0 && l.text !== '' && lines[i - 1]!.text !== '');
     const gap = paragraphs ? 2 : 1;
@@ -33,7 +51,7 @@ export function documentBlocks(extract: TextExtract): Block[] {
     const flush = () => {
       if (current.length === 0) return;
       const n = extract.unit === 'page' ? page.n : extract.unit === 'card' ? (card += 1) : current[0]!.n;
-      blocks.push({ kind: extract.unit, n, lines: current });
+      blocks.push({ i: blocks.length, kind: extract.unit, n, lines: current });
       current = [];
     };
     for (const line of lines) {
@@ -53,15 +71,18 @@ export function documentBlocks(extract: TextExtract): Block[] {
 // ---------------------------------------------------------------------------------------------------------------
 // Values in a block
 
-const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,24}/g;
-const URL_RE = /\b(?:https?:\/\/|www\.)[^\s<>"'()·•|,;]+/gi;
-/** A bare domain: labels and a 2–24 letter top-level domain, not inside a word, an email or a longer name. */
-const DOMAIN_RE = /(?<![\p{L}\p{N}@._-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+([a-z]{2,24})(?![\p{L}\p{N}_-]|\.[\p{L}\p{N}])(?:\/[^\s<>"'·•|,;]*)?/giu;
+/** Starts only where a token starts; every part is bounded, so each start costs a bounded amount of work. */
+export const EMAIL_RE = /(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,8}\.[A-Za-z]{2,24}/g;
+const URL_RE = /(?<![\p{L}\p{N}])(?:https?:\/\/|www\.)[^\s<>"'()·•|,;]{1,500}/giu;
+/** A bare domain: labels and a 2–24 letter top-level domain, starting at a token start, not inside an email or a longer name. */
+const DOMAIN_RE = /(?<![\p{L}\p{N}@._-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.){1,8}([a-z]{2,24})(?![\p{L}\p{N}_-]|\.[\p{L}\p{N}])(?:\/[^\s<>"'·•|,;]{0,300})?/giu;
 /** File names are not websites. */
 const FILE_EXT = new Set(['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'txt', 'ppt', 'pptx', 'jpg', 'jpeg', 'png', 'gif', 'zip']);
-const PHONE_RE = /(?:\+\s?)?\(?\d[\d \t().\-/]{5,}\d/g;
+/** A phone as written: at most 32 characters, so a failed match never scans far. */
+const PHONE_RE = /(?:\+ ?)?\(?\d[\d \t().\-/]{5,30}\d/g;
 const DATE_RE = /^\d{4}[-./]\d{1,2}[-./]\d{1,2}$|^\d{1,2}[-./]\d{1,2}[-./]\d{2,4}$/;
-const TRAILING = /[.,;:)\]]+$/;
+/** A number that is a reference, not a phone ("ref 12345678", "VAT: 123…", "Invoice #…"): the words just before it. */
+const NUMBER_LABEL = /(?:^|[^\p{L}])(?:ref|reference|réf|référence|referencia|invoice|factura|facture|order|pedido|commande|vat|tva|iva|tax|id|gst|gstin|cif|nif|rfc|siret|siren|account|acct|iban|po|ruc|rut|cuit|abn|ein|reg|registration|registro|cr)\.?\s?[:#]?\s?$|#\s?$/iu;
 
 const LEGAL_SUFFIX = new RegExp(
   `(?:^|[\\s,(])(?:${[
@@ -78,44 +99,93 @@ const TITLE_WORD = new RegExp(
   ].join('|')})(?![\\p{L}])`,
   'iu',
 );
-const HONORIFIC = /^(?:(?:Dr|Mr|Mrs|Ms|Sr|Sra|Mme)\.?|M\.)\s+/u;
+/** Words that make a name a business, not a person ("Northgate Retail Group" before "Sarah Lim"). */
+const COMPANY_WORD = new RegExp(
+  `(?<![\\p{L}])(?:${[
+    'Group', 'Groupe', 'Grupo', 'Retail', 'Trading', 'Clinic', 'Clinics', 'Clínica', 'Clinique', 'Solutions', 'Soluciones', 'Services',
+    'Servicios', 'Industries', 'Industrial', 'Holdings', 'Technologies', 'Technology', 'Tech', 'International', 'Internacional',
+    'Consulting', 'Consultores', 'Logistics', 'Logística', 'Engineering', 'Ingeniería', 'Partners', 'Systems', 'Studio', 'Studios',
+    'Agency', 'Agencia', 'Bank', 'Banco', 'Hotel', 'Hotels', 'Hospital', 'Foundation', 'Fundación', 'Institute', 'Instituto',
+    'University', 'Universidad', 'Company', 'Compañía', 'Enterprises', 'Labs', 'Media', 'Marketing', 'Design', 'Dental',
+    'Medical', 'Pharma', 'Foods', 'Motors', 'Energy', 'Capital', 'Ventures', 'Associates', 'Société', 'Corporation',
+  ].join('|')})(?![\\p{L}])`,
+  'iu',
+);
+/** A document's own heading or the organiser's notice, not a record ("Exhibitor Directory 2026", "For enquiries: …"). */
+const HEADING_WORD = /(?<![\p{L}])(?:directory|exhibitors?|visitors?|delegates?|attendees?|participants?|catalogue|catalog|programme|program|agenda|contents|directorio|expositores|visitantes|participantes|asistentes|catálogo|annuaire|exposants|visiteurs|sommaire)(?![\p{L}])/iu;
+const ENQUIRY = /(?<![\p{L}])(?:for (?:more |further )?(?:enquiries|inquiries|information|info|details)|enquiries|inquiries|contact us|get in touch|para (?:más )?información|informes|renseignements)(?![\p{L}])/iu;
+const HONORIFIC = /^(?:(?:Dr|Mr|Mrs|Ms|Sr|Sra|Mme)\.?|M\.)\s/u;
 const PARTICLE = '(?:de|del|da|das|do|dos|di|du|van|von|der|den|la|le|y|bin|al)';
-const CAP_WORD = "\\p{Lu}[\\p{L}'’.-]*";
+const CAP_WORD = "\\p{Lu}[\\p{L}'’.-]{0,40}";
 /** 2–4 capitalised words (lowercase name particles allowed between them), no digits, optional honorific. */
-const NAME_RE = new RegExp(`^(?:(?:Dr|Mr|Mrs|Ms|Sr|Sra|Mme)\\.?\\s+|M\\.\\s+)?${CAP_WORD}(?:\\s+(?:${PARTICLE}\\s+)*${CAP_WORD}){1,3}$`, 'u');
-/** What is left of a part that held only a contact value: field labels and separators. */
-const ONLY_LABELS = /^[\s\W]*(?:(?:tel|tél|telephone|téléphone|teléfono|telefono|phone|ph|mob|mobile|móvil|movil|cell|fax|email|e-mail|mail|correo|courriel|web|website|site|url|t|m|p|f|e|w)\b[\s\W]*)*$/iu;
+const NAME_RE = new RegExp(`^(?:(?:Dr|Mr|Mrs|Ms|Sr|Sra|Mme)\\.?\\s|M\\.\\s)?${CAP_WORD}(?:\\s(?:${PARTICLE}\\s){0,3}${CAP_WORD}){1,3}$`, 'u');
+/** Field labels: a part left with only these (after its email, website or phone) held only that value. */
+const LABELS = new Set([
+  'tel', 'tél', 'telephone', 'téléphone', 'teléfono', 'telefono', 'phone', 'ph', 'mob', 'mobile', 'móvil', 'movil', 'cell', 'fax',
+  'email', 'e', 'mail', 'correo', 'courriel', 'web', 'website', 'site', 'url', 't', 'm', 'p', 'f', 'w',
+]);
 /** Splits a line into parts: " · ", " • ", " | ", tabs, or three or more spaces (a PDF's columns). */
-const PART_SEP = /\s+[·•|]\s+|\t+| {3,}/;
+const PART_SEP = /[ \t]+[·•|][ \t]+|\t+| {3,}/;
+const EDGE = new Set([...' \t\n,;:·•|–—-']);
 
 const digits = (s: string) => s.replace(/\D/g, '');
-const tidy = (s: string) => s.replace(/^[\s,;:·•|–—-]+|[\s,;:·•|–—-]+$/g, '').replace(/\s+/g, ' ');
+
+/** Trims separators and dashes from both ends (a loop, not a regex: linear on any input) and collapses whitespace. */
+function tidy(s: string): string {
+  let a = 0;
+  let b = s.length;
+  while (a < b && EDGE.has(s[a]!)) a += 1;
+  while (b > a && EDGE.has(s[b - 1]!)) b -= 1;
+  return s.slice(a, b).replace(/\s+/g, ' ');
+}
+
+/** Drops trailing characters in `set` (a loop: linear). */
+function trimEnd(s: string, set: string): string {
+  let b = s.length;
+  while (b > 0 && set.includes(s[b - 1]!)) b -= 1;
+  return s.slice(0, b);
+}
+
+const onlyLabels = (s: string) => s.split(/[^\p{L}]+/u).every((w) => w === '' || LABELS.has(w.toLowerCase()));
 
 function firstPhone(text: string): string | null {
   for (const m of text.matchAll(PHONE_RE)) {
-    const v = m[0].trim().replace(/[\s(.\-/]+$/, '');
+    const v = trimEnd(m[0].trim(), ' \t(.-/');
     const d = digits(v).length;
-    if (d >= 8 && d <= 15 && !DATE_RE.test(v)) return v;
+    if (d < 8 || d > 15 || DATE_RE.test(v)) continue;
+    if (NUMBER_LABEL.test(text.slice(Math.max(0, m.index! - 24), m.index!))) continue;
+    return v;
   }
   return null;
 }
 
 function firstWebsite(text: string): string | null {
-  const url = text.match(URL_RE);
-  if (url) return url[0].replace(TRAILING, '');
+  for (const m of text.matchAll(URL_RE)) return trimEnd(m[0], '.,;:)]');
   for (const m of text.matchAll(DOMAIN_RE)) {
     const tld = m[1]!;
     // "Mr.Smith" is not a domain: the top-level domain is all lowercase or all capitals.
     if (tld !== tld.toLowerCase() && tld !== tld.toUpperCase()) continue;
     if (FILE_EXT.has(tld.toLowerCase())) continue;
-    return m[0].replace(TRAILING, '');
+    return trimEnd(m[0], '.,;:)]');
   }
   return null;
 }
 
 type Part = { text: string; rest: string; contact: boolean };
 
-/** A record's fields from the lines of a block (or of one line), or null when it has no email, phone or website. */
+/** A line's parts, each without its email, website and phone (`rest`); `contact` = it held one of them. */
+function partsOf(lines: string[], website: string | null, phone: string | null): Part[] {
+  return lines.flatMap((l) => l.split(PART_SEP)).map((p) => p.trim()).filter((p) => p !== '').map((text) => {
+    let rest = text.replace(EMAIL_RE, ' ').replace(URL_RE, ' ');
+    if (website && !/^(?:https?:\/\/|www\.)/i.test(website)) rest = rest.split(website).join(' ');
+    if (phone) rest = rest.split(phone).join(' ');
+    const contact = rest !== text;
+    rest = onlyLabels(rest) ? '' : tidy(rest);
+    return { text, rest, contact };
+  });
+}
+
+/** A record's fields from the lines of a block (or of one segment), or null when it has no email, phone or website. */
 function recordOf(lines: string[], known: readonly string[]): RowFields | null {
   const all = lines.join('\n');
   const email = all.match(EMAIL_RE)?.[0]?.toLowerCase() ?? null;
@@ -124,15 +194,8 @@ function recordOf(lines: string[], known: readonly string[]): RowFields | null {
   const phone = firstPhone(noEmail.replace(URL_RE, ' ').replace(DOMAIN_RE, ' '));
   if (!email && !phone && !website) return null;
 
-  // Each part without its contact values; a part that held only those (and labels) is no candidate for anything else.
-  const parts: Part[] = lines.flatMap((l) => l.split(PART_SEP)).map((p) => p.trim()).filter((p) => p !== '').map((text) => {
-    let rest = text.replace(EMAIL_RE, ' ').replace(URL_RE, ' ');
-    if (website && !/^(?:https?:\/\/|www\.)/i.test(website)) rest = rest.split(website).join(' ');
-    if (phone) rest = rest.split(phone).join(' ');
-    const contact = rest !== text;
-    rest = ONLY_LABELS.test(rest) ? '' : tidy(rest);
-    return { text, rest, contact };
-  });
+  // A part that held only contact values (and labels) is no candidate for anything else.
+  const parts = partsOf(lines, website, phone);
   const free = parts.filter((p) => p.rest !== '');
   const used = new Set<Part>();
   const fields: RowFields = {};
@@ -140,8 +203,7 @@ function recordOf(lines: string[], known: readonly string[]): RowFields | null {
   const countryOf = (p: Part) => {
     const whole = matchCountry(p.rest, known);
     if (whole) return whole;
-    const last = p.rest.split(',').pop()!.trim();
-    return p.rest.includes(',') ? matchCountry(last, known) : null;
+    return p.rest.includes(',') ? matchCountry(p.rest.slice(p.rest.lastIndexOf(',') + 1).trim(), known) : null;
   };
   const countryPart = free.find((p) => countryOf(p));
   if (countryPart) {
@@ -149,8 +211,7 @@ function recordOf(lines: string[], known: readonly string[]): RowFields | null {
     used.add(countryPart);
   }
 
-  const suffixPart = free.find((p) => !used.has(p) && LEGAL_SUFFIX.test(p.rest));
-  let company: Part | undefined = suffixPart;
+  let company: Part | undefined = free.find((p) => !used.has(p) && LEGAL_SUFFIX.test(p.rest));
   if (company) used.add(company);
 
   // Designation: a part with a title word; "Omar Haddad, Operations Manager" gives the title and a contact candidate.
@@ -166,12 +227,14 @@ function recordOf(lines: string[], known: readonly string[]): RowFields | null {
   }
 
   const nameLike = (p: Part) => !used.has(p) && p !== company && !p.contact && NAME_RE.test(p.rest);
+  const businessLike = (p: Part) => COMPANY_WORD.test(p.rest) || p.rest.split(' ').length >= 3;
   let contact: Part | undefined = free.find((p) => nameLike(p) && HONORIFIC.test(p.rest));
   if (contact) used.add(contact);
 
   if (!company) {
     // The part holding the website's name (or, without a website, a company email's), e.g. brightlinedental.com.
-    const domain = domainOf(website) ?? (email && !isFreeMail(domainOf(email) ?? '') ? domainOf(email) : null);
+    const emailDomain = email ? domainOf(email) : null;
+    const domain = domainOf(website) ?? (emailDomain && !isFreeMail(emailDomain) ? emailDomain : null);
     const stem = domain ? squash(domain.split('.')[0]!) : '';
     if (stem.length >= 3) {
       company = free.find((p) => {
@@ -185,15 +248,21 @@ function recordOf(lines: string[], known: readonly string[]): RowFields | null {
   // A name next to the title ("Tom Baker" under "Head of Procurement").
   if (!contact && !contactCandidate && designationPart) {
     const at = parts.indexOf(designationPart);
-    contact = [parts[at - 1], parts[at + 1]].find((p): p is Part => p !== undefined && nameLike(p));
+    contact = [parts[at - 1], parts[at + 1]].find((p): p is Part => p !== undefined && nameLike(p) && !businessLike(p))
+      ?? [parts[at - 1], parts[at + 1]].find((p): p is Part => p !== undefined && nameLike(p));
     if (contact) used.add(contact);
   }
-  // Else the first part that is no other field, a part that reads as a person's name last.
-  if (!company) company = free.find((p) => !used.has(p) && !nameLike(p)) ?? free.find((p) => !used.has(p));
-  if (company) used.add(company);
-  if (company) fields.companyName = company.rest;
+  // Else the first part that is no other field: one that reads as a person's name only after one that reads as a business.
+  if (!company) {
+    const open = free.filter((p) => !used.has(p));
+    company = open.find((p) => !nameLike(p)) ?? open.find(businessLike) ?? open[0];
+  }
+  if (company) {
+    used.add(company);
+    fields.companyName = company.rest;
+  }
 
-  if (!contact && !contactCandidate) contact = free.find(nameLike);
+  if (!contact && !contactCandidate) contact = free.find((p) => nameLike(p) && !businessLike(p)) ?? free.find(nameLike);
   const contactName = contact?.rest ?? contactCandidate;
   if (contactName) fields.contactName = contactName;
 
@@ -204,55 +273,134 @@ function recordOf(lines: string[], known: readonly string[]): RowFields | null {
   return fields;
 }
 
-/** Rows of blocks: a block with an email, phone or website is one record; one with two or more emails, a row per line holding one. */
-export function rowsFromBlocks(blocks: readonly Block[], known: readonly string[]): DraftRow[] {
-  const rows: DraftRow[] = [];
+const hasEmail = (text: string) => text.search(EMAIL_RE) >= 0;
+
+/**
+ * A heading block: the document's title or the organiser's notice ("Exhibitor Directory 2026 / For enquiries: …"):
+ * every line is a heading, an enquiry line or contact values only, and at least one is a heading.
+ */
+function isHeadingBlock(lines: string[]): boolean {
+  let heading = false;
+  for (const line of lines) {
+    if (LEGAL_SUFFIX.test(line)) return false;
+    if (HEADING_WORD.test(line)) heading = true;
+    else if (!ENQUIRY.test(line) && partsOf([line], firstWebsite(line.replace(EMAIL_RE, ' ')), null).some((p) => p.rest !== '' && !/^\d/.test(p.rest))) return false;
+  }
+  return heading;
+}
+
+/**
+ * Rows of blocks: a block with an email, phone or website is one record. One with two or more email lines (a list) is
+ * split at them: each email line with the lines since the previous one, and what follows the last one when it holds a
+ * phone or website (a record without an email).
+ */
+export function rowsFromBlocks(blocks: readonly Block[], known: readonly string[]): BlockRow[] {
+  const rows: BlockRow[] = [];
   for (const block of blocks) {
-    const emails = block.lines.reduce((n, l) => n + (l.text.match(EMAIL_RE)?.length ?? 0), 0);
-    if (emails >= 2) {
-      for (const line of block.lines) {
-        if (!line.text.match(EMAIL_RE)) continue;
-        const fields = recordOf([line.text], known);
-        if (fields) rows.push({ fields, originKind: block.kind, originN: block.kind === 'line' ? line.n : block.n });
-      }
+    const texts = block.lines.map((l) => l.text);
+    if (isHeadingBlock(texts)) continue;
+    const add = (lines: Block['lines']) => {
+      const fields = recordOf(lines.map((l) => l.text), known);
+      if (fields) rows.push({ fields, originKind: block.kind, originN: block.kind === 'line' ? lines[0]!.n : block.n, block: block.i });
+    };
+    const emailLines = block.lines.filter((l) => hasEmail(l.text));
+    if (emailLines.length < 2) {
+      add(block.lines);
       continue;
     }
-    const fields = recordOf(block.lines.map((l) => l.text), known);
-    if (fields) rows.push({ fields, originKind: block.kind, originN: block.n });
+    let segment: Block['lines'] = [];
+    for (const line of block.lines) {
+      segment.push(line);
+      if (hasEmail(line.text)) {
+        add(segment);
+        segment = [];
+      }
+    }
+    if (segment.length > 0) add(segment);
   }
   return rows;
 }
 
 /** The deterministic reader: the document's records, without Claude. */
 export function extractBlocks(extract: TextExtract, knownCountries: readonly string[]): DraftRow[] {
-  return rowsFromBlocks(documentBlocks(extract), knownCountries);
+  return rowsFromBlocks(documentBlocks(extract), knownCountries).map(({ block: _block, ...row }) => row);
+}
+
+/** The document's blocks and deterministic rows (run in the read child process). */
+export function draftDocument(extract: TextExtract, knownCountries: readonly string[]): DocumentDraft {
+  const blocks = documentBlocks(extract);
+  return { blocks, rows: rowsFromBlocks(blocks, knownCountries) };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
 // The check every Claude value must pass
 
-/** Lowercase, accents and punctuation removed, whitespace collapsed, padded so a match is whole words. */
-const normalise = (s: string) =>
-  ` ${s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()} `;
-/** The digits of each phone-like run of the text (digits with spaces, brackets, dots, dashes, slashes, "+"; no line breaks). */
-const digitRuns = (text: string) => (text.match(/\d[\d \t().\-/+]*/g) ?? []).map(digits);
+/** Letters NFD does not take apart. */
+const FOLD: Record<string, string> = { ø: 'o', ß: 'ss', æ: 'ae', œ: 'oe', ł: 'l', đ: 'd', ð: 'd', þ: 'th', ı: 'i' };
 
 /**
- * Whether a value is written in the text: email by lowercase substring, website by its domain, phone by its digits
- * (7 or more) within one number of the text, anything else by whole words after normalising.
+ * Lowercase; a word hyphenated across a line break joined; accents and ø/ß/æ… folded; dotted acronyms closed up
+ * ("A.B.C." → "abc"); punctuation removed and whitespace collapsed; padded so a match is whole words.
  */
-export function valueInText(value: string, field: ImportField, text: string): boolean {
+function normalise(s: string): string {
+  const t = s
+    .replace(/(?<=\p{L})-[ \t]*\r?\n[ \t]*(?=\p{L})/gu, '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    .replace(/[øßæœłđðþı]/g, (c) => FOLD[c]!)
+    .replace(/(?<![\p{L}\p{N}])(?:\p{L}\.){2,}/gu, (m) => m.replace(/\./g, ''))
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+  return ` ${t} `;
+}
+
+/** The digits of each phone-like run of the text (digits with single spaces, brackets, dots, dashes; no line breaks, no "/"). */
+const phoneRuns = (text: string) =>
+  (text.match(/\+?\(?\d(?:[\d().-]|[ \t](?=[\d(]))*/g) ?? []).map(digits).filter((d) => d.length >= 7);
+
+/** A text prepared once for many `valueInText` checks. */
+export type PreparedText = { lower: string; normal: string; emails: Set<string>; phones: string[] };
+
+export function prepareText(text: string): PreparedText {
+  return {
+    lower: text.toLowerCase(), normal: normalise(text),
+    emails: new Set((text.match(EMAIL_RE) ?? []).map((e) => e.toLowerCase())), phones: phoneRuns(text),
+  };
+}
+
+/** The domain occurs in the text as a whole domain (`www.acme.com` holds `acme.com`; `logistics.ae` is not in `alnoorlogistics.ae`). */
+function domainIn(domain: string, lower: string): boolean {
+  for (let at = lower.indexOf(domain); at >= 0; at = lower.indexOf(domain, at + 1)) {
+    const before = at > 0 ? lower[at - 1]! : '';
+    const after = lower.slice(at + domain.length, at + domain.length + 2);
+    if (/[a-z0-9-]/.test(before) || /^[a-z0-9-]/.test(after) || /^\.[a-z0-9]/.test(after)) continue;
+    return true;
+  }
+  return false;
+}
+
+/** `valueInText` against a prepared text. */
+export function valueInPrepared(value: string, field: ImportField, t: PreparedText): boolean {
   const v = value.trim();
   if (v === '') return false;
-  if (field === 'email') return text.toLowerCase().includes(v.toLowerCase());
+  if (field === 'email') return t.emails.has(v.toLowerCase());
   if (field === 'website') {
     const domain = domainOf(v);
-    return domain !== null && text.toLowerCase().includes(domain);
+    return domain !== null && domainIn(domain, t.lower);
   }
   if (field === 'phone') {
+    // One number of the text, whole, or without a short prefix (a country or trunk code) when 8+ digits are left.
     const d = digits(v);
-    return d.length >= 7 && digitRuns(text).some((run) => run.includes(d));
+    return d.length >= 7 && t.phones.some((run) => run === d || (d.length >= 8 && run.endsWith(d) && run.length - d.length <= 4));
   }
   const n = normalise(v);
-  return n.trim() !== '' && normalise(text).includes(n);
+  return n.trim() !== '' && t.normal.includes(n);
+}
+
+/**
+ * Whether a value is written in the text: an email equal to one of the text's emails, a website's domain as a whole
+ * domain, a phone as one whole number of the text (7+ digits; a short country / trunk prefix may be missing), anything
+ * else as whole words after normalising.
+ */
+export function valueInText(value: string, field: ImportField, text: string): boolean {
+  return valueInPrepared(value, field, prepareText(text));
 }

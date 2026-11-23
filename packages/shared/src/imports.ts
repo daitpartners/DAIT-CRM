@@ -52,12 +52,13 @@ export type ProblemCode = (typeof PROBLEM_CODES)[number];
 export type RowProblem = { code: ProblemCode; field?: ImportField; level: 'missing' | 'questionable' | 'info'; value?: string };
 
 /**
- * `ImportFile.meta`: what the file list says about a read file; `noClaude` = read without Claude (switched off / cap).
+ * `ImportFile.meta`: what the file list says about a read file; `noClaude` = (part) read without Claude: switched off,
+ * the month's run cap reached, or a long document past its per-file Claude limit (`importNoClaudeText`).
  * `rows` of a spreadsheet = its staged rows; `headers` = each sheet's header row cells (null when the sheet has none),
  * kept so a repeated header row stays "Not a lead" when the file's columns are re-sorted.
  */
 export type FileMeta = {
-  sheets?: number; rows?: number; pages?: number; lines?: number; textFound?: boolean; noClaude?: 'off' | 'cap';
+  sheets?: number; rows?: number; pages?: number; lines?: number; textFound?: boolean; noClaude?: ImportNoClaude;
   headers?: Record<string, string[] | null>;
   /** Column keys (sheet, U+001F, index) a person answered: never asked about again as a duplicate. */
   answered?: string[];
@@ -193,6 +194,33 @@ export function importFileErrorText(code: string, ext: string, lang: Lang): stri
   const texts = FILE_ERROR_TEXT[lang] ?? FILE_ERROR_TEXT.en;
   const known = (IMPORT_FILE_ERRORS as readonly string[]).includes(code) ? (code as ImportFileError) : 'unreadable';
   return texts[known].replace('{ext}', ext);
+}
+
+/** Why a document was read (in part) without Claude: switched off, the monthly run cap reached, or the per-file limit. */
+export const IMPORT_NO_CLAUDE = ['off', 'cap', 'limit'] as const;
+export type ImportNoClaude = (typeof IMPORT_NO_CLAUDE)[number];
+
+const NO_CLAUDE_TEXT: Record<Lang, Record<ImportNoClaude, string>> = {
+  en: {
+    off: 'Read without Claude (Claude is switched off)',
+    cap: 'Part read without Claude: this month\'s Claude runs are used up',
+    limit: 'Long document: part read without Claude',
+  },
+  es: {
+    off: 'Leído sin Claude (Claude está desactivado)',
+    cap: 'Parte leída sin Claude: se agotaron los usos de Claude de este mes',
+    limit: 'Documento largo: parte leída sin Claude',
+  },
+  fr: {
+    off: 'Lu sans Claude (Claude est désactivé)',
+    cap: 'Lu en partie sans Claude : les utilisations de Claude de ce mois sont épuisées',
+    limit: 'Document long : lu en partie sans Claude',
+  },
+};
+
+/** A file's `noClaude` in plain words, in `lang`. */
+export function importNoClaudeText(code: ImportNoClaude, lang: Lang): string {
+  return (NO_CLAUDE_TEXT[lang] ?? NO_CLAUDE_TEXT.en)[code];
 }
 
 /** A batch number: IMPORT-YYYY-MM-DD, then -2, -3 … for later batches the same day. */

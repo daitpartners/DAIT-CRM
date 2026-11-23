@@ -1,9 +1,13 @@
-/* Child-process entry: receives one file over IPC, reads it with `readImportBuffer` and sends the result back (see isolated.ts). */
+/*
+ * Child-process entry: receives one file over IPC, reads it with `readImportBuffer` (a document, given the CRM's
+ * countries, also through the deterministic reader: `draftDocument`) and sends the result back (see isolated.ts).
+ */
 import type { ImportExt } from '@dait-crm/shared';
-import { readImportBuffer } from './index.js';
+import { readImportBuffer, type ReadResult } from './index.js';
+import { draftDocument } from '../documents.js';
 
 type Job = {
-  ext: ImportExt; data: Uint8Array; fileName?: string;
+  ext: ImportExt; data: Uint8Array; fileName?: string; known: string[] | null;
   /** Test seams (readInWorker options), honoured only when NODE_ENV is 'test'. */
   busyMs: number; exhaustHeap: boolean; reportEnv: boolean; failWith: string | null;
 };
@@ -35,7 +39,12 @@ process.once('message', (job: Job) => {
     }
   }
   readImportBuffer(job.ext, Buffer.from(job.data.buffer, job.data.byteOffset, job.data.byteLength), job.fileName).then(
-    (result) => process.send!({ ok: true, result }, () => process.exit(0)),
+    (read) => {
+      const result: ReadResult = read.status === 'Read' && read.extract?.kind === 'text' && job.known
+        ? { ...read, draft: draftDocument(read.extract, job.known) } : read;
+      process.send!({ ok: true, result }, () => process.exit(0));
+    },
+  ).catch(
     (e: unknown) => process.send!({ ok: false, message: e instanceof Error ? e.message : String(e) }, () => process.exit(0)),
   );
 });

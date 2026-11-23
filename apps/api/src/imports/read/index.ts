@@ -5,6 +5,7 @@
  * file can only time out or run out of its own memory, never block or crash the worker process.
  */
 import type { FileMeta, ImportExt, ImportFileError } from '@dait-crm/shared';
+import type { DocumentDraft } from '../documents.js';
 import { readSpreadsheet } from './spreadsheet.js';
 import { readCsv } from './csv.js';
 import { readPdf } from './pdf.js';
@@ -20,6 +21,8 @@ export type TextExtract = { kind: 'text'; unit: 'page' | 'card' | 'line'; pages:
 /** `error` (Failed only) is the stable code stored in `import_files.error` (`IMPORT_FILE_ERRORS`, shared). */
 export type ReadResult = {
   status: 'Read' | 'Scan' | 'Failed'; meta: FileMeta; extract?: TableExtract | TextExtract; error?: ImportFileError;
+  /** A document's blocks and deterministic rows, worked out in the read child process (`readInWorker` with countries). */
+  draft?: DocumentDraft;
 };
 
 /**

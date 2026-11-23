@@ -4,7 +4,7 @@ import { prisma } from '../../db.js';
 import { readImportFile } from '../../imports/storage.js';
 import { readInWorker, type ReadInWorkerOptions } from '../../imports/read/isolated.js';
 import type { ReadResult } from '../../imports/read/index.js';
-import { refreshBatch, stageTable } from '../../imports/stage.js';
+import { knownCountries, refreshBatch, stageTable } from '../../imports/stage.js';
 import { stageDocument, type ImportDeps } from '../../imports/claude.js';
 import type { ImportReadFilePayload } from '../types.js';
 import type { JobContext } from '../runner.js';
@@ -32,7 +32,10 @@ export async function importReadFileHandler(job: Job, _ctx: JobContext): Promise
   let result: ReadResult;
   let written: boolean;
   try {
-    result = await readInWorker(file.ext as ImportExt, await readImportFile(file.storagePath), file.name, importReadOptions);
+    // With the countries, a document's deterministic reading runs in the read process too (untrusted text, bounded).
+    result = await readInWorker(file.ext as ImportExt, await readImportFile(file.storagePath), file.name, {
+      knownCountries: await knownCountries(), ...importReadOptions,
+    });
     written = (await write({ status: result.status, meta: result.meta as Prisma.InputJsonValue, error: result.error ?? null })).count === 1;
   } catch (e) {
     await write({ status: 'Failed', meta: {}, error: 'unreadable' });
@@ -42,7 +45,7 @@ export async function importReadFileHandler(job: Job, _ctx: JobContext): Promise
   if (!written || result.status !== 'Read' || !extract) return;
   try {
     if (extract.kind === 'table') await stageTable(fileId, extract);
-    else await stageDocument(fileId, extract, importReadDeps);
+    else await stageDocument(fileId, extract, importReadDeps, result.draft);
   } catch (e) {
     // A file whose rows could not be staged is not half-staged: no rows, Failed, the error kept on the job.
     await prisma.importRow.deleteMany({ where: { fileId } });
