@@ -1,0 +1,140 @@
+/**
+ * A local HTTP server for the website reader tests (no real network calls). It binds to 127.0.0.1 and serves the
+ * fixture sites in test/fixtures/sites by Host header; the tests map the `*.test` names to 127.0.0.1 with an injected
+ * resolver and put them on the RESEARCH_TEST_ALLOW_HOSTS allow-list.
+ */
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
+
+const SITES = join(import.meta.dirname, 'fixtures', 'sites');
+
+/** Host → path → fixture file. */
+const ROUTES: Record<string, Record<string, string>> = {
+  'site.test': {
+    '/': 'acme/index.html',
+    '/about-us': 'acme/about-us.html',
+    '/contact': 'acme/contact.html',
+    '/private/company-history': 'acme/private-company-history.html',
+    '/robots.txt': 'acme/robots.txt',
+  },
+  'meta.test': { '/': 'meta-only/index.html' },
+};
+
+/** Hosts the reader tests may reach (all served by this server on 127.0.0.1). */
+export const FIXTURE_HOSTS = [
+  'site.test', 'meta.test', 'other.test', 'slow.test', 'big.test', 'blocked.test', 'hop.test', 'gzip.test',
+];
+
+export const BIG_PAGE_BYTES = 2 * 1024 * 1024;
+
+export interface FixtureServer {
+  port: number;
+  /** Every request seen, as `host path`. */
+  requests: string[];
+  userAgents: string[];
+  /** Bytes the server managed to write for the 2 MB page before the client hung up. */
+  bigBytesWritten: () => number;
+  url: (host: string, path?: string) => string;
+  close: () => Promise<void>;
+}
+
+export async function startFixtureServer(): Promise<FixtureServer> {
+  const requests: string[] = [];
+  const userAgents: string[] = [];
+  let bigBytes = 0;
+  let port = 0;
+  const hanging = new Set<ServerResponse>();
+
+  const handler = (req: IncomingMessage, res: ServerResponse) => {
+    const host = (req.headers.host ?? '').replace(/:\d+$/, '');
+    const url = new URL(req.url ?? '/', 'http://x');
+    const path = url.pathname;
+    requests.push(`${host} ${path}`);
+    userAgents.push(String(req.headers['user-agent'] ?? ''));
+
+    if (path === '/redirect') {
+      res.writeHead(302, { location: url.searchParams.get('to') ?? '/' }).end();
+      return;
+    }
+    if (path.startsWith('/hop/')) {
+      const n = Number(path.slice(5));
+      res.writeHead(302, { location: n > 0 ? `/hop/${n - 1}` : '/' }).end();
+      return;
+    }
+    if (host === 'slow.test' && path !== '/robots.txt') {
+      hanging.add(res); // never answers
+      return;
+    }
+    if (host === 'big.test' && path === '/') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      const head = '<!doctype html><html><head><title>Big</title><meta name="description" content="A very big page.">'
+        + '</head><body><p>';
+      const chunk = 'x'.repeat(64 * 1024);
+      res.write(head);
+      bigBytes = head.length;
+      const pump = () => {
+        while (bigBytes < BIG_PAGE_BYTES) {
+          bigBytes += chunk.length;
+          if (!res.write(chunk)) { res.once('drain', pump); return; }
+        }
+        res.end('</p></body></html>');
+      };
+      res.on('error', () => {});
+      pump();
+      return;
+    }
+    if (host === 'blocked.test' && path === '/robots.txt') {
+      res.writeHead(200, { 'content-type': 'text/plain' })
+        .end('User-agent: DAIT-CRM-Research\nDisallow: /\n\nUser-agent: *\nAllow: /\n');
+      return;
+    }
+    if (host === 'gzip.test' && path === '/') {
+      res.writeHead(200, { 'content-type': 'text/html', 'content-encoding': 'gzip' })
+        .end(gzipSync('<html><head><title>Zipped</title><meta name="description" content="Compressed page."></head></html>'));
+      return;
+    }
+    if (host === 'other.test' || host === 'hop.test') {
+      if (path === '/robots.txt') { res.writeHead(404).end(); return; }
+      res.writeHead(200, { 'content-type': 'text/html' }).end(`<html><head><title>${host}</title></head><body>ok</body></html>`);
+      return;
+    }
+    const file = ROUTES[host]?.[path];
+    if (!file) {
+      res.writeHead(404, { 'content-type': 'text/plain' }).end('not found');
+      return;
+    }
+    const type = file.endsWith('.txt') ? 'text/plain' : 'text/html; charset=utf-8';
+    const headers: Record<string, string> = { 'content-type': type };
+    if (host === 'meta.test') headers['cf-ray'] = '8d1f2e3a4b5c6d7e-LHR';
+    res.writeHead(200, headers).end(readFileSync(join(SITES, file)));
+  };
+
+  const server: Server = createServer(handler);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  port = (server.address() as AddressInfo).port;
+  return {
+    port,
+    requests,
+    userAgents,
+    bigBytesWritten: () => bigBytes,
+    url: (host, path = '/') => `http://${host}:${port}${path}`,
+    close: async () => {
+      for (const res of hanging) res.destroy();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
+}
+
+/** Resolver for the tests: every fixture host → 127.0.0.1; anything else from the given map, else not found. */
+export function fixtureResolver(extra: Record<string, string[]> = {}): (host: string) => Promise<string[]> {
+  return async (host) => {
+    if (FIXTURE_HOSTS.includes(host)) return ['127.0.0.1'];
+    const hit = extra[host];
+    if (hit) return hit;
+    throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${host}`), { code: 'ENOTFOUND' });
+  };
+}

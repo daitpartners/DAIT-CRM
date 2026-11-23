@@ -1,0 +1,7 @@
+# Fixture robots.txt
+User-agent: SomeOtherBot
+Disallow: /
+
+User-agent: *
+Disallow: /private/
+Allow: /
