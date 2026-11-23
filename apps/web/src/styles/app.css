@@ -200,6 +200,8 @@ a:focus-visible,button:focus-visible,[role=combobox]:focus-visible,summary:focus
 .bulkbar{display:flex;align-items:center;gap:10px;padding:10px 18px;background:var(--tint);border-bottom:1px solid var(--line-2);font-size:13px;flex-wrap:wrap}
 tr.clickable{cursor:pointer}
 .row-link{color:var(--text);font-weight:600}
+/* Company Leads tab: the lead number is a purple link (prototype `<a style="font-weight:600">`). */
+.co-leadno{font-weight:600}
 /* Lead ID in the Leads list: the prototype's purple link, semibold. */
 .id-link{font-weight:600}
 .pager{display:flex;align-items:center;gap:10px;flex-wrap:wrap}

@@ -75,7 +75,7 @@ export function LeadsTab({ company, canManage }: { company: CompanyDetail; canMa
               return (
                 <tr key={l.id} className="clickable" onClick={() => navigate(`/leads/${l.id}`)}>
                   <td>
-                    <Link to={`/leads/${l.id}`} className="row-link" onClick={(e) => e.stopPropagation()}>
+                    <Link to={`/leads/${l.id}`} className="co-leadno" onClick={(e) => e.stopPropagation()}>
                       {l.number}
                     </Link>
                   </td>
