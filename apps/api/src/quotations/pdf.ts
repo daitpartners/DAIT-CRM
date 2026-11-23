@@ -11,8 +11,8 @@ import type { CompanySettingsValues, QuotationSnapshot } from './service.js';
  * text as typed. The same bytes serve Preview, Download and the email attachment.
  */
 
-/** PDF labels (en is the key text). */
-const LABELS: Record<Exclude<Lang, 'en'>, Record<string, string>> = {
+/** PDF labels (en is the key text); scripts/i18n-check.ts checks every phrase the PDF uses is here in es and fr. */
+export const LABELS: Record<Exclude<Lang, 'en'>, Record<string, string>> = {
   es: {
     'Quotation {number}': 'Presupuesto {number}',
     Date: 'Fecha',

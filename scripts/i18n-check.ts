@@ -1,6 +1,7 @@
 /**
  * Fails (exit 1) when a phrase used as t('...') / t("...") in apps/web/src is missing
- * from apps/web/src/locales/es.json or fr.json. Run: npm run i18n:check
+ * from apps/web/src/locales/es.json or fr.json, or a quotation PDF label used as L('...') in
+ * apps/api/src/quotations/pdf.ts is missing from its LABELS (es, fr). Run: npm run i18n:check
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -48,5 +49,18 @@ for (const lang of ['es', 'fr']) {
     for (const [p, file] of missing) console.error(`  ${JSON.stringify(p)}  (${file})`);
   }
 }
+
+// The quotation PDF's labels (release 3A): drawn on the server in the quotation owner's language.
+const pdfFile = join(root, 'apps/api/src/quotations/pdf.ts');
+const pdfPhrases = new Set([...readFileSync(pdfFile, 'utf8').matchAll(/(?<![\w.$])L\(\s*'((?:\\.|[^'\\])*)'/g)].map((m) => unescape(m[1]!)));
+const { LABELS } = (await import(pdfFile)) as { LABELS: Record<'es' | 'fr', Record<string, string>> };
+for (const lang of ['es', 'fr'] as const) {
+  const missing = [...pdfPhrases].filter((p) => typeof LABELS[lang][p] !== 'string' || LABELS[lang][p] === '');
+  if (missing.length) {
+    failed = true;
+    console.error(`i18n: ${missing.length} PDF label(s) missing from LABELS.${lang} in ${relative(root, pdfFile)}:`);
+    for (const p of missing) console.error(`  ${JSON.stringify(p)}`);
+  }
+}
 if (failed) process.exit(1);
-console.log(`i18n: ${phrases.size} phrases translated in es and fr`);
+console.log(`i18n: ${phrases.size} phrases translated in es and fr; ${pdfPhrases.size} quotation PDF labels`);
