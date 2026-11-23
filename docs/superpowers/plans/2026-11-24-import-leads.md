@@ -379,3 +379,17 @@ Run `npm audit --omit=dev` after install and note the result in the commit body.
 3. **Daily research limit (ruling 6):** the live limit is 50 rows/companies a day, shared with company research; a 121-row import stops at 50 and needs Resume the next day. Raise the limit in Settings, or exempt website-reader-only rows?
 4. **Allocation:** the English rule covers only the US and Canada, so English leads from other countries (e.g. the UAE rows in the mockup) import unassigned. Add a catch-all English rule?
 5. **Who may import:** Sales Representatives and Data Research Users lose the old "Import CSV" (spec gives import to Administrators and Managers only). Confirm.
+
+## Controller rulings on the owner questions (24 Nov 2026; binding for execution, owner may overturn)
+
+- **Q1 → mockup wins.** "Ready" = company + country + **email**. A ticked row with no email (phone-only or website-only)
+  is "Missing details" and goes to research. Replaces ruling 3's Ready rule; all tasks follow this.
+- **Q2 → yes, intended.** With "Accept ≥ 80%" unticked, research values stay suggestions; rows that depend on them for
+  country or their only email/phone are listed under "Rows that still need you" (with the Import them / Leave them out
+  choice) and in the rows-to-fix download.
+- **Q3 → imports are exempt from the daily research limit.** Rows researched only by the free website reader count
+  toward nothing; rows that use Claude count toward the monthly Claude run cap only. The daily limit keeps applying to
+  company research (release 4) exactly as today. Replaces ruling 6's shared daily count for imports.
+- **Q4 → no allocation change in this feature.** Rows that no rule allocates import unassigned (as today); the owner is
+  told and may add a catch-all English rule in Settings.
+- **Q5 → as approved:** `import_leads` for Administrators and Managers. Told to the owner.
