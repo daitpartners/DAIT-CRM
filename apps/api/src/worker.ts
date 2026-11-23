@@ -21,6 +21,7 @@ import { sweepStuckRuns } from './research/service.js';
 import { sweepImportFiles } from './imports/batches.js';
 import { sweepImportResearch } from './imports/research.js';
 import { sweepImportCommit } from './imports/commit.js';
+import { pruneImports } from './imports/manager.js';
 
 export { runOnce, runForever } from './jobs/runner.js';
 
@@ -96,8 +97,9 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<void> 
   await sweepImportCommit({ startup: true }).catch(warn('import commit startup sweep'));
   void schedule();
   const scheduler = setInterval(schedule, SCHEDULE_EVERY_MS);
-  // Old done / failed job rows are deleted at start and hourly.
-  const cleanup = () => pruneJobs(prisma).catch(warn('job cleanup'));
+  // Old done / failed job rows are deleted at start and hourly; so are import originals past 90 days, and batches never
+  // imported that nobody touched for 90 days.
+  const cleanup = () => Promise.all([pruneJobs(prisma).catch(warn('job cleanup')), pruneImports().catch(warn('import retention'))]);
   void cleanup();
   const cleaner = setInterval(cleanup, CLEANUP_EVERY_MS);
 

@@ -133,7 +133,7 @@ const VERIFICATION_FIELDS = [
   'mainProducts', 'websiteTechnology',
 ];
 
-function verificationStatus(company: Company, verified: Record<string, boolean>): string {
+export function verificationStatus(company: Company, verified: Record<string, boolean>): string {
   const filled = VERIFICATION_FIELDS.filter((f) => !isEmpty((company as unknown as Record<string, unknown>)[f]));
   const done = filled.filter((f) => verified[f]);
   if (filled.length > 0 && done.length === filled.length) return 'Verified';

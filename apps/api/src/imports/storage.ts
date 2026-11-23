@@ -4,7 +4,7 @@
  * falls back to `<repo>/.storage`. Every path is resolved and must stay inside `<storage>/imports`.
  */
 import { createReadStream } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -41,6 +41,15 @@ export async function saveImportFile(batchId: number, fileId: number, data: Buff
 
 export async function readImportFile(rel: string): Promise<Buffer> {
   return readFile(resolveInside(rel));
+}
+
+/** Whether a stored file is still on disk. */
+export async function storedFileExists(rel: string): Promise<boolean> {
+  try {
+    return (await stat(resolveInside(rel))).isFile();
+  } catch {
+    return false;
+  }
 }
 
 export function importFileStream(rel: string): NodeJS.ReadableStream {

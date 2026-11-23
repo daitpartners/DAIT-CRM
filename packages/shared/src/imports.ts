@@ -433,3 +433,62 @@ export function importActivityText(entry: ImportActivity, lang: Lang): string {
     default: return '';
   }
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Data manager: Undo (Administrators, `undo_imports`) and the copy around a long import.
+
+/** Why Undo keeps a record the batch created (someone worked on it, or it holds records Undo must not remove). */
+export const UNDO_REASONS = [
+  'edited', 'status', 'emails', 'notes', 'tasks', 'quotations', 'projects', 'calendar', 'mailer', 'reassigned',
+  'other_leads', 'other_contacts',
+] as const;
+export type UndoReason = (typeof UNDO_REASONS)[number];
+
+/**
+ * What Undo removes and keeps (`GET /imports/batches/:id/undo` lists it first; `POST` does it and saves it as
+ * `ImportBatch.undo`). `reverted`: CRM companies that existed before the batch whose research values the import
+ * accepted (and AI industry it wrote) go back, untouched since.
+ */
+export type UndoPreview = {
+  remove: { leads: { id: number; number: string }[]; contacts: number; companies: number };
+  keep: { kind: 'lead' | 'contact' | 'company'; id: number; label: string; reason: UndoReason }[];
+  reverted?: { id: number; label: string }[];
+};
+
+const UNDO_REASON_TEXT: Record<Lang, Record<UndoReason, string>> = {
+  en: {
+    edited: 'Edited after the import', status: 'Status changed', emails: 'Has emails', notes: 'Has notes or activity',
+    tasks: 'Has tasks', quotations: 'Has quotations', projects: 'Has projects', calendar: 'Has calendar events',
+    mailer: 'In a Mailer campaign', reassigned: 'Reassigned', other_leads: 'Linked to leads that stay',
+    other_contacts: 'Has contacts that stay',
+  },
+  es: {
+    edited: 'Editado después de la importación', status: 'Estado cambiado', emails: 'Tiene correos',
+    notes: 'Tiene notas o actividad', tasks: 'Tiene tareas', quotations: 'Tiene cotizaciones', projects: 'Tiene proyectos',
+    calendar: 'Tiene eventos de calendario', mailer: 'En una campaña de Mailer', reassigned: 'Reasignado',
+    other_leads: 'Vinculado a leads que se quedan', other_contacts: 'Tiene contactos que se quedan',
+  },
+  fr: {
+    edited: 'Modifié après l’import', status: 'Statut modifié', emails: 'A des e-mails', notes: 'A des notes ou de l’activité',
+    tasks: 'A des tâches', quotations: 'A des devis', projects: 'A des projets', calendar: 'A des événements d’agenda',
+    mailer: 'Dans une campagne Mailer', reassigned: 'Réattribué', other_leads: 'Lié à des leads conservés',
+    other_contacts: 'A des contacts conservés',
+  },
+};
+
+/** Why Undo keeps a record, in `lang` (an unknown reason reads as `edited`). */
+export function undoReasonText(reason: string, lang: Lang): string {
+  const t = UNDO_REASON_TEXT[lang] ?? UNDO_REASON_TEXT.en;
+  return t[(UNDO_REASONS as readonly string[]).includes(reason) ? (reason as UndoReason) : 'edited'];
+}
+
+const CONTINUE_HINT_TEXT: Record<Lang, string> = {
+  en: 'A long import can be stopped by a deploy or a restart of the server. If an import shows Failed, use Continue: it imports only the rows that are not in the CRM yet.',
+  es: 'Un despliegue o un reinicio del servidor puede detener una importación larga. Si una importación aparece como Fallida, usa Continuar: solo importa las filas que aún no están en el CRM.',
+  fr: 'Un déploiement ou un redémarrage du serveur peut arrêter un import long. Si un import est en échec, utilisez Reprendre : seules les lignes absentes du CRM sont importées.',
+};
+
+/** Data manager copy: a deploy or restart during a long import may need "Continue" (Task 6 R5), in `lang`. */
+export function importContinueHintText(lang: Lang): string {
+  return CONTINUE_HINT_TEXT[lang] ?? CONTINUE_HINT_TEXT.en;
+}

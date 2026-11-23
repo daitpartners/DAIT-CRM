@@ -434,6 +434,11 @@ export type RowView = {
   research?: Record<string, ResearchValue>; researchStatus?: string;
   /** Rendered with `importResearchNoteText` (shared). */
   researchNote?: ResearchNotePart[];
+  /** Batch detail filters only (imported / skipped / errors): what the row became. */
+  lead?: { id: number; number: string } | null;
+  company?: { id: number; number: string; created: boolean } | null;
+  error?: string | null;
+  outcomeCode?: string | null;
 };
 
 const ORIGIN_LABEL: Record<string, (n: number) => string> = {
@@ -497,6 +502,22 @@ export async function updateRow(rowId: number, body: ImportRowUpdate): Promise<R
 const FILTER_STATUS: Record<RowFilter, RowStatus | null> = { all: null, missing: 'Missing details', already: 'Already in CRM', notlead: 'Not a lead' };
 const FILTER_OUTCOME: Record<string, string> = { imported: 'Imported', skipped: 'Skipped', errors: 'Error' };
 
+/** The batch detail's row columns (imported / skipped / errors filters). */
+const outcomeSelect = {
+  ...rowSelect, error: true, outcomeCode: true, companyCreated: true,
+  lead: { select: { id: true, number: true } },
+  company: { select: { id: true, number: true } },
+} satisfies Prisma.ImportRowSelect;
+
+function outcomeRowView(r: Prisma.ImportRowGetPayload<{ select: typeof outcomeSelect }>): RowView {
+  return {
+    ...rowView(r),
+    lead: r.lead ? { id: r.lead.id, number: r.lead.number } : null,
+    company: r.company ? { id: r.company.id, number: r.company.number, created: r.companyCreated } : null,
+    error: r.error, outcomeCode: r.outcomeCode,
+  };
+}
+
 /** "Include all" / "Leave out all" for the rows a filter shows; returns how many ticks changed. */
 export async function includeAll(batchId: number, body: ImportIncludeAll): Promise<{ changed: number }> {
   const status = FILTER_STATUS[body.filter];
@@ -537,9 +558,12 @@ export async function listRows(batchId: number, q: ImportRowsQuery): Promise<{
       WHERE batch_id = ${batchId} AND EXISTS (SELECT 1 FROM jsonb_each_text(fields) AS e WHERE e.value ILIKE ${like})`;
     where.id = { in: hits.map((h) => h.id) };
   }
-  const [total, rows, tiles, files] = await Promise.all([
+  const order = { orderBy: [{ position: 'asc' }, { id: 'asc' }], ...pageArgs(q) } satisfies Prisma.ImportRowFindManyArgs;
+  const [total, items, tiles, files] = await Promise.all([
     prisma.importRow.count({ where }),
-    prisma.importRow.findMany({ where, select: rowSelect, orderBy: [{ position: 'asc' }, { id: 'asc' }], ...pageArgs(q) }),
+    q.filter in FILTER_OUTCOME
+      ? prisma.importRow.findMany({ where, select: outcomeSelect, ...order }).then((rows) => rows.map(outcomeRowView))
+      : prisma.importRow.findMany({ where, select: rowSelect, ...order }).then((rows) => rows.map(rowView)),
     batchTiles(batchId),
     prisma.importFile.findMany({ where: { batchId, deletedAt: null }, select: { id: true, name: true, questions: true }, orderBy: { id: 'asc' } }),
   ]);
@@ -547,7 +571,7 @@ export async function listRows(batchId: number, q: ImportRowsQuery): Promise<{
   const question = withQuestion
     ? { ...(withQuestion.questions as ColumnQuestion[])[0]!, fileId: withQuestion.id, fileName: withQuestion.name }
     : null;
-  return { items: rows.map(rowView), total, tiles, question };
+  return { items, total, tiles, question };
 }
 
 /** Step 1 → step 2: refused while a file is still being read (409 `files_reading`) or when nothing was staged (400 `no_rows`). */

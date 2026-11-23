@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   BATCH_NUMBER_RE, IMPORT_FILE_ERRORS, IMPORT_FIELDS, IMPORT_NO_CLAUDE, importNoClaudeText, IMPORT_TABLE_FIELDS, PROBLEM_CODES, importColumnLabel, importFileErrorText, importSource, IMPORT_FAILURES, importFailureText, problemText,
-  importActivityText, importEngineText, importResearchNoteText, RESEARCH_CLAUDE_FAILURES,
+  importActivityText, importEngineText, importResearchNoteText, RESEARCH_CLAUDE_FAILURES, UNDO_REASONS, undoReasonText, importContinueHintText,
   type ImportActivity, type ResearchNotePart, type RowProblem,
 } from '../src/imports';
 import {
@@ -65,6 +65,23 @@ describe('importFailureText', () => {
     }
     expect(importFailureText('job_failed', 'en')).toBe('The import stopped after repeated errors. Continue it to import the remaining rows.');
     expect(importFailureText('interrupted', 'es')).not.toBe(importFailureText('interrupted', 'en'));
+  });
+});
+
+describe('undoReasonText / importContinueHintText', () => {
+  test('every undo reason reads in en, es and fr, each different; an unknown one reads as edited', () => {
+    for (const lang of LANGS) {
+      expect(new Set(UNDO_REASONS.map((r) => undoReasonText(r, lang))).size).toBe(UNDO_REASONS.length);
+      expect(undoReasonText('nonsense', lang)).toBe(undoReasonText('edited', lang));
+    }
+    expect(undoReasonText('emails', 'en')).toBe('Has emails');
+  });
+
+  test('the Data manager "Continue" hint in three languages', () => {
+    expect(new Set(LANGS.map((l) => importContinueHintText(l))).size).toBe(3);
+    expect(importContinueHintText('en')).toContain('Continue');
+    expect(importContinueHintText('es')).toContain('Continuar');
+    expect(importContinueHintText('fr')).toContain('Reprendre');
   });
 });
 

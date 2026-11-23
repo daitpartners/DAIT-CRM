@@ -1,8 +1,8 @@
 import type { FastifyError, FastifyPluginAsync, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import {
-  IMPORT_MAX_FILE_BYTES, IMPORT_MAX_FILES, IMPORT_MAX_ROWS, ImportBatchCreate, ImportBatchUpdate, ImportColumnAnswer, ImportCommit,
-  ImportIncludeAll, ImportRowUpdate, ImportRowsQuery, OUTREACH_LANGUAGES, importSource,
+  IMPORT_MAX_FILE_BYTES, IMPORT_MAX_FILES, IMPORT_MAX_ROWS, ImportBatchCreate, ImportBatchListQuery, ImportBatchUpdate, ImportColumnAnswer,
+  ImportCommit, ImportIncludeAll, ImportRowUpdate, ImportRowsQuery, OUTREACH_LANGUAGES, importSource, type Lang,
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { NotFoundError, parseBody, parseQuery } from '../validate.js';
@@ -13,6 +13,9 @@ import { loadEnrichmentSettings, monthTotals } from '../research/service.js';
 import { claudeCodeConfig, claudeCodeReady } from '../research/providers.js';
 import { pauseResearch, researchView, resumeResearch, startBatchResearch } from '../imports/research.js';
 import { continueImport, reviewBatch, startImport } from '../imports/commit.js';
+import { attachmentHeader, rowsCsv, rowsToFixWorkbook } from '../imports/exports.js';
+import { batchDetail, listBatches, originalFile } from '../imports/manager.js';
+import { undoBatch, undoPreview } from '../imports/undo.js';
 
 const idOf = (raw: string) => {
   const id = Number(raw);
@@ -26,6 +29,22 @@ const ReviewQuery = z.object({
   acceptHigh: z.enum(['0', '1']).default('0'),
   noContactRows: z.enum(['import', 'leave']).optional(),
 });
+
+const FixQuery = z.object({
+  acceptHigh: z.enum(['0', '1']).default('0'),
+  noContactRows: z.enum(['import', 'leave']).optional(),
+});
+const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const LANGS = new Set<string>(['en', 'es', 'fr']);
+/** Downloads are written in the downloader's language. */
+const langOf = (language: string | null | undefined): Lang => (LANGS.has(language ?? '') ? (language as Lang) : 'en');
+
+/** A file download: never shown inline, never sniffed. */
+const download = (reply: FastifyReply, type: string, name: string) => reply
+  .header('content-type', type)
+  .header('content-disposition', attachmentHeader(name))
+  .header('x-content-type-options', 'nosniff')
+  .header('cache-control', 'private, no-store');
 
 const batchView = (b: { id: number; number: string; status: string; language: string; leadType: string }) =>
   ({ id: b.id, number: b.number, status: b.status, language: b.language, leadType: b.leadType });
@@ -64,10 +83,12 @@ async function languageRules(language: string): Promise<{ name: string; people: 
  * Import leads (steps 1 to 4): options, batches, file uploads, the staged rows (list, edit, tick, column questions,
  * re-matching), AI research (start, progress, pause, resume), the review totals and Import. Administrators and
  * Managers (`import_leads`). Changes are refused (409 `batch_locked`) once
- * the batch is Importing or later.
+ * the batch is Importing or later. Data manager: the batch list and detail, the downloads (rows to fix, CSV, original
+ * files) and Continue (`import_leads`); Undo (Administrators, `undo_imports`).
  */
 export const importBatchRoutes: FastifyPluginAsync = async (app) => {
   const canImport = { preHandler: [requireRight('import_leads')] };
+  const canUndo = { preHandler: [requireRight('undo_imports')] };
 
   // Uploads arrive as raw bytes, one file per request (this plugin only; the rest of the API stays JSON-only).
   app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer', bodyLimit: IMPORT_MAX_FILE_BYTES }, (_req, body, done) => {
@@ -215,5 +236,46 @@ export const importBatchRoutes: FastifyPluginAsync = async (app) => {
       await continueImport(id);
       return reply.code(202).send({ id, status: 'Importing' });
     });
+  });
+
+  /** Data manager: the batches (filters, search, tiles). */
+  app.get('/imports/batches', canImport, async (request) => listBatches(parseQuery(ImportBatchListQuery, request.query)));
+
+  app.get<{ Params: { id: string } }>('/imports/batches/:id', canImport, async (request) => batchDetail(idOf(request.params.id)));
+
+  /** "Download rows to fix": the rows that will not import (or imported still missing details), coloured, re-uploadable. */
+  app.get<{ Params: { id: string } }>('/imports/batches/:id/rows-to-fix.xlsx', canImport, async (request, reply) => {
+    const id = idOf(request.params.id);
+    const q = parseQuery(FixQuery, request.query);
+    const batch = await prisma.importBatch.findUnique({ where: { id }, select: { number: true } });
+    if (!batch) throw new NotFoundError();
+    const buf = await rowsToFixWorkbook(id, langOf(request.user!.language), { acceptHigh: q.acceptHigh === '1', noContactRows: q.noContactRows ?? null });
+    return download(reply, XLSX_TYPE, `${batch.number}-rows-to-fix.xlsx`).send(buf);
+  });
+
+  /** Every row of the batch as CSV. */
+  app.get<{ Params: { id: string } }>('/imports/batches/:id/rows.csv', canImport, async (request, reply) => {
+    const id = idOf(request.params.id);
+    const batch = await prisma.importBatch.findUnique({ where: { id }, select: { number: true } });
+    if (!batch) throw new NotFoundError();
+    const csv = await rowsCsv(id, langOf(request.user!.language));
+    return download(reply, 'text/csv; charset=utf-8', `${batch.number}-rows.csv`).send(csv);
+  });
+
+  /** The original uploaded file (410 `file_deleted` after the 90-day retention). */
+  app.get<{ Params: { id: string } }>('/imports/files/:id/original', canImport, async (request, reply) => {
+    const id = idOf(request.params.id);
+    return guard(reply, async () => {
+      const file = await originalFile(id);
+      return download(reply, 'application/octet-stream', file.name).send(file.stream);
+    });
+  });
+
+  /** Undo, listed first: what would be removed and what stays (and why). */
+  app.get<{ Params: { id: string } }>('/imports/batches/:id/undo', canUndo, async (request) => undoPreview(idOf(request.params.id)));
+
+  app.post<{ Params: { id: string } }>('/imports/batches/:id/undo', canUndo, async (request, reply) => {
+    const id = idOf(request.params.id);
+    return guard(reply, () => undoBatch(request.user!, id));
   });
 };
