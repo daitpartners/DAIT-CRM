@@ -113,7 +113,7 @@ describe('AI Intelligence tab (prototype views-companies.js tab ai)', () => {
     expect(card).toHaveTextContent('Confidence — · Research Not started');
     expect(card).toHaveTextContent('Last research never · Unverified');
     expect(card).toHaveTextContent('No AI summary yet. Run research to generate one.');
-    expect(card).toHaveTextContent('Engine: pluggable (Ollama self-hosted or Claude API). Suggestions are stored in enrichment_history and applied only to unverified fields.');
+    expect(card).toHaveTextContent('Engine: the Website reader, plus Claude Code when an administrator switches it on. Suggestions are kept in the research history and applied only to unverified fields.');
     expect(within(card).getByRole('button', { name: 'Re-run research' })).toBeEnabled();
     expect(within(card).getByRole('button', { name: 'Mark profile verified' })).toBeEnabled();
     expect(within(card).queryByRole('link', { name: 'Review suggestions' })).toBeNull();

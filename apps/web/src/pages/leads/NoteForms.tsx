@@ -89,7 +89,7 @@ export function MeetingForm({ lead, disabled }: { lead: LeadFull; disabled?: boo
         </div>
       ) : null}
       <div className="form-end">
-        <span className="dim">{t('Saved on the timeline. Calendar invites come with release 3.')}</span>
+        <span className="dim">{t('Saved on the timeline. The CRM does not send calendar invitations.')}</span>
         <button type="submit" className="btn primary" disabled={disabled || note.isPending}>
           {t('Save meeting')}
         </button>

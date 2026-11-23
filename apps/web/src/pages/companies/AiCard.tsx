@@ -140,7 +140,7 @@ function AiCardView({ companyId, view, big = false, canEdit, busy, onRun }: View
         </div>
       )}
       <div className="ai-engine">
-        {t('Engine: pluggable (Ollama self-hosted or Claude API). Suggestions are stored in enrichment_history and applied only to unverified fields.')}
+        {t('Engine: the Website reader, plus Claude Code when an administrator switches it on. Suggestions are kept in the research history and applied only to unverified fields.')}
       </div>
     </section>
   );

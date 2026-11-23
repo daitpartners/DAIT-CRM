@@ -13,7 +13,7 @@ export function ReportsPage() {
   const e = data?.enquiries;
   return (
     <>
-      <Topbar title={t('Reports')} sub={t('Existing dashboard and reporting stay as they are; these are the additions for the new modules')} />
+      <Topbar title={t('Reports')} sub={t('Where leads come from and how website enquiries turn into leads')} />
       <div className="page cols">
         <section className="card col-main" aria-labelledby="rep-src">
           <h2 id="rep-src">{t('Leads by source')}</h2>
@@ -45,6 +45,8 @@ export function ReportsPage() {
             <dt>{t('Matched existing companies')}</dt>
             <dd>{e?.matchedExisting ?? ''}</dd>
           </dl>
+          {/* Review #29: say why every count is 0 rather than show a silent row of zeros. */}
+          {e && e.received === 0 ? <p className="muted-text">{t('No website enquiries have reached the CRM yet.')}</p> : null}
         </section>
       </div>
     </>

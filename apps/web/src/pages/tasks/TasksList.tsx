@@ -148,8 +148,8 @@ export function TasksList() {
               <li>{t('Lead assigned or transferred to you')}</li>
               <li>{t('Follow-up date set on a lead')}</li>
               <li>{t('Added manually here, for a lead or on its own')}</li>
-              <li>{t('From an email (release 2) or a meeting (release 3)')}</li>
-              <li>{t('Quotation revision requested (from release 3)')}</li>
+              {/* Review #26: plain current wording; no quotation-revision task exists, so it is not listed. */}
+              <li>{t('From an email (Add follow-up task), or a call or meeting planned in the Calendar')}</li>
             </ul>
           </section>
         </aside>

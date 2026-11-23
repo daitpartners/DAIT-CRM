@@ -11,7 +11,7 @@ test('reports: prototype title, Leads by source bars and Enquiry conversion', as
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Reports' }).click();
   await expect(page).toHaveURL(/\/reports$/);
   await expect(page.getByRole('heading', { name: 'Reports', level: 1 })).toBeVisible();
-  await expect(page.locator('.topbar .sub')).toHaveText('Existing dashboard and reporting stay as they are; these are the additions for the new modules');
+  await expect(page.locator('.topbar .sub')).toHaveText('Where leads come from and how website enquiries turn into leads');
 
   const heads = await page.locator('main h2').allTextContents();
   expect(heads).toEqual(['Leads by source', 'Enquiry conversion']);
