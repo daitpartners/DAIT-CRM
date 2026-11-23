@@ -5,17 +5,21 @@ import type { CompanyDetail } from '../../../api/companies';
 import { contactName, useContacts } from '../../../api/contacts';
 import { useLeads } from '../../../api/leads';
 import { useLookupText } from '../../../api/queries';
-import { PlaceholderCard } from '../../../components/PlaceholderCard';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { useFormatDate } from '../../../hooks/useFormatDate';
-import { companyStatusText, researchStatusText } from '../../../i18n/labels';
+import { companyStatusText, researchStatusBadge, researchStatusText } from '../../../i18n/labels';
 import { useLang, useT } from '../../../i18n/useT';
+import { AiCard, type ResearchRunner } from '../AiCard';
 import type { CompanySection } from '../CompanyModal';
 import { ProjectsCard } from '../../projects/ProjectsCard';
 
-type Props = { company: CompanyDetail; canManage: boolean; onEdit: (section: CompanySection) => void };
+type Props = { company: CompanyDetail; canManage: boolean; onEdit: (section: CompanySection) => void; research: ResearchRunner };
 
-type Row = [label: string, value: ReactNode];
+/** A label, its value and the company field it shows (for the VERIFIED / AI tags). */
+type Row = [label: string, value: ReactNode, field?: string];
+
+/** The tag after a value (prototype v()): VERIFIED for a user-confirmed field, else AI · n% for an accepted suggestion. */
+type Tags = { verified: Record<string, boolean>; ai: Record<string, { confidence?: number }> };
 
 /** Leads in the Overview side card. */
 const OVERVIEW_LEADS = 4;
@@ -38,10 +42,10 @@ const pills = (items: string[]) => (items.length ? items.map((x) => <span key={x
 
 /**
  * Overview in the prototype's layout: the legend bar, sections A–E (definition lists, each with its own Edit
- * button) in a two-column grid, and the side column: AI business intelligence (a later release), Projects,
+ * button) in a two-column grid, and the side column: AI business intelligence, Projects,
  * Leads & prospects and Contacts.
  */
-export function OverviewTab({ company: c, canManage, onEdit }: Props) {
+export function OverviewTab({ company: c, canManage, onEdit, research }: Props) {
   const t = useT();
   const lang = useLang();
   const lookup = useLookupText(lang);
@@ -51,72 +55,79 @@ export function OverviewTab({ company: c, canManage, onEdit }: Props) {
   const email = c.businessEmail ? safeUrl(`mailto:${c.businessEmail}`) : null;
 
   const { date } = useFormatDate();
+  const tags: Tags = { verified: c.verifiedFields ?? {}, ai: c.aiFields ?? {} };
 
   return (
     <>
       <div className="legend">
         <strong>{t('Legend')}</strong>
+        <span>
+          <span className="tag-ok flat">{t('VERIFIED')}</span> {t('entered or confirmed by a user')}
+        </span>
+        <span>
+          <span className="tag-ai">{t('AI · {n}%', { n: 82 })}</span> {t('AI-suggested. Never overwrites verified values.')}
+        </span>
         <span className="dim">{t('Empty fields stay empty. Nothing is invented.')}</span>
         <div className="grow" />
         <span>
           {t('Last research: {when}', { when: c.aiLastResearchAt ? date(c.aiLastResearchAt) : t('never') })}
           {' · '}
-          <span className="badge b-grey">{researchStatusText(t, c.aiResearchStatus)}</span>
+          <span className={researchStatusBadge(c.aiResearchStatus)}>{researchStatusText(t, c.aiResearchStatus)}</span>
         </span>
       </div>
       <div className="cols">
         <div className="col-main">
           <div className="profile-grid">
-            <Section letter="A" title={t('Company overview')} section="overview" canManage={canManage} onEdit={onEdit} rows={[
-              [t('Company name'), c.name],
-              [t('Legal name'), c.legalName],
-              [t('Website'), <LinkOut url={c.website} />],
-              [t('Business email'), c.businessEmail ? (email ? <a href={email}>{c.businessEmail}</a> : c.businessEmail) : null],
-              [t('Industry'), lookup('industry', c.industry)],
-              [t('Business category'), lookup('business_category', c.businessCategory)],
-              [t('Business type'), lookup('business_type', c.businessType)],
-              [t('Year established'), c.yearEstablished],
-              [t('LinkedIn company'), <LinkOut url={c.linkedinUrl} />],
+            <Section letter="A" title={t('Company overview')} section="overview" canManage={canManage} onEdit={onEdit} tags={tags} rows={[
+              [t('Company name'), c.name, 'name'],
+              [t('Legal name'), c.legalName, 'legalName'],
+              [t('Website'), <LinkOut url={c.website} />, 'website'],
+              [t('Business email'), c.businessEmail ? (email ? <a href={email}>{c.businessEmail}</a> : c.businessEmail) : null, 'businessEmail'],
+              [t('Industry'), lookup('industry', c.industry), 'industry'],
+              [t('Business category'), lookup('business_category', c.businessCategory), 'businessCategory'],
+              [t('Business type'), lookup('business_type', c.businessType), 'businessType'],
+              [t('Year established'), c.yearEstablished, 'yearEstablished'],
+              [t('LinkedIn company'), <LinkOut url={c.linkedinUrl} />, 'linkedinUrl'],
               [t('Status'), companyStatusText(t, c.status)],
-              [t('Description'), c.description],
+              [t('Description'), c.description, 'description'],
             ]} />
-            <Section letter="B" title={t('Company address')} section="address" canManage={canManage} onEdit={onEdit} rows={[
-              [t('Country'), lookup('country', c.country)],
-              [t('State / Province'), c.state],
-              [t('City'), c.city],
-              [t('Street address'), c.street],
-              [t('ZIP / Postal code'), c.zip],
-              [t('Time zone'), c.timezone],
-              [t('Latitude, longitude'), c.lat !== null && c.lng !== null ? `${c.lat}, ${c.lng}` : null],
-              [t('Google Maps / Places'), <LinkOut url={c.mapsUrl} />],
+            <Section letter="B" title={t('Company address')} section="address" canManage={canManage} onEdit={onEdit} tags={tags} rows={[
+              [t('Country'), lookup('country', c.country), 'country'],
+              [t('State / Province'), c.state, 'state'],
+              [t('City'), c.city, 'city'],
+              [t('Street address'), c.street, 'street'],
+              [t('ZIP / Postal code'), c.zip, 'zip'],
+              [t('Time zone'), c.timezone, 'timezone'],
+              [t('Latitude, longitude'), c.lat !== null && c.lng !== null ? `${c.lat}, ${c.lng}` : null, 'lat'],
+              [t('Google Maps / Places'), <LinkOut url={c.mapsUrl} />, 'mapsUrl'],
             ]} />
-            <Section letter="C" title={t('Size & financial')} note={t('all optional')} section="size" canManage={canManage} onEdit={onEdit} rows={[
-              [t('Employee count'), number(c.employeeCount)],
-              [t('Employee range'), lookup('employee_range', c.employeeRange)],
-              [t('Annual revenue'), money(c.annualRevenue)],
-              [t('Revenue range'), lookup('revenue_range', c.revenueRange)],
-              [t('Ownership type'), lookup('ownership_type', c.ownershipType)],
-              [t('Registration number'), c.registrationNumber],
-              [t('Stock exchange'), c.stockExchange],
-              [t('Stock symbol'), c.stockSymbol],
+            <Section letter="C" title={t('Size & financial')} note={t('all optional')} section="size" canManage={canManage} onEdit={onEdit} tags={tags} rows={[
+              [t('Employee count'), number(c.employeeCount), 'employeeCount'],
+              [t('Employee range'), lookup('employee_range', c.employeeRange), 'employeeRange'],
+              [t('Annual revenue'), money(c.annualRevenue), 'annualRevenue'],
+              [t('Revenue range'), lookup('revenue_range', c.revenueRange), 'revenueRange'],
+              [t('Ownership type'), lookup('ownership_type', c.ownershipType), 'ownershipType'],
+              [t('Registration number'), c.registrationNumber, 'registrationNumber'],
+              [t('Stock exchange'), c.stockExchange, 'stockExchange'],
+              [t('Stock symbol'), c.stockSymbol, 'stockSymbol'],
             ]} />
-            <Section letter="D" title={t('Products & services')} section="products" canManage={canManage} onEdit={onEdit} rows={[
-              [t('Main services'), c.mainServices],
-              [t('Main products'), c.mainProducts],
-              [t('Business verticals'), pills(c.businessVerticals)],
-              [t('Target markets'), pills(c.targetMarkets)],
-              [t('Geographic markets'), pills(c.geographicMarkets)],
-              [t('Key brands'), c.keyBrands],
-              [t('Specialisation'), c.specialisation],
+            <Section letter="D" title={t('Products & services')} section="products" canManage={canManage} onEdit={onEdit} tags={tags} rows={[
+              [t('Main services'), c.mainServices, 'mainServices'],
+              [t('Main products'), c.mainProducts, 'mainProducts'],
+              [t('Business verticals'), pills(c.businessVerticals), 'businessVerticals'],
+              [t('Target markets'), pills(c.targetMarkets), 'targetMarkets'],
+              [t('Geographic markets'), pills(c.geographicMarkets), 'geographicMarkets'],
+              [t('Key brands'), c.keyBrands, 'keyBrands'],
+              [t('Specialisation'), c.specialisation, 'specialisation'],
             ]} />
-            <Section letter="E" title={t('Digital presence')} section="digital" wide canManage={canManage} onEdit={onEdit} rows={[
-              [t('LinkedIn'), <LinkOut url={c.linkedinUrl} />],
-              [t('Facebook'), <LinkOut url={c.socialFacebook} />],
-              [t('Instagram'), <LinkOut url={c.socialInstagram} />],
-              [t('X / Twitter'), <LinkOut url={c.socialX} />],
-              [t('YouTube'), <LinkOut url={c.socialYoutube} />],
-              [t('Other social profile'), <LinkOut url={c.socialOther} />],
-              [t('Website technology'), c.websiteTechnology],
+            <Section letter="E" title={t('Digital presence')} section="digital" wide canManage={canManage} onEdit={onEdit} tags={tags} rows={[
+              [t('LinkedIn'), <LinkOut url={c.linkedinUrl} />, 'linkedinUrl'],
+              [t('Facebook'), <LinkOut url={c.socialFacebook} />, 'socialFacebook'],
+              [t('Instagram'), <LinkOut url={c.socialInstagram} />, 'socialInstagram'],
+              [t('X / Twitter'), <LinkOut url={c.socialX} />, 'socialX'],
+              [t('YouTube'), <LinkOut url={c.socialYoutube} />, 'socialYoutube'],
+              [t('Other social profile'), <LinkOut url={c.socialOther} />, 'socialOther'],
+              [t('Website technology'), c.websiteTechnology, 'websiteTechnology'],
             ]}>
               <div className="digital-notes">
                 <AiNote label={t('Website assessment')} text={c.websiteAssessment} empty={t('Website assessment: not yet generated.')} />
@@ -126,11 +137,7 @@ export function OverviewTab({ company: c, canManage, onEdit }: Props) {
           </div>
         </div>
         <aside className="col-side" aria-label={t('Company summary')}>
-          <PlaceholderCard
-            title={t('AI business intelligence')}
-            release="4"
-            hint={t('Opportunity score, confidence and an AI company summary built from approved sources.')}
-          />
+          <AiCard companyId={c.id} research={research} />
           <ProjectsCard companyId={c.id} />
           <LeadsCard companyId={c.id} />
           <ContactsCard companyId={c.id} />
@@ -215,10 +222,11 @@ type SectionProps = {
   rows: Row[];
   canManage: boolean;
   onEdit: (section: CompanySection) => void;
+  tags: Tags;
   wide?: boolean;
 };
 
-function Section({ letter, title, note, section, rows, canManage, onEdit, wide, children }: SectionProps) {
+function Section({ letter, title, note, section, rows, canManage, onEdit, tags, wide, children }: SectionProps) {
   const t = useT();
   const headingId = useId();
   return (
@@ -235,29 +243,38 @@ function Section({ letter, title, note, section, rows, canManage, onEdit, wide, 
       </h2>
       {children ? (
         <div className="grid2 sec-split">
-          <List rows={rows} />
+          <List rows={rows} tags={tags} />
           {children}
         </div>
       ) : (
-        <List rows={rows} />
+        <List rows={rows} tags={tags} />
       )}
     </section>
   );
 }
 
-function List({ rows }: { rows: Row[] }) {
+function List({ rows, tags }: { rows: Row[]; tags: Tags }) {
   return (
     <dl className="kv">
-      {rows.map(([label, value]) => {
+      {rows.map(([label, value, field]) => {
         const blank = isEmpty(value) || isEmptyLink(value);
         return (
           <Pair key={label} label={label} blank={blank}>
             {value}
+            {field ? <FieldTag field={field} tags={tags} /> : null}
           </Pair>
         );
       })}
     </dl>
   );
+}
+
+function FieldTag({ field, tags }: { field: string; tags: Tags }) {
+  const t = useT();
+  if (tags.verified[field] === true) return <span className="tag-ok">{t('VERIFIED')}</span>;
+  const ai = tags.ai[field];
+  if (!ai) return null;
+  return <span className="tag-ai">{typeof ai.confidence === 'number' ? t('AI · {n}%', { n: ai.confidence }) : t('AI')}</span>;
 }
 
 /** A <LinkOut> element with no url renders nothing; treat it as blank. */

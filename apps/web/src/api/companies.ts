@@ -75,6 +75,10 @@ export type CompanyDetail = CompanySummary & {
   verificationStatus: VerificationStatus;
   aiResearchStatus: string;
   aiLastResearchAt: string | null;
+  /** Fields a user entered or confirmed (release 4): VERIFIED, never suggested by AI research. */
+  verifiedFields?: Record<string, boolean> | null;
+  /** Fields whose value came from an accepted AI suggestion: confidence and source (release 4). */
+  aiFields?: Record<string, { confidence?: number }> | null;
   createdAt: string;
   createdBy: { id: number; name: string } | null;
 };

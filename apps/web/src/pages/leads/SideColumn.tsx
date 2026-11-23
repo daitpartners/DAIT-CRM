@@ -1,13 +1,17 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { isClosedStatus, safeUrl } from '@dait-crm/shared';
 import { useLeadAction, useRefreshWhenOutOfDate, type LeadFull } from '../../api/leads';
-import { useLookupText } from '../../api/queries';
+import { keys, useLookupText } from '../../api/queries';
+import { isResearchQueued } from '../../api/research';
+import { useCurrentUser } from '../../api/useCurrentUser';
 import { Icons } from '../../components/Icons';
 import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
-import { verificationBadge, verificationText } from '../../i18n/labels';
+import { researchStatusBadge, researchStatusText, verificationBadge, verificationText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
+import { useResearchRunner } from '../companies/AiCard';
 import { ContactModal } from '../companies/ContactModal';
 import { ProjectsCard } from '../projects/ProjectsCard';
 
@@ -111,7 +115,6 @@ function NoContactCard({ lead, live }: { lead: LeadFull; live: boolean }) {
 function CompanyCard({ lead }: { lead: LeadFull }) {
   const t = useT();
   const lookup = useLookupText(useLang());
-  const toast = useToast();
   const c = lead.company!;
   const website = safeUrl(c.website);
   const place = [c.city, lookup('country', c.country)].filter(Boolean).join(', ');
@@ -130,12 +133,7 @@ function CompanyCard({ lead }: { lead: LeadFull }) {
         </h2>
         <div className="co-line">{line}</div>
       </div>
-      <div className="note ai-empty">
-        {t('No AI research yet.')}{' '}
-        <button type="button" className="linkish" onClick={() => toast(t('Coming in release 4'))}>
-          {t('Run research')}
-        </button>
-      </div>
+      <AiLine lead={lead} />
       <div className="co-links">
         {c.verificationStatus ? <span className={verificationBadge(c.verificationStatus)}>{verificationText(t, c.verificationStatus)}</span> : null}
         {website ? (
@@ -147,6 +145,61 @@ function CompanyCard({ lead }: { lead: LeadFull }) {
         <Link to={`/companies/${c.id}`}>{t('Full profile →')}</Link>
       </div>
     </section>
+  );
+}
+
+/**
+ * The company card's AI line (prototype views-lead-detail.js): the AI summary with its confidence once research has
+ * produced one; otherwise the research status ("No AI research yet." before the first run) and "Run research" for
+ * users who may edit companies. While a run is queued the research view polls; when it finishes the lead refreshes.
+ */
+function AiLine({ lead }: { lead: LeadFull }) {
+  const t = useT();
+  const me = useCurrentUser();
+  const qc = useQueryClient();
+  const c = lead.company!;
+  const [watching, setWatching] = useState(false);
+  const { query, run, busy } = useResearchRunner(c.id, {
+    enabled: watching || isResearchQueued(c.aiResearchStatus),
+    onFinished: () => {
+      setWatching(false);
+      void qc.invalidateQueries({ queryKey: keys.lead(lead.id) });
+    },
+  });
+  const status = query.data?.company?.aiResearchStatus ?? c.aiResearchStatus ?? 'Not started';
+  const summary = query.data?.company?.aiSummary ?? c.aiSummary;
+  const confidence = query.data?.company?.aiConfidence ?? c.aiConfidence;
+  if (summary) {
+    return (
+      <div className="note ai lead-ai">
+        <strong>{t('AI summary')}</strong> {confidence ? <span className="tag-ai">{confidence}</span> : null}
+        <div>{summary}</div>
+      </div>
+    );
+  }
+  return (
+    <div className="note ai-empty">
+      {status === 'Not started' ? (
+        t('No AI research yet.')
+      ) : (
+        <>
+          {t('AI research')} <span className={researchStatusBadge(status)}>{researchStatusText(t, status)}</span>
+        </>
+      )}{' '}
+      {me.can('manage_companies') ? (
+        <button
+          type="button"
+          className="linkish"
+          disabled={busy || isResearchQueued(status)}
+          onClick={() => {
+            setWatching(true);
+            run();
+          }}
+        >
+          {t('Run research')}
+        </button>
+      ) : null}
+    </div>
   );
 }
 

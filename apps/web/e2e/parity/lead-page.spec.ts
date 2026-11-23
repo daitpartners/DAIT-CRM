@@ -195,14 +195,16 @@ test('lead page: a prospect without a contact person', async ({ page }) => {
   const heads = await side.locator('h2, .side-title').evaluateAll((els) => els.map((el) => (el.textContent ?? '').replace(/\s+/g, ' ').trim()));
   expect(heads).toEqual(['No contact yet', helix.name, 'Projects 0']);
   const co = side.getByRole('region', { name: helix.name });
-  await expect(co).toContainText('No AI research yet.');
+  // Creating this lead queued automatic research for Helix (release 4: a website, never researched), so the AI line
+  // shows the run as Pending; the run itself is covered by research.spec.ts.
+  await expect(co).toContainText('AI research Pending');
   await expect(co.locator('.ai-empty')).toHaveCSS('border-top-style', 'solid');
   await expect(page.getByRole('region', { name: 'Profile' })).toContainText(
     'No contact person on this lead yet. Add one from the Contact card on the right and the profile will appear here.',
   );
   await expect(page.getByRole('tab', { name: /^Emails/ })).toHaveText('Emails 0');
-  await co.getByRole('button', { name: 'Run research' }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Coming in release 4' })).toBeVisible();
+  // While that run is queued, Run research waits.
+  await expect(co.getByRole('button', { name: 'Run research' })).toBeDisabled();
   const projects = side.getByRole('region', { name: /Projects/ });
   await expect(projects).toContainText('Projects unlock when a lead at this company is marked Won or a quotation is accepted.');
   await expect(projects).not.toHaveAttribute('aria-disabled', 'true');

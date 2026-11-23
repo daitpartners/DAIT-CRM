@@ -71,10 +71,12 @@ test('locations tab adds and deletes a location', async ({ page }) => {
   await expect(page.locator('.loc-card')).toHaveCount(2);
 });
 
-test('later-release tabs show an empty state', async ({ page }) => {
+test('AI Intelligence and Research Sources tabs show their empty states', async ({ page }) => {
   await openNorthwind(page);
+  await page.getByRole('tab', { name: 'Research Sources' }).click();
+  await expect(page.getByRole('tabpanel')).toContainText('No sources recorded.');
   await page.getByRole('tab', { name: 'AI Intelligence' }).click();
-  await expect(page.getByRole('tabpanel')).toContainText('Available in release 4');
+  await expect(page.getByRole('tabpanel')).toContainText('No research runs yet.');
   await expect(page).toHaveURL(/#ai$/);
 
   // The tab survives a reload through the URL hash.

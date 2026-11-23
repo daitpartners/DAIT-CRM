@@ -33,7 +33,8 @@ test('company profile: prototype header, tabs and section headings', async ({ pa
   await expect(page.locator('.topbar .sub')).toContainText(/northwindlogistics\.in · .* · Pune, India · .*\d+ contacts · \d+ leads · \d+ locations/);
   const actions = await page.locator('.topbar .hdr-actions .btn').allTextContents();
   expect(actions).toEqual(['Run AI research', 'Add contact', 'New lead', 'New quotation', 'Edit profile']);
-  await expect(page.getByRole('button', { name: 'Run AI research' })).toBeDisabled();
+  // Enabled unless a run is queued: earlier specs create leads for this company, which queue automatic research.
+  await expect(page.getByRole('button', { name: 'Run AI research' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'New quotation' })).toBeEnabled();
 
   const tabs = await page.getByRole('tab').evaluateAll((els) => els.map((el) => (el.textContent ?? '').replace(/\s*\d+$/, '').trim()));
@@ -47,7 +48,7 @@ test('company profile: prototype header, tabs and section headings', async ({ pa
     'AI business intelligence', 'Projects', 'Leads & prospects', 'Contacts',
   ]);
   await expect(page.getByRole('region', { name: 'Leads & prospects' }).getByRole('link', { name: /LD-1001/ })).toBeVisible();
-  await expect(page.getByRole('region', { name: 'AI business intelligence' })).toContainText('Available in release 4');
+  await expect(page.getByRole('region', { name: 'AI business intelligence' })).toContainText('No AI summary yet. Run research to generate one.');
   await captureParity(page, 'company-profile');
 
   const panels: [string, string[]][] = [
@@ -75,7 +76,8 @@ test('company profile: prototype header, tabs and section headings', async ({ pa
   );
   await page.getByRole('tab', { name: /^Activities/ }).click();
   await expect(page.getByRole('region', { name: 'Activity summary' })).toContainText(/Calls\s*\d+/);
-  // Later-release panels are inert.
+  // AI Intelligence (release 4): the big card's actions; the research flow itself is covered by research.spec.ts.
   await page.getByRole('tab', { name: 'AI Intelligence' }).click();
-  await expect(page.getByRole('tabpanel').getByRole('button')).toHaveCount(0);
+  await expect(page.getByRole('tabpanel').getByRole('button', { name: 'Re-run research' })).toBeVisible();
+  await expect(page.getByRole('tabpanel').getByRole('button', { name: 'Mark profile verified' })).toBeEnabled();
 });

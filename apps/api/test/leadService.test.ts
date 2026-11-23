@@ -294,4 +294,11 @@ describe('dates and serializers', () => {
     const detail = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id }, include: leadDetailInclude });
     expect(leadDetail(detail, '2026-11-21').company).toMatchObject({ contactCount: 0, openLeadCount: 1 });
   });
+
+  it("carries the company's AI research status, summary and confidence for the lead page AI line", async () => {
+    const lead = await makeLead({});
+    await prisma.company.update({ where: { id: lead.companyId! }, data: { aiResearchStatus: 'Completed', aiSummary: 'Freight forwarder.', aiConfidence: 'High' } });
+    const detail = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id }, include: leadDetailInclude });
+    expect(leadDetail(detail, '2026-11-21').company).toMatchObject({ aiResearchStatus: 'Completed', aiSummary: 'Freight forwarder.', aiConfidence: 'High' });
+  });
 });

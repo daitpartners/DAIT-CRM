@@ -16,6 +16,7 @@ import { companyStatusBadge, companyStatusText, errorText, initials, verificatio
 import { useLang, useT } from '../../i18n/useT';
 import { CompanyModal, type CompanySection } from './CompanyModal';
 import { ContactModal } from './ContactModal';
+import { useResearchRunner } from './AiCard';
 import { ActivitiesTab } from './tabs/ActivitiesTab';
 import { AiTab, SourcesTab } from './tabs/AiTabs';
 import { ContactsTab } from './tabs/ContactsTab';
@@ -54,6 +55,13 @@ export function CompanyProfile() {
   const [adding, setAdding] = useState<'contact' | 'project' | null>(null);
   const toast = useToast();
   const newQuote = useCreateQuotationForCompany();
+  // One research runner per profile (polls while a run is queued, toasts once when it finishes): the header button,
+  // the Overview card and the AI Intelligence tab share it. A run started here opens the AI tab when it finishes.
+  const research = useResearchRunner(id, {
+    onFinished: (startedHere) => {
+      if (startedHere) navigate({ pathname: location.pathname, search: location.search, hash: '#ai' }, { replace: true });
+    },
+  });
 
   const hash = location.hash.replace(/^#/, '');
   const active: TabId = isTab(hash) ? hash : 'overview';
@@ -94,7 +102,7 @@ export function CompanyProfile() {
   let panel;
   switch (active) {
     case 'overview':
-      panel = <OverviewTab company={company} canManage={canManage} onEdit={(s) => setEditing(s)} />;
+      panel = <OverviewTab company={company} canManage={canManage} onEdit={(s) => setEditing(s)} research={research} />;
       break;
     case 'contacts':
       panel = <ContactsTab company={company} canManage={canManage} />;
@@ -112,10 +120,10 @@ export function CompanyProfile() {
       panel = <ActivitiesTab company={company} />;
       break;
     case 'ai':
-      panel = <AiTab />;
+      panel = <AiTab company={company} research={research} />;
       break;
     default:
-      panel = <SourcesTab />;
+      panel = <SourcesTab company={company} />;
   }
 
   const closed = company.status === 'Closed';
@@ -130,7 +138,6 @@ export function CompanyProfile() {
     ...(leadTotal !== undefined ? [t('{n} leads', { n: leadTotal })] : []),
     ...(locations ? [t('{n} locations', { n: locations.length })] : []),
   ];
-  const later = (release: string) => t('Available in release {release}', { release });
 
   return (
     <>
@@ -172,9 +179,11 @@ export function CompanyProfile() {
         }
       >
         <div className="hdr-actions">
-          <button type="button" className="btn" disabled title={later('4')}>
-            {t('Run AI research')}
-          </button>
+          {canManage ? (
+            <button type="button" className="btn" onClick={research.run} disabled={research.busy}>
+              {t('Run AI research')}
+            </button>
+          ) : null}
           {canManage ? (
             <button type="button" className="btn" onClick={() => setAdding('contact')} disabled={closed} title={closedTitle}>
               {t('Add contact')}

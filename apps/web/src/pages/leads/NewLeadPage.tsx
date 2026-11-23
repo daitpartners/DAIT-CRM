@@ -375,8 +375,8 @@ function NewLeadForm() {
               <li>{t('The lead is linked to the chosen company. No new company record is created when one exists.')}</li>
               <li>{t('The owner gets an in-app notification and a task to review the lead.')}</li>
               <li>{t('A follow-up task is created for the follow-up date.')}</li>
-              <li className="nl-later">
-                {t('AI enrichment')} <span className="badge b-grey">{t('Available in release 4')}</span>
+              <li>
+                {t('AI enrichment job is queued with status')} <strong>{t('Pending|research')}</strong>. {t('It never overwrites verified fields.')}
               </li>
             </ol>
           </section>

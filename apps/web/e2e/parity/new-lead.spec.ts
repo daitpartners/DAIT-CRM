@@ -37,7 +37,9 @@ test('new lead page: prototype cards in order, defaults, and a company preset fr
   await expect(form.getByRole('combobox', { name: 'Company (existing record)' })).toHaveAttribute('placeholder', 'Create new company on save');
   await expect(form.getByLabel('Contact person')).toBeDisabled();
   await expect(page.getByRole('region', { name: 'Linked company preview' })).toContainText('A new company record will be created on save');
-  await expect(page.getByRole('region', { name: 'What happens on save' })).toContainText('Available in release 4');
+  await expect(page.getByRole('region', { name: 'What happens on save' })).toContainText(
+    'AI enrichment job is queued with status Pending. It never overwrites verified fields.',
+  );
 
   // A new name: no duplicate, a new company on save.
   await form.getByLabel('Company name').fill(`Parity Newco ${Date.now()}`);

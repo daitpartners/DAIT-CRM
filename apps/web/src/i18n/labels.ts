@@ -99,6 +99,99 @@ export function researchStatusText(t: TFn, status: string): string {
   }
 }
 
+/** Badge class for a research or run status (prototype badge): Pending / Processing amber, Completed green, Failed red. */
+export function researchStatusBadge(status: string): string {
+  switch (status) {
+    case 'Pending':
+    case 'Processing':
+      return 'badge b-warn';
+    case 'Completed':
+      return 'badge b-ok';
+    case 'Failed':
+      return 'badge b-bad';
+    default:
+      return 'badge b-grey';
+  }
+}
+
+/** The suggestions table's Field label (shared RESEARCH_FIELDS); an unknown field shows the server's label. */
+export function researchFieldText(t: TFn, field: string, fallback: string): string {
+  switch (field) {
+    case 'description':
+      return t('Company description');
+    case 'legalName':
+      return t('Legal company name');
+    case 'businessEmail':
+      return t('Business email');
+    case 'street':
+      return t('Street address');
+    case 'city':
+      return t('City');
+    case 'state':
+      return t('State / Province');
+    case 'zip':
+      return t('ZIP / Postal code');
+    case 'yearEstablished':
+      return t('Year established');
+    case 'linkedinUrl':
+      return t('LinkedIn company URL');
+    case 'socialFacebook':
+      return t('Facebook');
+    case 'socialInstagram':
+      return t('Instagram');
+    case 'socialX':
+      return t('X / Twitter');
+    case 'socialYoutube':
+      return t('YouTube');
+    case 'websiteTechnology':
+      return t('Website technology');
+    case 'lat':
+      return t('Latitude');
+    case 'lng':
+      return t('Longitude');
+    case 'mapsUrl':
+      return t('Google Maps link');
+    case 'website':
+      return t('Website');
+    case 'websiteAssessment':
+      return t('Website assessment');
+    case 'specialisation':
+      return t('Specialisation');
+    case 'employeeRange':
+      return t('Employee range');
+    case 'aiPotentialServices':
+      return t('Potential services');
+    default:
+      return fallback;
+  }
+}
+
+/** A research source type (shared SOURCE_TYPES and the manual dialog's "Other"); anything else shows as stored. */
+export function sourceTypeText(t: TFn, type: string): string {
+  switch (type) {
+    case 'Company website':
+      return t('Company website');
+    case 'Google Places API':
+      return t('Google Places API');
+    case 'Public registry':
+      return t('Public registry');
+    case 'Business directory':
+      return t('Business directory');
+    case 'Social profile':
+      return t('Social profile');
+    case 'Contact form':
+      return t('Contact form');
+    case 'Manual research':
+      return t('Manual research');
+    case 'CSV import':
+      return t('CSV import');
+    case 'Other':
+      return t('Other|source');
+    default:
+      return type;
+  }
+}
+
 /**
  * A lead status. Statuses are a lookup group (administrators may add more): the seeded ones are
  * translated here (`|lead`: Spanish and French agree with the masculine "el lead" / "le lead");
@@ -349,6 +442,14 @@ export function errorText(t: TFn, code: string, vars: Record<string, string | nu
       return t('The quotation total is too large. Lower the amounts and try again.');
     case 'invalid_transition':
       return t('That status change is not available');
+    case 'research_running':
+      return t('Research is already running for this company.');
+    case 'daily_limit':
+      return t('The daily research limit has been reached. Try again tomorrow.');
+    case 'field_locked':
+      return t('Field is verified · not overwritten');
+    case 'already_decided':
+      return t('This suggestion has already been decided.');
     default:
       return t('Something went wrong. Please try again.');
   }

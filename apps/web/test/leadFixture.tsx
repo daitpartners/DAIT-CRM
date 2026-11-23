@@ -30,7 +30,7 @@ export function makeLead(overrides: Partial<LeadFull> = {}): LeadFull {
     company: {
       id: 4, number: 'CO-0245', name: 'Meridian Textiles', industry: null, city: null, country: 'India', employeeRange: null,
       isClient: false, verificationStatus: null, contactCount: 1, openLeadCount: 1, legalName: null, website: null, domain: null,
-      businessCategory: null, timezone: null,
+      businessCategory: null, timezone: null, aiResearchStatus: 'Not started', aiSummary: null, aiConfidence: null,
     },
     contact: {
       id: 9, companyId: 4, company: { id: 4, number: 'CO-0245', name: 'Meridian Textiles' }, firstName: 'Tom', lastName: 'Hale',

@@ -30,6 +30,13 @@ function stub({ isClient = true, statusCode = 200, me = seller }: { isClient?: b
     const method = init?.method ?? 'GET';
     calls.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
     if (url === '/api/me') return Response.json(me);
+    if (url === '/api/companies/4/research' && method === 'POST') return Response.json({ runId: 9 }, { status: 202 });
+    if (url === '/api/companies/4/research') {
+      return Response.json({
+        company: { aiResearchStatus: 'Pending', aiSummary: null, aiConfidence: null, aiPotentialServices: [], verifiedFields: {} },
+        pending: [], runs: [], canEdit: true,
+      });
+    }
     if (url === '/api/companies/4/projects') return Response.json({ items: isClient ? [PROJECT] : [], isClient });
     if (url.startsWith('/api/projects/form-options')) return Response.json(OPTIONS);
     if (url === '/api/leads/5/status') {
@@ -193,5 +200,39 @@ describe('Won dialog: Mark Won and create project (prototype)', () => {
     );
     expect(screen.queryByRole('button', { name: 'Mark Won and create project' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Mark Won' })).toHaveClass('primary');
+  });
+});
+
+describe('Company card AI line (prototype views-lead-detail.js)', () => {
+  it('before any research: "No AI research yet." and Run research queues a job; then the status shows', async () => {
+    const u = userEvent.setup();
+    const calls = stub();
+    render(
+      <Wrap qc={makeClient(seller)}>
+        <SideColumn lead={makeLead()} live />
+      </Wrap>,
+    );
+    const co = screen.getByRole('region', { name: 'Meridian Textiles' });
+    expect(co).toHaveTextContent('No AI research yet. Run research');
+    expect(calls.some((c) => c.url.endsWith('/research'))).toBe(false);
+    await u.click(within(co).getByRole('button', { name: 'Run research' }));
+    expect(await screen.findByText('Enrichment job queued · running in background')).toBeInTheDocument();
+    await waitFor(() => expect(co).toHaveTextContent('AI research Pending'));
+    expect(within(co).getByRole('button', { name: 'Run research' })).toBeDisabled();
+    expect(calls.filter((c) => c.method === 'POST').map((c) => c.url)).toEqual(['/api/companies/4/research']);
+  });
+
+  it('with an AI summary: the summary and its confidence; no run button for users who may not edit companies', () => {
+    stub({ me: { ...rep, rights: ['manage_leads'] } });
+    const lead = makeLead();
+    render(
+      <Wrap qc={makeClient({ ...rep, rights: ['manage_leads'] })}>
+        <SideColumn lead={{ ...lead, company: { ...lead.company!, aiResearchStatus: 'Completed', aiSummary: 'Textile mill in Surat.', aiConfidence: 'Medium' } }} live />
+      </Wrap>,
+    );
+    const co = screen.getByRole('region', { name: 'Meridian Textiles' });
+    expect(co).toHaveTextContent('AI summary Medium');
+    expect(co).toHaveTextContent('Textile mill in Surat.');
+    expect(within(co).queryByRole('button', { name: 'Run research' })).toBeNull();
   });
 });

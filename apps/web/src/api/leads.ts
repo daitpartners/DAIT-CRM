@@ -54,6 +54,8 @@ export type LeadDetail = Omit<LeadSummary, 'company' | 'contact'> & {
     id: number; number: string; name: string; industry: string | null; city: string | null; country: string;
     employeeRange: string | null; isClient: boolean; verificationStatus: string | null; contactCount: number; openLeadCount: number;
     legalName: string | null; website: string | null; domain: string | null; businessCategory: string | null; timezone: string | null;
+    /** The lead page's AI line (release 4). */
+    aiResearchStatus?: string; aiSummary?: string | null; aiConfidence?: string | null;
   } | null;
   /** The contact's full profile (`contactProfile`) plus `name` / `email` kept for the older screens. */
   contact: (ContactProfileView & { name: string; email: string | null }) | null;
