@@ -5,7 +5,7 @@ import { normalisePhone, roleLabel, type ImportCommit, type ResearchValue, type 
 import { prisma } from '../src/db';
 import { buildApp } from '../src/app';
 import type { AuthUser } from '../src/plugins/auth';
-import { commitBatch, importRow, normalisePersonName, splitName, startImport, sweepImportCommit, COMMIT_LEASE_MS } from '../src/imports/commit';
+import { commitBatch, failImport, importRow, normalisePersonName, splitName, startImport, sweepImportCommit, COMMIT_LEASE_MS } from '../src/imports/commit';
 import { knownCountries } from '../src/imports/stage';
 import { claimNext, STALE_AFTER_MS } from '../src/jobs/queue';
 import { rematchBatch, stageHooks } from '../src/imports/stage';
@@ -529,6 +529,40 @@ describe('import · resumable job, stamps and errors', () => {
     const again = await post(`/api/imports/batches/${batch.id}/import/continue`, {});
     expect(again.statusCode).toBe(409);
     expect(again.json()).toEqual({ error: 'cannot_continue' });
+  });
+
+  it('a run whose lease ran out cannot renew it and stops before the next row', async () => {
+    const batch = await batchWith(four());
+    await startImport(authOf(admin), batch.id, choose());
+    const old = new Date(Date.now() - COMMIT_LEASE_MS - 1000);
+    await expect(commitBatch(batch.id, {
+      afterRow: async (n) => { if (n === 1) await prisma.importBatch.update({ where: { id: batch.id }, data: { commitHeartbeatAt: old } }); },
+    })).rejects.toThrow('import_lease_lost');
+    expect(await prisma.lead.count()).toBe(1);
+    expect((await batchOf(batch.id)).status).toBe('Importing');
+  });
+
+  it('losing the lease on the last attempt leaves the batch to the run holding it; failImport skips a live lease', async () => {
+    const batch = await batchWith(four());
+    await startImport(authOf(admin), batch.id, choose());
+    await prisma.job.updateMany({ where: { type: 'import_commit' }, data: { attempts: 2 } });
+    importCommitDeps.afterRow = async () => {
+      await prisma.importBatch.update({ where: { id: batch.id }, data: { commitRun: 'other-run', commitHeartbeatAt: new Date() } });
+    };
+    expect(await runJob()).toBe(true);
+    expect((await prisma.job.findFirstOrThrow({ where: { type: 'import_commit' } })).status).toBe('failed');
+    expect(await batchOf(batch.id)).toMatchObject({ status: 'Importing', importError: null, commitRun: 'other-run' });
+    await failImport(batch.id, 'job_failed');
+    expect((await batchOf(batch.id)).status).toBe('Importing');
+  });
+
+  it('Continue is refused while the batch still has an import job queued', async () => {
+    const batch = await batchWith(four().slice(0, 1));
+    await startImport(authOf(admin), batch.id, choose());
+    await prisma.importBatch.update({ where: { id: batch.id }, data: { status: 'Failed', importError: 'interrupted' } });
+    const res = await post(`/api/imports/batches/${batch.id}/import/continue`, {});
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: 'import_running' });
   });
 
   it('scheduled sweep: an Importing batch whose job failed for good becomes Failed (and can be continued)', async () => {

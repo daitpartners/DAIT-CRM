@@ -143,6 +143,10 @@ export async function continueImport(batchId: number): Promise<void> {
       SELECT status, import_error FROM import_batches WHERE id = ${batchId} FOR UPDATE`;
     if (!batch) throw new NotFoundError();
     if (batch.status !== 'Failed' || batch.import_error === null) throw new ImportError('cannot_continue', 409);
+    const alive = await tx.job.count({
+      where: { type: 'import_commit', status: { in: ['queued', 'running'] }, payload: { path: ['batchId'], equals: batchId } },
+    });
+    if (alive > 0) throw new ImportError('import_running', 409);
     await tx.importBatch.update({
       where: { id: batchId }, data: { status: 'Importing', importError: null, commitRun: null, commitHeartbeatAt: null },
     });
@@ -150,11 +154,16 @@ export async function continueImport(batchId: number): Promise<void> {
   });
 }
 
-/** The import job gave up: an Importing batch becomes Failed with the reason (it can be continued). */
+/**
+ * The import job gave up: an Importing batch becomes Failed with the reason (it can be continued). Not while a run still
+ * holds a live lease on it (that run carries on).
+ */
 export async function failImport(batchId: number, code: ImportFailure): Promise<void> {
   await prisma.$transaction(async (tx) => {
     const [batch] = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM import_batches WHERE id = ${batchId} FOR UPDATE`;
     if (batch?.status !== 'Importing') return;
+    const lease = await tx.importBatch.findUniqueOrThrow({ where: { id: batchId }, select: { commitRun: true, commitHeartbeatAt: true } });
+    if (lease.commitRun !== null && lease.commitHeartbeatAt !== null && lease.commitHeartbeatAt.getTime() > Date.now() - COMMIT_LEASE_MS) return;
     await tx.importBatch.update({
       where: { id: batchId }, data: { status: 'Failed', importError: code, commitRun: null, commitHeartbeatAt: null },
     });
@@ -168,7 +177,8 @@ export async function failImport(batchId: number, code: ImportFailure): Promise<
  */
 export const COMMIT_LEASE_MS = 5 * 60_000;
 
-class LeaseLost extends Error {
+/** This run no longer holds the batch (another run took it over, or its lease ran out). */
+export class LeaseLost extends Error {
   constructor() {
     super('import_lease_lost');
   }
@@ -188,8 +198,13 @@ async function takeLease(batchId: number, run: string): Promise<boolean> {
   });
 }
 
+/** Renews this run's lease; a lease that already ran out cannot be renewed (another run may take the batch). */
 async function renewLease(batchId: number, run: string): Promise<void> {
-  const { count } = await prisma.importBatch.updateMany({ where: { id: batchId, commitRun: run }, data: { commitHeartbeatAt: new Date() } });
+  const now = new Date();
+  const { count } = await prisma.importBatch.updateMany({
+    where: { id: batchId, commitRun: run, commitHeartbeatAt: { gt: new Date(now.getTime() - COMMIT_LEASE_MS) } },
+    data: { commitHeartbeatAt: now },
+  });
   if (count === 0) throw new LeaseLost();
 }
 
