@@ -69,14 +69,15 @@ const CA_CITIES: Record<string, string> = Object.fromEntries(
 
 const MX_STATES: Record<string, string> = Object.fromEntries(
   ([
-    ['America/Tijuana', 'baja california|bc'],
-    ['America/Mazatlan', 'baja california sur|bcs|sinaloa|nayarit'],
-    ['America/Hermosillo', 'sonora'],
-    ['America/Cancun', 'quintana roo'],
-    ['America/Chihuahua', 'chihuahua'],
-    ['America/Monterrey', 'coahuila|durango|nuevo leon|tamaulipas'],
-    ['America/Merida', 'campeche|yucatan'],
-    ['America/Mexico_City', 'aguascalientes|chiapas|ciudad de mexico|cdmx|colima|estado de mexico|mexico|guanajuato|guerrero|hidalgo|jalisco|michoacan|morelos|oaxaca|puebla|queretaro|san luis potosi|tabasco|tlaxcala|veracruz|zacatecas'],
+    // Names, ISO 3166-2 codes (JAL, NLE, …) and the usual abbreviations (Jal., N.L., Q. Roo, …).
+    ['America/Tijuana', 'baja california|bc|bcn'],
+    ['America/Mazatlan', 'baja california sur|bcs|sinaloa|sin|nayarit|nay'],
+    ['America/Hermosillo', 'sonora|son'],
+    ['America/Cancun', 'quintana roo|roo|qroo|q roo|qr'],
+    ['America/Chihuahua', 'chihuahua|chh|chih'],
+    ['America/Monterrey', 'coahuila|coa|coah|durango|dur|dgo|nuevo leon|nle|nl|tamaulipas|tam|tamps'],
+    ['America/Merida', 'campeche|cam|camp|yucatan|yuc'],
+    ['America/Mexico_City', 'aguascalientes|agu|ags|chiapas|chp|chis|ciudad de mexico|cdmx|cmx|df|colima|col|estado de mexico|mexico|mex|edomex|guanajuato|gua|gto|guerrero|gro|hidalgo|hid|hgo|jalisco|jal|michoacan|mic|mich|morelos|mor|oaxaca|oax|puebla|pue|queretaro|que|qro|san luis potosi|slp|tabasco|tab|tlaxcala|tla|tlax|veracruz|ver|zacatecas|zac'],
   ] as const).flatMap(([zone, list]) => list.split('|').map((c) => [c, zone])),
 );
 const MX_CITIES: Record<string, string> = {
@@ -98,6 +99,20 @@ const BR_STATES: Record<string, string> = Object.fromEntries(
     ['America/Fortaleza', 'ceara|ce|maranhao|ma|piaui|pi|rio grande do norte|rn|paraiba|pb'],
     ['America/Belem', 'para|pa|amapa|ap'],
     ['America/Araguaina', 'tocantins|to'],
+  ] as const).flatMap(([zone, list]) => list.split('|').map((c) => [c, zone])),
+);
+const BR_CITIES: Record<string, string> = Object.fromEntries(
+  ([
+    ['America/Sao_Paulo', 'sao paulo|rio de janeiro|brasilia|belo horizonte|curitiba|porto alegre|florianopolis|goiania|vitoria|campinas|santos|guarulhos|niteroi'],
+    ['America/Manaus', 'manaus|porto velho|boa vista'],
+    ['America/Cuiaba', 'cuiaba|campo grande'],
+    ['America/Rio_Branco', 'rio branco'],
+    ['America/Bahia', 'salvador'],
+    ['America/Recife', 'recife'],
+    ['America/Maceio', 'maceio|aracaju'],
+    ['America/Fortaleza', 'fortaleza|sao luis|teresina|natal|joao pessoa'],
+    ['America/Belem', 'belem|macapa'],
+    ['America/Araguaina', 'palmas'],
   ] as const).flatMap(([zone, list]) => list.split('|').map((c) => [c, zone])),
 );
 const AU_STATES: Record<string, string> = Object.fromEntries(
@@ -126,7 +141,7 @@ const add = (names: string, rule: Rule) => names.split('|').forEach((n) => (COUN
 add('United States|United States of America|USA|US|U S A|America', multi(US_ZONES, US_STATES, US_CITIES));
 add('Canada', multi(CA_ZONES, CA_PROVINCES, CA_CITIES));
 add('Mexico|México', multi(MX_ZONES, MX_STATES, MX_CITIES));
-add('Brazil|Brasil', multi(BR_ZONES, BR_STATES));
+add('Brazil|Brasil', multi(BR_ZONES, BR_STATES, BR_CITIES));
 add('Australia', multi(AU_ZONES, AU_STATES, AU_CITIES));
 add('Spain|España', one('Europe/Madrid', CANARY));
 add('Portugal', one('Europe/Lisbon', { azores: 'Atlantic/Azores', acores: 'Atlantic/Azores', madeira: 'Atlantic/Madeira' }));
@@ -169,7 +184,9 @@ export function resolveTimezones(
   if (!rule) return { zones: [senderTimezone], source: 'sender' };
   const byState = rule.states?.[key(a.state)];
   if (byState) return { zones: [byState], source: 'address' };
-  const byCity = rule.cities?.[key(a.city)] ?? rule.states?.[key(a.city)];
+  // A city may be a state's full name, never a 2-letter code ("LA" is Los Angeles, not Louisiana; "Sé" is in São Paulo).
+  const city = key(a.city);
+  const byCity = rule.cities?.[city] ?? (city.length > 2 ? rule.states?.[city] : undefined);
   if (byCity) return { zones: [byCity], source: 'address' };
   return { zones: rule.zones, source: 'country' };
 }

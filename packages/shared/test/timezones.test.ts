@@ -121,3 +121,40 @@ describe('every Mexican and Brazilian state', () => {
     expect(zone('Brazil', 'Amazonas').zones).toEqual(['America/Manaus']);
   });
 });
+
+describe('state codes and cities (follow-ups)', () => {
+  const zone = (country: string, state: string) => resolveTimezones({ country, state }, 'UTC');
+  const city = (country: string, c: string) => resolveTimezones({ country, city: c }, 'UTC');
+
+  test('Mexican state codes (ISO and common abbreviations)', () => {
+    expect(zone('Mexico', 'JAL')).toEqual({ zones: ['America/Mexico_City'], source: 'address' });
+    expect(zone('Mexico', 'NLE').zones).toEqual(['America/Monterrey']);
+    expect(zone('Mexico', 'N.L.').zones).toEqual(['America/Monterrey']);
+    expect(zone('Mexico', 'BCN').zones).toEqual(['America/Tijuana']);
+    expect(zone('Mexico', 'ROO').zones).toEqual(['America/Cancun']);
+    expect(zone('Mexico', 'Q. Roo').zones).toEqual(['America/Cancun']);
+    expect(zone('Mexico', 'YUC').zones).toEqual(['America/Merida']);
+    expect(zone('Mexico', 'CMX').zones).toEqual(['America/Mexico_City']);
+    expect(zone('Mexico', 'SON').zones).toEqual(['America/Hermosillo']);
+    expect(zone('Mexico', 'Chih.').zones).toEqual(['America/Chihuahua']);
+    expect(zone('Mexico', 'Tamps').zones).toEqual(['America/Monterrey']);
+  });
+
+  test('a city is never read as a 2-letter state code', () => {
+    // "LA" in the city is Los Angeles, not Louisiana; Brazil's "Sé" is a São Paulo district, not Sergipe.
+    expect(city('United States', 'LA').zones).not.toEqual(['America/Chicago']);
+    expect(city('Brazil', 'Sé')).toEqual({ zones: ['America/Sao_Paulo', 'America/Manaus'], source: 'country' });
+    expect(city('Brazil', 'PA').source).toBe('country');
+    // Full state names in the city still count.
+    expect(city('Brazil', 'Bahia')).toEqual({ zones: ['America/Bahia'], source: 'address' });
+  });
+
+  test('major Brazilian cities', () => {
+    expect(city('Brazil', 'Manaus')).toEqual({ zones: ['America/Manaus'], source: 'address' });
+    expect(city('Brazil', 'Salvador').zones).toEqual(['America/Bahia']);
+    expect(city('Brazil', 'Recife').zones).toEqual(['America/Recife']);
+    expect(city('Brasil', 'Belém').zones).toEqual(['America/Belem']);
+    expect(city('Brazil', 'Rio de Janeiro').zones).toEqual(['America/Sao_Paulo']);
+    expect(city('Brazil', 'Cuiabá').zones).toEqual(['America/Cuiaba']);
+  });
+});
