@@ -235,6 +235,22 @@ describe('file upload', () => {
     expect(await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } })).toMatchObject({ status: 'Failed', error: 'timeout' });
   });
 
+  it('crash output goes to the job error only, never to the file', async () => {
+    const { cookie } = await as('ADMINISTRATOR');
+    const batch = await newBatch(cookie);
+    const file = (await upload(batch.id, 'a.csv', Buffer.from('Company\nAcme'), cookie)).json();
+    importReadOptions.failWith = 'FATAL something broke';
+    try {
+      expect(await runReadJob()).toBe(true);
+    } finally {
+      delete importReadOptions.failWith;
+    }
+    expect(await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } })).toMatchObject({ status: 'Failed', error: 'unreadable' });
+    const job = await prisma.job.findFirstOrThrow({ where: { type: 'import_read_file' } });
+    expect(job.status).toBe('failed');
+    expect(job.lastError).toContain('FATAL something broke');
+  });
+
   it('a file the reader refuses keeps its reason', async () => {
     const { cookie } = await as('ADMINISTRATOR');
     const batch = await newBatch(cookie);

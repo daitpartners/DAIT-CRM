@@ -1,10 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
 import {
   assertZipSize, decodeText, readImportBuffer, type TableExtract, type TextExtract,
 } from '../src/imports/read/index';
-import { readInWorker } from '../src/imports/read/isolated';
+import { fork } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { childEnv, readInWorker } from '../src/imports/read/isolated';
 import { readSpreadsheet } from '../src/imports/read/spreadsheet';
 import { rebuildZip, ZIP_MAX_BYTES } from '../src/imports/read/zip';
 import { PDF_MAX_PAGES } from '../src/imports/read/pdf';
@@ -21,6 +23,10 @@ vi.mock('mammoth', async (importOriginal) => {
   const m = await importOriginal<{ default: typeof import('mammoth') }>();
   const d = m.default;
   return { default: { ...d, extractRawText: vi.fn(d.extractRawText) } };
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 const table = (r: { extract?: TableExtract | TextExtract }) => r.extract as TableExtract;
@@ -278,6 +284,49 @@ describe('reading in a child process', () => {
     expect(await readInWorker('csv', tiny, 'a.csv', { memoryMb: 160 })).toMatchObject({ status: 'Read' });
     expect(await readInWorker('csv', tiny, 'a.csv', { memoryMb: 160, exhaustHeap: true })).toEqual({ status: 'Failed', meta: {}, error: 'too_large' });
     expect(await readInWorker('csv', tiny, 'a.csv')).toMatchObject({ status: 'Read' });
+  });
+
+  it('the read process gets no secrets: only NODE_ENV, PATH and TZ', async () => {
+    const secrets = {
+      DATABASE_URL: 'postgresql://x:y@db/crm', MS_CLIENT_SECRET: 'ms-secret', MS_CLIENT_ID: 'ms-id', CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-x',
+      SESSION_SECRET: 'session-secret-0123456789-0123456789', TOKEN_ENCRYPTION_KEY: 'key', GOOGLE_PLACES_API_KEY: 'places',
+    };
+    for (const [k, v] of Object.entries(secrets)) vi.stubEnv(k, v);
+    expect(Object.keys(childEnv()).sort()).toEqual(['NODE_ENV', 'PATH', 'TZ'].filter((k) => process.env[k] !== undefined).sort());
+    const answer = await readInWorker('txt', Buffer.from('x'), 'a.txt', { reportEnv: true }).catch((e: Error) => e.message);
+    expect(String(answer)).toMatch(/^env:/);
+    const keys = JSON.parse(String(answer).slice(4)) as string[];
+    for (const k of Object.keys(secrets)) expect(keys).not.toContain(k);
+    // macOS adds __CF_USER_TEXT_ENCODING to every process it starts (not from us, not a secret).
+    expect(keys.filter((k) => !k.startsWith('__CF_'))).toEqual(['NODE_ENV', 'PATH', 'TZ'].filter((k) => process.env[k] !== undefined).sort());
+  });
+
+  it('test hooks are ignored outside NODE_ENV test', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    const started = Date.now();
+    expect(await readInWorker('csv', Buffer.from('Company\nAcme\n'), 'a.csv', { busyMs: 10_000, timeoutMs: 8000, exhaustHeap: true }))
+      .toMatchObject({ status: 'Read' });
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  it("a crashed read's error carries the end of its stderr", async () => {
+    const message = await readInWorker('csv', Buffer.from('x'), 'a.csv', { failWith: `boom\u0000\n${'z'.repeat(1000)} last words` })
+      .then(() => '', (e: Error) => e.message);
+    expect(message).toMatch(/^reader stopped \(exit 3\): /);
+    expect(message).toContain('last words');
+    expect(message).not.toContain('\u0000');
+    expect(message.length).toBeLessThan(600);
+  });
+
+  it('the read process exits when the parent disconnects', async () => {
+    const entry = fileURLToPath(new URL('../src/imports/read/child.ts', import.meta.url));
+    const child = fork(entry, [], { execArgv: ['--import', 'tsx'], env: childEnv(), stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+    const exited = new Promise<number | null>((resolve) => child.on('exit', (code) => resolve(code)));
+    await new Promise((r) => setTimeout(r, 1500));
+    child.disconnect();
+    const code = await Promise.race([exited, new Promise<string>((r) => setTimeout(() => r('still running'), 5000))]);
+    if (code === 'still running') child.kill('SIGKILL');
+    expect(code).toBe(1);
   });
 
   it('never blocks this thread: timers keep ticking while hostile PDFs are read', async () => {

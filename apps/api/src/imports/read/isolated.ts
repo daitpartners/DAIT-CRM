@@ -24,6 +24,27 @@ export interface ReadInWorkerOptions {
   busyMs?: number;
   /** Test seam: the child fills its heap until it runs out, like a runaway parser. */
   exhaustHeap?: boolean;
+  /** Test seam: the child answers with the names of its environment variables instead of reading. */
+  reportEnv?: boolean;
+  /** Test seam: the child writes this to stderr and exits with code 3. */
+  failWith?: string;
+}
+
+/** The only variables the read process gets: never the database URL, Microsoft, Claude or session secrets. */
+const CHILD_ENV_KEYS = ['NODE_ENV', 'PATH', 'TZ'] as const;
+
+export function childEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const key of CHILD_ENV_KEYS) if (env[key] !== undefined) out[key] = env[key];
+  return out;
+}
+
+/** Kept from the child's stderr for the job's error (crash output only; never stored on the file). */
+const STDERR_TAIL = 500;
+
+/** Crash output, made safe to keep: printable characters only, whitespace collapsed, the last 500 characters. */
+function stderrTail(text: string): string {
+  return text.replace(/[^\x20-\x7e\n]/g, '').replace(/\s+/g, ' ').trim().slice(-STDERR_TAIL);
 }
 
 /** From source (tests, tsx) the entry is TypeScript and needs the tsx loader; from dist it is plain JavaScript. */
@@ -40,8 +61,12 @@ export function readInWorker(
     const child = fork(ENTRY, [], {
       execArgv: [...(fromSource ? ['--import', 'tsx'] : []), `--max-old-space-size=${opts.memoryMb ?? READ_MEMORY_MB}`],
       serialization: 'advanced',
-      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+      env: childEnv(),
+      stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
     });
+    let stderr = '';
+    child.stderr?.setEncoding('utf8');
+    child.stderr?.on('data', (chunk: string) => { stderr = (stderr + chunk).slice(-4 * STDERR_TAIL); });
     let settled = false;
     const finish = (fn: () => void) => {
       if (settled) return;
@@ -53,11 +78,18 @@ export function readInWorker(
     const timer = setTimeout(() => finish(() => resolve({ status: 'Failed', meta: {}, error: 'timeout' })), timeoutMs);
     child.on('message', (m: Message) => finish(() => (m.ok ? resolve(m.result) : reject(new Error(m.message)))));
     child.on('error', (e) => finish(() => reject(e)));
-    child.on('exit', (code, signal) => finish(() => {
+    // 'close' (not 'exit'): stderr has been read to the end by then.
+    child.on('close', (code, signal) => finish(() => {
       // V8's fatal "heap out of memory" aborts (SIGABRT / 134); the kernel's OOM killer sends SIGKILL.
       if (signal === 'SIGABRT' || signal === 'SIGKILL' || code === 134) resolve({ status: 'Failed', meta: {}, error: 'too_large' });
-      else reject(new Error(`reader stopped (exit ${code ?? signal})`));
+      else {
+        const tail = stderrTail(stderr);
+        reject(new Error(`reader stopped (exit ${code ?? signal})${tail ? `: ${tail}` : ''}`));
+      }
     }));
-    child.send({ ext, data: new Uint8Array(data), fileName, busyMs: opts.busyMs ?? 0, exhaustHeap: opts.exhaustHeap ?? false });
+    child.send({
+      ext, data: new Uint8Array(data), fileName, busyMs: opts.busyMs ?? 0, exhaustHeap: opts.exhaustHeap ?? false,
+      reportEnv: opts.reportEnv ?? false, failWith: opts.failWith ?? null,
+    });
   });
 }
