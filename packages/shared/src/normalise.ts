@@ -96,15 +96,17 @@ export function isSharedHost(domain: string): boolean {
   return inList(SHARED_HOST_DOMAINS, domain);
 }
 
-const LEGAL_SUFFIX = new RegExp(
-  '\\b(pvt|private|ltd|limited|llc|llp|lp|inc|gmbh|ag|kg|plc|spa|sl|slu|sa|sau|sas|sasu|sarl|eurl|srl|bv|nv|ltda|lda|'
-  + 'sapi|pty|co|corp|corporation|company|group)\\b\\.?', 'g',
-);
+/**
+ * Legal forms, removed only as trailing words (repeated: "Acme Private Limited", "Bimbo S.A.B. de C.V."), so a name
+ * that starts with one ("AG Foods", "Sa Pa Travel", "Co-op") keeps it, and a name that is only one ("Eurl") keeps it.
+ * Migration 20's SQL uses this exact pattern.
+ */
+const TRAILING_LEGAL_FORMS = / (?:(?:s de rl|de cv|de rl|pvt|private|ltd|limited|llc|llp|lp|inc|gmbh|ag|kg|plc|spa|sl|slu|sa|sab|sau|sas|sasu|sarl|eurl|srl|bv|nv|ltda|lda|sapi|pty|co|corp|corporation|company|group) )*(?:s de rl|de cv|de rl|pvt|private|ltd|limited|llc|llp|lp|inc|gmbh|ag|kg|plc|spa|sl|slu|sa|sab|sau|sas|sasu|sarl|eurl|srl|bv|nv|ltda|lda|sapi|pty|co|corp|corporation|company|group) *$/;
 
 /**
- * Company name key for duplicate matching: accents folded, lower-case, dotted initials joined ("S.A." → "sa"), legal
- * forms removed (Ltd, GmbH, S.L., S.A. de C.V., SARL, SAS, S.r.l., AG, B.V. …), punctuation collapsed.
- * Can be '' (e.g. "Company Group Ltd"); callers must treat '' as no key.
+ * Company name key for duplicate matching: accents folded, lower-case, dotted initials joined ("S.A." → "sa"), trailing
+ * legal forms removed (Ltd, GmbH, S.L., S.A. de C.V., S. de R.L., SARL, SAS, S.r.l., AG, B.V. …), punctuation collapsed.
+ * Callers must still treat '' (an empty or punctuation-only name) as no key.
  * Migration 20 holds the same steps in SQL (`normalise_company_name`) to back-fill `companies.name_normalised`; a test
  * keeps the two equal, so change both together.
  */
@@ -113,8 +115,9 @@ export function normaliseCompanyName(name: string): string {
     .replace(/[^a-z0-9.]+/g, ' ')
     .replace(/\b([a-z])\. (?=[a-z]\.)/g, '$1.')
     .replace(/\b([a-z])\.(?=[a-z]\.| |$)/g, '$1')
-    .replace(/\bde (cv|rl)\b/g, ' ')
-    .replace(LEGAL_SUFFIX, '')
+    .replace(/\./g, ' ')
+    .replace(/ +/g, ' ')
+    .replace(TRAILING_LEGAL_FORMS, '')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
 }

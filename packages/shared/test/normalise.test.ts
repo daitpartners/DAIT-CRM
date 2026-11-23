@@ -8,9 +8,18 @@ test.each([
   ['Northwind Logistics Private Limited', 'northwind logistics'], ['Meyer Bauhaus GmbH', 'meyer bauhaus'],
   ['Acme, Inc.', 'acme'], ['  Zenith   Retail LLC ', 'zenith retail'],
 ])('normaliseCompanyName(%s)', (input, out) => expect(normaliseCompanyName(input)).toBe(out));
-test('normaliseCompanyName of only legal suffixes is empty (callers treat as no key)', () => {
-  expect(normaliseCompanyName('Company Group Ltd')).toBe('');
+test('normaliseCompanyName keeps a name that is only legal forms (never empty)', () => {
+  expect(normaliseCompanyName('Company Group Ltd')).toBe('company');
+  expect(normaliseCompanyName('Eurl')).toBe('eurl');
+  expect(normaliseCompanyName('S.A.')).toBe('sa');
+  expect(normaliseCompanyName('')).toBe('');
 });
+test.each([
+  ['AG Foods', 'ag foods'], ['NV Energy', 'nv energy'], ['Sa Pa Travel', 'sa pa travel'], ['LP Gas Co', 'lp gas'],
+  ['KG Logistics', 'kg logistics'], ['Lda Imports', 'lda imports'], ['Co-op', 'co op'], ['Meridian Group', 'meridian'],
+  ['Grupo Bimbo S.A.B. de C.V.', 'grupo bimbo'], ['Acme S.de R.L.', 'acme'], ['Acme S. de R.L. de C.V.', 'acme'],
+  ['Acme S de RL', 'acme'], ['Acme Corporation Inc.', 'acme'],
+])('normaliseCompanyName removes legal forms only at the end: %s', (input, out) => expect(normaliseCompanyName(input)).toBe(out));
 test('FREE_MAIL_DOMAINS covers the common consumer providers, including Indian ones', () => {
   for (const d of ['gmail.com', 'hotmail.com', 'icloud.com', 'outlook.com', 'yahoo.com', 'yahoo.co.in', 'rediffmail.com', 'zohomail.in', 'proton.me']) {
     expect(FREE_MAIL_DOMAINS.has(d)).toBe(true);

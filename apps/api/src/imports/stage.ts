@@ -330,6 +330,20 @@ export async function resortFile(fileId: number): Promise<void> {
   await refreshBatch(file.batchId, rows.map((r) => r.id));
 }
 
+/**
+ * Runs a staged-row change while holding the batch row (`FOR UPDATE`) and only if the batch is not Importing or later,
+ * checked under that lock. Whatever moves the batch to Importing must take the same lock, so no edit lands after an
+ * import has started.
+ */
+async function underBatchLock<T>(batchId: number, fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  return prisma.$transaction(async (tx) => {
+    const [batch] = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM import_batches WHERE id = ${batchId} FOR UPDATE`;
+    if (!batch) throw new NotFoundError();
+    if (isLocked(batch.status)) throw new ImportError('batch_locked', 409);
+    return fn(tx);
+  });
+}
+
 async function batchForEdit(batchId: number) {
   const batch = await prisma.importBatch.findUnique({ where: { id: batchId }, select: { id: true, status: true } });
   if (!batch) throw new NotFoundError();
@@ -351,7 +365,8 @@ export async function answerColumn(fileId: number, body: ImportColumnAnswer): Pr
     if (isLocked(batch.status)) throw new ImportError('batch_locked', 409);
     const current = await tx.importFile.findUniqueOrThrow({ where: { id: fileId }, select: { columnMap: true, questions: true, meta: true } });
     let questions = current.questions as ColumnQuestion[];
-    if (!questions.some((q) => q.sheet === body.sheet && q.col === body.col)) throw new NotFoundError();
+    const asked = questions.find((q) => q.sheet === body.sheet && q.col === body.col);
+    if (!asked) throw new NotFoundError();
     const key = columnKey(body.sheet, body.col);
     const target = body.field === 'skip' ? 'ignore' : body.field;
     const columnMap = { ...(current.columnMap as Record<string, string>), [key]: target };
@@ -359,7 +374,8 @@ export async function answerColumn(fileId: number, body: ImportColumnAnswer): Pr
     const answered = [...new Set([...(meta.answered ?? []), key])];
     questions = questions.filter((q) => !(q.sheet === body.sheet && q.col === body.col));
     const rows = await resortFields(tx, fileId, columnMap);
-    if (target !== 'ignore' && target !== 'notes') {
+    // Confirming the guess (e.g. a second "Phone" column is a phone too) accepts the duplicate as it was: no follow-up.
+    if (target !== 'ignore' && target !== 'notes' && target !== asked.guess) {
       for (const [otherKey, otherTarget] of Object.entries(columnMap)) {
         const at = otherKey.lastIndexOf(COLUMN_KEY_SEP);
         const sheet = otherKey.slice(0, at);
@@ -425,11 +441,11 @@ function rowView(r: Prisma.ImportRowGetPayload<{ select: typeof rowSelect }>): R
  * Applies a person's cell edit and / or tick in one statement, so two quick edits of one row never lose each other
  * (an empty value clears the field; either way the field is then kept on re-sorts).
  */
-export async function applyRowEdit(rowId: number, body: ImportRowUpdate): Promise<void> {
+export async function applyRowEdit(rowId: number, body: ImportRowUpdate, db: Db = prisma): Promise<void> {
   const field = body.field ?? null;
   const value = body.value ?? null;
   const include = body.include ?? null;
-  await prisma.$executeRaw`
+  await db.$executeRaw`
     UPDATE import_rows SET
       fields = CASE
         WHEN ${field}::text IS NULL THEN fields
@@ -445,8 +461,7 @@ export async function applyRowEdit(rowId: number, body: ImportRowUpdate): Promis
 export async function updateRow(rowId: number, body: ImportRowUpdate): Promise<RowView> {
   const row = await prisma.importRow.findUnique({ where: { id: rowId }, select: { id: true, batchId: true } });
   if (!row) throw new NotFoundError();
-  await batchForEdit(row.batchId);
-  await applyRowEdit(rowId, body);
+  await underBatchLock(row.batchId, (tx) => applyRowEdit(rowId, body, tx));
   await refreshBatch(row.batchId, [rowId]);
   return rowView(await prisma.importRow.findUniqueOrThrow({ where: { id: rowId }, select: rowSelect }));
 }
@@ -456,12 +471,11 @@ const FILTER_OUTCOME: Record<string, string> = { imported: 'Imported', skipped: 
 
 /** "Include all" / "Leave out all" for the rows a filter shows; returns how many ticks changed. */
 export async function includeAll(batchId: number, body: ImportIncludeAll): Promise<{ changed: number }> {
-  await batchForEdit(batchId);
   const status = FILTER_STATUS[body.filter];
-  const { count } = await prisma.importRow.updateMany({
+  const { count } = await underBatchLock(batchId, (tx) => tx.importRow.updateMany({
     where: { batchId, outcome: null, include: !body.include, ...(status ? { status } : {}) },
     data: { include: body.include, includeTouched: true },
-  });
+  }));
   return { changed: count };
 }
 

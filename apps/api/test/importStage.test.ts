@@ -278,10 +278,13 @@ describe('companies', () => {
       'Banco de España', 'Meridian Textiles Limited', 'Northwind Logistics Private Limited', 'Company Group Ltd',
       'Ørsted A/S', 'Straße GmbH', 'Ｆｕｌｌｗｉｄｔｈ Co', 'İstanbul Lojistik', 'Café-Bar "El Niño", S.L.U.', '  Zenith   Retail LLC ',
       'L\'Oréal S.A.', 'Total Care Ltd.', 'x.y.z', 'S.A.', '', 'Ação Ltda', 'Grupo Bimbo, S.A.B. de C.V.',
+      'AG Foods', 'NV Energy', 'Sa Pa Travel', 'LP Gas Co', 'KG Logistics', 'Co-op', 'Eurl', 'Lda Imports', 'Company Group Ltd',
+      'Acme S.de R.L.', 'Acme S. de R.L. de C.V.', 'Meridian Group', 'Acme Corporation Inc.', 'Corp', 'ltd ltd ltd',
     ];
     for (const name of names) {
       const [row] = await prisma.$queryRaw<{ n: string }[]>`SELECT normalise_company_name(${name}) AS n`;
       expect(row!.n, name).toBe(normaliseCompanyName(name));
+      if (name.trim() !== '') expect(normaliseCompanyName(name), name).not.toBe('');
     }
   });
 
@@ -503,6 +506,40 @@ describe('step-2 API', () => {
     const after = await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } });
     expect(after.questions).toEqual([]);
     expect(after.columnMap).toMatchObject({ [columnKey('two', 0)]: 'companyName', [columnKey('two', 1)]: 'ignore' });
+  });
+
+  it('confirming a duplicate column\'s guess asks nothing more (N-2)', async () => {
+    const { cookie } = await as('ADMINISTRATOR');
+    const batch = await newBatch();
+    const file = await newFile(batch.id, 'phones.csv');
+    await stageTable(file.id, table({ phones: [['Company', 'Phone', 'Phone'], ['Acme', '+34 91 555 0100', '+34 600 555 010']] }));
+    expect((await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } })).questions).toMatchObject([{ col: 2, guess: 'phone' }]);
+    await json('POST', `/api/imports/files/${file.id}/columns`, cookie, { sheet: 'phones', col: 2, field: 'phone' });
+    expect((await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } })).questions).toEqual([]);
+  });
+
+  it('an edit waiting on the batch lock is refused once the batch went to Importing (N-5)', async () => {
+    const { cookie, batch, rows } = await staged();
+    let locked!: () => void;
+    const lockTaken = new Promise<void>((r) => { locked = r; });
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    const starter = prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM import_batches WHERE id = ${batch.id} FOR UPDATE`;
+      await tx.importBatch.update({ where: { id: batch.id }, data: { status: 'Importing' } });
+      locked();
+      await held;
+    }, { timeout: 20_000 });
+    await lockTaken;
+    const edit = json('PATCH', `/api/imports/rows/${rows[1].id}`, cookie, { field: 'email', value: 'late@brightline.ca' });
+    const tick = json('POST', `/api/imports/batches/${batch.id}/include`, cookie, { filter: 'all', include: false });
+    await new Promise((r) => setTimeout(r, 300));
+    release();
+    await starter;
+    expect([(await edit).statusCode, (await tick).statusCode]).toEqual([409, 409]);
+    const row = await prisma.importRow.findUniqueOrThrow({ where: { id: rows[1].id } });
+    expect(fieldsOf(row).email).toBeUndefined();
+    expect(await prisma.importRow.count({ where: { batchId: batch.id, includeTouched: true } })).toBe(0);
   });
 
   it('Sales Representatives get 403', async () => {
