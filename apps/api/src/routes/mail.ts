@@ -105,6 +105,16 @@ const unlinkedWhere = (user: AuthUser): Prisma.EmailMessageWhereInput => ({
   OR: [{ leadId: null }, { NOT: { lead: leadWhere(user, { includeArchived: true }) } }], folder: { not: 'drafts' },
 });
 
+/**
+ * Linking a message (Link to lead, Create lead) also links the user's older mail in the same conversation that has no
+ * lead yet, so the thread does not keep showing it as unmatched; mail already on another lead keeps its lead.
+ */
+async function linkConversation(db: Tx | typeof prisma, m: EmailMessage, lead: Pick<Lead, 'id' | 'companyId' | 'contactId'>) {
+  if (!m.threadId) return;
+  const where = { userId: m.userId, threadId: m.threadId, leadId: null, id: { not: m.id } };
+  await db.emailMessage.updateMany({ where, data: { leadId: lead.id, companyId: lead.companyId, ...(lead.contactId ? { contactId: lead.contactId } : {}) } });
+}
+
 /** Queues the same change in the user's mailbox (messages that came from it only). */
 async function tellMailbox(db: Tx | typeof prisma, m: EmailMessage, action: MailActionPayload['action']) {
   if (m.graphId) await enqueue(db, 'mail_action', { emailMessageId: m.id, action }, { maxAttempts: ACTION_ATTEMPTS });
@@ -360,8 +370,12 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
       const m = await ownMessage(prisma, user, request.params.id);
       const lead = await assertLeadVisible(prisma, user, leadId);
       const keepContact = m.contactId && lead.companyId && (await prisma.contact.count({ where: { id: m.contactId, companyId: lead.companyId } })) > 0;
-      const updated = await prisma.emailMessage.update({
-        where: { id: m.id }, data: { leadId: lead.id, companyId: lead.companyId, contactId: lead.contactId ?? (keepContact ? m.contactId : null) },
+      const updated = await prisma.$transaction(async (tx) => {
+        const u = await tx.emailMessage.update({
+          where: { id: m.id }, data: { leadId: lead.id, companyId: lead.companyId, contactId: lead.contactId ?? (keepContact ? m.contactId : null) },
+        });
+        await linkConversation(tx, m, lead);
+        return u;
       });
       return { id: updated.id, leadId: updated.leadId };
     });
@@ -394,6 +408,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
           await auditCreatedLead(tx, user.id, created);
           const l = created.lead;
           await tx.emailMessage.update({ where: { id: m.id }, data: { leadId: l.id, companyId: l.companyId, contactId: l.contactId } });
+          await linkConversation(tx, m, l);
           return l.id;
         });
         // Release 4: AI research for a never-researched company with a website.

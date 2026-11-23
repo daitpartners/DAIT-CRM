@@ -424,6 +424,28 @@ describe('reading mail on the Email screen (2B-2)', () => {
     expect(await prisma.emailMessage.findUniqueOrThrow({ where: { id: m.id } })).toMatchObject({ leadId: lead.id, contactId: contact.id, companyId: company.id });
   });
 
+  it('link and create lead also link the older unlinked mail of the same conversation (no "no matching contact" left)', async () => {
+    const { rep, box, lead, company, contact } = await setup();
+    const other = await makeLead({ assignedToId: rep.id });
+    const older = await synced(rep.id, box.id, { threadId: 'c', fromAddress: 'x@unknown.io', occurredAt: new Date('2026-11-18T10:00:00Z') });
+    const elsewhere = await synced(rep.id, box.id, { threadId: 'c', leadId: other.id, occurredAt: new Date('2026-11-19T10:00:00Z') });
+    const m = await synced(rep.id, box.id, { threadId: 'c', fromAddress: 'x@unknown.io' });
+    const notMine = await synced((await makeUser()).id, null, { threadId: 'c', fromAddress: 'x@unknown.io' });
+    const cookie = await signIn(app, rep);
+    expect((await call('POST', `/api/mail/${m.id}/link`, cookie, { leadId: lead.id })).statusCode).toBe(200);
+    expect(await prisma.emailMessage.findUniqueOrThrow({ where: { id: older.id } })).toMatchObject({ leadId: lead.id, companyId: company.id, contactId: contact.id });
+    expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: elsewhere.id } })).leadId).toBe(other.id);
+    expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: notMine.id } })).leadId).toBeNull();
+    const thread = (await call('GET', `/api/mail/${m.id}`, cookie)).json().thread;
+    expect(thread.find((h: { id: number }) => h.id === older.id).unmatched).toBe(false);
+
+    const first = await synced(rep.id, box.id, { threadId: 'd', fromAddress: 'sara@blue-river.io', occurredAt: new Date('2026-11-18T10:00:00Z') });
+    const next = await synced(rep.id, box.id, { threadId: 'd', fromAddress: 'sara@blue-river.io', fromName: 'Sara Lind' });
+    const res = await call('POST', `/api/mail/${next.id}/create-lead`, cookie);
+    expect(res.statusCode).toBe(201);
+    expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: first.id } })).leadId).toBe(res.json().leadId);
+  });
+
   it('create lead from an email links the sender’s company by domain, allocates and links the message', async () => {
     const { rep, box, company } = await setup();
     const m = await synced(rep.id, box.id, { fromAddress: 'luis@acme.com', fromName: 'Luis Vega', subject: 'Need a quote', bodyText: 'Please call' });
