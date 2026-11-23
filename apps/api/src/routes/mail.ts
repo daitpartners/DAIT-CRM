@@ -107,12 +107,23 @@ const unlinkedWhere = (user: AuthUser): Prisma.EmailMessageWhereInput => ({
 
 /**
  * Linking a message (Link to lead, Create lead) also links the user's older mail in the same conversation that has no
- * lead yet, so the thread does not keep showing it as unmatched; mail already on another lead keeps its lead.
+ * lead yet, so the thread does not keep showing it as unmatched. Left alone: drafts, newer mail, mail on another lead
+ * and mail matched to another company. As /link: the lead's contact, else the row's own contact only when it belongs
+ * to the lead's company.
  */
 async function linkConversation(db: Tx | typeof prisma, m: EmailMessage, lead: Pick<Lead, 'id' | 'companyId' | 'contactId'>) {
   if (!m.threadId) return;
-  const where = { userId: m.userId, threadId: m.threadId, leadId: null, id: { not: m.id } };
-  await db.emailMessage.updateMany({ where, data: { leadId: lead.id, companyId: lead.companyId, ...(lead.contactId ? { contactId: lead.contactId } : {}) } });
+  const rows = await db.emailMessage.findMany({
+    where: {
+      userId: m.userId, threadId: m.threadId, leadId: null, id: { not: m.id }, folder: { not: 'drafts' },
+      occurredAt: { lte: m.occurredAt }, OR: [{ companyId: null }, ...(lead.companyId !== null ? [{ companyId: lead.companyId }] : [])],
+    },
+    select: { id: true, contact: { select: { id: true, companyId: true } } },
+  });
+  for (const r of rows) {
+    const keep = r.contact && lead.companyId !== null && r.contact.companyId === lead.companyId ? r.contact.id : null;
+    await db.emailMessage.update({ where: { id: r.id }, data: { leadId: lead.id, companyId: lead.companyId, contactId: lead.contactId ?? keep } });
+  }
 }
 
 /** Queues the same change in the user's mailbox (messages that came from it only). */
