@@ -41,7 +41,8 @@ export function Sidebar({ me, open, onNavigate, collapsed = false, onCollapse }:
     }
   }
 
-  const item = (to: string, label: string, icon: keyof typeof Icons, end = false, badge: string | null = null, hot = false) => {
+  /** `short`: the badge as shown when the full wording is too wide (fr "3 nouv."); screen readers get `badge`. */
+  const item = (to: string, label: string, icon: keyof typeof Icons, end = false, badge: string | null = null, hot = false, short?: string) => {
     const name = badge ? `${label} (${badge})` : label;
     return (
       <NavLink
@@ -49,12 +50,24 @@ export function Sidebar({ me, open, onNavigate, collapsed = false, onCollapse }:
         end={end}
         className={cls}
         onClick={onNavigate}
-        title={collapsed ? name : undefined}
+        // Folded: the name shows as a tooltip on hover and on keyboard focus (CSS, data-label) and is the link's name.
+        data-label={collapsed ? name : undefined}
         aria-label={collapsed ? name : undefined}
       >
         {Icons[icon]}
         <span className="nav-l">{label}</span>
-        {badge ? <span className={hot ? 'cnt hot' : 'cnt'}>{badge}</span> : null}
+        {badge ? (
+          <span className={hot ? 'cnt hot' : 'cnt'}>
+            {short && short !== badge ? (
+              <>
+                <span aria-hidden="true">{short}</span>
+                <span className="sr">{badge}</span>
+              </>
+            ) : (
+              badge
+            )}
+          </span>
+        ) : null}
       </NavLink>
     );
   };
@@ -89,10 +102,10 @@ export function Sidebar({ me, open, onNavigate, collapsed = false, onCollapse }:
       {me.rights.includes('use_email') ? item('/mailer', t('Mailer'), 'send', false, count(counts?.mailerLive, many(counts?.mailerLive, '1 live', '{n} live')), true) : null}
       {item('/calendar', t('Calendar'), 'calendar')}
       {item('/quotations', t('Quotations'), 'quote')}
-      {item('/projects', t('Projects'), 'tasks', false, count(counts?.projects, String(counts?.projects)))}
+      {item('/projects', t('Projects'), 'projects', false, count(counts?.projects, String(counts?.projects)))}
       <div className="navsec">{t('Work')}</div>
       {item('/tasks', t('Tasks'), 'tasks', false, count(counts?.overdueTasks, many(counts?.overdueTasks, '1 overdue', '{n} overdue')))}
-      {item('/notifications', t('Notifications'), 'bell', false, count(counts?.unread, many(counts?.unread, '1 new', '{n} new')), true)}
+      {item('/notifications', t('Notifications'), 'bell', false, count(counts?.unread, many(counts?.unread, '1 new', '{n} new')), true, many(counts?.unread, '1 new|badge', '{n} new|badge'))}
       {item('/reports', t('Reports'), 'reports')}
       <div className="grow" />
       {item('/settings', t('Settings'), 'settings')}
@@ -103,7 +116,7 @@ export function Sidebar({ me, open, onNavigate, collapsed = false, onCollapse }:
         <div className="who">
           <div className="nm">{me.name}</div>
           <small>{roleText(t, me.role)}</small>
-          <button type="button" className="signout" onClick={signOut} aria-label={t('Sign out')} title={collapsed ? `${t('Sign out')} · ${me.name}` : undefined}>
+          <button type="button" className="signout" onClick={signOut} aria-label={t('Sign out')} data-label={collapsed ? `${t('Sign out')} · ${me.name}` : undefined}>
             {Icons.signout}
             <span className="nav-l">{t('Sign out')}</span>
           </button>

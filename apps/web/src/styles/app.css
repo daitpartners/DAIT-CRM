@@ -224,6 +224,12 @@ a:focus-visible,button:focus-visible,[role=combobox]:focus-visible,summary:focus
   .sidebar.collapsed .me .who .nm,.sidebar.collapsed .me .who small{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
   .sidebar.collapsed .signout{margin:0;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0}
   .sidebar.collapsed .signout svg{display:block;width:16px;height:16px}
+  /* Names on the rail: a tooltip on hover and on keyboard focus (review M-4). The rail fits short screens, so it
+     need not scroll and the tooltip may leave it. */
+  .sidebar.collapsed{overflow:visible}
+  .sidebar.collapsed [data-label]{position:relative}
+  .sidebar.collapsed [data-label]::after{content:attr(data-label);position:absolute;left:calc(100% + 10px);top:50%;transform:translateY(-50%);padding:5px 10px;border-radius:6px;background:var(--ink);color:#fff;font-size:12px;font-weight:600;white-space:nowrap;box-shadow:0 6px 18px rgba(31,2,73,.3);opacity:0;pointer-events:none;transition:opacity .12s;z-index:60}
+  .sidebar.collapsed [data-label]:hover::after,.sidebar.collapsed [data-label]:focus-visible::after{opacity:1}
 }
 @media (prefers-reduced-motion:reduce){.sidebar{transition:none}}
 /* Short laptop screens (1280×720): tighter rows so the whole menu and Sign out fit without scrolling. */

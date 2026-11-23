@@ -19,7 +19,11 @@ test('« folds the sidebar to an icon rail and the Email folders to a strip; bot
   await expect(nav).toHaveClass(/collapsed/);
   // After the .2 s width transition.
   await expect.poll(() => nav.evaluate((el) => el.getBoundingClientRect().width)).toBe(64);
-  await expect(nav.getByRole('link', { name: 'Leads', exact: false }).first()).toHaveAttribute('title', /^Leads/);
+  await expect(nav.getByRole('link', { name: 'Leads', exact: false }).first()).toHaveAttribute('data-label', /^Leads/);
+  // The name shows on keyboard focus, not only on hover (review M-4).
+  await page.keyboard.press('Tab');
+  await nav.getByRole('link', { name: 'Dashboard' }).focus();
+  await expect.poll(() => nav.getByRole('link', { name: 'Dashboard' }).evaluate((el) => getComputedStyle(el, '::after').opacity)).toBe('1');
   await expect(nav.getByRole('button', { name: 'Sign out' })).toBeVisible();
 
   await page.goto('/email?folder=sent');

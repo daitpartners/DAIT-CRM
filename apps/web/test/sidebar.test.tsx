@@ -36,9 +36,9 @@ describe('collapsible sidebar', () => {
     expect(nav).toHaveClass('collapsed');
     expect(screen.getByRole('button', { name: 'Expand sidebar' })).toHaveAttribute('aria-expanded', 'false');
     // Each item keeps its name (tooltip and accessible name), with the count where it has one.
-    expect(screen.getByRole('link', { name: 'Leads (15)' })).toHaveAttribute('title', 'Leads (15)');
+    expect(screen.getByRole('link', { name: 'Leads (15)' })).toHaveAttribute('data-label', 'Leads (15)');
     expect(screen.getByRole('link', { name: 'Notifications (3 new)' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Dashboard' })).toHaveAttribute('title', 'Dashboard');
+    expect(screen.getByRole('link', { name: 'Dashboard' })).toHaveAttribute('data-label', 'Dashboard');
     // Sign out stays reachable.
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
     expect(localStorage.getItem('dait-sidebar-collapsed')).toBe('1');
@@ -48,7 +48,7 @@ describe('collapsible sidebar', () => {
     expect(screen.getByRole('navigation', { name: 'Main navigation' })).toHaveClass('collapsed');
     await u.click(screen.getByRole('button', { name: 'Expand sidebar' }));
     expect(screen.getByRole('navigation', { name: 'Main navigation' })).not.toHaveClass('collapsed');
-    expect(screen.getByRole('link', { name: /^Leads/ })).not.toHaveAttribute('title');
+    expect(screen.getByRole('link', { name: /^Leads/ })).not.toHaveAttribute('data-label');
     expect(localStorage.getItem('dait-sidebar-collapsed')).toBe('0');
   });
 
@@ -72,7 +72,9 @@ describe('collapsible sidebar', () => {
     unmount();
     view({ ...rep, language: 'fr' }, { ...counts, overdueTasks: 2 });
     expect(screen.getByText('2 en retard')).toBeInTheDocument();
-    expect(screen.getByText('3 nouv.')).toBeInTheDocument();
+    // Short on screen where the full word does not fit; the full wording for screen readers (review M-12).
+    expect(screen.getByText('3 nouv.')).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByText('3 nouvelles')).toHaveClass('sr');
     expect(screen.getByRole('link', { name: /^Leads/ })).toBeInTheDocument();
   });
 });

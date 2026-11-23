@@ -177,6 +177,21 @@ export const Icons: Record<string, ReactElement> = {
       <path d="M6 9l6 6 6-6" />
     </svg>
   ),
+  /* The prototype's clock (notifications of another kind). */
+  clock: (
+    <svg {...base}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  ),
+  /* Not in the prototype (which reuses the Tasks icon): Projects, so the folded sidebar tells the two apart. */
+  projects: (
+    <svg {...base}>
+      <rect x="3" y="7" width="18" height="13" rx="2" />
+      <path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+      <path d="M3 13h18" />
+    </svg>
+  ),
   /* Not in the prototype (collapsible panels, owner 23 Nov 2026): « to fold a panel, sign-out, in the same line style. */
   fold: (
     <svg {...base}>
