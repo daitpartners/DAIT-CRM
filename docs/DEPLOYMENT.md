@@ -185,8 +185,11 @@ always pass the database: `backup.sh dait_crm`. Cron line for `daitcrm` (`cronta
 30 2 * * * PGUSER=<db-user> /home/daitcrm/live/current/deploy/backup.sh dait_crm >> /home/daitcrm/backups/backup.log 2>&1
 ```
 
-Whether this cron entry, the `~/.pgpass` file and the rclone remote are in place was not verified on 23 Nov 2026: check
-with `sudo -iu daitcrm crontab -l`, `ls -l ~/backups`, `tail ~/backups/backup.log`.
+**Checked on the server, 23 Nov 2026: the daily backup is NOT set up.** `daitcrm` has no crontab, there is no
+`~/.pgpass`, rclone is not installed, and `~/backups` holds only the hand-made pre-release dumps. Until a daily job
+exists, data entered between releases has no backup, and every dump is on this one server. The database `dait_crm` is
+owned by the PostgreSQL role `dait_crm`. Check again with `sudo -iu daitcrm crontab -l`, `ls -l ~/backups`,
+`tail ~/backups/backup.log`.
 
 ## Restoring
 
