@@ -508,7 +508,11 @@ async function visibleSuggestion(tx: Prisma.TransactionClient, user: AuthUser, i
   return { s };
 }
 
-async function applySuggestion(
+/**
+ * Accepts one suggestion: the value written, the field verified, `ai_fields` records its confidence and source (also
+ * used by Import leads for research values accepted at 80% or higher). The caller checks the field is not locked.
+ */
+export async function applySuggestion(
   tx: Prisma.TransactionClient, user: AuthUser, s: { id: number; runId: number; field: string; value: Prisma.JsonValue; confidence: number; sourceUrl: string },
   company: Company,
 ): Promise<Company> {

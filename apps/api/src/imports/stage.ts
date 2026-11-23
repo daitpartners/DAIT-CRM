@@ -243,19 +243,26 @@ export const stageHooks: { beforeEvaluationWrite?: () => Promise<void>; beforeRe
 
 /**
  * Writes re-evaluated rows. Nothing a person did meanwhile is lost: a row whose fields changed since they were read is
- * skipped (the edit's own re-evaluation covers it), and the tick is only written while no person has set it.
+ * skipped (the edit's own re-evaluation covers it), and the tick is only written while no person has set it. Written
+ * under the batch row lock and only while the batch is not Importing or later, so a re-match never lands after an
+ * import has started.
  */
-async function writeEvaluations(updates: RowUpdate[]): Promise<void> {
-  for (let i = 0; i < updates.length; i += CHUNK) {
-    const chunk = JSON.stringify(updates.slice(i, i + CHUNK));
-    await prisma.$executeRaw`
-      UPDATE import_rows AS r
-      SET status = v.status, problems = v.problems, fields = v.fields, matched_company_id = v.matched,
-          include = CASE WHEN r.include_touched THEN r.include ELSE v.include END
-      FROM jsonb_to_recordset(${chunk}::jsonb)
-        AS v(id int, status text, include boolean, problems jsonb, fields jsonb, prev jsonb, matched int)
-      WHERE r.id = v.id AND r.fields = v.prev`;
-  }
+async function writeEvaluations(batchId: number, updates: RowUpdate[]): Promise<void> {
+  if (updates.length === 0) return;
+  await prisma.$transaction(async (tx) => {
+    const [batch] = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM import_batches WHERE id = ${batchId} FOR UPDATE`;
+    if (!batch || isLocked(batch.status)) return;
+    for (let i = 0; i < updates.length; i += CHUNK) {
+      const chunk = JSON.stringify(updates.slice(i, i + CHUNK));
+      await tx.$executeRaw`
+        UPDATE import_rows AS r
+        SET status = v.status, problems = v.problems, fields = v.fields, matched_company_id = v.matched,
+            include = CASE WHEN r.include_touched THEN r.include ELSE v.include END
+        FROM jsonb_to_recordset(${chunk}::jsonb)
+          AS v(id int, status text, include boolean, problems jsonb, fields jsonb, prev jsonb, matched int)
+        WHERE r.id = v.id AND r.fields = v.prev AND r.outcome IS NULL`;
+    }
+  }, { timeout: 120_000, maxWait: 30_000 });
 }
 
 /**
@@ -309,7 +316,7 @@ export async function refreshBatch(batchId: number, rowIds?: number[]): Promise<
       if (!same) updates.push(next);
     });
     await stageHooks.beforeEvaluationWrite?.();
-    await writeEvaluations(updates);
+    await writeEvaluations(batchId, updates);
   }
   const rowCount = await prisma.importRow.count({ where: { batchId } });
   await prisma.importBatch.update({ where: { id: batchId }, data: { rowCount } });

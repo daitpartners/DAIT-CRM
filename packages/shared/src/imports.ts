@@ -142,6 +142,22 @@ export function importColumnLabel(key: ImportColumnKey, lang: Lang): string {
   return (COLUMN_LABELS[lang] ?? COLUMN_LABELS.en)[key];
 }
 
+/**
+ * Step 4 ("Review and import") totals for the current choices: rows that will be imported, the new companies they make
+ * (distinct), rows going onto companies already in the CRM, the rows left out by reason, the rows with no email or phone
+ * (Import them / Leave them out), rows whose country came only from research (Q2: not importable while "Accept" is
+ * unticked) and the countries the CRM does not know yet.
+ */
+export type ReviewSummary = {
+  willImport: number;
+  newCompanies: number;
+  existingCompanies: number;
+  skipped: { total: number; alreadyInCrm: number; notLead: number; unticked: number; other: number };
+  noContactRows: number;
+  researchOnlyCountry: number;
+  unknownCountries: { value: string; count: number }[];
+};
+
 /** How an imported lead's source reads: "Import · IMPORT-2026-11-24-2". */
 export function importSource(number: string): string {
   return `Import · ${number}`;

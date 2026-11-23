@@ -160,6 +160,17 @@ describe('leads API', () => {
     expect((await req('GET', '/api/leads?archived=1', rep.cookie)).statusCode).toBe(403);
   });
 
+  it('a batch number in the search is an exact import batch match (case-insensitive)', async () => {
+    const mgr = await as('MANAGER');
+    const first = await makeLead({ importBatch: 'IMPORT-2026-11-24', companyName: 'Batch One Co' });
+    const second = await makeLead({ importBatch: 'IMPORT-2026-11-24-2', companyName: 'Batch Two Co' });
+    // A lead whose name happens to contain the number is not part of the batch.
+    await makeLead({ companyName: 'IMPORT-2026-11-24 Trading' });
+    const ids = async (q: string) => (await req('GET', `/api/leads?q=${encodeURIComponent(q)}`, mgr.cookie)).json().items.map((i: { id: number }) => i.id);
+    expect(await ids('IMPORT-2026-11-24')).toEqual([first.id]);
+    expect(await ids('import-2026-11-24-2')).toEqual([second.id]);
+  });
+
   it('overdue tab uses the user\'s timezone', async () => {
     const east = await as('MANAGER', 'Pacific/Kiritimati');
     const west = await as('MANAGER', 'Pacific/Pago_Pago');

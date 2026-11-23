@@ -1,8 +1,8 @@
 import type { FastifyError, FastifyPluginAsync, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import {
-  IMPORT_MAX_FILE_BYTES, IMPORT_MAX_FILES, IMPORT_MAX_ROWS, ImportBatchCreate, ImportBatchUpdate, ImportColumnAnswer,
-  ImportIncludeAll, ImportRowUpdate, ImportRowsQuery, OUTREACH_LANGUAGES,
+  IMPORT_MAX_FILE_BYTES, IMPORT_MAX_FILES, IMPORT_MAX_ROWS, ImportBatchCreate, ImportBatchUpdate, ImportColumnAnswer, ImportCommit,
+  ImportIncludeAll, ImportRowUpdate, ImportRowsQuery, OUTREACH_LANGUAGES, importSource,
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { NotFoundError, parseBody, parseQuery } from '../validate.js';
@@ -12,6 +12,7 @@ import { answerColumn, includeAll, listRows, rematchBatch, sortBatch, updateRow 
 import { loadEnrichmentSettings, monthTotals } from '../research/service.js';
 import { claudeCodeConfig, claudeCodeReady } from '../research/providers.js';
 import { pauseResearch, researchView, resumeResearch, startBatchResearch } from '../imports/research.js';
+import { reviewBatch, startImport } from '../imports/commit.js';
 
 const idOf = (raw: string) => {
   const id = Number(raw);
@@ -21,6 +22,10 @@ const idOf = (raw: string) => {
 
 const FileQuery = z.object({ name: z.string().trim().min(1).max(255) });
 const ResearchQuery = z.object({ page: z.coerce.number().int().min(1).default(1) });
+const ReviewQuery = z.object({
+  acceptHigh: z.enum(['0', '1']).default('0'),
+  noContactRows: z.enum(['import', 'leave']).optional(),
+});
 
 const batchView = (b: { id: number; number: string; status: string; language: string; leadType: string }) =>
   ({ id: b.id, number: b.number, status: b.status, language: b.language, leadType: b.leadType });
@@ -42,9 +47,23 @@ async function firstNames(ids: number[]): Promise<string[]> {
   return ids.map((id) => byId.get(id)).filter((n): n is string => Boolean(n));
 }
 
+/** The active allocation rules for an outreach language, each with its people's first names (step 1 and step 4). */
+async function languageRules(language: string): Promise<{ name: string; people: string[] }[]> {
+  const rules = await prisma.allocationRule.findMany({
+    where: { isActive: true, matchLanguage: language },
+    orderBy: [{ priority: 'asc' }, { id: 'asc' }],
+    select: { name: true, assignTo: true },
+  });
+  return Promise.all(rules.map(async (r) => {
+    const assignTo = r.assignTo as number | number[];
+    return { name: r.name, people: await firstNames(Array.isArray(assignTo) ? assignTo : [assignTo]) };
+  }));
+}
+
 /**
- * Import leads (steps 1 to 3): options, batches, file uploads, the staged rows (list, edit, tick, column questions,
- * re-matching) and AI research (start, progress, pause, resume). Administrators and Managers (`import_leads`). Changes are refused (409 `batch_locked`) once
+ * Import leads (steps 1 to 4): options, batches, file uploads, the staged rows (list, edit, tick, column questions,
+ * re-matching), AI research (start, progress, pause, resume), the review totals and Import. Administrators and
+ * Managers (`import_leads`). Changes are refused (409 `batch_locked`) once
  * the batch is Importing or later.
  */
 export const importBatchRoutes: FastifyPluginAsync = async (app) => {
@@ -63,23 +82,12 @@ export const importBatchRoutes: FastifyPluginAsync = async (app) => {
   /** What step 1 shows: the language allocation rules, whether Claude will help, and the upload limits. */
   app.get('/imports/options', canImport, async () => {
     const claudeConfig = claudeCodeConfig(process.env);
-    const [rules, settings, totals, ready] = await Promise.all([
-      prisma.allocationRule.findMany({
-        where: { isActive: true, matchLanguage: { in: [...OUTREACH_LANGUAGES] } },
-        orderBy: [{ priority: 'asc' }, { id: 'asc' }],
-        select: { name: true, matchLanguage: true, assignTo: true },
-      }),
+    const [settings, totals, ready] = await Promise.all([
       loadEnrichmentSettings(prisma),
       monthTotals(prisma),
       claudeCodeReady(claudeConfig),
     ]);
-    const languages = await Promise.all(OUTREACH_LANGUAGES.map(async (value) => ({
-      value,
-      rules: await Promise.all(rules.filter((r) => r.matchLanguage === value).map(async (r) => {
-        const assignTo = r.assignTo as number | number[];
-        return { name: r.name, people: await firstNames(Array.isArray(assignTo) ? assignTo : [assignTo]) };
-      })),
-    })));
+    const languages = await Promise.all(OUTREACH_LANGUAGES.map(async (value) => ({ value, rules: await languageRules(value) })));
     return {
       languages,
       claude: {
@@ -177,5 +185,26 @@ export const importBatchRoutes: FastifyPluginAsync = async (app) => {
     const id = idOf(request.params.id);
     const { page } = parseQuery(ResearchQuery, request.query);
     return researchView(id, page);
+  });
+
+  /** Step 4: what the import will do with these choices, the batch's type, language and source, and who gets the leads. */
+  app.get<{ Params: { id: string } }>('/imports/batches/:id/review', canImport, async (request) => {
+    const id = idOf(request.params.id);
+    const q = parseQuery(ReviewQuery, request.query);
+    const { batch, summary } = await reviewBatch(id, { acceptHigh: q.acceptHigh === '1', noContactRows: q.noContactRows ?? null });
+    return {
+      ...summary, leadType: batch.leadType, language: batch.language, source: importSource(batch.number),
+      allocation: await languageRules(batch.language),
+    };
+  });
+
+  /** Step 4: Import (202; the `import_commit` job does the work). */
+  app.post<{ Params: { id: string } }>('/imports/batches/:id/import', canImport, async (request, reply) => {
+    const id = idOf(request.params.id);
+    const body = parseBody(ImportCommit, request.body);
+    return guard(reply, async () => {
+      await startImport(request.user!, id, body);
+      return reply.code(202).send({ id, status: 'Importing' });
+    });
   });
 };

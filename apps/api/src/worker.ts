@@ -12,6 +12,7 @@ import { campaignStepHandler } from './jobs/handlers/campaignStep.js';
 import { researchCompanyHandler } from './jobs/handlers/researchCompany.js';
 import { importReadFileHandler } from './jobs/handlers/importReadFile.js';
 import { importResearchHandler } from './jobs/handlers/importResearch.js';
+import { importCommitHandler } from './jobs/handlers/importCommit.js';
 import { scheduleCampaigns } from './mailer/schedule.js';
 import { scheduleMailSync } from './mail/schedule.js';
 import { scheduleCalendarSync } from './calendar/schedule.js';
@@ -25,7 +26,7 @@ export { runOnce, runForever } from './jobs/runner.js';
 const HANDLERS: Partial<Record<JobType, JobHandler>> = {
   send_email: sendEmailHandler, send_user_email: sendUserEmailHandler, sync_mailbox: syncMailboxHandler, mail_action: mailActionHandler,
   campaign_step: campaignStepHandler, sync_calendar: syncCalendarHandler, research_company: researchCompanyHandler,
-  import_read_file: importReadFileHandler, import_research: importResearchHandler,
+  import_read_file: importReadFileHandler, import_research: importResearchHandler, import_commit: importCommitHandler,
 };
 
 /**
