@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { MAIL_PAGE_SIZE, MAIL_PAGE_SIZES, MAIL_VIEWS, useMailList, useMailMeta, useSyncNow, type MailFilter, type MailItem, type MailView } from '../../api/mail';
+import { MAIL_PAGE_SIZE, MAIL_PAGE_SIZES, MAIL_VIEWS, useMailList, useMailMessage, useMailMeta, useSyncNow, type MailFilter, type MailItem, type MailView } from '../../api/mail';
 import { clientName } from '../../api/companies';
 import { useTemplates } from '../../api/templates';
 import { useCurrentUser } from '../../api/useCurrentUser';
@@ -63,6 +63,9 @@ export function EmailPage() {
   const items = list?.items ?? [];
   const total = list?.total ?? 0;
   const selectedId = num(id ?? null) ?? items[0]?.id ?? null;
+  // The message opened from a link (the Reader's own query): a list answered before the open marked it read
+  // still shows its row as read.
+  const { data: opened } = useMailMessage(num(id ?? null) ?? null);
   const mailbox = meta?.mailbox ?? null;
   const connected = mailbox?.status === 'connected';
   const lang = me.language;
@@ -279,7 +282,7 @@ export function EmailPage() {
             {leadNumber ? ` · ${leadNumber}` : ''}
           </div>
           {items.map((m) => (
-            <MessageRow key={m.id} m={m} on={m.id === selectedId} to={`/email/${m.id}${params.toString() ? `?${params.toString()}` : ''}`} />
+            <MessageRow key={m.id} m={opened?.id === m.id && opened.isRead ? { ...m, isRead: true } : m} on={m.id === selectedId} to={`/email/${m.id}${params.toString() ? `?${params.toString()}` : ''}`} />
           ))}
           {!isLoading && items.length === 0 ? (
             <div className="empty">

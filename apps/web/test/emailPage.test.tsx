@@ -276,6 +276,25 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     expect(await screen.findByText(/synced Today, 11:55/)).toBeTruthy();
   });
 
+  it('a message opened from a link is not bold even when the list arrives after it', async () => {
+    const a = item({ id: 7, subject: 'Unread one', isRead: false });
+    stub([a], { 7: detail({ ...a, isRead: true }) });
+    // The list (answered before the open marked it read) arrives only after the message itself.
+    let opened!: () => void;
+    const detailDone = new Promise<void>((r) => (opened = r));
+    const base = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/mail?')) await detailDone;
+      const res = await base(url, init);
+      if (url === '/api/mail/7') setTimeout(opened, 0);
+      return res;
+    });
+    show('/email/7');
+    const list = screen.getByRole('region', { name: 'Message list' });
+    const row = (await within(list).findByText('Unread one')).closest('a')!;
+    expect(row.className).not.toMatch(/\bunread\b/);
+  });
+
   it('opening an unread message clears its bold at once', async () => {
     const u = userEvent.setup();
     const first = item({ id: 1, isRead: true });
