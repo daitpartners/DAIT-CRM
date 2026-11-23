@@ -145,7 +145,7 @@ function MailSide({ m, day, short }: { m: MailDetail; day: (ymd: string) => stri
   const l = m.lead;
   const companyId = l?.companyId ?? m.company?.id;
   const event = (h: MailDetail['thread'][number]) => {
-    const what = h.kind === 'sent' ? t('sent by {who}', { who: h.by ?? '' }) : h.kind === 'reply' ? t('reply received') : h.kind === 'draft' ? t('draft') : t('received');
+    const what = h.kind === 'sent' ? (h.by ? t('sent by {who}', { who: h.by }) : t('sent')) : h.kind === 'reply' ? t('reply received') : h.kind === 'draft' ? t('draft') : t('received');
     return h.direction === 'in' && h.unmatched ? `${what} · ${t('no matching contact')}` : what;
   };
   return (

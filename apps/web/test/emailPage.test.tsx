@@ -548,6 +548,17 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     expect(within(side).queryByText('No earlier messages.')).toBeNull();
   });
 
+  it('your own open message reads plain "sent" (prototype E-6)', async () => {
+    at1200();
+    const a = item({ id: 1, folder: 'sent', status: 'sent', occurredAt: '2026-11-18T10:20:00.000Z' });
+    stub([a], {
+      1: detail(a, { thread: [{ id: 1, occurredAt: '2026-11-18T10:20:00.000Z', direction: 'out', who: 'ana@acme.com', subject: 'Proposal', kind: 'sent', by: null, unmatched: false }] }),
+    }, META, (url) => (url === '/api/me' ? london : undefined));
+    show('/email/1', london);
+    const side = await screen.findByRole('complementary', { name: 'Linked records' });
+    expect(await within(side).findByText('18 Nov 10:20 · sent')).toBeTruthy();
+  });
+
   it('a single unmatched message shows its own history entry', async () => {
     at1200();
     const a = item({ id: 1, occurredAt: '2026-11-16T09:30:00.000Z' });

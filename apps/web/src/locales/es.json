@@ -1294,6 +1294,7 @@
   "Paused by {name}": "En pausa por {name}",
   "Mailbox needs reconnecting": "Hay que volver a conectar el buzón",
   "You can send to at most 500 leads in one run.": "Puede enviar como máximo a 500 leads en cada envío.",
+  "sent": "enviado",
   "sent by {who}": "enviado por {who}",
   "reply received": "respuesta recibida",
   "received": "recibido",

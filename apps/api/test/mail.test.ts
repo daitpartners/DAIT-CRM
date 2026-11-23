@@ -355,8 +355,22 @@ describe('reading mail on the Email screen (2B-2)', () => {
     expect((await call('GET', `/api/mail/${m.id}`, cookie)).json().thread).toEqual([
       { id: m.id, occurredAt: '2026-11-20T10:00:00.000Z', direction: 'in', who: 'Ana Ruiz', subject: 'Interested in your work', kind: 'received', by: null, unmatched: true },
     ]);
-    // Without a conversation id: the message alone; sent by the mailbox owner (first name of the user when Graph gave no sender name).
-    expect((await call('GET', `/api/mail/${noThread.id}`, cookie)).json().thread).toMatchObject([{ id: noThread.id, kind: 'sent', by: 'Maya' }]);
+    // Without a conversation id: the message alone; your own open message reads "sent" (prototype E-6), no "by".
+    expect((await call('GET', `/api/mail/${noThread.id}`, cookie)).json().thread).toMatchObject([{ id: noThread.id, kind: 'sent', by: null }]);
+  });
+
+  it('thread wording: only mail answering yours is "reply received"; your other mail is "sent by" you (prototype E-1, E-6)', async () => {
+    const { rep, box } = await setup();
+    const at = (d: number) => new Date(Date.UTC(2026, 10, d, 10));
+    const out1 = await synced(rep.id, box.id, { threadId: 'w', folder: 'sent', status: 'sent', fromAddress: 'maya@daitpartners.com', fromName: null, occurredAt: at(10) });
+    const in1 = await synced(rep.id, box.id, { threadId: 'w', subject: 'Re: Proposal', occurredAt: at(11) });
+    const in2 = await synced(rep.id, box.id, { threadId: 'w', subject: 'Re: Proposal', occurredAt: at(12) });
+    const out2 = await synced(rep.id, box.id, { threadId: 'w', folder: 'sent', status: 'sent', fromAddress: 'maya@daitpartners.com', fromName: 'Maya Pillai', occurredAt: at(13) });
+    const cookie = await signIn(app, rep);
+    const kinds = async (id: number) =>
+      (await call('GET', `/api/mail/${id}`, cookie)).json().thread.map((h: { id: number; kind: string; by: string | null }) => [h.id, h.kind, h.by]);
+    expect(await kinds(in2.id)).toEqual([[out2.id, 'sent', 'Maya'], [in2.id, 'received', null], [in1.id, 'reply', null], [out1.id, 'sent', 'Maya']]);
+    expect(await kinds(out2.id)).toEqual([[out2.id, 'sent', null], [in2.id, 'received', null], [in1.id, 'reply', null], [out1.id, 'sent', 'Maya']]);
   });
 
   it('a preview (the first message shown on arrival) does not mark it read', async () => {

@@ -56,17 +56,21 @@ const REPLY_SUBJECT = /^\s*(re|aw|sv|rv)\s*:/i;
 /**
  * The side panel's thread history (prototype `history`, newest first): the open message and the rest of the
  * conversation in the user's own mailbox. `kind` words the event ("sent by Maya", "reply received", "received"),
- * `by` is the sender's first name for your own mail, `unmatched` marks mail with no lead and no contact.
+ * `by` is the sender's first name for your own mail other than the open message, `unmatched` marks mail with no lead
+ * and no contact.
  */
 function threadHistory(user: AuthUser, open: EmailMessage, others: EmailMessage[]) {
   const all = [...others, open].sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime() || b.id - a.id);
   return all.map((t, i) => {
     const inbound = isInbound(t);
-    const earlier = i < all.length - 1;
-    const kind = t.status === 'draft' ? 'draft' : !inbound ? 'sent' : earlier || REPLY_SUBJECT.test(t.subject) ? 'reply' : 'received';
+    // A reply answers your own mail: the message before it (drafts aside) is yours, or "Re:" when it starts the list.
+    const before = all.slice(i + 1).find((o) => o.status !== 'draft');
+    const kind = t.status === 'draft' ? 'draft' : !inbound ? 'sent' : (before ? !isInbound(before) : REPLY_SUBJECT.test(t.subject)) ? 'reply' : 'received';
+    // Your own open message reads plain "sent" (prototype E-6); your other mail in the thread "sent by <first name>".
+    const by = inbound || t.id === open.id ? null : ((t.fromName || user.name).trim().split(/\s+/)[0] ?? null);
     return {
       id: t.id, occurredAt: t.occurredAt, direction: inbound ? 'in' : 'out', who: counterpart(t), subject: t.subject,
-      kind, by: inbound ? null : ((t.fromName || user.name).trim().split(/\s+/)[0] ?? null), unmatched: !t.leadId && !t.contactId,
+      kind, by, unmatched: !t.leadId && !t.contactId,
     };
   });
 }
