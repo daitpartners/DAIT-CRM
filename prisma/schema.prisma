@@ -59,6 +59,10 @@ model User {
   enrichmentRuns     EnrichmentRun[]
   decidedSuggestions EnrichmentSuggestion[]
 
+  importBatchesCreated  ImportBatch[] @relation("ImportBatchCreator")
+  importBatchesImported ImportBatch[] @relation("ImportBatchImporter")
+  importBatchesUndone   ImportBatch[] @relation("ImportBatchUndoer")
+
   @@map("users")
 }
 
@@ -393,6 +397,9 @@ model Company {
   enrichmentSuggestions EnrichmentSuggestion[]
   sourceRecords         SourceRecord[]
 
+  importRowsMatched ImportRow[] @relation("ImportRowMatchedCompany")
+  importRows        ImportRow[] @relation("ImportRowCompany")
+
   @@index([name])
   @@index([nameNormalised, country])
   @@index([country])
@@ -441,6 +448,7 @@ model Contact {
   campaignRecipients  EmailCampaignRecipient[]
   quotations          Quotation[]
   projectStakeholders ProjectStakeholder[]
+  importRows          ImportRow[]
 
   @@index([businessEmail])
   @@index([phoneNormalised])
@@ -529,6 +537,7 @@ model Lead {
 
   enrichmentRuns EnrichmentRun[]
   sourceRecords  SourceRecord[]
+  importRows     ImportRow[]
 
   @@index([status])
   @@index([assignedToId])
@@ -963,4 +972,144 @@ model EmailCampaignRecipient {
   @@index([campaignId, status, position])
   @@index([leadId])
   @@map("email_campaign_recipients")
+}
+
+/// An "Import leads" batch (IMPORT-YYYY-MM-DD[-n]): its files and staged rows until they are imported, then the record
+/// the Data manager lists (downloads, original files, Undo).
+model ImportBatch {
+  id                   Int       @id @default(autoincrement())
+  /// IMPORT-YYYY-MM-DD[-n] (BATCH_NUMBER_RE, shared); also `leads.import_batch` of every lead it imports.
+  number               String    @unique @db.VarChar(30)
+  /// OUTREACH_LANGUAGES (shared): en | es.
+  language             String    @db.Char(2)
+  /// LEAD_TYPES (shared): Lead | Prospect.
+  leadType             String    @map("lead_type") @db.VarChar(10)
+  /// BATCH_STATUSES (shared).
+  status               String    @default("Uploading") @db.VarChar(20)
+  createdById          Int?      @map("created_by_id")
+  rowCount             Int       @default(0) @map("row_count")
+  importedCount        Int       @default(0) @map("imported_count")
+  newCompanyCount      Int       @default(0) @map("new_company_count")
+  existingCompanyCount Int       @default(0) @map("existing_company_count")
+  skippedCount         Int       @default(0) @map("skipped_count")
+  errorCount           Int       @default(0) @map("error_count")
+  researchTotal        Int       @default(0) @map("research_total")
+  researchDone         Int       @default(0) @map("research_done")
+  researchPaused       Boolean   @default(false) @map("research_paused")
+  /// Why research stopped by itself: only "cap" (the monthly Claude run cap).
+  researchStopReason   String?   @map("research_stop_reason") @db.VarChar(20)
+  researchStartedAt    DateTime? @map("research_started_at")
+  researchEngine       String?   @map("research_engine") @db.VarChar(120)
+  /// { at: string; text: string }[], newest first, at most 50.
+  activity             Json      @default("[]")
+  /// ImportCommit (shared): the step-4 choices.
+  options              Json      @default("{}")
+  importedAt           DateTime? @map("imported_at")
+  importedById         Int?      @map("imported_by_id")
+  undoneAt             DateTime? @map("undone_at")
+  undoneById           Int?      @map("undone_by_id")
+  /// What Undo removed and kept.
+  undo                 Json?
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  createdBy  User?        @relation("ImportBatchCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  importedBy User?        @relation("ImportBatchImporter", fields: [importedById], references: [id], onDelete: SetNull)
+  undoneBy   User?        @relation("ImportBatchUndoer", fields: [undoneById], references: [id], onDelete: SetNull)
+  files      ImportFile[]
+  rows       ImportRow[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("import_batches")
+}
+
+/// One uploaded file of a batch, stored as STORAGE_DIR/imports/<batchId>/<fileId>.
+model ImportFile {
+  id          Int       @id @default(autoincrement())
+  batchId     Int       @map("batch_id")
+  name        String    @db.VarChar(255)
+  /// IMPORT_EXTENSIONS (shared).
+  ext         String    @db.VarChar(5)
+  size        Int
+  storagePath String    @map("storage_path") @db.VarChar(500)
+  /// FILE_STATUSES (shared): Reading | Read | Scan | Failed.
+  status      String    @default("Reading") @db.VarChar(20)
+  /// FileMeta (shared).
+  meta        Json      @default("{}")
+  error       String?   @db.VarChar(200)
+  /// "<sheet>\u0000<col>" → the column's target field (or "ignore").
+  columnMap   Json      @default("{}") @map("column_map")
+  /// ColumnQuestion[] (shared): the unsure columns still open.
+  questions   Json      @default("[]")
+  /// Claude calls made reading this file; summed (by read_at month) against the monthly Claude run cap.
+  claudeCalls Int       @default(0) @map("claude_calls")
+  readAt      DateTime? @map("read_at")
+  /// Set when the original file is removed (90 days after upload); the row stays as the record.
+  deletedAt   DateTime? @map("deleted_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  batch ImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  rows  ImportRow[]
+
+  @@index([batchId])
+  @@map("import_files")
+}
+
+/// One staged row (a sheet row, PDF page entry, card or text line) and, once committed, what it became.
+model ImportRow {
+  id               Int       @id @default(autoincrement())
+  batchId          Int       @map("batch_id")
+  fileId           Int       @map("file_id")
+  position         Int
+  sheet            String?   @db.VarChar(100)
+  /// row | page | card | line: with origin_n, the "From" column.
+  originKind       String    @map("origin_kind") @db.VarChar(5)
+  originN          Int       @map("origin_n")
+  /// The source cells as read (string[]).
+  raw              Json      @default("[]")
+  /// RowFields (shared): the row's own values (as read, then as edited).
+  fields           Json      @default("{}")
+  /// ImportField[]: fields a person edited (kept when the file's columns are re-sorted).
+  edited           Json      @default("[]")
+  /// ROW_STATUSES (shared).
+  status           String    @db.VarChar(20)
+  include          Boolean
+  includeTouched   Boolean   @default(false) @map("include_touched")
+  matchedCompanyId Int?      @map("matched_company_id")
+  /// RowProblem[] (shared).
+  problems         Json      @default("[]")
+  /// Partial<Record<ImportField, ResearchValue>> (shared).
+  research         Json      @default("{}")
+  /// RESEARCH_ROW_STATUSES (shared).
+  researchStatus   String?   @map("research_status") @db.VarChar(12)
+  researchNote     String?   @map("research_note") @db.VarChar(300)
+  researchedAt     DateTime? @map("researched_at")
+  /// Set by reserveClaudeRun before the row's Claude call and never cleared: counts toward the monthly run cap.
+  claudeAt         DateTime? @map("claude_at")
+  /// Imported | Skipped | Error.
+  outcome          String?   @db.VarChar(10)
+  outcomeCode      String?   @map("outcome_code") @db.VarChar(30)
+  error            String?   @db.VarChar(300)
+  leadId           Int?      @map("lead_id")
+  companyId        Int?      @map("company_id")
+  contactId        Int?      @map("contact_id")
+  companyCreated   Boolean   @default(false) @map("company_created")
+  contactCreated   Boolean   @default(false) @map("contact_created")
+  /// Set at import: what Undo checks before removing what this row created.
+  stamps           Json?
+  importedAt       DateTime? @map("imported_at")
+
+  batch          ImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  file           ImportFile  @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  matchedCompany Company?    @relation("ImportRowMatchedCompany", fields: [matchedCompanyId], references: [id], onDelete: SetNull)
+  lead           Lead?       @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  company        Company?    @relation("ImportRowCompany", fields: [companyId], references: [id], onDelete: SetNull)
+  contact        Contact?    @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([batchId, position])
+  @@index([batchId, status])
+  @@index([fileId])
+  @@index([claudeAt])
+  @@map("import_rows")
 }
