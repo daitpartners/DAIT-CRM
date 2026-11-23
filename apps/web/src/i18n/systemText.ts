@@ -132,14 +132,30 @@ export const notificationText = (t: TFn, text: string): string => apply(NOTIFICA
 /** A notification's detail: translated only for the kinds whose detail the server writes, and only those parts. */
 export function notificationDetail(t: TFn, text: string, detail: string): string {
   const kind = DETAILS.find(([re]) => re.test(text));
-  return kind ? parts(kind[1], t, detail) : detail;
+  if (!kind) return detail;
+  // "Company · from LD-1010": only a last part after the company is the server's; the name is kept as stored.
+  if (kind[1] === FROM_LEAD) {
+    const at = detail.lastIndexOf(' · ');
+    const done = at < 0 ? null : apply(FROM_LEAD, t, detail.slice(at + 3));
+    return done === null ? detail : `${detail.slice(0, at)} · ${done}`;
+  }
+  return parts(kind[1], t, detail);
 }
 
 /** A task title: the server's own titles translate; a user's title is shown as typed. */
 export const taskTitle = (t: TFn, title: string): string => apply(TASK, t, title) ?? title;
 
-/** A timeline entry's title. */
-export const timelineTitle = (t: TFn, title: string): string => apply(TIMELINE, t, title) ?? title;
+/** Meeting entries the server writes when a call or meeting is planned; any other meeting title was typed by a user. */
+const PLANNED: Rule[] = TIMELINE.filter(([re]) => /scheduled/.test(re.source));
+
+/**
+ * A timeline entry's title. Meeting and research-note titles are typed by users, so a meeting translates only in the
+ * server's "Call / Meeting scheduled · …" shape and a research note never does.
+ */
+export function timelineTitle(t: TFn, title: string, type?: string): string {
+  if (type === 'research') return title;
+  return apply(type === 'meeting' ? PLANNED : TIMELINE, t, title) ?? title;
+}
 
 /** An AI research run's trigger or engine. */
 export const researchText = (t: TFn, text: string): string => apply(RESEARCH, t, text) ?? text;

@@ -23,7 +23,7 @@ test('« folds the sidebar to an icon rail and the Email folders to a strip; bot
   // The name shows on keyboard focus, not only on hover (review M-4).
   await page.keyboard.press('Tab');
   await nav.getByRole('link', { name: 'Dashboard' }).focus();
-  await expect.poll(() => nav.getByRole('link', { name: 'Dashboard' }).evaluate((el) => getComputedStyle(el, '::after').opacity)).toBe('1');
+  await expect(page.locator('.rail-tip')).toHaveText('Dashboard');
   await expect(nav.getByRole('button', { name: 'Sign out' })).toBeVisible();
 
   await page.goto('/email?folder=sent');

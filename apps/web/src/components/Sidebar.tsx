@@ -1,3 +1,4 @@
+import { useState, type FocusEvent, type MouseEvent } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
@@ -50,7 +51,7 @@ export function Sidebar({ me, open, onNavigate, collapsed = false, onCollapse }:
         end={end}
         className={cls}
         onClick={onNavigate}
-        // Folded: the name shows as a tooltip on hover and on keyboard focus (CSS, data-label) and is the link's name.
+        // Folded: the name shows as a tooltip on hover and on keyboard focus (data-label) and is the link's name.
         data-label={collapsed ? name : undefined}
         aria-label={collapsed ? name : undefined}
       >
@@ -71,10 +72,37 @@ export function Sidebar({ me, open, onNavigate, collapsed = false, onCollapse }:
       </NavLink>
     );
   };
+  // The rail's tooltip (review M-4, N-1): fixed to the viewport beside the item, so the rail can keep its own scroll
+  // on a short screen without clipping it.
+  const [tip, setTip] = useState<{ text: string; top: number; left: number } | null>(null);
+  const showTip = (el: Element | null) => {
+    const item = el?.closest<HTMLElement>('[data-label]');
+    if (!collapsed || !item) return setTip(null);
+    const r = item.getBoundingClientRect();
+    setTip({ text: item.dataset.label ?? '', top: r.top + r.height / 2, left: r.right + 10 });
+  };
+  const onFocusTip = (e: FocusEvent) => {
+    let keyboard = true;
+    try {
+      keyboard = (e.target as HTMLElement).matches(':focus-visible');
+    } catch {
+      /* an older browser without :focus-visible: show it */
+    }
+    showTip(keyboard ? (e.target as Element) : null);
+  };
   const toggleName = collapsed ? t('Expand sidebar') : t('Collapse sidebar');
 
   return (
-    <nav id="sidebar" className={['sidebar', open ? 'open' : '', collapsed ? 'collapsed' : ''].filter(Boolean).join(' ')} aria-label={t('Main navigation')}>
+    <nav
+      id="sidebar"
+      className={['sidebar', open ? 'open' : '', collapsed ? 'collapsed' : ''].filter(Boolean).join(' ')}
+      aria-label={t('Main navigation')}
+      onMouseOver={(e: MouseEvent) => showTip(e.target as Element)}
+      onMouseLeave={() => setTip(null)}
+      onFocus={onFocusTip}
+      onBlur={() => setTip(null)}
+      onScroll={() => setTip(null)}
+    >
       <div className="brand">
         <img src="/logo-mark.svg" alt="" />
         <div className="brand-t">
@@ -122,6 +150,11 @@ export function Sidebar({ me, open, onNavigate, collapsed = false, onCollapse }:
           </button>
         </div>
       </div>
+      {collapsed && tip ? (
+        <div className="rail-tip" role="tooltip" aria-hidden="true" style={{ top: tip.top, left: tip.left }}>
+          {tip.text}
+        </div>
+      ) : null}
     </nav>
   );
 }

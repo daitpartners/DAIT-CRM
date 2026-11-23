@@ -27,7 +27,7 @@ export function TimelineEntry({ activity: a, last, extra }: { activity: Activity
         {last ? null : <div className="line" />}
       </div>
       <div className="ev">
-        <strong>{timelineTitle(t, a.title)}</strong>
+        <strong>{timelineTitle(t, a.title, a.activityType)}</strong>
         {a.body ? <div className="b pre">{a.body}</div> : null}
         {link ? (
           <div className="b">

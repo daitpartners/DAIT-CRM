@@ -39,6 +39,11 @@ describe('collapsible sidebar', () => {
     expect(screen.getByRole('link', { name: 'Leads (15)' })).toHaveAttribute('data-label', 'Leads (15)');
     expect(screen.getByRole('link', { name: 'Notifications (3 new)' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Dashboard' })).toHaveAttribute('data-label', 'Dashboard');
+    // Hover shows the name beside the rail (a fixed tooltip, so the rail can keep its own scroll; review N-1).
+    await u.hover(screen.getByRole('link', { name: 'Leads (15)' }));
+    expect(screen.getByRole('tooltip', { hidden: true })).toHaveTextContent('Leads (15)');
+    await u.unhover(screen.getByRole('navigation', { name: 'Main navigation' }));
+    expect(screen.queryByRole('tooltip', { hidden: true })).toBeNull();
     // Sign out stays reachable.
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
     expect(localStorage.getItem('dait-sidebar-collapsed')).toBe('1');

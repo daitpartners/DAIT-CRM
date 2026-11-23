@@ -42,6 +42,14 @@ describe('stored system texts in the reader language (review #04)', () => {
     expect(taskTitle(tEs, 'Call · pricing')).toBe('Call · pricing');
     expect(taskTitle(tEs, 'Discovery meeting')).toBe('Discovery meeting');
     expect(timelineTitle(tEs, 'Call · pricing')).toBe('Call · pricing');
+    // A meeting or research note a user typed stays as typed, even in a system shape (review N-2).
+    expect(timelineTitle(tEs, 'Lead created', 'meeting')).toBe('Lead created');
+    expect(timelineTitle(tEs, 'Lead created', 'research')).toBe('Lead created');
+    expect(timelineTitle(tEs, 'Meeting scheduled · Kick-off', 'meeting')).toBe('Reunión planificada · Kick-off');
+    expect(timelineTitle(tEs, 'Lead created', 'created')).toBe('Lead creado');
+    // Only the last part of a project's detail is the server's "from LD-…" (review N-3).
+    expect(notificationDetail(tEs, 'Project created · Web', 'from Monday Ltd · from LD-1010')).toBe('from Monday Ltd · de LD-1010');
+    expect(notificationDetail(tEs, 'Project created · Web', 'from Acme')).toBe('from Acme');
   });
 
   it('English is shown as stored', () => {

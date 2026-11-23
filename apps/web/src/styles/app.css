@@ -210,7 +210,8 @@ a:focus-visible,button:focus-visible,[role=combobox]:focus-visible,summary:focus
 .side-toggle svg{width:16px;height:16px}
 @media (min-width:900px){
   /* Sticky, scrolling on its own: every module and Sign out stay in reach on long pages and short laptop screens. */
-  .sidebar{position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;transition:width .2s ease,flex-basis .2s ease}
+  /* z-index: the sticky sidebar is its own stacking context; above the page so the rail's tooltip shows over it. */
+  .sidebar{position:sticky;top:0;z-index:5;align-self:flex-start;height:100vh;overflow-y:auto;transition:width .2s ease,flex-basis .2s ease}
   .sidebar.collapsed{width:64px;flex-basis:64px;padding:18px 10px 20px}
   .sidebar.collapsed .brand{flex-direction:column;gap:8px;padding:4px 0 14px}
   .sidebar.collapsed .brand-t{display:none}
@@ -224,21 +225,18 @@ a:focus-visible,button:focus-visible,[role=combobox]:focus-visible,summary:focus
   .sidebar.collapsed .me .who .nm,.sidebar.collapsed .me .who small{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
   .sidebar.collapsed .signout{margin:0;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0}
   .sidebar.collapsed .signout svg{display:block;width:16px;height:16px}
-  /* Names on the rail: a tooltip on hover and on keyboard focus (review M-4). The rail fits short screens, so it
-     need not scroll and the tooltip may leave it. */
-  .sidebar.collapsed{overflow:visible}
-  .sidebar.collapsed [data-label]{position:relative}
-  .sidebar.collapsed [data-label]::after{content:attr(data-label);position:absolute;left:calc(100% + 10px);top:50%;transform:translateY(-50%);padding:5px 10px;border-radius:6px;background:var(--ink);color:#fff;font-size:12px;font-weight:600;white-space:nowrap;box-shadow:0 6px 18px rgba(31,2,73,.3);opacity:0;pointer-events:none;transition:opacity .12s;z-index:60}
-  .sidebar.collapsed [data-label]:hover::after,.sidebar.collapsed [data-label]:focus-visible::after{opacity:1}
+  /* Names on the rail: a tooltip on hover and on keyboard focus (review M-4, N-1), fixed beside the item so the rail
+     keeps its own scroll on short screens. */
+  .rail-tip{position:fixed;transform:translateY(-50%);padding:5px 10px;border-radius:6px;background:var(--ink);color:#fff;font-size:12px;font-weight:600;white-space:nowrap;box-shadow:0 6px 18px rgba(31,2,73,.3);pointer-events:none;z-index:60}
 }
 @media (prefers-reduced-motion:reduce){.sidebar{transition:none}}
 /* Short laptop screens (1280×720): tighter rows so the whole menu and Sign out fit without scrolling. */
 @media (min-width:900px) and (max-height:780px){.sidebar .nav{padding-top:7px;padding-bottom:7px}.sidebar .navsec{padding-top:10px}.sidebar .brand{padding-bottom:14px}}
-/* The icon rail on a short screen: smaller gaps and no avatar (the name is the Sign out tooltip), so Sign out fits. */
+/* The icon rail on a short screen: smaller gaps; below about 720 px it scrolls on its own to Settings, the avatar and
+   Sign out. */
 @media (min-width:900px) and (max-height:780px){
   .sidebar.collapsed .brand{gap:4px;padding-bottom:8px}
   .sidebar.collapsed .navsec{margin:6px}
-  .sidebar.collapsed .me .av{display:none}
 }
 .mobilebar{display:none}
 .nav-scrim{display:none}
