@@ -150,7 +150,7 @@ textarea.in{height:auto;padding:10px 12px;resize:vertical;line-height:1.5}
 .task{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px}
 .task.over{border-color:#F2B8B8;background:#FFF7F7}.task.done{opacity:.55}
 .task strong{display:block}.task .m{color:var(--muted);font-size:12px;margin-top:2px}
-.task-when{color:var(--muted);font-size:12px;font-weight:500;margin-left:8px;white-space:nowrap}
+.task-when{color:var(--muted);font-size:12px;font-weight:500;margin-left:4px;white-space:nowrap}
 /* Lets the title shrink in a narrow column (Completed), so the unbreakable type · time drops to its own line. */
 .task .grow{min-width:0}
 .task input{margin-top:3px;accent-color:var(--purple)}

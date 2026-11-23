@@ -182,7 +182,9 @@ export function TaskItem({ task, busy, onTick, onEdit, onSnooze }: TaskItemProps
       <span className="grow">
         <strong>
           {task.title}
-          {when ? <span className="task-when">{when}</span> : null}
+          {/* A break chance before the time: in the narrow Completed card the title keeps its words together and the
+              type · time moves to its own line (review #27). */}
+          {when ? <>{' '}<span className="task-when">{when}</span></> : null}
         </strong>
         <span className="m">
           {task.isDone ? (
