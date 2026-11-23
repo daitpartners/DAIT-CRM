@@ -16,6 +16,7 @@ import { companyStatusBadge, companyStatusText, errorText, initials, verificatio
 import { useLang, useT } from '../../i18n/useT';
 import { CompanyModal, type CompanySection } from './CompanyModal';
 import { ContactModal } from './ContactModal';
+import { useSources } from '../../api/research';
 import { useResearchRunner } from './AiCard';
 import { ActivitiesTab } from './tabs/ActivitiesTab';
 import { AiTab, SourcesTab } from './tabs/AiTabs';
@@ -49,6 +50,7 @@ export function CompanyProfile() {
   const leadTotal = pipeline?.byStatus.reduce((n, g) => n + g.count, 0);
   const { data: activities } = useCompanyActivities(id, 1);
   const { data: projects } = useCompanyProjects(id);
+  const { data: sources } = useSources(id);
   const lookupText = useLookupText(lang);
   // undefined = closed; null = whole form (header Edit); a section = that group's Edit button.
   const [editing, setEditing] = useState<CompanySection | null | undefined>(undefined);
@@ -96,7 +98,7 @@ export function CompanyProfile() {
     { id: 'projects', label: t('Projects'), ...count(projects?.items.length) },
     { id: 'activities', label: t('Activities'), ...count(activities?.total) },
     { id: 'ai', label: t('AI Intelligence') },
-    { id: 'sources', label: t('Research Sources') },
+    { id: 'sources', label: t('Research Sources'), ...count(sources?.length) },
   ];
 
   let panel;

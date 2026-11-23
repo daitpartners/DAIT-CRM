@@ -227,7 +227,7 @@ describe('placesProvider', () => {
     });
     expect(res.findings.every((x) => x.sourceUrl === 'https://maps.google.com/?cid=123' && x.confidence === 85)).toBe(true);
     expect(res.sources).toHaveLength(1);
-    expect(res.sources[0]).toMatchObject({ sourceType: 'Google Places API', title: 'Google Places · ChIJ_abc-123' });
+    expect(res.sources[0]).toMatchObject({ sourceType: 'Google Places API', title: 'Google Places · ChIJ_abc-123', confidence: '85%' });
     expect(res.sources[0]!.snapshot).toContain('Phone: 0114 496 0000');
     expect(res.sources[0]!.fieldsPopulated).toContain('Phone');
     expect(JSON.stringify(res)).not.toContain(KEY);
@@ -271,7 +271,7 @@ describe('websiteProvider', () => {
     expect(res.error).toBeUndefined();
     expect(res.pages).toHaveLength(3);
     expect(res.sources.map((s) => s.url)).toEqual([home, site.url('site.test', '/about-us'), site.url('site.test', '/contact')]);
-    expect(res.sources[0]).toMatchObject({ sourceType: 'Company website', confidence: '70–90' });
+    expect(res.sources[0]).toMatchObject({ sourceType: 'Company website', confidence: '70–90%' });
     expect(res.sources[0]!.fieldsPopulated).toContain('Legal company name');
     expect(res.sources[0]!.snapshot).toContain('We build widgets & parts for packaging lines across Europe.');
   });

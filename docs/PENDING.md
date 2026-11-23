@@ -31,6 +31,49 @@ Kept here at the owner's request; picked up when the owner says so.
 - **1D public contact form + Enquiries** — "keep contact in pending, i will decide lateron" (22 Nov 2026). Open point:
   daitpartners.com/contact already has its own brief form (contact.php → Mailjet).
 
+## Release 4 — AI research (23 Nov 2026) — ready on `release-4-ai-research`, not merged, not deployed
+- **Status:** branch `release-4-ai-research` (from main `2c14c1c`), five tasks done and checked side by side against the
+  prototype (screenshots and `parity-report.md` in `parity-screenshots-4-ai-research/` next to the repo); unit, API,
+  e2e, build, translations and database checks green. One database migration (`20261204100000_ai_research`). Needs
+  merge + "deploy" from the owner.
+- **What it adds:** "Run AI research" on a company (header, Overview AI card, AI Intelligence tab, lead page AI line)
+  and an automatic run when a lead is created for a company with a website that was never researched. The free Website
+  reader reads the company's own site (robots.txt respected) and proposes values for empty, unverified fields only;
+  users Accept / Reject them (or "Accept all ≥ 80%"), see the Enrichment history and the Research Sources tab (one
+  record per page read, read-only snapshot, "+ Add source manually"). The Companies list "AI research queue" tile
+  counts pending · processing · failed runs. Administrators get the Enrichment engine card.
+- **Fixed in the parity check:** the Research Sources tab now shows its count ("Research Sources 5"); source
+  confidence reads "90%" / "70–90%" as the prototype (was "90"); the Overview legend reads "Empty fields stay NULL.
+  Nothing is invented." and "Last research: <date>, <time>" as the prototype; the lead page AI line has the prototype's
+  lilac note background and a normal-weight "Run research". Also fixed (older, release 3B): a company with no leads and
+  no projects answered 404 to Administrators and Managers on its Projects tab (no "Projects 0" count) and in the
+  Create project dialog.
+- **Kept different from the prototype (approved design):**
+  - Enrichment engine card follows the design, not the prototype, including its order: Engine — Website reader (built
+    in, free, always on), Claude API (off until ANTHROPIC_API_KEY is on the server and a monthly cap is set), Ollama
+    ("not installed on this server", disabled); Sources — Public company website (on), Web search (needs Claude API),
+    Google Places API (off until GOOGLE_PLACES_API_KEY and a monthly call cap), Apollo.io ("not connected"); plus the
+    Daily run limit field. The prototype has Ollama on, Places on, Apollo / Web search selectable.
+  - No AI summary, AI classification or opportunity score until Claude is turned on: the AI card shows "Opportunity
+    score not yet computed" and "No AI summary yet. Run research to generate one."; the lead page AI line shows the
+    research status ("AI research Completed · Run research") instead of the prototype's AI summary.
+  - The lead page AI line's "Run research" starts a run (as the design); the prototype's links to the AI tab.
+- **Owner to do:**
+  - **Claude (optional, paid):** create an API key at console.anthropic.com — this is separate from a Claude
+    subscription (Pro / Max does not include API use) and needs its own billing; set `ANTHROPIC_API_KEY` (and
+    `ANTHROPIC_MODEL`, e.g. the current Opus or Sonnet model id) in the server environment and restart; then, in a
+    company's AI Intelligence tab → Enrichment engine, turn Claude on with a monthly cap in USD. Test Web search once
+    with the real key on one company before switching Web search on.
+  - **Before turning Claude on:** check the price table `CLAUDE_PRICES_USD_PER_MTOK` (and the web search price) in
+    `apps/api/src/research/providers.ts` against https://platform.claude.com/docs/en/about-claude/pricing — the cap is
+    counted from it.
+  - **Google Places (optional, paid):** a Google Cloud project with a billing account, a budget alert and an API quota
+    for the Places API (New); create `GOOGLE_PLACES_API_KEY` (restricted to the Places API) and set it in the server
+    environment; then switch "Google Places API" on in the engine card with a monthly call cap.
+  - **Apollo.io:** needs a paid Apollo plan; not built (shows "not connected").
+  - **Limits:** the daily run limit (default 50 across the CRM) resets at midnight UTC (05:30 IST); the Claude monthly
+    cap and the Places monthly call cap reset at midnight UTC on the 1st of the month (05:30 IST).
+
 ## Release 3A — Quotations (22 Nov 2026) — ready on `release-3a-quotations`, not merged, not deployed
 - **Status:** branch `release-3a-quotations` (from main `4e14d50`), all tasks done and checked side by side against the
   prototype (screenshots in `parity-screenshots-3a-quotations/` next to the repo); unit, API, e2e, build, translations

@@ -52,19 +52,20 @@ type Call = { method: string; url: string };
 
 let signedIn: Me = seller;
 
-function stub({ items = ROWS, isClient = true, status = 'Active' }: { items?: ProjectRow[]; isClient?: boolean; status?: string } = {}) {
+function stub({ items = ROWS, isClient = true, status = 'Active', company = {} }: { items?: ProjectRow[]; isClient?: boolean; status?: string; company?: object } = {}) {
   const calls: Call[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     calls.push({ method: init?.method ?? 'GET', url });
     if (url === '/api/me') return Response.json(signedIn);
     if (url === '/api/companies/4/projects') return Response.json({ items, isClient });
-    if (url === '/api/companies/4') return Response.json({ ...COMPANY, isClient, status });
+    if (url === '/api/companies/4') return Response.json({ ...COMPANY, isClient, status, ...company });
     if (url.startsWith('/api/projects/form-options')) return Response.json({ ...OPTIONS, company: { ...OPTIONS.company, isClient } });
     if (url.startsWith('/api/companies?')) return Response.json({ items: [], total: 0, page: 1, pageSize: 100 });
     if (url.startsWith('/api/leads') || url.startsWith('/api/contacts') || url.startsWith('/api/quotations')) {
       return Response.json({ items: [], total: 0, page: 1, pageSize: 25 });
     }
     if (url.endsWith('/locations')) return Response.json({ items: [] });
+    if (url === '/api/companies/4/sources') return Response.json({ items: [{ id: 1 }, { id: 2 }, { id: 3 }] });
     if (url.endsWith('/pipeline')) return Response.json({ byStatus: [], open: 0, won: 0, lost: 0 });
     if (url.includes('/activities')) return Response.json({ items: [], total: 0, page: 1, pageSize: 20, summary: null });
     return Response.json({});
@@ -158,6 +159,25 @@ describe('Company profile: Projects', () => {
     const at = names.findIndex((n) => n.startsWith('Projects'));
     expect(names[at - 1]).toMatch(/^Leads & Prospects/);
     expect(names[at + 1]).toMatch(/^Activities/);
+  });
+
+  it('the Research Sources tab carries its count, as the prototype ("Research Sources 5")', async () => {
+    stub();
+    mount(<CompanyProfile />, { at: '/companies/4', path: '/companies/:id' });
+    await waitFor(() => expect(screen.getByRole('tab', { name: /^Research Sources/ })).toHaveTextContent('Research Sources 3'));
+    expect(screen.getByRole('tab', { name: /^AI Intelligence/ })).toHaveTextContent(/^AI Intelligence$/);
+  });
+
+  it('Overview legend as the prototype: "Empty fields stay NULL", last research with its time and status', async () => {
+    stub({ company: { aiResearchStatus: 'Completed', aiLastResearchAt: '2026-11-18T09:51:00.000Z' } });
+    mount(<CompanyProfile />, { at: '/companies/4', path: '/companies/:id' });
+    const legend = await waitFor(() => {
+      const el = document.querySelector('.legend');
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    expect(legend).toHaveTextContent('Empty fields stay NULL. Nothing is invented.');
+    expect(legend).toHaveTextContent(/Last research: 18\/11\/2026,? \d\d:51 · Completed/);
   });
 
   it('tab: table in prototype columns, Create project for a client, and How projects work', async () => {

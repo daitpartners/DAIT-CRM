@@ -470,6 +470,20 @@ describe('projects API — list, company tab, form options', () => {
     expect((await req('GET', `/api/companies/${hidden.company.id}/projects`, rep.cookie)).statusCode).toBe(404);
   });
 
+  it('a company with no leads and no projects: users who see every company get the tab and the options (not 404)', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const company = await makeCompany({ name: 'Leadless Ltd' });
+    const tab = await req('GET', `/api/companies/${company.id}/projects`, admin.cookie);
+    expect(tab.statusCode, tab.body).toBe(200);
+    expect(tab.json()).toEqual({ items: [], isClient: false });
+    const options = await req('GET', `/api/projects/form-options?company=${company.id}`, admin.cookie);
+    expect(options.statusCode, options.body).toBe(200);
+    // A rep who neither created it nor has a lead there still gets 404.
+    const rep = await as('SALES_REPRESENTATIVE');
+    expect((await req('GET', `/api/companies/${company.id}/projects`, rep.cookie)).statusCode).toBe(404);
+    expect((await req('GET', `/api/projects/form-options?company=${company.id}`, rep.cookie)).statusCode).toBe(404);
+  });
+
   it('company projects: a rep on an unassigned lead (company hidden) sees only the projects visible to them', async () => {
     const admin = await as('ADMINISTRATOR');
     const rep = await as('SALES_REPRESENTATIVE');

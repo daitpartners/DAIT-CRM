@@ -259,7 +259,7 @@
   "Employee count": "Nombre d’employés",
   "Employee range": "Tranche d'effectif",
   "Employees": "Employés",
-  "Empty fields stay empty. Nothing is invented.": "Les champs vides restent vides. Rien n’est inventé.",
+  "Empty fields stay NULL. Nothing is invented.": "Les champs vides restent NULL. Rien n’est inventé.",
   "Enrichment engine": "Moteur d’enrichissement",
   "Enrichment history": "Historique d’enrichissement",
   "Enter a company name": "Saisissez le nom de l’entreprise",

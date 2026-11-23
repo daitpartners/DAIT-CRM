@@ -54,7 +54,7 @@ export function OverviewTab({ company: c, canManage, onEdit, research }: Props) 
   const number = (n: number | null) => (n === null ? null : new Intl.NumberFormat(lang).format(n));
   const email = c.businessEmail ? safeUrl(`mailto:${c.businessEmail}`) : null;
 
-  const { date } = useFormatDate();
+  const { dateTime } = useFormatDate();
   const tags: Tags = { verified: c.verifiedFields ?? {}, ai: c.aiFields ?? {} };
 
   return (
@@ -67,10 +67,10 @@ export function OverviewTab({ company: c, canManage, onEdit, research }: Props) 
         <span>
           <span className="tag-ai">{t('AI · {n}%', { n: 82 })}</span> {t('AI-suggested. Never overwrites verified values.')}
         </span>
-        <span className="dim">{t('Empty fields stay empty. Nothing is invented.')}</span>
+        <span className="dim">{t('Empty fields stay NULL. Nothing is invented.')}</span>
         <div className="grow" />
         <span>
-          {t('Last research: {when}', { when: c.aiLastResearchAt ? date(c.aiLastResearchAt) : t('never') })}
+          {t('Last research: {when}', { when: c.aiLastResearchAt ? dateTime(c.aiLastResearchAt) : t('never') })}
           {' · '}
           <span className={researchStatusBadge(c.aiResearchStatus)}>{researchStatusText(t, c.aiResearchStatus)}</span>
         </span>

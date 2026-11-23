@@ -556,7 +556,8 @@ fieldset.bare>legend{padding:0}
 .lead-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:12px;margin-top:4px}
 
 /* Lead page side column (prototype): AI line without research, link-style button, Projects hint. */
-.note.ai-empty{font-size:12.5px;color:var(--muted);border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:10px 12px}
+.note.ai-empty{font-size:12.5px;color:var(--muted);border:1px solid var(--line);border-radius:8px;background:#F9F7FD;padding:10px 12px}
+.note.ai-empty .linkish{font-weight:inherit}
 .linkish{border:0;background:none;padding:0;font:inherit;color:var(--purple);font-weight:600;cursor:pointer}
 .linkish:hover{color:#4B0A9A}
 .side-hint{font-size:12.5px;line-height:1.45}

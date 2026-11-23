@@ -1,10 +1,11 @@
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
+import type { Prisma } from '@prisma/client';
 import {
   defaultCurrency, projectCreateSchema, projectFormOptionsQuerySchema, projectListQuerySchema, projectUpdateSchema,
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { NotFoundError, parseBody, parseQuery } from '../validate.js';
-import { requireRight, requireUser } from '../plugins/auth.js';
+import { requireRight, requireUser, type AuthUser } from '../plugins/auth.js';
 import { StaleError, isNotFound, isUniqueViolation } from '../prismaErrors.js';
 import { RuleError } from '../leads/service.js';
 import { leadWhere } from '../leads/visibility.js';
@@ -36,6 +37,17 @@ async function guard<T>(reply: FastifyReply, fn: () => Promise<T>, opts: { stale
     if (isUniqueViolation(e, 'quotation_id')) return reply.code(409).send({ error: 'quotation_linked' });
     throw e;
   }
+}
+
+/**
+ * The company, a lead of it (archived included) or a project of it is visible to the user. A user who sees every
+ * company needs no OR: Prisma drops an empty object inside OR, so `OR: [{}, …]` would match only the other branches
+ * (a company without leads or projects was 404 for Administrators and Managers).
+ */
+function reachableCompany(user: AuthUser): Prisma.CompanyWhereInput {
+  const own = companyWhere(user);
+  if (Object.keys(own).length === 0) return {};
+  return { OR: [own, { leads: { some: leadWhere(user, { includeArchived: true }) } }, { projects: { some: projectWhere(user) } }] };
 }
 
 const idOf = (raw: string) => {
@@ -80,17 +92,7 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
     const user = request.user!;
     const id = idOf(request.params.id);
     // As form-options: the company, a lead of it (archived included: its page still shows the card) or a project of it.
-    const company = await prisma.company.findFirst({
-      where: {
-        id,
-        OR: [
-          companyWhere(user),
-          { leads: { some: leadWhere(user, { includeArchived: true }) } },
-          { projects: { some: projectWhere(user) } },
-        ],
-      },
-      select: { id: true, isClient: true },
-    });
+    const company = await prisma.company.findFirst({ where: { id, ...reachableCompany(user) }, select: { id: true, isClient: true } });
     if (!company) throw new NotFoundError();
     return { items: await projectRows(prisma, user, { companyId: company.id }), isClient: company.isClient };
   });
@@ -105,16 +107,7 @@ export const projectRoutes: FastifyPluginAsync = async (app) => {
   app.get('/projects/form-options', { preHandler: [requireUser] }, async (request) => {
     const query = parseQuery(projectFormOptionsQuerySchema, request.query);
     const user = request.user!;
-    const company = await prisma.company.findFirst({
-      where: {
-        id: query.company,
-        OR: [
-          companyWhere(user),
-          { leads: { some: leadWhere(user, { includeArchived: true }) } },
-          { projects: { some: projectWhere(user) } },
-        ],
-      },
-    });
+    const company = await prisma.company.findFirst({ where: { id: query.company, ...reachableCompany(user) } });
     if (!company) throw new NotFoundError();
     const project = query.project === undefined
       ? null

@@ -72,7 +72,7 @@ const confidenceRange = (values: number[]): string => {
   if (values.length === 0) return '';
   const lo = Math.min(...values);
   const hi = Math.max(...values);
-  return lo === hi ? String(lo) : `${lo}–${hi}`;
+  return lo === hi ? `${lo}%` : `${lo}–${hi}%`;
 };
 
 const fieldLabels = (fields: string[]): string =>
@@ -202,7 +202,7 @@ export function placesProvider({ apiKey, fetchImpl = fetch }: PlacesProviderOpti
             url: sourceUrl,
             sourceType: 'Google Places API',
             fieldsPopulated: fieldLabels([...findings.map((f) => f.field), ...(phone ? ['phone'] : [])]),
-            confidence: findings.length ? String(PLACES_CONFIDENCE) : '',
+            confidence: findings.length ? `${PLACES_CONFIDENCE}%` : '',
             snapshot,
           }],
         };
