@@ -231,6 +231,20 @@ describe('reading mail on the Email screen (2B-2)', () => {
     expect((await call('GET', '/api/mail/meta', adminCookie)).json().unlinked).toBe(0);
   });
 
+  it('the company filter never matches through a lead you cannot see', async () => {
+    const { rep, box } = await setup();
+    const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    const y = await makeCompany({ name: 'Globex', website: 'https://globex.com' });
+    const theirs = await makeLead({ companyId: y.id, assignedToId: other.id });
+    const mine = await makeLead({ companyId: y.id, assignedToId: rep.id });
+    // Mail linked only through a lead (no company on the message itself).
+    await synced(rep.id, box.id, { subject: 'Through theirs', leadId: theirs.id, companyId: null });
+    await synced(rep.id, box.id, { subject: 'Through mine', leadId: mine.id, companyId: null });
+    const res = (await call('GET', `/api/mail?view=inbox&company=${y.id}`, await signIn(app, rep))).json();
+    expect(res.items.map((i: { subject: string }) => i.subject)).toEqual(['Through mine']);
+    expect(res.total).toBe(1);
+  });
+
   it('awaiting reply finds an old message when filtered by company', async () => {
     const { rep, box, lead } = await setup();
     const y = await makeCompany({ name: 'Globex', website: 'https://globex.com' });

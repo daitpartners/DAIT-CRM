@@ -216,7 +216,10 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
     else if (view === 'awaiting') and.push({ id: { in: await awaitingIds(user.id) } });
     else and.push({ folder: view });
     const company = Number(q.company);
-    if (q.company && Number.isInteger(company)) and.push({ OR: [{ companyId: company }, { lead: { companyId: company } }] });
+    // Through a lead only when the user can see that lead (a lead moved to someone else does not place your mail).
+    if (q.company && Number.isInteger(company)) {
+      and.push({ OR: [{ companyId: company }, { lead: { AND: [{ companyId: company }, leadWhere(user, { includeArchived: true })] } }] });
+    }
     const lead = Number(q.lead);
     if (q.lead && Number.isInteger(lead)) and.push({ leadId: lead });
     // Narrows the caller's own mail only (the userId filter above stays): a tag never shows anyone else's message.
