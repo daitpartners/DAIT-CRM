@@ -145,6 +145,20 @@ describe('renderQuotationPdf', () => {
     for (const n of [1, 2, 3]) expect(text).toContain(`Page ${n} of 3`);
   });
 
+  it('a very long item name with a discount stays inside its row (the discount line is kept, nothing runs over)', async () => {
+    const name = Array.from({ length: 900 }, (_, i) => `Word${i + 1}`).join(' ');
+    const lines = [
+      { item: name, description: null, qty: 1, unit: 'project', unitPrice: 1000, discount: 15 },
+      { item: 'After line', description: null, qty: 1, unit: 'unit', unitPrice: 10, discount: 0 },
+    ];
+    const buf = await render(snapshot({}, lines), settings());
+    expect(pageCount(buf)).toBe(3);
+    const text = pdfText(buf);
+    expect(text).toContain('15% discount');
+    expect(text).toContain('After line');
+    for (const n of [1, 2, 3]) expect(text).toContain(`Page ${n} of 3`);
+  });
+
   it('shows characters outside the standard fonts as "?" (₹ as INR) instead of failing', async () => {
     const lines = [{ item: 'Café ₹ fee ✓', description: '“Fase 2” – año', qty: 1, unit: 'unit', unitPrice: 10, discount: 0 }];
     const text = pdfText(await render(snapshot({}, lines), settings()));

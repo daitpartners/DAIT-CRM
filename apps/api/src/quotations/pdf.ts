@@ -176,10 +176,14 @@ export async function renderQuotationPdf(
     const item = printable(l.item);
     const discount = l.discount ? L('{n}% discount', { n: num(l.discount) }) : '';
     let desc = l.description ? printable(l.description) : '';
-    doc.font(BOLD).fontSize(9.5);
-    const itemH = Math.min(doc.heightOfString(item || ' ', { width: cellW }), maxCell);
     doc.font(REGULAR).fontSize(9);
     const discountH = discount ? 2 + doc.heightOfString(discount, { width: cellW }) : 0;
+    // An item name taller than a page is cut (with an ellipsis) to what fits on one beside its discount line.
+    doc.font(BOLD).fontSize(9.5);
+    const itemLineH = doc.currentLineHeight(true);
+    const itemFull = doc.heightOfString(item || ' ', { width: cellW });
+    const itemH = itemFull > maxCell - discountH ? Math.max(itemLineH, Math.floor((maxCell - discountH) / itemLineH) * itemLineH) : itemFull;
+    doc.font(REGULAR).fontSize(9);
     // A description taller than a page is cut (with an ellipsis) to what fits on one, so the row never runs on.
     const descRoom = Math.max(0, maxCell - itemH - discountH - 2);
     let descH = desc ? doc.heightOfString(desc, { width: cellW }) : 0;
