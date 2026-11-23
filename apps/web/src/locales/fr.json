@@ -1684,5 +1684,9 @@
   "The sender's mailbox is no longer connected.": "La boîte de l’expéditeur n’est plus connectée.",
   "The email could not be sent. Send it again from the quotation.": "L’e-mail n’a pas pu être envoyé. Renvoyez-le depuis le devis.",
   "Check Sent Items in Outlook before sending again.": "Vérifiez les Éléments envoyés dans Outlook avant de renvoyer.",
-  "The email was sent, but the quotation and lead could not be updated. Check them before sending again.": "L’e-mail a été envoyé, mais le devis et le lead n’ont pas pu être mis à jour. Vérifiez-les avant de renvoyer."
+  "The email was sent, but the quotation and lead could not be updated. Check them before sending again.": "L’e-mail a été envoyé, mais le devis et le lead n’ont pas pu être mis à jour. Vérifiez-les avant de renvoyer.",
+  "1 unread email": "1 e-mail non lu",
+  "{n} unread emails": "{n} e-mails non lus",
+  "1 mailer run in progress": "1 envoi du mailer en cours",
+  "{n} mailer runs in progress": "{n} envois du mailer en cours"
 }

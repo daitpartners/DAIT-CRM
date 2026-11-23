@@ -1684,5 +1684,9 @@
   "The sender's mailbox is no longer connected.": "El buzón del remitente ya no está conectado.",
   "The email could not be sent. Send it again from the quotation.": "No se pudo enviar el correo. Vuelve a enviarlo desde el presupuesto.",
   "Check Sent Items in Outlook before sending again.": "Revisa Elementos enviados en Outlook antes de volver a enviarlo.",
-  "The email was sent, but the quotation and lead could not be updated. Check them before sending again.": "El correo se envió, pero no se pudieron actualizar el presupuesto ni el lead. Revíselos antes de volver a enviarlo."
+  "The email was sent, but the quotation and lead could not be updated. Check them before sending again.": "El correo se envió, pero no se pudieron actualizar el presupuesto ni el lead. Revíselos antes de volver a enviarlo.",
+  "1 unread email": "1 correo sin leer",
+  "{n} unread emails": "{n} correos sin leer",
+  "1 mailer run in progress": "1 envío del mailer en curso",
+  "{n} mailer runs in progress": "{n} envíos del mailer en curso"
 }

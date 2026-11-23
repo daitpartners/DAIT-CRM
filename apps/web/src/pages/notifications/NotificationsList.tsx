@@ -2,7 +2,7 @@ import { Fragment, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import {
-  NOTIFICATION_PAGE_SIZE, useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications, type NotificationRow,
+  NOTIFICATION_PAGE_SIZE, useMarkAllNotificationsRead, useMarkNotificationRead, useNavCounts, useNotifications, type NotificationRow,
 } from '../../api/notifications';
 import { useTasks } from '../../api/tasks';
 import { useCurrentUser } from '../../api/useCurrentUser';
@@ -19,13 +19,35 @@ import { systemDetail, systemText } from '../../i18n/systemText';
 /** Only in-app paths are followed; anything else stays on this page. */
 const inApp = (link: string | null): link is string => Boolean(link && link.startsWith('/') && !link.startsWith('//'));
 
-type Kind = 'leads' | 'tasks' | 'other';
-/** The kind shown on a row (prototype KIND), read from where the notification points. */
-const kindOf = (n: NotificationRow): Kind =>
-  n.link?.startsWith('/leads/') ? 'leads' : n.link === '/tasks' || n.link?.startsWith('/tasks?') ? 'tasks' : 'other';
+type Kind = 'leads' | 'tasks' | 'email' | 'mailer' | 'quotes' | 'ai' | 'calendar' | 'projects' | 'mailbox' | 'other';
+/**
+ * The kind shown on a row (prototype KIND, review #28), read from where the notification points: the link does not
+ * depend on the language the text was stored in.
+ */
+const kindOf = (n: NotificationRow): Kind => {
+  const l = n.link ?? '';
+  if (l.startsWith('/leads/')) return 'leads';
+  if (l === '/tasks' || l.startsWith('/tasks?')) return 'tasks';
+  if (l.startsWith('/quotations')) return 'quotes';
+  if (/^\/companies\/\d+#(ai|sources)$/.test(l)) return 'ai';
+  if (l.startsWith('/mailer')) return 'mailer';
+  if (l.startsWith('/projects')) return 'projects';
+  if (l.startsWith('/email')) return 'email';
+  if (l.startsWith('/calendar')) return 'calendar';
+  if (l.startsWith('/settings/connections')) return 'mailbox';
+  return 'other';
+};
+/** Icon and colour per kind (prototype KIND: person, mailS, quoteS, spark, calS, swap; clock for Other). */
 const KIND_STYLE: Record<Kind, { icon: ReactNode; bg: string }> = {
   leads: { icon: Icons.user, bg: '#EFE6FD' },
   tasks: { icon: Icons.tasks, bg: '#FFF8EC' },
+  email: { icon: Icons.mail, bg: '#E4D5FB' },
+  mailer: { icon: Icons.send, bg: '#FFF1E0' },
+  quotes: { icon: Icons.quote, bg: '#FFF1E0' },
+  ai: { icon: Icons.spark, bg: '#FFF8EC' },
+  calendar: { icon: Icons.calendar, bg: '#EFE6FD' },
+  projects: { icon: Icons.swap, bg: '#EFE6FD' },
+  mailbox: { icon: Icons.mail, bg: '#E6F6EC' },
   other: { icon: Icons.bell, bg: '#EDE9F4' },
 };
 
@@ -80,15 +102,26 @@ export function NotificationsList() {
     const d = ymdIn(new Date(n.createdAt), me.timezone);
     return d === today ? t('Today') : d === yesterday ? t('Yesterday') : t('Earlier');
   };
-  const time = (iso: string) => new Intl.DateTimeFormat(me.language, { timeZone: me.timezone, hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
-  const kindText: Record<Kind, string> = { leads: t('Leads'), tasks: t('Tasks'), other: t('Other|notification') };
+  // 24-hour, as the rest of the CRM (review #28).
+  const time = (iso: string) => new Intl.DateTimeFormat(me.language, { timeZone: me.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
+  const kindText: Record<Kind, string> = {
+    leads: t('Leads'), tasks: t('Tasks'), email: t('Email'), mailer: t('Mailer'), quotes: t('Quotations'), ai: t('AI research'),
+    calendar: t('Calendar'), projects: t('Projects'), mailbox: t('Mailbox'), other: t('Other|notification'),
+  };
 
+  // Prototype attention strip: also unread email and running mailer runs (your own mailbox only).
+  const counts = useNavCounts().data;
+  const mail = me.rights.includes('use_email');
+  const unreadMail = mail ? (counts?.mailUnread ?? 0) : 0;
+  const runs = mail ? (counts?.mailerLive ?? 0) : 0;
   const overdue = tasks.data?.counts.overdue ?? 0;
   const dueToday = tasks.data?.counts.today ?? 0;
   const attention = [
     overdue ? { cls: 'bad', text: overdue === 1 ? t('1 overdue open task') : t('{n} overdue open tasks', { n: overdue }) } : null,
     dueToday ? { cls: 'warn', text: dueToday === 1 ? t('1 open task due today') : t('{n} open tasks due today', { n: dueToday }) } : null,
-  ].filter((x): x is { cls: string; text: string } => x !== null);
+    unreadMail ? { cls: '', to: '/email', text: unreadMail === 1 ? t('1 unread email') : t('{n} unread emails', { n: unreadMail }) } : null,
+    runs ? { cls: '', to: '/mailer', text: runs === 1 ? t('1 mailer run in progress') : t('{n} mailer runs in progress', { n: runs }) } : null,
+  ].filter((x): x is { cls: string; text: string; to?: string } => x !== null);
 
   let last: string | null = null;
   return (
@@ -112,7 +145,7 @@ export function NotificationsList() {
         {attention.length ? (
           <div className="natt">
             {attention.map((a) => (
-              <Link key={a.cls} className={a.cls} to="/tasks">
+              <Link key={a.to ?? a.cls} className={a.cls || undefined} to={a.to ?? '/tasks'}>
                 {a.text} →
               </Link>
             ))}
