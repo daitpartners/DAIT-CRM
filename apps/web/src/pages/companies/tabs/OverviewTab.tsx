@@ -35,7 +35,9 @@ const isEmpty = (v: ReactNode) => v === null || v === undefined || v === '' || (
  * "linkedin.com/ company/" rather than mid-word (review #31).
  */
 export function breakableUrl(text: string): ReactNode[] {
-  return text.split(/(?<=[/.\-?&=_])(?=.)/).flatMap((part, i) => (i ? [<wbr key={i} />, part] : [part]));
+  // A match-based split (no regex lookbehind: Safari before 16.4 cannot parse it).
+  const parts = text.match(/[^/.\-?&=_]*[/.\-?&=_]?/g)?.filter(Boolean) ?? [text];
+  return parts.flatMap((part, i) => (i ? [<wbr key={i} />, part] : [part]));
 }
 
 /** An outbound link when the value is a safe URL; otherwise the stored text (never an unsafe href). */

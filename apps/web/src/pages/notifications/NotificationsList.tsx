@@ -37,18 +37,18 @@ const kindOf = (n: NotificationRow): Kind => {
   if (l.startsWith('/settings/connections')) return 'mailbox';
   return 'other';
 };
-/** Icon and colour per kind (prototype KIND: person, mailS, quoteS, spark, calS, swap; clock for Other). */
+/** Icon and colour per kind (prototype KIND: person, mailS for Email / Mailer / Mailbox, quoteS, spark, calS, swap; clock for Other). */
 const KIND_STYLE: Record<Kind, { icon: ReactNode; bg: string }> = {
   leads: { icon: Icons.user, bg: '#EFE6FD' },
   tasks: { icon: Icons.tasks, bg: '#FFF8EC' },
   email: { icon: Icons.mail, bg: '#E4D5FB' },
-  mailer: { icon: Icons.send, bg: '#FFF1E0' },
+  mailer: { icon: Icons.mail, bg: '#FFF1E0' },
   quotes: { icon: Icons.quote, bg: '#FFF1E0' },
   ai: { icon: Icons.spark, bg: '#FFF8EC' },
   calendar: { icon: Icons.calendar, bg: '#EFE6FD' },
   projects: { icon: Icons.swap, bg: '#EFE6FD' },
   mailbox: { icon: Icons.mail, bg: '#E6F6EC' },
-  other: { icon: Icons.bell, bg: '#EDE9F4' },
+  other: { icon: Icons.clock, bg: '#EDE9F4' },
 };
 
 /** YYYY-MM-DD of an instant in a time zone. */

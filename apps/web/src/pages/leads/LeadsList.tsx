@@ -435,7 +435,7 @@ export function LeadsList() {
             ) : (
               <Table
                 rawHead
-                sticky={2}
+                sticky={canManage ? 2 : 1}
                 head={head}
                 isEmpty={isPending || !rows?.length}
                 empty={isPending ? t('Loading…') : filtered ? t('No leads match these filters') : t('No leads here yet')}
