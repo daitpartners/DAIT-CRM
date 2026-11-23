@@ -80,6 +80,8 @@ export const MailListQuery = PagingQuery.pick({ page: true, pageSize: true }).ex
   /** Release 3B: only the caller's own messages tagged with this project. */
   project: z.string().optional(),
   s: z.string().optional(),
+  /** `0`: no total (later batches of the Email list, which scrolls; the first batch carries it). */
+  count: z.enum(['0', '1']).optional(),
 });
 export type MailListQuery = z.infer<typeof MailListQuery>;
 

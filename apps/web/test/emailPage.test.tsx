@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { EmailPage } from '../src/pages/email/EmailPage';
+import { mergeHead, type MailPage } from '../src/api/mail';
 import type { MailDetail, MailItem, MailMeta } from '../src/api/mail';
 import { ToastProvider } from '../src/components/Toast';
 import { ConfirmProvider } from '../src/components/ConfirmDialog';
@@ -359,6 +360,7 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
           act(() => w.cb([{ isIntersecting: true, target: w.el! } as IntersectionObserverEntry], {} as IntersectionObserver));
         },
         live: () => watched.filter((x) => x.alive && x.el),
+        made: () => watched.length,
       };
     }
     const where = () => screen.getByTestId('where').textContent;
@@ -454,6 +456,96 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       await waitFor(() => expect(rows.scrollTop).toBe(0));
     });
 
+    it('later batches are asked without a total (count=0); the first batch carries it', async () => {
+      const lists = batched();
+      const w = watcher();
+      show();
+      const list = screen.getByRole('region', { name: 'Message list' });
+      expect(await within(list).findByText('Message 1')).toBeTruthy();
+      expect(lists.at(-1)!.get('count')).toBeNull();
+      w.reach();
+      expect(await within(list).findByText('Message 51')).toBeTruthy();
+      expect(lists.at(-1)!.get('count')).toBe('0');
+      expect(within(list).getByText(/Inbox/).parentElement!.textContent).toMatch(/Inbox · 120 messages/);
+    });
+
+    it('the periodic refresh asks for the first batch only and merges it: new mail on top, the loaded rows kept', async () => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+      const all = Array.from({ length: 120 }, (_, i) => item({ id: i + 1, subject: `Message ${i + 1}`, isRead: true, occurredAt: new Date(Date.UTC(2026, 10, 20, 12, 0) - i * 60_000).toISOString() }));
+      let rows = all;
+      const lists: URLSearchParams[] = [];
+      stub([], { 1: detail(all[0]!), 500: detail(item({ id: 500 })) }, META, (url) => {
+        if (!url.startsWith('/api/mail?')) return undefined;
+        const q = new URL(url, 'http://x').searchParams;
+        lists.push(q);
+        const page = Number(q.get('page') ?? 1);
+        return { items: rows.slice((page - 1) * 50, page * 50), total: q.get('count') === '0' ? null : rows.length, page, pageSize: 50 };
+      });
+      const w = watcher();
+      show('/email/1');
+      const list = screen.getByRole('region', { name: 'Message list' });
+      expect(await within(list).findByText('Message 1')).toBeTruthy();
+      w.reach();
+      expect(await within(list).findByText('Message 100')).toBeTruthy();
+      // New mail arrives, and Message 3 is archived elsewhere.
+      rows = [item({ id: 500, subject: 'Brand new', occurredAt: '2026-11-20T13:00:00.000Z' }), ...all.filter((m) => m.id !== 3)];
+      const before = lists.length;
+      act(() => vi.advanceTimersByTime(60_000));
+      expect(await within(list).findByText('Brand new')).toBeTruthy();
+      const asked = lists.slice(before);
+      expect(asked).toHaveLength(1);
+      expect(asked[0]!.get('page')).toBeNull();
+      expect(within(list).queryByText('Message 3')).toBeNull();
+      // Rows from the second batch are still there (51–100), Message 51 included, and the open message stays selected.
+      expect(within(list).getByText('Message 51')).toBeTruthy();
+      expect(within(list).getByText('Message 100')).toBeTruthy();
+      expect(list.querySelectorAll('a.msg')).toHaveLength(100);
+      expect(within(list).getByText(/Inbox/).parentElement!.textContent).toMatch(/Inbox · 120 messages/);
+      expect(within(list).getByText('Message 1').closest('a')!.getAttribute('aria-current')).toBe('true');
+    });
+
+    it('a filter change asks the new list\'s first batch once, and nothing is watched while the old rows stand in', async () => {
+      const u = userEvent.setup();
+      const lists = batched();
+      const w = watcher();
+      const inner = globalThis.fetch;
+      let release = () => {};
+      const gate = new Promise<void>((r) => (release = r));
+      vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+        if (url.includes('company=4')) await gate;
+        return inner(url, init);
+      });
+      show();
+      const list = screen.getByRole('region', { name: 'Message list' });
+      expect(await within(list).findByText('Message 1')).toBeTruthy();
+      await u.selectOptions(screen.getByRole('combobox', { name: 'Client / company' }), '4');
+      await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/email?company=4'));
+      // The old inbox rows still show, but the foot is not watched.
+      expect(within(list).getByText('Message 1')).toBeTruthy();
+      expect(w.live()).toHaveLength(0);
+      release();
+      await waitFor(() => expect(lists.filter((q) => q.get('company') === '4').length).toBeGreaterThan(0));
+      await waitFor(() => expect(w.live()).toHaveLength(1));
+      expect(lists.filter((q) => q.get('company') === '4' && q.get('page') === null)).toHaveLength(1);
+    });
+
+    it('crossing the 1100 px breakpoint watches the list foot again (its scrolling box changes)', async () => {
+      let listener: (() => void) | null = null;
+      const media = { matches: true, addEventListener: (_: string, fn: () => void) => (listener = fn), removeEventListener: () => (listener = null) };
+      vi.stubGlobal('matchMedia', () => media);
+      batched();
+      const w = watcher();
+      show();
+      const list = screen.getByRole('region', { name: 'Message list' });
+      expect(await within(list).findByText('Message 1')).toBeTruthy();
+      await waitFor(() => expect(w.live()).toHaveLength(1));
+      const made = w.made();
+      media.matches = false;
+      act(() => listener!());
+      await waitFor(() => expect(w.made()).toBeGreaterThan(made));
+      expect(w.live()).toHaveLength(1);
+    });
+
     it('a short list: the total in words, no Loading… row; an empty one says so', async () => {
       const a = item();
       stub([a], { 1: detail(a) });
@@ -482,6 +574,8 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       const doc = frame.getAttribute('srcdoc')!;
       expect(doc).toContain('<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src https: http: data:; style-src \'unsafe-inline\'">');
       expect(doc).toContain('<base target="_blank">');
+      expect(doc).toContain('<meta name="referrer" content="no-referrer">');
+      expect(frame.getAttribute('referrerpolicy')).toBe('no-referrer');
       expect(doc).toContain('<td style="color:#1f497d"><b>Ana Ruiz</b><br>Acme</td>');
       // The plain-text body is not shown beside it.
       expect(document.querySelector('.reader .body')).toBeNull();
@@ -689,5 +783,31 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     await u.click(within(again).getByRole('button', { name: 'Expand folders' }));
     expect(within(again).getByRole('link', { name: 'Sent' })).toHaveAttribute('aria-current', 'page');
     expect(localStorage.getItem('dait-mail-folders-collapsed')).toBe('0');
+  });
+});
+
+describe('mergeHead (the list refresh, security review M5)', () => {
+  const row = (id: number, minute: number) => item({ id, occurredAt: new Date(Date.UTC(2026, 10, 20, 12, minute)).toISOString() });
+  const page = (items: MailItem[], n: number, total: number | null = 200): MailPage => ({ items, total, page: n, pageSize: 3 });
+
+  it('replaces rows up to the fresh batch\'s last one, keeps older loaded rows, drops ones that left', () => {
+    const data = { pages: [page([row(9, 9), row(8, 8), row(7, 7)], 1), page([row(6, 6), row(5, 5), row(4, 4)], 2, null)], pageParams: [1, 2] };
+    // 10 arrived, 8 was archived: the fresh first batch is 10, 9, 7.
+    const merged = mergeHead(data, page([row(10, 10), row(9, 9), row(7, 7)], 1, 199));
+    expect(merged.pages.flatMap((p) => p.items.map((m) => m.id))).toEqual([10, 9, 7, 6, 5, 4]);
+    expect(merged.pages[0]!.total).toBe(199);
+    expect(merged.pageParams).toEqual([1, 2]);
+  });
+
+  it('rows pushed out of the first batch by new mail stay (they are older than its last row)', () => {
+    const data = { pages: [page([row(9, 9), row(8, 8), row(7, 7)], 1)], pageParams: [1] };
+    const merged = mergeHead(data, page([row(11, 11), row(10, 10), row(9, 9)], 1));
+    expect(merged.pages[0]!.items.map((m) => m.id)).toEqual([11, 10, 9, 8, 7]);
+  });
+
+  it('a first batch that is the whole list leaves nothing else', () => {
+    const data = { pages: [page([row(9, 9), row(8, 8), row(7, 7)], 1), page([row(6, 6)], 2, null)], pageParams: [1, 2] };
+    const merged = mergeHead(data, { items: [row(9, 9)], total: 1, page: 1, pageSize: 50 });
+    expect(merged.pages.flatMap((p) => p.items.map((m) => m.id))).toEqual([9]);
   });
 });

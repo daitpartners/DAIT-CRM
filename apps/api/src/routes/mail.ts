@@ -290,7 +290,8 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
     });
   });
 
-  // The message list, paged (owner, 22 Nov 2026): every filter applies first, `total` counts what they leave.
+  // The message list, paged (owner, 22 Nov 2026): every filter applies first, `total` counts what they leave
+  // (`count=0`, the later batches of the scrolling list: no total).
   app.get('/mail', pre, async (request) => {
     const user = request.user!;
     const q = parseQuery(MailListQuery, request.query);
@@ -317,7 +318,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
       prisma.emailMessage.findMany({
         where, include: { lead: { select: { id: true, number: true } } }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], ...pageArgs(q),
       }),
-      prisma.emailMessage.count({ where }),
+      q.count === '0' ? null : prisma.emailMessage.count({ where }),
     ]);
     // A lead the user can no longer see (moved to someone else) is not shown: no id, no number.
     const leadIds = [...new Set(rows.flatMap((m) => (m.leadId ? [m.leadId] : [])))];

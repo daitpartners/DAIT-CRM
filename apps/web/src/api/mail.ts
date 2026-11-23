@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { ApiError, api } from './client';
 import { keys } from './queries';
@@ -15,8 +15,8 @@ export type MailFilter = { view: MailView; company?: number; lead?: number; proj
  */
 export const MAIL_BATCH = 50;
 
-/** One batch of the list; `total` counts every message the filters leave. */
-export type MailPage = { items: MailItem[]; total: number; page: number; pageSize: number };
+/** One batch of the list; `total` counts every message the filters leave (null on later batches, asked with count=0). */
+export type MailPage = { items: MailItem[]; total: number | null; page: number; pageSize: number };
 
 /** A message in the list (release 2B-2): only ever the signed-in user's own. */
 export type MailItem = {
@@ -78,26 +78,57 @@ const listPath = (f: MailFilter, page: number) => {
   if (f.lead) q.set('lead', String(f.lead));
   if (f.project) q.set('project', String(f.project));
   if (f.s) q.set('s', f.s);
-  if (page > 1) q.set('page', String(page));
+  // Later batches need no total: the first batch (and its refresh) carries it.
+  if (page > 1) {
+    q.set('page', String(page));
+    q.set('count', '0');
+  }
   q.set('pageSize', String(MAIL_BATCH));
   return `/api/mail?${q.toString()}`;
 };
 
+type MailBatches = InfiniteData<MailPage, number>;
+
+/** `a` is listed after `b` (the list's order: newest first, then higher id first). */
+const isAfter = (a: MailItem, b: MailItem) => a.occurredAt < b.occurredAt || (a.occurredAt === b.occurredAt && a.id < b.id);
+
+/**
+ * A fresh first batch merged into the loaded list: its rows replace what was loaded up to its last row (new mail
+ * appears, changed rows update, rows archived or moved meanwhile go); rows loaded beyond it stay as they were. When the
+ * first batch is the whole list, nothing else stays.
+ */
+export function mergeHead(data: MailBatches, head: MailPage): MailBatches {
+  const ids = new Set(head.items.map((m) => m.id));
+  const last = head.items.at(-1);
+  const whole = head.items.length < head.pageSize;
+  const keep = (m: MailItem) => !whole && !ids.has(m.id) && !!last && isAfter(m, last);
+  const [first, ...rest] = data.pages;
+  return {
+    ...data,
+    pages: [
+      { ...head, items: [...head.items, ...(first?.items.filter(keep) ?? [])] },
+      ...rest.map((p) => ({ ...p, items: p.items.filter(keep) })),
+    ],
+  };
+}
+
 /**
  * The list, one batch of 50 at a time (`fetchNextPage` loads the next). `items` are the batches loaded so far, once each
- * (mail arriving between two batches shifts the later one; a message already shown is not repeated).
+ * (mail arriving between two batches shifts the later one; a message already shown is not repeated). Kept fresh by
+ * asking again for the first batch only (every 60 s, every 5 s while one of yours is sending) and merging it in, never
+ * every loaded batch (security review M5).
  */
 export function useMailList(f: MailFilter, enabled = true) {
+  const qc = useQueryClient();
+  const queryKey = [...ROOT, 'list', f];
   const q = useInfiniteQuery({
-    queryKey: [...ROOT, 'list', f],
+    queryKey,
     queryFn: ({ pageParam }) => api<MailPage>(listPath(f, pageParam)),
     initialPageParam: 1,
-    getNextPageParam: (last, pages) => (pages.reduce((n, p) => n + p.items.length, 0) < last.total && last.items.length > 0 ? last.page + 1 : undefined),
+    getNextPageParam: (last, pages) =>
+      (pages.reduce((n, p) => n + p.items.length, 0) < (pages[0]?.total ?? 0) && last.items.length > 0 ? last.page + 1 : undefined),
     placeholderData: keepPreviousData,
     enabled,
-    // New mail arrives with each 5-minute sync; a queued message turns Sent within seconds.
-    refetchInterval: (query) =>
-      (query.state.data?.pages.some((p) => p.items.some((m) => m.status === 'queued' || m.status === 'sending')) ? 5000 : 60_000),
   });
   const pages = q.data?.pages;
   const items = useMemo(() => {
@@ -108,7 +139,20 @@ export function useMailList(f: MailFilter, enabled = true) {
       return true;
     });
   }, [pages]);
-  return { ...q, items, total: pages?.at(-1)?.total ?? 0 };
+  const sending = items.some((m) => m.status === 'queued' || m.status === 'sending');
+  const live = enabled && !!pages && !q.isPlaceholderData;
+  const keyText = JSON.stringify(queryKey);
+  useEffect(() => {
+    if (!live) return;
+    const timer = setInterval(() => {
+      api<MailPage>(listPath(f, 1))
+        .then((head) => qc.setQueryData<MailBatches>(queryKey, (data) => (data ? mergeHead(data, head) : data)))
+        .catch(() => undefined); // the next tick tries again
+    }, sending ? 5000 : 60_000);
+    return () => clearInterval(timer);
+    // The filter is in keyText.
+  }, [keyText, live, sending, qc]);
+  return { ...q, items, total: pages?.[0]?.total ?? 0 };
 }
 
 export function useMailMeta() {

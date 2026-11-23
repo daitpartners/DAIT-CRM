@@ -319,6 +319,17 @@ describe('reading mail on the Email screen (2B-2)', () => {
     expect((await get('view=sent')).total).toBe(0);
   });
 
+  it('count=0 (a later batch of the scrolling list) skips the total; the rows are the same', async () => {
+    const { rep, box } = await setup();
+    for (let i = 0; i < 60; i++) await synced(rep.id, box.id, { subject: `M ${i}`, occurredAt: new Date(Date.UTC(2026, 10, 1, 0, i)) });
+    const cookie = await signIn(app, rep);
+    const counted = (await call('GET', '/api/mail?view=inbox&page=2&pageSize=50', cookie)).json();
+    const res = (await call('GET', '/api/mail?view=inbox&page=2&pageSize=50&count=0', cookie)).json();
+    expect(counted.total).toBe(60);
+    expect(res.total).toBeNull();
+    expect(res.items.map((i: { id: number }) => i.id)).toEqual(counted.items.map((i: { id: number }) => i.id));
+  });
+
   it('list page size is at most 100, as other lists', async () => {
     const { rep } = await setup();
     const cookie = await signIn(app, rep);

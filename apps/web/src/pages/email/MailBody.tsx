@@ -13,6 +13,8 @@ export function mailFrameDoc(html: string): string {
     '<!doctype html><html><head><meta charset="utf-8">',
     `<meta http-equiv="Content-Security-Policy" content="${CSP}">`,
     '<base target="_blank">',
+    // Pictures and links do not tell senders (or their tracking hosts) the CRM's address (security review M1).
+    '<meta name="referrer" content="no-referrer">',
     '<style>html{color-scheme:light}body{margin:0;padding:20px 24px;font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;',
     'color:#1F1533;background:#fff;overflow-wrap:anywhere}img{max-width:100%;height:auto}pre{white-space:pre-wrap}',
     'a{color:#6811CF}',
@@ -33,5 +35,5 @@ export function mailFrameDoc(html: string): string {
 export function MailBody({ html, text }: { html: string | null; text: string }) {
   const t = useT();
   if (!html) return <div className="body">{text}</div>;
-  return <iframe className="body-frame" title={t('Message body')} sandbox="allow-popups allow-popups-to-escape-sandbox" srcDoc={mailFrameDoc(html)} />;
+  return <iframe className="body-frame" title={t('Message body')} sandbox="allow-popups allow-popups-to-escape-sandbox" referrerPolicy="no-referrer" srcDoc={mailFrameDoc(html)} />;
 }

@@ -15,6 +15,9 @@ import { fillTemplate } from '../../lib/mergeFields';
 import { ComposeModal, type ComposeStart } from './ComposeModal';
 import { Reader } from './Reader';
 
+/** Where the Email screen fits the window and the list scrolls in its own column (app.css). */
+const WIDE = '(min-width:1100px)';
+
 const num = (v: string | null) => (v && /^\d+$/.test(v) ? Number(v) : undefined);
 
 function viewLabel(t: TFn, v: MailView): string {
@@ -49,7 +52,7 @@ export function EmailPage() {
     view, company: num(params.get('company')), lead: num(params.get('lead')), project: num(params.get('project')), s: params.get('s') ?? undefined,
   };
   const { data: meta } = useMailMeta();
-  const { items, total, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } = useMailList(filter);
+  const { items, total, isLoading, hasNextPage, isFetchingNextPage, isPlaceholderData, fetchNextPage } = useMailList(filter);
   const { data: templates } = useTemplates();
   const sync = useSyncNow();
   const [compose, setCompose] = useState<ComposeStart | null>(null);
@@ -64,15 +67,26 @@ export function EmailPage() {
     if (rowsRef.current) rowsRef.current.scrollTop = 0;
   }, [listKey]);
 
+  // Desktop or not (the 1100 px breakpoint where the rows start scrolling in their own column), followed on resize.
+  const [wide, setWide] = useState(() => window.matchMedia?.(WIDE).matches ?? false);
+  useEffect(() => {
+    const media = window.matchMedia?.(WIDE);
+    if (!media) return;
+    const change = () => setWide(media.matches);
+    media.addEventListener('change', change);
+    return () => media.removeEventListener('change', change);
+  }, []);
+
   /**
    * The next batch loads when the list's foot comes near: within the rows' own column on desktop (owner, 23 Nov 2026:
-   * the screen fits the window), within the window where the page itself scrolls. Watching again after each batch
-   * keeps loading while the foot is still in view (a tall screen).
+   * the screen fits the window), within the window where the page itself scrolls (chosen again when the window crosses
+   * the breakpoint). Watching again after each batch keeps loading while the foot is still in view (a tall screen).
+   * Nothing is watched while the previous filter's rows stand in for the new ones, so its first batch is asked once.
    */
   const loaded = items.length;
   useEffect(() => {
     const foot = moreRef.current;
-    if (!foot || !hasNextPage || isFetchingNextPage || typeof IntersectionObserver === 'undefined') return;
+    if (!foot || !hasNextPage || isFetchingNextPage || isPlaceholderData || typeof IntersectionObserver === 'undefined') return;
     const rows = rowsRef.current;
     const root = rows && getComputedStyle(rows).overflowY !== 'visible' ? rows : null;
     const watch = new IntersectionObserver((entries) => {
@@ -80,7 +94,7 @@ export function EmailPage() {
     }, { root, rootMargin: '0px 0px 300px 0px' });
     watch.observe(foot);
     return () => watch.disconnect();
-  }, [hasNextPage, isFetchingNextPage, loaded, listKey, fetchNextPage]);
+  }, [hasNextPage, isFetchingNextPage, isPlaceholderData, loaded, listKey, wide, fetchNextPage]);
 
   const selectedId = num(id ?? null) ?? items[0]?.id ?? null;
   // The message opened from a link (the Reader's own query): a list answered before the open marked it read
