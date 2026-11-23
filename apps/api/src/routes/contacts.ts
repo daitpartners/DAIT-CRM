@@ -171,6 +171,8 @@ export const contactRoutes: FastifyPluginAsync = async (app) => {
     const user = request.user!;
     try {
       const moved = await prisma.$transaction(async (tx) => {
+        // Lock order as everywhere: leads, then the contact (Do not email locks its lead, then the contact).
+        await tx.$queryRaw`SELECT id FROM leads WHERE contact_id = ${id} ORDER BY id FOR UPDATE`;
         const before = await tx.contact.findFirst({ where: { id, company: companyWhere(user) } });
         if (!before) throw new NotFoundError();
         if (new Date(body.updatedAt).getTime() !== before.updatedAt.getTime()) throw new StaleError();

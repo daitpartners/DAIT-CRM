@@ -347,9 +347,9 @@ export function taskKindText(t: TFn, kind: TaskKind): string {
 /**
  * A quotation history line (stored in English by the server) in the reader's language. `status` / `rest` split a
  * "<Status> · …" line so the editor's status steps can show the part after the status; `full` is the whole line.
- * A line it does not know is shown as stored.
+ * A line it does not know is shown as stored. `day` shows a stored YYYY-MM-DD in the user's date format.
  */
-export function quoteHistoryText(t: TFn, text: string): { status: string | null; rest: string; full: string } {
+export function quoteHistoryText(t: TFn, text: string, day: (ymd: string) => string = (d) => d): { status: string | null; rest: string; full: string } {
   const line = (rest: string, status: string | null = null) => ({ status, rest, full: status ? `${quoteStatusText(t, status)} · ${rest}` : rest });
   let m: RegExpExecArray | null;
   if ((m = /^Draft created by (.+) · copy of (\S+)$/.exec(text))) return line(t('Draft created by {name} · copy of {number}', { name: m[1]!, number: m[2]! }));
@@ -359,7 +359,7 @@ export function quoteHistoryText(t: TFn, text: string): { status: string | null;
   if ((m = /^Sent · rev (\d+) · emailed as PDF to (.+)$/.exec(text))) return line(t('rev {n} · emailed as PDF to {name}', { n: m[1]!, name: m[2]! }), 'Sent');
   if ((m = /^Sent again · rev (\d+) · emailed as PDF to (.+)$/.exec(text))) return line(t('Sent again · rev {n} · emailed as PDF to {name}', { n: m[1]!, name: m[2]! }));
   if ((m = /^(Negotiating|Accepted|Rejected) · by (.+)$/.exec(text))) return line(t('by {name}', { name: m[2]! }), m[1]!);
-  if ((m = /^Expired · valid until (\S+)$/.exec(text))) return line(t('valid until {date}', { date: m[1]! }), 'Expired');
+  if ((m = /^Expired · valid until (\d{4}-\d{2}-\d{2})$/.exec(text))) return line(t('valid until {date}', { date: day(m[1]!) }), 'Expired');
   if ((m = /^(Linked to project|Converted to project|Unlinked from project) (\S+)$/.exec(text))) {
     const number = m[2]!;
     return line(m[1] === 'Linked to project' ? t('Linked to project {number}', { number }) : m[1] === 'Converted to project' ? t('Converted to project {number}', { number }) : t('Unlinked from project {number}', { number }));

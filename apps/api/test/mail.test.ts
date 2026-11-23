@@ -446,6 +446,27 @@ describe('reading mail on the Email screen (2B-2)', () => {
     expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: first.id } })).leadId).toBe(res.json().leadId);
   });
 
+  it('conversation linking also links newer mail, leaves mail of another company and drafts alone, and drops a contact of another company', async () => {
+    const { rep, box, company } = await setup();
+    const b = await makeCompany({ name: 'Bolt', website: 'https://bolt.io' });
+    const bContact = await makeContact({ companyId: b.id, firstName: 'Bo', lastName: 'Lt', businessEmail: 'bo@bolt.io' });
+    const noContactLead = await makeLead({ companyId: company.id, contactId: null, assignedToId: rep.id });
+    const at = (d: number) => new Date(Date.UTC(2026, 10, d, 10));
+    const otherCo = await synced(rep.id, box.id, { threadId: 't', companyId: b.id, contactId: bContact.id, fromAddress: 'bo@bolt.io', occurredAt: at(15) });
+    const strayContact = await synced(rep.id, box.id, { threadId: 't', companyId: null, contactId: bContact.id, occurredAt: at(16) });
+    const draft = await synced(rep.id, box.id, { threadId: 't', folder: 'drafts', status: 'draft', occurredAt: at(17) });
+    const older = await synced(rep.id, box.id, { threadId: 't', occurredAt: at(18) });
+    const m = await synced(rep.id, box.id, { threadId: 't', occurredAt: at(19) });
+    const newer = await synced(rep.id, box.id, { threadId: 't', occurredAt: at(20) });
+    expect((await call('POST', `/api/mail/${m.id}/link`, await signIn(app, rep), { leadId: noContactLead.id })).statusCode).toBe(200);
+    const row = (id: number) => prisma.emailMessage.findUniqueOrThrow({ where: { id } });
+    expect(await row(otherCo.id)).toMatchObject({ leadId: null, companyId: b.id, contactId: bContact.id });
+    expect(await row(strayContact.id)).toMatchObject({ leadId: noContactLead.id, companyId: company.id, contactId: null });
+    expect((await row(draft.id)).leadId).toBeNull();
+    expect(await row(older.id)).toMatchObject({ leadId: noContactLead.id, companyId: company.id });
+    expect(await row(newer.id)).toMatchObject({ leadId: noContactLead.id, companyId: company.id });
+  });
+
   it('create lead from an email links the sender’s company by domain, allocates and links the message', async () => {
     const { rep, box, company } = await setup();
     const m = await synced(rep.id, box.id, { fromAddress: 'luis@acme.com', fromName: 'Luis Vega', subject: 'Need a quote', bodyText: 'Please call' });

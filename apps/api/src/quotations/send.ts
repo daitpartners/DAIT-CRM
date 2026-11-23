@@ -140,7 +140,8 @@ export async function onQuotationSent(
       },
     });
     if (!locked && (await beforeProposalSent(tx, lead.status))) {
-      await applyStatusChange(tx, lead, PROPOSAL_SENT, { userId: msg.userId }, { sourceTitle: `Quotation sent · ${q.number}` });
+      // No source text: the "Quotation sent" line just above already says why (one line, not two alike).
+      await applyStatusChange(tx, lead, PROPOSAL_SENT, { userId: msg.userId });
       await audit(tx, { entityType: 'lead', entityId: lead.id, action: 'update', userId: msg.userId, before: { status: lead.status }, after: { status: PROPOSAL_SENT } });
     }
   }

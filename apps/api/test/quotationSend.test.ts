@@ -180,7 +180,8 @@ describe('send a quotation by email (release 3A)', () => {
     expect(acts.filter((a) => a.activityType === 'quote' && a.title.startsWith('Quotation sent'))).toEqual([
       expect.objectContaining({ title: `Quotation sent · ${q.number} rev 1`, body: formatMoney(q.totals.total, q.currency), relatedType: 'quotation', relatedId: q.id }),
     ]);
-    expect(acts.filter((a) => a.activityType === 'status')).toEqual([expect.objectContaining({ statusFrom: 'Qualified', statusTo: 'Proposal Sent' })]);
+    // One "Quotation sent" line: the status change under it does not repeat it (as accepting).
+    expect(acts.filter((a) => a.activityType === 'status')).toEqual([expect.objectContaining({ statusFrom: 'Qualified', statusTo: 'Proposal Sent', body: null })]);
     // One line for the send: no separate "Email sent" entry.
     expect(acts.filter((a) => a.activityType === 'email')).toEqual([]);
     expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ status: 'sent' });
