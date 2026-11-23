@@ -1,0 +1,1281 @@
+<title>Import Leads mockup</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* DAIT Partners CRM — theme tokens and components, ported from prototype/css/app.css
+   (sections: theme tokens, Shell, Components, combobox, modal + toast, accessibility).
+   Colours from the approved brand theme; Montserrat per the design spec. */
+:root{
+  --ink:#1F0249; --purple:#6811CF; --purple-2:#812BE1; --orange:#BA5425; --orange-2:#AB4C21; --peach:#F09044; --bg:#F5F1FC;
+  --text:#1F1533; --muted:#6A5E86; --body:#4A3F66; --faint:#7B709A;
+  --line:#E3DCF2; --line-2:#EDE8F6; --field:#D2C7E8; --surface:#FFFFFF; --tint:#EFE6FD; --tint-2:#E4D5FB;
+  --nav-text:#CFC2EC; --nav-hover:#2E0F66; --nav-on:#3A1A78; --nav-sub:#9D8CC9; --nav-muted:#AE9FD6;
+  --grad:linear-gradient(90deg,#BA5326,#822CDB);
+  --ok-bg:#DCF5E6; --ok-fg:#0F5C2E; --warn-bg:#FFF1E0; --warn-fg:#8A4B00; --bad-bg:#FDE8E8; --bad-fg:#A32020;
+  --info-bg:#FBE4D4; --info-fg:#8A3E12; --grey-bg:#EDE9F4; --grey-fg:#514768;
+  --radius:10px; --font:Montserrat,system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:13.5px;-webkit-font-smoothing:antialiased}
+a{color:var(--purple);text-decoration:none}a:hover{color:#4B0A9A}
+h1,h2,h3{margin:0;font-weight:800}
+h1{font-size:20px}h2{font-size:14px;font-weight:700}h3{font-size:13px;font-weight:700}
+input,select,textarea,button{font:inherit;color:inherit}
+button{cursor:pointer}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+/* Shell */
+.shell{min-height:100vh;display:flex;flex-wrap:wrap}
+.sidebar{width:232px;flex:0 0 232px;background:var(--ink);display:flex;flex-direction:column;padding:18px 12px 20px;gap:2px}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 8px 20px;color:#fff}
+.brand img{width:34px;height:40px;object-fit:contain}
+.brand b{display:block;font-size:14px}.brand small{font-size:11px;color:var(--nav-muted)}
+.nav{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;color:var(--nav-text);font-size:13.5px;font-weight:500}
+.nav:hover{background:var(--nav-hover);color:#fff}.nav.on{background:var(--nav-on);color:#fff}
+.nav svg{width:18px;height:18px;flex:0 0 auto}
+/* The label never wraps; a long badge ("3 nouvelles") is abbreviated in the dictionaries (fr "3 nouv."). */
+.nav-l{white-space:nowrap}
+.nav .cnt{margin-left:auto;flex-shrink:0}
+.nav .cnt{margin-left:auto;font-size:11px;font-weight:600;background:#5A2BB0;color:#fff;border-radius:999px;padding:2px 6px;white-space:nowrap}
+.nav .cnt.hot{background:var(--peach);color:var(--ink)}
+.navsec{font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--nav-sub);padding:14px 10px 6px}
+.me{display:flex;align-items:center;gap:10px;padding:12px 8px 0;margin-top:6px;border-top:1px solid var(--nav-on);color:#fff}
+.me .av{background:var(--peach);color:var(--ink)}
+.me small{display:block;font-size:11px;color:var(--nav-muted)}
+.me select{margin-top:4px;width:100%;background:var(--nav-on);color:#fff;border:0;border-radius:6px;padding:4px 6px;font-size:11.5px}
+main{flex:999 1 560px;min-width:0;display:flex;flex-direction:column}
+.topbar{display:flex;align-items:center;gap:12px;padding:16px 28px;background:var(--surface);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.topbar .sub{font-size:12.5px;color:var(--muted);margin-top:2px}
+/* The title block takes the room the actions leave, so at 1280 px the actions stay on the title's line and a long
+   subtitle wraps instead (review #31). */
+.topbar-t{flex:999 1 360px;min-width:0}
+/* Company profile: the actions wrap one by one after the title, as the prototype's header (Run AI research and Add
+   contact top right, the rest on the next line; review #16). */
+.co-top .topbar-t{flex:0 1 auto}
+.co-top .hdr-actions{display:contents}
+/* Long links in value columns break at their separators (breakableUrl), not mid-word. */
+.kv dd a{overflow-wrap:break-word}
+.sec-link{font-size:12px;font-weight:500}
+.topbar .crumb{font-size:12px;color:var(--muted);margin-bottom:4px}
+.grow{flex-grow:1}
+.page{padding:20px 28px 28px;display:flex;flex-direction:column;gap:16px}
+.cols{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start}
+.page.cols{flex-direction:row}
+/* Components */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;display:flex;flex-direction:column;gap:14px}
+.card.flush{padding:0;gap:0;overflow:hidden}
+.card .head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.card .foot{padding:12px 18px;font-size:12.5px;color:var(--muted);border-top:1px solid var(--line-2)}
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.tiles.t3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;color:var(--text)}
+.tile .l{font-size:12px;color:var(--muted);font-weight:500}.tile .v{font-size:24px;font-weight:800;margin-top:4px}.tile .m{font-size:12px;color:var(--muted);margin-top:2px}
+.tile .m.bad{color:var(--bad-fg)}.tile .m.ok{color:#176B3A}.tile .m.warn{color:var(--warn-fg)}
+.badge{display:inline-block;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;line-height:16px;white-space:nowrap}
+.b-purple{background:var(--tint);color:#4B0A9A}.b-purple2{background:var(--tint-2);color:#4B0A9A}
+.b-ok{background:var(--ok-bg);color:var(--ok-fg)}.b-warn{background:var(--warn-bg);color:var(--warn-fg)}.b-bad{background:var(--bad-bg);color:var(--bad-fg)}
+.b-info{background:var(--info-bg);color:var(--info-fg)}.b-grey{background:var(--grey-bg);color:var(--grey-fg)}
+.tag-ai{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:999px;font-size:10.5px;font-weight:700;letter-spacing:.03em;background:var(--warn-bg);color:var(--warn-fg);border:1px dashed var(--peach);vertical-align:middle;margin-left:6px;white-space:nowrap}
+.tag-ok{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:999px;font-size:10.5px;font-weight:700;letter-spacing:.03em;background:var(--ok-bg);color:var(--ok-fg);vertical-align:middle;margin-left:6px}
+.prio{display:inline-flex;align-items:center;gap:6px}.prio::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--faint)}
+.prio.High::before{background:#C62828}.prio.Medium::before{background:#B26A00}
+.btn{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 14px;border-radius:8px;border:1px solid var(--field);background:var(--surface);font-size:13px;font-weight:600;color:var(--text);white-space:nowrap}
+.btn:hover{background:#F9F7FD;color:var(--text)}
+.btn.primary{background:var(--grad);border-color:transparent;color:#fff}.btn.primary:hover{filter:brightness(1.05);color:#fff}
+.btn.sm{height:30px;padding:0 10px;font-size:12.5px}.btn.xs{height:26px;padding:0 8px;font-size:12px}
+.btn.danger{color:var(--bad-fg);border-color:#F2B8B8}
+.chip{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border:1px solid var(--field);border-radius:8px;background:var(--surface);font-size:13px;font-weight:500;color:var(--text)}
+select.in,select.chip{appearance:none;-webkit-appearance:none;padding-right:34px;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236A5E86' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");background-repeat:no-repeat;background-position:right 12px center;background-size:16px 16px;cursor:pointer}
+select.in:disabled,select.chip:disabled{opacity:.6;cursor:default}
+.filters{display:flex;align-items:center;gap:8px;padding:12px 18px;flex-wrap:wrap;border-bottom:1px solid var(--line-2)}
+.tabs{display:flex;align-items:center;gap:22px;padding:0 18px;border-bottom:1px solid var(--line);flex-wrap:wrap;overflow-x:auto}
+.tab{padding:11px 2px;font-size:13.5px;font-weight:500;color:var(--muted);border:0;border-bottom:2px solid transparent;background:none;white-space:nowrap}
+.tab.on{color:var(--purple);border-bottom-color:var(--purple);font-weight:600}
+.tab .n{color:var(--faint);font-weight:500}.tab .n.bad{color:var(--bad-fg);font-weight:600}
+.search{display:flex;align-items:center;gap:8px;height:36px;padding:0 12px;border:1px solid var(--field);border-radius:8px;background:var(--surface);width:280px;max-width:100%}
+.search input{border:0;outline:0;background:transparent;flex-grow:1;font-size:13px;min-width:0}
+.search.search-wide{width:330px}
+.tbl{overflow-x:auto;position:relative}
+/* Wide tables (review #02): a fade marks the side where columns are scrolled out of view (ScrollBox sets more-l /
+   more-r), and sticky-1 / sticky-2 keep the first column(s) in view with a shadow on their edge once scrolled. */
+.tbl-wrap{position:relative;min-width:0}
+.tbl-wrap::before,.tbl-wrap::after{content:"";position:absolute;top:0;bottom:0;width:28px;pointer-events:none;opacity:0;transition:opacity .15s;z-index:3}
+.tbl-wrap::before{left:0;background:linear-gradient(90deg,rgba(31,2,73,.14),rgba(31,2,73,0))}
+.tbl-wrap::after{right:0;background:linear-gradient(270deg,rgba(31,2,73,.14),rgba(31,2,73,0))}
+.tbl-wrap.more-l::before,.tbl-wrap.more-r::after{opacity:1}
+.tbl-wrap.more-l:has(> .tbl.sticky-1,> .tbl.sticky-2)::before{opacity:0}
+.tbl.sticky-1 tr>:first-child,.tbl.sticky-2 tr>:nth-child(-n+2){position:sticky;left:0;z-index:2}
+.tbl.sticky-1 td:first-child,.tbl.sticky-2 td:nth-child(-n+2){background:var(--surface)}
+.tbl.sticky-1 tbody tr:hover td,.tbl.sticky-2 tbody tr:hover td{background:#F6F2FD}
+.tbl.sticky-1 tr.sel td,.tbl.sticky-2 tr.sel td{background:var(--tint)}
+.tbl.sticky-2 tr>:first-child{width:34px;min-width:34px;max-width:34px}
+.tbl.sticky-2 tr>:nth-child(2){left:34px}
+.more-l .tbl.sticky-1 tr>:first-child,.more-l .tbl.sticky-2 tr>:nth-child(2){box-shadow:8px 0 8px -8px rgba(31,2,73,.3)}
+@media (prefers-reduced-motion:reduce){.tbl-wrap::before,.tbl-wrap::after{transition:none}}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{text-align:left;font-weight:600;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;background:#F9F7FD}
+td{padding:11px 12px;border-bottom:1px solid var(--line-2);vertical-align:middle;white-space:nowrap}
+tbody tr:hover td{background:#F6F2FD}tr.sel td{background:var(--tint)}
+td.wrap{white-space:normal}td .dim{color:var(--faint)}
+.empty{padding:28px;text-align:center;color:var(--muted);font-size:13px}
+.lbl{font-size:12.5px;font-weight:600;color:var(--body);margin-bottom:6px;display:block}
+.req{color:var(--bad-fg);margin-left:2px}
+.in{width:100%;height:38px;padding:0 12px;border:1px solid var(--field);border-radius:8px;background:var(--surface);font-size:13.5px;color:var(--text)}
+.in:focus{outline:2px solid var(--purple);outline-offset:1px;border-color:var(--purple)}
+textarea.in{height:auto;padding:10px 12px;resize:vertical;line-height:1.5}
+.in.err{border-color:var(--bad-fg)}
+.err-msg{font-size:12px;color:var(--bad-fg);margin-top:4px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 18px}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px 18px}
+.grid4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 18px}
+.span2{grid-column:span 2}.span3{grid-column:span 3}.span4{grid-column:span 4}
+.kv{display:grid;grid-template-columns:140px 1fr;gap:9px 12px;font-size:13px;margin:0}
+.kv dt{color:var(--muted)}.kv dd{margin:0;font-weight:500;min-width:0;overflow-wrap:anywhere}
+.kv dd.null{color:var(--faint);font-weight:400}
+.pill{display:inline-block;padding:3px 9px;border-radius:6px;background:var(--grey-bg);color:var(--body);font-size:12px;font-weight:500;margin:0 6px 6px 0}
+.note{padding:10px 12px;border-radius:8px;font-size:12.5px;line-height:1.5}
+.note.warn{border:1px solid #F0C98A;background:#FFF8EC;color:var(--body)}
+.note.ok{border:1px solid #C9E8D3;background:#F1FBF4;color:var(--ok-fg)}
+.note.info{background:#F9F7FD;border:1px solid var(--line);color:var(--muted)}
+.note.ai{border:1px dashed var(--peach);background:#FFFBF4;color:var(--body)}
+.legend{display:flex;gap:14px;align-items:center;padding:10px 14px;background:var(--surface);border:1px solid var(--line);border-radius:8px;font-size:12.5px;color:var(--body);flex-wrap:wrap}
+.av{width:32px;height:32px;border-radius:50%;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;background:var(--tint);color:#4B0A9A}
+.logo{width:30px;height:30px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:11.5px;margin-right:10px;vertical-align:middle;background:var(--tint);color:#4B0A9A}
+.logo.lg{width:56px;height:56px;border-radius:12px;font-size:18px;font-weight:800;margin:0}
+.tl{display:flex;gap:14px}.tl .rail{display:flex;flex-direction:column;align-items:center}
+.tl .dot{width:30px;height:30px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;background:var(--tint)}
+.tl .dot svg{width:15px;height:15px}
+/* Icon colours per activity type (prototype UI.timeline ACT), and the status change as badges (review #17). */
+.tl .dot.t-call,.tl .dot.t-research{background:#FBE4D4}.tl .dot.t-email{background:#E4D5FB}
+.tl .dot.t-meeting,.tl .dot.t-assign,.tl .dot.t-status{background:#EFE6FD}
+.tl .dot.t-transfer,.tl .dot.t-quote{background:#FFF1E0}.tl .dot.t-ai{background:#FFF8EC}
+.tl .dot.t-created{background:#E6F6EC}.tl .dot.t-note{background:#EDE9F4}
+.tl .ev .tl-status{margin:6px 0 2px;font-size:12px}
+.tl .line{flex-grow:1;width:2px;background:var(--line);margin:4px auto 0}
+.tl .ev{padding-bottom:18px;min-width:0;font-size:13px}.tl .ev .m{color:var(--muted)}.tl .ev .b{color:var(--body);margin-top:4px;line-height:1.5}
+.task{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px}
+.task.over{border-color:#F2B8B8;background:#FFF7F7}.task.done{opacity:.55}
+.task strong{display:block}.task .m{color:var(--muted);font-size:12px;margin-top:2px}
+.task-when{color:var(--muted);font-size:12px;font-weight:500;margin-left:4px;white-space:nowrap}
+/* Lets the title shrink in a narrow column (Completed), so the unbreakable type · time drops to its own line. */
+.task .grow{min-width:0}
+.task input{margin-top:3px;accent-color:var(--purple)}
+.radio-card{display:flex;gap:12px;padding:14px 16px;border:1px solid var(--field);border-radius:10px;background:var(--surface);cursor:pointer}
+.radio-card.on{border:2px solid var(--purple);background:var(--tint)}
+.radio-card input{margin-top:3px;accent-color:var(--purple)}
+/* The radio keeps its own size in the flex row, so its focus ring is a circle, not a tall oval (review #14). */
+.radio-card input{align-self:flex-start;flex:0 0 auto}
+.radio-card small{display:block;font-size:12.5px;color:var(--body);margin-top:2px}
+.score{width:72px;height:72px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.score div{width:56px;height:56px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px}
+.bar{height:8px;background:var(--grey-bg);border-radius:4px;margin-top:4px}.bar div{height:8px;border-radius:4px;background:#822CDB}
+.sw{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer}
+.sw input{appearance:none;width:34px;height:20px;border-radius:999px;background:var(--field);position:relative;margin:0;flex:0 0 auto}
+.sw input::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s}
+.sw input:checked{background:#822CDB}.sw input:checked::after{left:16px}
+/* searchable dropdown (combobox) */
+.combo{position:relative;min-width:0}
+.combo>input{padding-right:34px;width:100%;text-overflow:ellipsis}
+.combo>input.chip{width:190px}
+.combo .caret{position:absolute;right:12px;top:0;bottom:0;margin:auto 0;width:16px;height:16px;border:0;background:none;color:var(--muted);display:flex;align-items:center;justify-content:center;padding:0;pointer-events:auto}
+.combo .caret svg{width:16px;height:16px;display:block}
+.combo-list{position:absolute;left:0;top:calc(100% + 4px);min-width:100%;max-width:420px;max-height:260px;overflow:auto;background:var(--surface);border:1px solid var(--field);border-radius:8px;box-shadow:0 10px 30px rgba(31,2,73,.14);z-index:40;padding:4px;margin:0;list-style:none}
+.combo-list[hidden]{display:none}
+.combo-list li{padding:7px 10px;border-radius:6px;font-size:13px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.combo-list li.on,.combo-list li:hover{background:var(--tint);color:#4B0A9A}
+.combo-list li mark{background:#FFE7C9;color:inherit;border-radius:2px;padding:0 1px}
+.combo-list li.none{color:var(--muted);cursor:default}
+.combo-list .hint{padding:4px 10px 6px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--line-2);margin-bottom:4px}
+/* modal + toast */
+.modal-bg{position:fixed;inset:0;background:rgba(31,2,73,.45);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50}
+.modal{background:var(--surface);border-radius:12px;width:560px;max-width:100%;max-height:90vh;overflow:auto;padding:22px 24px;display:flex;flex-direction:column;gap:14px;box-shadow:0 20px 60px rgba(31,2,73,.25)}
+.modal .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:4px}
+.modal:focus{outline:none}
+/* A note inside a field label, e.g. Cc "(stakeholders)": normal weight, muted (prototype inline style). */
+.lbl .lbl-note{font-weight:400;color:var(--muted)}
+.toasts{position:fixed;right:20px;bottom:20px;display:flex;flex-direction:column;gap:8px;z-index:60}
+.toast{background:var(--ink);color:#fff;padding:10px 14px;border-radius:8px;font-size:13px;box-shadow:0 8px 24px rgba(31,2,73,.3);max-width:360px}
+.toast.ok{border-left:4px solid #5BD48A}.toast.warn{border-left:4px solid var(--peach)}
+/* Accessibility fixes (UX report M9): keyboard focus is always visible. */
+a:focus-visible,button:focus-visible,[role=combobox]:focus-visible,summary:focus-visible,input[type=checkbox]:focus-visible,input[type=radio]:focus-visible{outline:2px solid var(--purple);outline-offset:2px}
+.in:focus-visible{outline:2px solid var(--purple);outline-offset:1px}
+
+/* Web app additions: user card sign-out, mobile bar, settings sub-navigation, inline editing */
+.me .who{min-width:0;flex-grow:1}
+/* White, as the prototype (the notifications' muted .nm rule below must not reach it). */
+.me .who .nm{font-size:13px;font-weight:600;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.me .signout{margin-top:6px;background:var(--nav-on);color:#fff;border:0;border-radius:6px;padding:4px 10px;font-size:11.5px;font-weight:600}
+.me .signout:hover{background:var(--nav-hover)}
+.me .signout svg{display:none}
+/* Collapsible sidebar (owner addition, 23 Nov 2026; wide screens only): « in the brand row folds it to a 64 px icon rail. */
+.side-toggle{margin-left:auto;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;flex:0 0 auto;border:0;border-radius:8px;background:none;color:var(--nav-muted);padding:0}
+.side-toggle:hover{background:var(--nav-hover);color:#fff}
+.side-toggle svg{width:16px;height:16px}
+@media (min-width:900px){
+  /* Sticky, scrolling on its own: every module and Sign out stay in reach on long pages and short laptop screens. */
+  /* z-index: the sticky sidebar is its own stacking context; above the page so the rail's tooltip shows over it. */
+  .sidebar{position:sticky;top:0;z-index:5;align-self:flex-start;height:100vh;overflow-y:auto;transition:width .2s ease,flex-basis .2s ease}
+  .sidebar.collapsed{width:64px;flex-basis:64px;padding:18px 10px 20px}
+  .sidebar.collapsed .brand{flex-direction:column;gap:8px;padding:4px 0 14px}
+  .sidebar.collapsed .brand-t{display:none}
+  .sidebar.collapsed .side-toggle{margin:0;transform:rotate(180deg)}
+  .sidebar.collapsed .nav{position:relative;justify-content:center;padding:9px 0}
+  .sidebar.collapsed .nav-l{display:none}
+  .sidebar.collapsed .nav .cnt{position:absolute;top:6px;right:9px;width:8px;height:8px;padding:0;font-size:0;box-shadow:0 0 0 2px var(--ink)}
+  .sidebar.collapsed .navsec{font-size:0;padding:0;height:1px;margin:10px 6px;background:var(--nav-on)}
+  .sidebar.collapsed .me{flex-direction:column;gap:8px;padding:12px 0 0}
+  .sidebar.collapsed .me .who{display:flex;justify-content:center}
+  .sidebar.collapsed .me .who .nm,.sidebar.collapsed .me .who small{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .sidebar.collapsed .signout{margin:0;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0}
+  .sidebar.collapsed .signout svg{display:block;width:16px;height:16px}
+  /* Names on the rail: a tooltip on hover and on keyboard focus (review M-4, N-1), fixed beside the item so the rail
+     keeps its own scroll on short screens. */
+  .rail-tip{position:fixed;transform:translateY(-50%);padding:5px 10px;border-radius:6px;background:var(--ink);color:#fff;font-size:12px;font-weight:600;white-space:nowrap;box-shadow:0 6px 18px rgba(31,2,73,.3);pointer-events:none;z-index:60}
+}
+@media (prefers-reduced-motion:reduce){.sidebar{transition:none}}
+/* Short laptop screens (1280×720): tighter rows so the whole menu and Sign out fit without scrolling. */
+@media (min-width:900px) and (max-height:780px){.sidebar .nav{padding-top:7px;padding-bottom:7px}.sidebar .navsec{padding-top:10px}.sidebar .brand{padding-bottom:14px}}
+/* The icon rail on a short screen: smaller gaps; below about 720 px it scrolls on its own to Settings, the avatar and
+   Sign out. */
+@media (min-width:900px) and (max-height:780px){
+  .sidebar.collapsed .brand{gap:4px;padding-bottom:8px}
+  .sidebar.collapsed .navsec{margin:6px}
+}
+.mobilebar{display:none}
+.nav-scrim{display:none}
+.subnav{display:flex;gap:8px;flex-wrap:wrap}
+.subnav a{display:inline-flex;align-items:center;height:32px;padding:0 12px;border-radius:999px;border:1px solid var(--field);background:var(--surface);font-size:12.5px;font-weight:600;color:var(--body)}
+.subnav a.on{background:var(--tint);border-color:var(--purple);color:#4B0A9A}
+.placeholder{padding:48px 24px;text-align:center;color:var(--muted)}
+.placeholder h2{color:var(--text);margin-bottom:6px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips .pill{display:inline-flex;align-items:center;gap:6px;margin:0}
+.chips .pill button{border:0;background:none;padding:0;width:18px;height:18px;border-radius:50%;line-height:1;color:var(--muted)}
+.chips .pill button:hover{background:var(--line);color:var(--text)}
+.cell-in{height:32px;font-size:13px;min-width:120px}
+.row-actions{display:flex;gap:6px;align-items:center}
+.inline-form{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;padding:14px 18px;border-top:1px solid var(--line-2)}
+.inline-form>div{flex:1 1 140px;min-width:0}
+.signin{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px;background:var(--bg)}
+.signin .card{width:420px;max-width:100%;padding:28px 28px 24px}
+.signin .mark{width:48px;height:56px;object-fit:contain}
+.signin .btn{justify-content:center;width:100%;height:42px}
+.signin .ms-tile{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:5px;background:#fff;margin-right:4px}
+.signin form{display:flex;flex-direction:column;gap:12px}
+.signin .divider{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.signin .divider::before,.signin .divider::after{content:"";flex:1;height:1px;background:var(--line)}
+.check{display:flex;align-items:center;gap:8px;font-size:13px}
+.check input{accent-color:var(--purple)}
+/* Companies list and form (release 1B) */
+.note.danger{border:1px solid #F2B8B8;background:var(--bad-bg);color:var(--bad-fg)}
+.note a{font-weight:600}
+.dup-list{margin:6px 0 0;padding-left:18px}
+.dup-list li{margin:2px 0}
+.th-sort{display:inline-flex;align-items:center;gap:4px;border:0;background:none;padding:0;font:inherit;color:inherit;text-transform:inherit;letter-spacing:inherit;cursor:pointer}
+.th-sort .arrow{opacity:0}.th-sort:hover .arrow{opacity:.5}.th-sort .arrow.on{opacity:1;color:var(--purple)}
+.filter-combo{width:190px}
+.filter-combo .in{height:34px;font-size:13px}
+.bulkbar{display:flex;align-items:center;gap:10px;padding:10px 18px;background:var(--tint);border-bottom:1px solid var(--line-2);font-size:13px;flex-wrap:wrap}
+tr.clickable{cursor:pointer}
+.row-link{color:var(--text);font-weight:600}
+/* Company Leads tab: the lead number is a purple link (prototype `<a style="font-weight:600">`). */
+.co-leadno{font-weight:600}
+/* Lead ID in the Leads list: the prototype's purple link, semibold. */
+.id-link{font-weight:600}
+.pager{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.form-sec{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:6px 0 -4px}
+.modal:has(.company-form){width:720px}
+
+/* Below 900 px the sidebar becomes a top bar with a menu button that opens the navigation as an overlay (UX report H3). */
+@media (max-width:899.98px){
+  .shell{flex-direction:column;flex-wrap:nowrap}
+  .mobilebar{display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:46;height:56px;padding:0 16px;background:var(--ink);color:#fff}
+  .mobilebar img{width:26px;height:30px;object-fit:contain}
+  .mobilebar b{font-size:14px}
+  .mobilebar .menu-btn{margin-left:auto;display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 12px;border-radius:8px;border:1px solid var(--nav-on);background:var(--nav-on);color:#fff;font-weight:600;font-size:13px}
+  .mobilebar .menu-btn svg{width:18px;height:18px}
+  .side-toggle{display:none}
+  .sidebar{display:none;position:fixed;top:56px;left:0;bottom:0;width:min(300px,85vw);z-index:45;overflow-y:auto}
+  .sidebar.open{display:flex}
+  .sidebar .brand{display:none}
+  .nav-scrim.open{display:block;position:fixed;inset:56px 0 0 0;background:rgba(31,2,73,.45);z-index:44}
+  main{flex:1 1 auto;width:100%}
+  .topbar{padding:14px 16px}
+  .page{padding:16px}
+  .tabs{gap:16px;padding:0 16px}
+  .grid2,.grid3,.grid4{grid-template-columns:minmax(0,1fr)}
+  .span2,.span3,.span4{grid-column:auto}
+  .modal{padding:18px 16px}
+  .toasts{left:16px;right:16px}
+}
+/* Company profile (release 1B) */
+.profile-tabs{background:var(--surface);padding:0 28px}
+.profile-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+.profile-grid .wide{grid-column:span 2}
+.sec-head{display:flex;align-items:center;gap:8px}
+.sec-head .pill{margin:0}
+.sec-head .btn{margin-left:auto}
+.title-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.hint-text{font-size:12px;color:var(--muted);margin-top:4px}
+.cell-sub{display:block;font-size:11.5px;color:var(--muted);font-weight:400}
+.row-actions{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+@media (max-width:899.98px){
+  .profile-tabs{padding:0 16px}
+  .profile-grid{grid-template-columns:minmax(0,1fr)}
+  .profile-grid .wide{grid-column:auto}
+}
+/* Leads, tasks and notifications (release 1C) */
+.modal:has(.wide-form){width:720px}
+.overdue{color:var(--bad-fg);font-weight:600}
+td.strong{font-weight:600}td.muted{color:var(--muted)}
+.date-range{display:inline-flex;gap:8px;flex-wrap:wrap}
+.date-chip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)}
+.date-chip .chip{padding:0 8px}
+.link-clear{margin-top:6px}
+.muted-text{margin:0;font-size:13px;color:var(--muted)}
+.in.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
+.in.file{padding:6px 10px}
+/* CSV import: the file input is a styled button (review #10); the real input stays focusable for the keyboard. */
+.file-pick{display:flex;align-items:center;gap:10px;flex-wrap:wrap;position:relative}
+.file-pick input{position:absolute;width:1px;height:1px;opacity:0}
+.file-pick input:focus-visible+label{outline:2px solid var(--purple);outline-offset:2px}
+.file-pick .dim{font-size:12.5px;color:var(--muted)}
+.csv-cols code{font-size:12px;background:var(--grey-bg);padding:1px 5px;border-radius:4px;color:var(--text)}
+.csv-summary{display:flex;flex-direction:column;gap:10px}
+.seg{display:inline-flex;gap:6px}
+.task-list{list-style:none;margin:0;padding:14px 18px;display:flex;flex-direction:column;gap:8px}
+.task-list .task{align-items:center}
+.task-actions{display:inline-flex;gap:6px;flex:0 0 auto}
+.nlist{list-style:none;margin:0;padding:0}
+.nrow{display:flex;align-items:flex-start;gap:14px;width:100%;text-align:left;font:inherit;padding:14px 20px;border:0;border-bottom:1px solid var(--line-2);background:var(--surface);color:var(--text);cursor:pointer}
+.nrow:hover{background:#FBF9FF}.nrow.unread{background:#FAF6FF}
+.nb{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.nb strong{font-size:13.5px;font-weight:500}.nrow.unread .nb strong{font-weight:700;color:var(--ink)}
+.nd{font-size:12.5px;color:var(--body)}.nm{font-size:12px;color:var(--muted)}
+.ndot{flex:0 0 auto;width:9px;height:9px;border-radius:50%;background:var(--purple);margin-top:6px}
+a.tile{display:block;text-decoration:none}a.tile:hover{border-color:var(--purple)}
+@media (max-width:899.98px){.tiles.t3{grid-template-columns:minmax(0,1fr)}}
+/* Lead page (release 1C) */
+.card-title{margin:0;font-size:14px;font-weight:700}
+.actions-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.inline-bar{display:flex;flex-direction:row;align-items:flex-end;gap:8px;flex-wrap:wrap}
+.inline-bar .lbl{margin:0 0 10px}
+.inline-bar input.in{width:auto}
+.inline-bar .grow{min-width:240px}
+.col-main{flex:999 1 520px;min-width:0;display:flex;flex-direction:column;gap:16px}
+.col-side{flex:1 1 300px;max-width:380px;min-width:0;display:flex;flex-direction:column;gap:16px}
+.stepper{list-style:none;margin:0;padding:0;display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end}
+.stage{flex:1 1 92px;min-width:0}
+.stage button{display:block;width:100%;border:0;background:none;padding:0;text-align:left;cursor:pointer;color:inherit;font:inherit}
+.stage button:disabled{cursor:default}
+.stage .bar{display:block;height:7px;border-radius:4px;background:var(--line)}
+.stage .t{display:block;font-size:11.5px;color:var(--muted);margin-top:6px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage.done .bar{background:#822CDB}.stage.done .t{color:var(--text)}
+.stage.on .bar{background:var(--grad)}.stage.on .t{color:var(--purple);font-weight:700}
+.stage button:not(:disabled):hover .bar{box-shadow:0 0 0 3px var(--tint-2)}
+.stage button:focus-visible{outline:2px solid var(--purple);outline-offset:3px;border-radius:4px}
+.stage.end .t{color:var(--faint)}
+.stage.closed .bar{background:var(--bad-fg)}.stage.closed .t{color:var(--bad-fg);font-weight:700}
+.closed-banner{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:8px;background:var(--bad-bg);color:var(--bad-fg);font-size:13px;flex-wrap:wrap}
+.timeline{list-style:none;margin:0;padding:0}
+.pre{white-space:pre-wrap}
+.task-list.flat{padding:0}
+.radio-group{border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;min-width:0}
+.menu-wrap{position:relative}
+.menu{position:absolute;right:0;top:calc(100% + 4px);z-index:30;min-width:200px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(40,12,90,.14);padding:6px;display:flex;flex-direction:column}
+.menu [role=menuitem]{display:block;width:100%;text-align:left;border:0;background:none;padding:8px 10px;border-radius:6px;font:inherit;font-size:13px;color:var(--text);cursor:pointer}
+.menu [role=menuitem]:hover,.menu [role=menuitem]:focus{background:var(--tint);outline:0}
+.menu [role=menuitem].danger{color:var(--bad-fg)}
+@media (max-width:899.98px){.col-side{max-width:none}}
+/* Prototype parity port (release 1-parity): rules copied verbatim from prototype/css/app.css for the lead page,
+   company/contact cards, settings pick-list and notifications. Existing app overrides above are kept: .stepper/.stage,
+   .closed-banner, .pager, .seg and .nrow are not re-ported; email, calendar, quotation, mailer and public-form rules are skipped. */
+/* lead page: control strip, composer */
+.ctrl{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start}
+.ctrl>div{display:flex;flex-direction:column;gap:6px;min-width:150px}
+.ctrl .l{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.ctrl .in{height:34px}
+.quick{display:flex;gap:4px;flex-wrap:wrap}
+.quick button{height:24px;padding:0 8px;border-radius:999px;border:1px solid var(--field);background:#fff;font-size:11px;font-weight:600;color:var(--body)}
+.quick button:hover{background:var(--tint);border-color:#822CDB;color:#4B0A9A}
+.ctab{display:inline-flex;align-items:center;gap:6px}.ctab svg{width:15px;height:15px}
+.composer .body{padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+.composer .body[hidden]{display:none}
+.tl .ev .b.research{background:#FFFDF9;border:1px dashed #F6D0B2;border-radius:8px;padding:8px 10px}
+.hdr-actions{display:flex;gap:8px;flex-wrap:wrap}
+/* links, numbers, steps */
+.link{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;color:var(--text)}
+.num{text-align:right;white-space:nowrap}
+.step{display:flex;gap:10px;font-size:12.5px;color:var(--body)}.step .d{width:10px;height:10px;border-radius:50%;background:var(--field);flex:0 0 auto;margin-top:4px}.step .d.on{background:#822CDB}
+/* Leads-2: person-first list + profile on top of the lead page */
+.l2 td.nm .n{margin-right:8px}.l2 td.nm .li-btn{vertical-align:middle}.l2 td.nm a.n{font-weight:600;color:var(--ink)}
+.l2 tbody tr{cursor:pointer}
+.l2 th a{color:inherit;display:inline-flex;align-items:center;gap:4px}.l2 th a:hover{color:var(--purple)}.l2 th .ar{font-size:10px;color:var(--purple)}
+.l2 td.ell{max-width:240px;overflow:hidden;text-overflow:ellipsis}
+.pager .btn[aria-disabled=true]{opacity:.45;pointer-events:none}
+.pager input{width:70px;height:30px}
+.li-btn{display:inline-flex;align-items:center;gap:6px;color:#0A66C2;font-weight:600;font-size:12.5px}.li-btn svg{width:17px;height:17px}
+.li-btn.lg{padding:6px 10px;border:1px solid #0A66C2;border-radius:8px}.li-btn.lg:hover{background:#0A66C2;color:#fff}
+.li-btn.off{color:var(--muted);border-color:var(--line);cursor:default}
+.sks{display:flex;flex-wrap:wrap;gap:6px}.sk{font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--tint);color:#4B0A9A}.sk.lang{background:#FFF1E0;color:#8A4B00}
+.pinfo{min-width:0;flex:1;display:flex;flex-direction:column;gap:7px}
+.prow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.phead{font-size:14px;color:var(--text)}.pmeta{font-size:12.5px;color:var(--muted)}
+.pcontacts{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:13px;margin-top:2px}.pcontacts a{display:inline-flex;align-items:center;gap:6px}.pcontacts svg{width:16px;height:16px}.pcontacts small{color:var(--muted);font-weight:400}
+.pabout{margin:4px 0 0;font-size:13.5px;line-height:1.55;max-width:80ch}
+.xp{display:flex;flex-direction:column;gap:12px}
+.xpi{display:flex;gap:12px;font-size:13px;position:relative}
+.xpi+.xpi::before{content:"";position:absolute;left:5px;top:-12px;height:12px;border-left:2px solid var(--line)}
+.xpdot{width:12px;height:12px;border-radius:50%;background:var(--line);margin-top:4px;flex:0 0 auto}.xpi.now .xpdot{background:var(--purple)}
+.xpd{font-size:12.5px;color:var(--muted);margin-top:3px}
+.hdr-actions .btn svg{width:16px;height:16px}
+.l2box{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,3fr);gap:0;padding:0}
+.l2box.two{grid-template-columns:1fr}
+.l2col{padding:18px 20px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.l2col+.l2col{border-left:1px solid var(--line-2)}
+.l2h{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;min-height:26px}
+.l2h .dim{font-weight:500;letter-spacing:0;text-transform:none;font-size:12px}
+.l2box .ctrl{display:grid;grid-template-columns:1fr 1fr;gap:14px 12px}
+.l2box .ctrl>div{min-width:0!important;max-width:none!important}
+.l2box .ctrl>div:first-child,.l2box .ctrl>div:last-child{grid-column:1/-1}
+.l2box .ctrl select.in,.l2box .ctrl .combo{width:100%!important}
+@media (max-width:820px){.l2box,.l2box.two{grid-template-columns:1fr}.l2col+.l2col{border-left:0;border-top:1px solid var(--line-2)}}
+.l2facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 18px;margin:6px 0 2px;padding:12px 0;border-top:1px solid var(--line-2);border-bottom:1px solid var(--line-2)}
+.l2facts>div{min-width:0}.l2facts dt{font-size:10.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px}
+.l2facts dd{margin:0;font-size:13px;font-weight:400;color:var(--text);overflow-wrap:anywhere}
+.l2pie{--p:0;flex:0 0 auto;width:52px;height:52px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:conic-gradient(var(--purple) calc(var(--p)*1%),var(--tint) 0)}
+.l2pie b{width:38px;height:38px;border-radius:50%;background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:var(--ink)}
+.l2col .prow{flex-wrap:nowrap;align-items:flex-start;justify-content:space-between;gap:12px}.pnm{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;min-width:0}.pnm h2{overflow-wrap:anywhere}
+.l2box .ctrl>div:first-child>div{flex-wrap:wrap}
+.l2facts dd .prio{font-weight:400}
+.ptop{min-width:0;flex:1;display:flex;flex-direction:column;gap:7px}.l2col .pcontacts{align-items:center}
+.xprow{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1.3fr) 76px minmax(0,1fr) 30px;gap:6px;padding:8px 0;border-bottom:1px solid var(--line-2)}
+.xprow .in{height:32px;min-width:0}.xprow [data-x=description]{grid-column:1/-2}.xprow [data-xpdel]{height:32px;padding:0;justify-content:center}
+@media (max-width:640px){.xprow{grid-template-columns:1fr 1fr 30px}.xprow [data-x=title],.xprow [data-x=description]{grid-column:1/-2}}
+.l2line{font-size:13px;color:var(--muted)}.l2line b{font-weight:400;color:var(--text)}.l2line i{font-style:normal;margin:0 10px;color:var(--line)}
+/* Leads-2: collapsible Profile and composer boxes */
+.card.flush.l2sec{overflow:visible}.l2sec .l2box{border-radius:0 0 var(--radius) var(--radius)}
+.l2tb{display:flex;align-items:center;gap:10px;padding:8px 14px 8px 8px}
+.l2tog{flex:1;min-width:0;display:flex;align-items:center;gap:10px;background:none;border:0;padding:6px 8px;border-radius:8px;text-align:left;font:inherit;color:var(--text)}
+.l2tog:hover{background:var(--tint)}
+.chev{width:16px;height:16px;flex:0 0 auto;color:var(--purple);transition:transform .28s ease}
+.is-closed .l2tog .chev,.is-closed .l2ctog .chev{transform:rotate(-90deg)}
+.l2tt{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;flex:0 0 auto}
+.l2sum{display:flex;align-items:center;gap:6px 14px;min-width:0;flex-wrap:wrap;font-size:13px;color:var(--muted);opacity:0;max-height:0;overflow:hidden;transition:opacity .2s ease}
+.l2sum b{color:var(--ink);font-size:14px}
+.l2sec.is-closed .l2sum{opacity:1;max-height:60px}
+.l2focus{flex:0 0 auto}.l2focus svg{width:14px;height:14px}
+.l2fold{display:grid;grid-template-rows:1fr;transition:grid-template-rows .28s ease}
+.l2sec.is-closed .l2fold{grid-template-rows:0fr}
+.l2foldin{min-height:0;overflow:visible}
+.l2sec.is-anim .l2foldin,.l2sec.is-closed .l2foldin{overflow:hidden}
+.l2sec.is-closed .l2foldin{visibility:hidden;transition:visibility 0s .28s}
+.l2sec .l2box{border-top:1px solid var(--line-2)}
+.l2ctog{margin-left:auto;display:inline-flex;align-items:center;gap:6px;background:none;border:0;padding:6px 8px;border-radius:8px;font:inherit;font-size:12px;font-weight:600;color:var(--muted)}
+.l2ctog:hover{background:var(--tint);color:var(--purple)}
+#composer.is-closed [data-cpanel]{display:none}
+#composer.is-closed .tabs{border-bottom:0}
+#composer.is-closed .tab.on{border-bottom-color:transparent}
+@media (prefers-reduced-motion:reduce){.l2fold,.chev,.l2sum{transition:none}}
+.card.flush.l2tl{overflow:visible}.l2fu{padding:4px 0 14px}.l2fu[hidden]{display:none}
+/* Follow-up tab: date, priority and type on the first row (prototype); Owner and Status each on their own row. */
+.l2fu .fu-date{min-width:260px;max-width:300px}
+.l2fu .fu-owner,.l2fu .fu-status{flex:0 0 100%}
+.l2fu .fu-owner .fu-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-height:34px}
+.l2fu .fu-owner-name{font-weight:600;color:var(--text)}
+.l2fu .fu-status select.in{width:200px}
+@media (max-width:640px){.l2facts{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.l2 th.ck,.l2 td.ck{width:34px;padding-right:0;cursor:default}.l2 td.ck input,.l2 th.ck input{width:16px;height:16px;accent-color:var(--purple);cursor:pointer;vertical-align:middle}
+/* Notifications */
+.natt{display:flex;flex-wrap:wrap;gap:8px}
+.natt a{padding:8px 14px;border-radius:999px;background:var(--tint);color:#4B0A9A;font-size:12.5px;font-weight:600}
+.natt a.bad{background:var(--bad-bg);color:var(--bad-fg)}.natt a.warn{background:var(--warn-bg);color:var(--warn-fg)}
+.ngh{padding:10px 20px 6px;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:#FBFAFE;border-bottom:1px solid var(--line-2)}
+.ni{flex:0 0 auto;width:36px;height:36px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center}.ni svg{width:18px;height:18px}
+/* Tiles collapse (prototype breakpoints; .tiles.t3 keeps the app rule above) */
+@media (max-width:899.98px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:640px){.tiles{grid-template-columns:1fr}}
+/* Later-release placeholder panel (PlaceholderCard; the full-page .placeholder above is for NotFound/AccessDenied).
+   Muted card in the prototype's .note.info colours with a dashed border; normal card padding, left-aligned. */
+.card.ph-card{background:#F9F7FD;border:1px dashed var(--field);color:var(--muted);gap:6px}
+.card.ph-card h2{color:var(--muted)}
+.card.ph-card p{margin:0;font-size:12.5px;line-height:1.5}
+.card.ph-card .ph-note{font-weight:600;color:var(--faint)}
+/* Lead page (prototype parity, task 4) */
+.btn:disabled{opacity:.55;cursor:not-allowed}.btn:disabled:hover{background:var(--surface);color:var(--text)}.btn.primary:disabled:hover{background:var(--grad);color:#fff}.btn.primary:disabled:hover{filter:none}
+.pname{font-size:19px;margin:0}
+.l2col .dim,.side-card .dim,.l2fu .dim,.composer .dim{color:var(--muted);font-size:12.5px}
+ul.xp{list-style:none;margin:0;padding:0}
+/* Experience dates: normal text colour at 12px, as in the prototype (its .dim has no grey outside tables). */
+.l2col .xp-span{font-size:12px;color:var(--text)}
+.pcontacts small{color:var(--muted);font-size:11px}
+.l2facts dd.dim{color:var(--faint)}
+.composer-head{display:flex;flex-wrap:wrap;align-items:center;gap:0 22px;padding:0 10px 0 18px}
+.composer-head>.tabs{border-bottom:0;padding:0;flex:0 1 auto}
+.composer-head>.l2ctog{order:2}
+.composer-head>[role=tabpanel]{order:3;flex:1 1 100%;margin:0 -10px 0 -18px;border-top:1px solid var(--line)}
+#composer.is-closed [role=tabpanel]{display:none}
+.composer-head .ctab-ph{cursor:not-allowed;opacity:.55}
+.composer .body form{display:flex;flex-direction:column;gap:12px}
+fieldset.bare{border:0;margin:0;padding:0;min-width:0}
+fieldset.bare>legend{padding:0}
+.form-end{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}.form-end .dim{margin-right:auto}
+.l2tl .l2tlb{padding:14px 20px 6px}
+.l2fu.ctrl{display:flex;gap:18px 22px}
+.fu-date{min-width:min(260px,100%);max-width:320px}
+.fu-row{display:flex;gap:8px;align-items:center}.fu-row .in{width:170px}
+.fu-closed{font-size:11.5px;color:var(--bad-fg)}
+.fu-passed{font-size:12px;color:var(--warn-fg);margin-top:4px}
+.fu-tasks{flex:1 1 100%;display:flex;flex-direction:column;gap:6px}
+.fu-list{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.fu-task{display:flex;flex-wrap:wrap;gap:2px 8px;align-items:center;font-size:12.5px;max-width:100%}
+.fu-task input{accent-color:var(--purple)}
+/* Narrow screens: the title keeps at least 12em (or the row), the type / time and date wrap under it. */
+.fu-t{flex:0 1 auto;min-width:min(12em,calc(100% - 24px));overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fu-due{color:var(--muted);font-size:11.5px;white-space:nowrap}.fu-due.overdue{color:var(--bad-fg)}
+.fu-more{font-size:12px}
+.side-card{gap:10px}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.co-name{font-size:14px;margin:0}.co-name a{color:var(--text)}
+.co-line{font-size:12.5px;color:var(--muted)}
+.co-links{display:flex;gap:8px 14px;font-size:12.5px;color:var(--muted);flex-wrap:wrap;align-items:center}
+.ph-inline .ph-note{font-weight:600;color:var(--faint)}
+.up-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+/* The prototype's calendar icon (calS) before a call or meeting. */
+.up-ic svg{width:14px;height:14px;vertical-align:-2px;margin-right:6px;stroke:#4B0A9A}
+.xprow.edu{grid-template-columns:minmax(0,1.3fr) minmax(0,1.3fr) 76px 76px 30px}
+.xprow .xp-desc{grid-column:1/-2}
+
+/* Companies list (prototype views-companies.js) */
+.co-cell{display:flex;align-items:center;gap:0;min-width:0}
+.co-cell .logo{flex:none}
+.dup-note{margin:14px 18px 0}
+.filters-count{font-size:12.5px}
+
+/* Company profile (prototype views-companies.js) */
+.sec-head .sec-note{font-size:12px;font-weight:500;color:var(--muted)}
+.digital-notes{display:flex;flex-direction:column;gap:10px;font-size:13px}
+@media (max-width:899.98px){.sec-split{grid-template-columns:minmax(0,1fr)}}
+.digital-notes .note.ai div{margin-top:4px}
+.legend .dim{color:var(--faint)}
+.side-card .muted{color:var(--muted)}
+.side-card .small{font-size:13px}
+.side-card h2 .n{font-weight:500}
+.head .head-note{font-size:12.5px;color:var(--muted)}
+.sec-title-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.sec-title-row h2{margin:0}
+.side-card .kv.kv-narrow{grid-template-columns:150px 1fr}
+.rules{margin:0;padding-left:18px;font-size:13px;color:var(--body);display:flex;flex-direction:column;gap:8px}
+.info-text{margin:0;font-size:13px;color:var(--body);line-height:1.5}
+.loc-card .kv-cols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 24px}
+@media (max-width:899.98px){.loc-card .kv-cols{grid-template-columns:minmax(0,1fr)}}
+.loc-card .card-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.loc-card .card-head h2{margin:0}
+.loc-card .card-head .row-actions{margin-left:auto}
+.activity-body{padding:18px 20px 6px}
+.search svg{width:16px;height:16px;flex:none;color:var(--muted)}
+/* Tasks page (prototype V.tasks): sections inside one card, help list on the side */
+.task-sec{display:flex;flex-direction:column;gap:8px}
+.task-sec h2{display:flex;align-items:center;gap:8px}
+.card .none{margin:0;font-size:13px}
+.how-list{margin:0;padding-left:18px;font-size:13px;color:var(--body);display:flex;flex-direction:column;gap:6px}
+.task .badge{flex:0 0 auto}
+
+/* Dashboard (prototype V.dashboard) */
+.bell-btn{position:relative}.bell-btn svg{width:16px;height:16px}
+.bell-count{position:absolute;top:-6px;right:-6px;font-size:10px;padding:1px 6px;line-height:14px}
+.dash-tasks{flex:1 1 380px;min-width:0}
+.dash-mid{flex:1 1 340px;min-width:0;display:flex;flex-direction:column;gap:16px}
+.dash-pipe{flex:1 1 280px;min-width:0;max-width:360px}
+.dash-tasks .card-head{flex-wrap:wrap}.dash-tasks h2{white-space:nowrap}
+.dash-badges{display:flex;gap:6px;flex-wrap:wrap}
+.dash-more{font-size:13px;font-weight:600}
+.dash-cal{font-size:12.5px;font-weight:600}
+.agenda{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;font-size:13px}
+.agenda li{display:flex;gap:12px;align-items:flex-start}
+.ag-time{width:48px;flex:0 0 auto;color:var(--muted);font-weight:600}
+.ag-body{border-left:3px solid var(--purple);padding-left:10px}
+.ag-body .m{display:block;color:var(--muted);font-size:12px}
+.dnotes{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;font-size:13px}
+.dnote{display:flex;gap:10px;width:100%;text-align:left;font:inherit;padding:0;border:0;background:none;color:var(--text);cursor:pointer}
+.dnote:hover strong{color:var(--purple)}
+.dnote .dot{width:8px;height:8px;border-radius:50%;background:var(--field);flex:0 0 auto;margin-top:6px}
+.dnote.unread .dot{background:var(--peach)}
+.dnote .m{display:block;color:var(--muted);font-size:12px}
+.pipe-bars{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px;font-size:12.5px}
+.pipe-row{display:flex;justify-content:space-between;gap:8px}
+.pipe-foot{font-size:12px}
+@media (max-width:899.98px){.dash-pipe{max-width:none}}
+
+/* Settings (prototype views-settings.js): heading with an inline muted line */
+.card-title-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.card-sub{font-size:12.5px}
+
+/* New lead page (prototype views-leads.js V.leadForm) */
+.nl-idnote{font-size:12.5px;color:var(--muted)}
+.nl-sub{font-size:12.5px;color:var(--muted);margin-top:2px}
+.nl-foot{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.nl-steps{margin:0;padding-left:18px;font-size:13px;color:var(--body);display:flex;flex-direction:column;gap:8px}
+.nl-dup{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap}
+.nl-dup-body{min-width:200px}
+.nl-dup-title{font-weight:600;color:var(--warn-fg)}
+.nl-dup-list{margin:2px 0;padding:0;list-style:none}
+.nl-dup-actions{display:flex;gap:8px;flex-wrap:wrap}
+.nl-co{display:flex;gap:12px;align-items:center}
+.nl-co .logo{margin:0;flex:none}
+.nl-co-name{font-weight:600;color:var(--text);overflow-wrap:anywhere}
+.nl-kv{grid-template-columns:110px 1fr}
+
+/* Email tab (prototype data-cpanel=email): Cc stakeholders chips (prototype .ccbox) and the footer row. */
+.ccbox{position:relative}
+.ccfield{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-height:40px;padding:5px 8px;border:1px solid var(--field);border-radius:8px;background:var(--surface);cursor:text}
+.ccfield:focus-within{outline:2px solid var(--purple);outline-offset:1px;border-color:var(--purple)}
+.ccfield input:focus,.ccfield input:focus-visible{outline:0!important;box-shadow:none}
+.ccfield input{flex:1;min-width:150px;border:0;outline:0;background:none;font:inherit;font-size:13px;height:28px;color:var(--text)}
+.cchip{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:3px 4px 3px 10px;border-radius:999px;background:var(--tint);color:#4B0A9A;font-size:12.5px;font-weight:600}
+.cchip button{border:0;background:none;color:inherit;font-size:10px;width:18px;height:18px;border-radius:50%;padding:0;line-height:1}
+.cchip button:hover{background:#4B0A9A;color:#fff}
+.ccbox .combo-list{max-height:230px;width:100%}
+.email-form{display:flex;flex-direction:column;gap:14px}
+.email-foot{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.email-foot .sw{font-size:12.5px}
+.email-foot .email-days{width:90px;height:28px}
+
+/* Lead actions row in the Edit profile dialog (Edit lead details, Switch contact, Archive). */
+.lead-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:12px;margin-top:4px}
+
+/* Lead page side column (prototype): AI line without research, link-style button, Projects hint. */
+.note.ai-empty{font-size:12.5px;color:var(--muted);border:1px solid var(--line);border-radius:8px;background:#F9F7FD;padding:10px 12px}
+.note.ai-empty .linkish{font-weight:inherit}
+.linkish{border:0;background:none;padding:0;font:inherit;color:var(--purple);font-weight:600;cursor:pointer}
+.linkish:hover{color:#4B0A9A}
+.side-hint{font-size:12.5px;line-height:1.45}
+.side-card h2 .n{color:var(--muted);font-weight:500}
+
+/* Reports (prototype app.js reports()): source rows with bars, enquiry key-values. */
+.rep-bars{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px;font-size:12.5px}
+.rep-row{display:flex;justify-content:space-between}
+.rep-kv{grid-template-columns:200px 1fr}
+
+/* Settings → Email & calendar connections (prototype V.connectionsCard). */
+.conn-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.conn-head h2{margin:0}.conn-sub{font-size:12.5px;color:var(--muted)}
+.conn-head .btn svg{margin-right:2px}
+.conn-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.conn-row{display:flex;gap:12px;align-items:center;padding:12px 14px;border:1px solid var(--line);border-radius:10px;flex-wrap:wrap}
+.conn-logo{width:36px;height:36px;border-radius:8px;background:#F3F6FB;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto}
+.conn-main{min-width:0;flex:1 1 220px}.conn-addr{font-weight:700}.conn-owner{font-weight:500;color:var(--muted)}
+.conn-meta{font-size:12.5px;color:var(--muted)}
+.conn-acts{display:flex;gap:6px;flex-wrap:wrap}
+.conn-admin{font-size:12.5px;color:var(--body)}.conn-admin summary{cursor:pointer;font-weight:600}.conn-admin div{margin-top:8px;line-height:1.6}
+.provider-list{display:flex;flex-direction:column;gap:8px}
+.btn.provider{height:auto;padding:12px 14px;justify-content:flex-start;text-align:left;gap:12px}
+.provider-mark{width:18px;text-align:center;font-weight:800}
+.provider-desc{display:block;font-size:12px;color:var(--muted);font-weight:400}
+
+/* Settings → Email templates (prototype V.templatesCard). */
+.tpl-file{display:block;font-size:11.5px;color:var(--muted)}
+.tpl-subject{max-width:260px;overflow:hidden;text-overflow:ellipsis}
+.tpl-upload{cursor:pointer}
+.tpl-help{font-size:12px}
+td.nowrap{white-space:nowrap}
+
+/* Lead page → Emails tab (release 2B-1): your own emails with the lead. */
+.mail-list{list-style:none;margin:0;padding:0 18px 14px;display:flex;flex-direction:column;gap:8px}
+.mail-item{border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.mail-item summary{cursor:pointer;display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
+.mail-subject{font-weight:600;color:var(--text)}
+.mail-meta{flex-basis:100%;font-size:12.5px;color:var(--muted)}
+.mail-body{white-space:pre-wrap;font:inherit;font-size:13px;color:var(--body);margin:10px 0 0}
+
+/* Email screen (release 2B-2; prototype .mail, .folders, .fold, .msglist, .msg, .reader, .mailside). */
+.mail-filters{background:var(--surface);padding:10px 28px;border-bottom:1px solid var(--line)}
+.mail-for{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-right:4px}
+.mail-pick{width:240px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mail-search{height:34px;width:300px}
+.mail-search input{border:0;outline:0;background:none;flex:1;min-width:0;font:inherit;font-size:13px}
+.mail{display:flex;flex-wrap:wrap;align-items:stretch;flex-grow:1}
+.folders{flex:0 0 190px;padding:18px 14px;border-right:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;gap:2px}
+/* Owner addition (23 Nov 2026): « in the column's head folds folders and templates to a strip with ». */
+.folders-head{display:flex;justify-content:flex-end;margin:-10px -6px 0}
+.folders-toggle{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;flex:0 0 auto;border:0;border-radius:8px;background:none;color:var(--muted);padding:0}
+.folders-toggle:hover{background:var(--tint);color:var(--purple)}
+.folders-toggle svg{width:16px;height:16px}
+.folders-list{display:contents}
+@media (min-width:761px){
+  .folders.collapsed{flex:0 0 44px;padding:12px 8px;align-items:center}
+  .folders.collapsed .folders-toggle{transform:rotate(180deg)}
+  .folders.collapsed .folders-head{margin:0}
+  .folders.collapsed .folders-list{display:none}
+}
+/* Phone: the folders are a row of chips above the list; folding does not apply there (review M-6). */
+@media (max-width:760px){.folders-head{display:none}}
+.fold{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;font-size:13px;font-weight:500;color:var(--body);border:0;background:none;text-align:left;cursor:pointer;text-decoration:none}
+.fold.on{background:var(--tint);color:#4B0A9A;font-weight:600}
+.fold .cnt{margin-left:auto;font-size:11px;background:#822CDB;color:#fff;border-radius:999px;padding:1px 7px}
+.fold .cnt.hot{background:var(--peach);color:var(--ink)}
+.mail-sec{color:var(--muted)}
+.mail-oft{font-size:10px;color:var(--muted)}
+.mail-manage{color:var(--purple)}
+.msglist{flex:1 1 300px;max-width:400px;min-width:0;border-right:1px solid var(--line);background:var(--surface)}
+.msglist-head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+.msglist-head strong{color:var(--text)}
+/* Owner requests (22–23 Nov 2026), not in the prototype: the pager in the narrow list column, compact (« ‹ › » buttons)
+   on two lines — count and Rows, then the navigation (the full-width ::after breaks the line; the navigation is
+   ordered after it). */
+.msglist .pager{padding:8px 14px;gap:6px 8px;font-size:12.5px;color:var(--muted);border-top:1px solid var(--line);background:var(--surface)}
+.msglist .pager::after{content:'';flex-basis:100%;order:1}
+.msglist .pager>button,.msglist .pager>label:last-of-type{order:2}
+.pager.compact{gap:6px 4px}
+.pager.compact .pg-sym{width:30px;justify-content:center;padding:0;font-size:14px}
+.pager.compact input{width:48px;padding:0 6px}
+.pager.compact select.chip{height:30px}
+/* Desktop (owner, 23 Nov 2026): the Email screen fits the window — the mail area takes the height left under the
+   header and filters, each column scrolls on its own and the list's pager stays in view at its foot. */
+@media (min-width:1100px){
+  main:has(> .mail){height:100vh;overflow:hidden}
+  .mail{flex:1 1 0;min-height:0}
+  .folders,.reader,.mailside{overflow-y:auto;min-height:0}
+  .msglist{display:flex;flex-direction:column;min-height:0}
+  .msglist-head,.msglist .pager{flex:none}
+  .msglist-rows{flex:1 1 auto;min-height:0;overflow-y:auto}
+}
+.msg{display:flex;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line-2);cursor:pointer;color:var(--text);width:100%;text-align:left;text-decoration:none}
+.msg.on{background:var(--tint)}
+/* The open (and hovered) row keeps its dark text, as the prototype's selected row (review #20). */
+.msg:hover,.msg.on{color:var(--text)}
+.msg.unread .who{font-weight:800}
+.msg .av{flex:0 0 auto}
+.msg-main{min-width:0;flex-grow:1}
+.msg .who{font-size:13px;font-weight:600;display:flex;justify-content:space-between;gap:8px}
+.msg-who{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.msg .sub{display:block;font-size:12.5px;margin-top:2px}
+.msg .pre{display:block;font-size:12px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.msg .t{font-size:11.5px;color:var(--muted);font-weight:500;white-space:nowrap}
+.msg-tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.reader{flex:999 1 420px;min-width:0;display:flex;flex-direction:column;background:var(--surface)}
+.reader.empty{align-items:center;justify-content:center}
+.reader-head{padding:18px 24px 14px;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start}
+.reader-title{min-width:0;flex-grow:1}
+.reader-title h2{font-size:16px;margin:0}
+.reader-meta{font-size:12.5px;color:var(--muted);margin-top:4px;overflow-wrap:anywhere}
+.reader-actions{display:flex;gap:6px;flex-wrap:wrap}
+.reader .body{padding:20px 24px;font-size:13.5px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
+.reader-attach{padding:0 24px 14px;font-size:12.5px;color:var(--body)}
+.reader-foot{margin-top:auto;padding:14px 24px;border-top:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+.mailside{flex:0 1 250px;min-width:0;padding:18px 16px;border-left:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;gap:12px}
+.mailside .navsec{padding:0 0 4px}
+.mailside .link{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;color:var(--text);text-decoration:none;font-size:13px}
+.mailside .link-sub{display:block;color:var(--muted)}
+.mail-thread{font-size:12.5px;color:var(--body);display:flex;flex-direction:column;gap:6px}
+.mail-loop{display:flex;gap:6px 14px;flex-wrap:wrap}
+.mail-loop .sw{font-size:12.5px}.mail-loop .dim{color:var(--muted)}
+.mail-context{font-size:12.5px;color:var(--body);padding-top:9px}
+@media (max-width:760px){
+  .mail-filters{padding:10px 16px}
+  .folders{flex:1 1 100%;flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--line)}
+  .folders .navsec{flex-basis:100%}
+  .msglist{max-width:none;flex-basis:100%;border-right:0}
+  .mailside{flex-basis:100%;border-left:0;border-top:1px solid var(--line)}
+}
+/* From 1100 px the four columns share one row; at 1280 px the list, reader and Linked records narrow a little
+   instead of Linked records dropping under the others (review #31). */
+@media (min-width:1100px){.mail{flex-wrap:nowrap}.reader{flex-shrink:1}}
+/* 761–1099 px (review M-5): folders, list and reader share the first row (the reader may narrow to 280 px) and
+   Linked records takes its own row under them, instead of four squeezed columns. */
+@media (min-width:761px) and (max-width:1099.98px){.reader{flex-basis:280px}.msglist{max-width:none}.mailside{flex:1 1 100%;border-left:0;border-top:1px solid var(--line)}}
+.mail-connect{margin:16px 28px 0;padding:12px 16px;border:1px solid #F0C98A;background:#FFF8EC;border-radius:10px;font-size:13px;color:var(--body);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+@media (max-width:760px){.mail-connect{margin:12px 16px 0}}
+
+/* Mailer (release 2C; prototype .wsteps, .mprev, .mquick, .mradio, .mrec, .mbar, .l2line, .hdr-actions). */
+.wiz{display:flex;flex-direction:column;gap:14px}
+.wsteps{display:flex;gap:6px;list-style:none;margin:0;padding:0;flex-wrap:wrap}
+.wsteps li{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--muted);padding:6px 12px 6px 6px;border-radius:999px;background:#F6F3FB}
+.wsteps li span{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--line);color:var(--text);font-size:11.5px}
+.wsteps li.on{background:var(--tint);color:#4B0A9A}
+.wsteps li.on span{background:var(--purple);color:#fff}
+.wsteps li.done span{background:#CDEBD7;color:#176B3A}
+.mprev{border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:#FBFAFE}
+.mprev .msub{font-weight:700;font-size:13.5px;margin:2px 0 8px}
+.mprev pre{margin:0;font:inherit;font-size:13px;white-space:pre-wrap;color:var(--body);max-height:190px;overflow:auto}
+.mquick{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.mradio{display:flex;align-items:center;gap:8px;font-size:13px;margin-top:8px;cursor:pointer;flex-wrap:wrap}
+.mradio input[type=radio]{accent-color:var(--purple)}
+.mw-start{width:210px;height:32px;margin-left:6px}
+.mw-hours{margin-top:10px;font-size:12.5px}
+.mw-help{font-size:12.5px}
+.mw-err{font-size:12px;margin-top:3px}
+.mw-kv{grid-template-columns:120px 1fr}
+.mw-details{grid-template-columns:110px 1fr}
+/* Prototype campaign side cards: Details gap 10px, address and lawful basis at normal weight; Email as queued gap 8px, 12px note. */
+.mw-detcard{gap:10px}.mw-details .mw-light{font-weight:400}.mw-queued{gap:8px}.mw-queued-note{font-size:12px}
+.modal:has(> .wiz){width:760px}
+.modal .actions .btn svg{width:14px;height:14px}
+/* Leads bulk bar (prototype .mbulk). */
+.mbulk{display:none;align-items:center;gap:8px;padding:8px 18px;background:var(--tint);border-bottom:1px solid var(--line);font-size:13px;flex-wrap:wrap}
+.mbulk.on{display:flex}.mbulk .btn svg{width:14px;height:14px}.mbulk .btn:disabled{opacity:.5;cursor:not-allowed}
+a.strong{font-weight:600}
+/* Campaign recipients (review #22): the address stays on one line with the recipient's local time under it; the sent
+   time may wrap after its date and a message id anywhere. */
+.mw-rec th,.mw-rec td{padding-left:10px;padding-right:10px}
+.mw-rec td.mw-sent{white-space:normal}
+.mw-rec .mw-local{display:block;font-size:11.5px;color:var(--muted)}
+.mw-rec td.mw-status{min-width:150px}.mw-rec td.mw-sent{min-width:106px}
+.mw-rec td.mw-msg{white-space:normal;overflow-wrap:anywhere;font-size:12px;min-width:96px}
+.mrec{max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+.mrec td,.mrec th{padding:7px 10px}
+.mbar{display:inline-block;width:90px;height:6px;border-radius:3px;background:var(--tint);overflow:hidden;vertical-align:middle}
+.mbar i{display:block;height:100%;background:linear-gradient(90deg,var(--purple),var(--peach));transition:width .4s ease}
+
+/* Calendar (release 3C): prototype .ccal / .cmini / .cgrid / .cit rules, copied verbatim. The prototype's .seg (links in a
+   bordered strip) is .seg.link-seg here, as the Tasks page keeps its own .seg of buttons. */
+.seg.link-seg{gap:0;border:1px solid var(--field);border-radius:8px;overflow:hidden;background:var(--surface)}
+.link-seg a{padding:7px 14px;font-size:13px;font-weight:600;color:var(--muted)}.link-seg a+a{border-left:1px solid var(--line)}
+.link-seg a.on{background:var(--tint);color:#4B0A9A}.link-seg a:hover{color:var(--purple)}
+.page.ccal{flex-direction:row;align-items:flex-start;gap:20px}
+.cside{flex:0 0 260px;display:flex;flex-direction:column;gap:18px;min-width:0}
+.cmain{flex:1;min-width:0;display:flex;flex-direction:column;gap:10px}
+.cmini{padding:14px;gap:10px;min-width:0;overflow:hidden}.cmh{display:flex;align-items:center;gap:6px;font-size:14px}
+.cnav{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:1px solid var(--field);border-radius:8px;background:var(--surface);color:var(--text)}
+.cnav svg{width:14px;height:14px}.cnav:hover{border-color:var(--purple);color:var(--purple)}.cnav.lg{width:36px;height:36px}
+.cmg{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px;text-align:center}
+.cmg .wd{font-size:10.5px;font-weight:600;color:var(--muted);padding:4px 0}
+.cmg a{position:relative;display:flex;align-items:center;justify-content:center;aspect-ratio:1;border-radius:8px;font-size:12.5px;font-weight:500}
+.cmg a.in{background:var(--tint);color:#4B0A9A}.cmg a.out{color:var(--faint)}
+.cmg a:hover{outline:1px solid var(--purple)}
+.cmg a.sel{outline:2px solid var(--purple)}
+.cmg a.today{background:var(--purple);color:#fff;font-weight:700}
+.cmg a.has::after{content:"";position:absolute;bottom:3px;left:50%;width:4px;height:4px;margin-left:-2px;border-radius:50%;background:var(--orange)}
+.cmg a.today.has::after{background:#fff}
+.coh{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--bad-fg);display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.coh span{background:var(--bad-fg);color:#fff;border-radius:999px;padding:1px 8px;font-size:11px;letter-spacing:0}
+.coi{display:block;padding:9px 12px;margin-bottom:8px;border-left:3px solid var(--bad-fg);border-radius:6px;background:var(--bad-bg);color:var(--ink)}
+.coi strong{display:block;font-size:13px}.coi span{font-size:12px;color:var(--bad-fg)}.coi:hover{color:var(--ink);box-shadow:0 2px 10px rgba(163,32,32,.15)}
+.con{font-size:12.5px;color:var(--muted)}
+.cbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.cbar .btn svg{width:14px;height:14px}
+.ctitle{font-size:20px;font-weight:800;color:var(--ink);margin:0 0 0 8px}
+.csum{font-size:12.5px;color:var(--muted)}
+.cgrid{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.cgh{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border-bottom:1px solid var(--line)}
+.cgh>div{padding:9px 12px;font-size:12px;font-weight:600;color:var(--muted)}.cgh b{color:var(--text)}.cgh .today{color:var(--purple)}.cgh .today b{color:var(--purple)}
+.cgb{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
+.cc{min-height:112px;padding:6px 6px 8px;border-right:1px solid var(--line-2);border-bottom:1px solid var(--line-2);display:flex;flex-direction:column;gap:4px;cursor:pointer;min-width:0}
+.cgb .cc:nth-child(7n){border-right:0}.cc:hover{background:#FBF9FF}
+.cc.out{background:#FAF8FD}.cc.out .cn{color:var(--faint)}
+.cc.tall{min-height:420px}.cgrid.day .cc{border:0;padding:14px;gap:8px;min-height:300px}
+.cn{font-size:13px;font-weight:600;padding:2px 4px;color:var(--text)}
+.cc.today .cn span{display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;padding:0 7px;border-radius:999px;background:var(--purple);color:#fff}
+.cnone{color:var(--faint);font-size:12px;padding:4px}
+.cit{display:flex;align-items:baseline;gap:6px;width:100%;text-align:left;font:inherit;font-size:12px;font-weight:600;padding:4px 8px;border:0;border-left:3px solid var(--peach);border-radius:5px;background:#FFF4E8;color:var(--ink);overflow:hidden;white-space:nowrap}
+.cit .tt{overflow:hidden;text-overflow:ellipsis}.cit .tm{font-weight:500;color:var(--muted);flex:0 0 auto}.cit .co{margin-left:auto;font-weight:500;color:var(--muted);flex:0 0 auto;padding-left:12px}
+.cit:hover{color:var(--ink);filter:brightness(.97)}
+.cit.t-call{border-left-color:var(--orange);background:#FBE9DF}
+.cit.t-meeting{border-left-color:var(--purple);background:var(--tint)}
+.cit.t-internal,.cit.t-task{border-left-color:#6A5E86;background:#EDE9F4}
+.cit.over{border-left-color:var(--bad-fg);background:var(--bad-bg)}
+.cit.done{background:#F6F3FB;border-left-color:var(--field);color:var(--faint);font-weight:500}.cit.done .tt{text-decoration:line-through}
+.cgrid.day .cit{font-size:13.5px;padding:10px 12px}
+.cmore{font-size:11.5px;font-weight:600;padding:0 8px}
+.cleg{display:flex;align-items:center;flex-wrap:wrap;gap:6px 6px;font-size:12px;color:var(--muted)}
+.cleg .k{display:inline-block;width:10px;height:10px;border-radius:3px;margin-left:12px;background:var(--peach)}.cleg .k:first-child{margin-left:0}
+.cleg .k.t-call{background:var(--orange)}.cleg .k.t-meeting{background:var(--purple)}.cleg .k.t-internal{background:#6A5E86}.cleg .k.over{background:var(--bad-fg)}.cleg .k.done{background:var(--field)}
+@media (max-width:1000px){.page.ccal{flex-direction:column}.cside{flex:none;width:100%;flex-direction:row;flex-wrap:wrap}.cmini{flex:0 0 260px}.cover{flex:1;min-width:220px}}
+@media (max-width:640px){.cgh>div{padding:8px 2px;text-align:center;font-size:10.5px;overflow:hidden}.cc{min-height:84px;padding:3px}.cit{padding:3px 4px;font-size:10.5px}.cit .tm{display:none}.cgrid.week .cgb,.cgrid.week .cgh{grid-template-columns:repeat(7,minmax(0,1fr))}.cmini{flex:1 1 100%}}
+
+/* ---------- Quotations (prototype V.quotes; its inline styles as classes) ---------- */
+.q-num{font-weight:600}
+/* The company may wrap so the Owner column fits at 1400 px (review #02). */
+.q-co{min-width:170px}
+.q-exp{color:var(--bad-fg);font-weight:600}
+.q-act{font-size:12.5px;font-weight:600}.q-convert{color:var(--orange)}
+/* Quotation editor (prototype V.quoteEditor; its inline styles as classes) */
+.cell{height:34px;padding:0 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);font-size:13px;color:var(--text)}
+.totals{display:grid;grid-template-columns:1fr auto;gap:8px 16px;font-size:13px;align-content:start}
+.totals .big{font-weight:800;font-size:15px;border-top:1px solid var(--line);padding-top:8px}
+/* Each amount sits level with its label, also on the rows with a % box (review #24). */
+.totals{align-items:center}
+/* Quotation editor (review #23): the lines need about 720 px, so below that the side cards move under the editor
+   instead of squeezing Item to a few letters; Item keeps room for a readable name. */
+.q-editor>.col-main{flex-basis:720px}
+.q-item{min-width:200px}
+.q-m{color:var(--muted)}
+.q-hint{font-size:12.5px;color:var(--muted)}
+.q-foot{display:flex;flex-wrap:wrap;gap:20px;padding:16px 20px;border-top:1px solid var(--line)}
+.q-notes{flex:1 1 320px;min-width:0}
+.cell.q-pct{width:60px;height:28px;margin-left:6px}
+.q-steps{display:flex;flex-direction:column;gap:10px}
+.step .d.q-bad{background:var(--bad-fg)}
+.q-btns{display:flex;gap:8px;flex-wrap:wrap}
+.q-revs{font-size:13px;display:flex;flex-direction:column;gap:10px}
+.q-rev{padding:10px 12px;border:1px solid var(--line);border-radius:8px}.q-rev.on{border-color:#822CDB;background:var(--tint)}
+.q-rev .m{color:var(--body);font-size:12.5px;margin-top:2px}
+.q-small{font-size:12px;color:var(--muted)}
+.q-hist{font-size:12.5px;color:var(--body);display:flex;flex-direction:column;gap:6px}
+.q-accept{font-size:13px;color:var(--body);line-height:1.5}
+.q-pdf{width:100%;height:70vh;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+
+/* ---------- Projects (prototype V.projects / V.projectModal; its inline styles as classes) ---------- */
+.pj-sub{display:block;font-size:11.5px;color:var(--muted)}
+.pj-client{color:var(--text);font-weight:600}
+.pj-sh{max-width:260px}
+.pj-acts{white-space:nowrap}
+.pj-count{font-size:12.5px;color:var(--muted)}
+.pj-hint{font-weight:400;color:var(--muted)}
+.pj-stakeholders{display:flex;flex-direction:column;gap:6px}
+.pj-stakeholders .muted{color:var(--muted)}
+.pj-none{font-size:12.5px;color:var(--muted)}
+/* Edit project: the locked Client keeps normal text, as the prototype (not the global disabled-select dimming). */
+select.in.pj-locked:disabled{opacity:1;color:var(--text);-webkit-text-fill-color:var(--text);background-color:var(--surface)}
+.link.pj-mine{border-color:#822CDB;background:var(--tint)}
+.pj-card-main{min-width:0}
+.pj-card-sub{display:block;color:var(--muted);font-size:12px}
+/* AI research (release 4, prototype aiCard / engineCard / tabs ai and sources) */
+.card.ai-card{border:1px dashed var(--peach);background:#FFFBF4}
+.ai-card .ai-head{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.ai-card .score div{background:#FFFBF4}
+.ai-card .ai-facts{font-size:13px;flex:1 1 180px}
+.ai-card .ai-sub{color:var(--muted);margin-top:3px}
+.ai-card .ai-score{font-weight:600}
+.ai-card .ai-conf{color:var(--warn-fg)}
+.ai-card .ai-actions{display:flex;flex-direction:column;gap:8px}
+.ai-card .ai-links{display:flex;gap:8px;flex-wrap:wrap}
+.ai-card .note.ai-summary{background:#fff;border:1px solid #F6D0B2;color:var(--body);font-size:13px}
+.ai-card .ai-engine{font-size:11.5px;color:var(--muted)}
+.head h2 .sec-note{font-size:12px;font-weight:500;color:var(--muted)}
+.tag-ai.flat,.tag-ok.flat{margin-left:0}
+.kv.ai-kv{grid-template-columns:130px 1fr}
+.note.snapshot{color:var(--body);max-height:260px;overflow:auto;white-space:pre-wrap}
+.engine-list{display:flex;flex-direction:column;gap:10px}
+.engine-sep{height:1px;background:var(--line-2)}
+.engine-sub{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-left:42px;font-size:12px;color:var(--muted)}
+.engine-num{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--body)}
+.engine-num .in{width:96px;height:30px}
+.engine-hint{font-size:12.5px;color:var(--muted)}
+.engine-muted{color:var(--muted)}
+.locked-note{color:var(--muted);font-size:12.5px}
+.engine-note{font-size:12px;color:var(--muted);line-height:1.5}
+.modal-form{display:flex;flex-direction:column;gap:14px}
+.note.ai.lead-ai{font-size:12.5px}
+.lead-ai .tag-ai{margin-left:4px}
+.lead-ai > div{margin-top:4px}
+
+/* Static mockup only (layout, no new colours, fonts or shadows): hidden panes stay hidden although .card/.page are
+   flex; five tiles share one row on wide screens; the wizard steps are clickable here. */
+[hidden]{display:none!important}
+@media (min-width:900px){.tiles.t5{grid-template-columns:repeat(5,minmax(0,1fr))}}
+.wsteps li[data-step]{cursor:pointer}
+</style>
+<div class="shell"><div class="mobilebar"><img src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyBpZD0iTGF5ZXJfMSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB2ZXJzaW9uPSIxLjEiIHZpZXdCb3g9IjAgMCAxMDQ2LjQ3IDEyNjAuOTEiPgogIDwhLS0gR2VuZXJhdG9yOiBBZG9iZSBJbGx1c3RyYXRvciAzMC40LjAsIFNWRyBFeHBvcnQgUGx1Zy1JbiAuIFNWRyBWZXJzaW9uOiAyLjEuNCBCdWlsZCAyMjYpICAtLT4KICA8ZGVmcz4KICAgIDxzdHlsZT4KICAgICAgLnN0MCB7CiAgICAgICAgZmlsbDogI2ZmZjsKICAgICAgfQogICAgPC9zdHlsZT4KICA8L2RlZnM+CiAgPHBhdGggY2xhc3M9InN0MCIgZD0iTTIuNjEsNDEuMjFsMS4yNC0uMzQtMS4yOS4xYy4wMi4wOC4wMy4xNi4wNS4yNCwwLDAsMCwwLDAsMFoiLz4KICA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNNjk4LjIyLDc1Ljg3Yy0zOC45OS0yNy4wNi0xMjQuNjYtNDQuNS0xNzIuMjUtNTIuNDktNDcuMDktNy45MS05OS4wMS0xNC4wMy0xNTQuMy0xOC4yMS00LjAyLS4zLTk5LjQ3LTcuNC0xOTUuMi00LjQ2LTQ1LjU0LDEuNC04Mi42Miw0Ljg2LTExMC4yMSwxMC4zQzI1LjA3LDE5LjEzLDE0LjQ4LDI5Ljg4LDExLjg0LDM1LjU3Yy0uMjMuNDktLjIzLjgzLDAsMi42LjA5LjY4LjE4LDEuMzcuMjMsMi4wNWwtLjM1LjAzYzExLjE2LDM3LjgzLDUxLjIxLDcwLjMsODkuMDcsOTcuMTIsMzkuMjksMjcuODUsMTEwLjMyLDY5LjYxLDE1My40Myw4Ny40MSw3Ny42NiwzMi4wNywxNzcuMjgsNDEuNTEsMjczLjYyLDUwLjY1LDM4LjEyLDMuNjEsNzQuMTMsNy4wMywxMDguMDMsMTEuNzcsNjQuOTUsOS4wOCwxMTcuNTQsMjAuOTcsMTY4LjQ4LDM4LjE3LTEuMzItNi44My0yLjctMTMuNzUtNC4xNS0yMC45Mi0yNC41OS0xMjEuNzctNTguOS0xOTguNjctMTAxLjk3LTIyOC41NloiLz4KICA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNNzQxLjY4LDk5LjM2Yy4xNi4yMi4zMi40Ni40OC42OC43Ljk5LDEuNCwxLjk5LDIuMSwzLjAxLjI1LjM3LjUuNzQuNzUsMS4xMS42MS45LDEuMjIsMS44MiwxLjgyLDIuNzQuMjcuNDEuNTMuODEuOCwxLjIyLjYxLjk0LDEuMjEsMS44OSwxLjgxLDIuODYuMjQuMzguNDguNzcuNzIsMS4xNS43MSwxLjE1LDEuNDIsMi4zMiwyLjEzLDMuNS4xMi4yLjI0LjM5LjM1LjU5Ljg0LDEuNDIsMS42OCwyLjg1LDIuNTEsNC4zMS4xMy4yMi4yNS40NS4zOC42OC42OCwxLjIsMS4zNiwyLjQyLDIuMDMsMy42NS4yNS40NS40OS45MS43NCwxLjM2LjU2LDEuMDMsMS4xMSwyLjA3LDEuNjcsMy4xMi4yNy41Mi41NCwxLjAzLjgxLDEuNTUuNTQsMS4wNCwxLjA3LDIuMDgsMS42MSwzLjE0LjI2LjUxLjUyLDEuMDIuNzgsMS41NC41OCwxLjE3LDEuMTYsMi4zNSwxLjc0LDMuNTUuMi40LjM5LjguNTksMS4yMS43NywxLjYxLDEuNTQsMy4yNCwyLjMxLDQuODkuMS4yMS4xOS40My4yOS42NC42NiwxLjQzLDEuMzEsMi44NywxLjk2LDQuMzMuMjQuNTUuNDksMS4xLjczLDEuNjYuNSwxLjE0LDEuMDEsMi4zLDEuNTEsMy40Ni4yNy42My41NCwxLjI3LjgxLDEuOTEuNDgsMS4xMi45NSwyLjI1LDEuNDIsMy4zOS4yNy42NS41NCwxLjMuOCwxLjk1LjUsMS4yMi45OSwyLjQ0LDEuNDgsMy42OC4yMy41Ny40NiwxLjE0LjY4LDEuNzEuNzEsMS44MSwxLjQyLDMuNjMsMi4xMyw1LjQ4LDEzLjQ3LDM1LjM2LDI1LDc3LjI1LDM1LjI2LDEyOC4wNSw2LjUsMzIuMTcsMTEuNzYsNTkuNiwxNS4yOSw5NS4wNCw4LjM4LDg0LjA1LDguNDcsMTc1LjIxLjI2LDI3MC45NC02Ljk5LDgxLjQ0LTE5Ljk4LDE2Ni40LTM4LjYyLDI1Mi43NCw1NS4wNy0xNi41NywxMDIuMTYtMzUuNzEsMTQwLjMzLTU3LjA2LDEuNjYtLjkzLDMuMy0xLjg2LDQuOTItMi43OS43OC0uNDUsMS41NS0uOTEsMi4zMi0xLjM2LjgzLS40OSwxLjY4LS45NywyLjUtMS40NiwxLjAyLS42LDIuMDItMS4yMSwzLjAyLTEuODIuNTctLjM0LDEuMTQtLjY4LDEuNy0xLjAzLDEuMjMtLjc1LDIuNDQtMS41MSwzLjY1LTIuMjcuMzItLjIuNjUtLjQuOTctLjYsMS4zMy0uODQsMi42NS0xLjY5LDMuOTUtMi41My4xOS0uMTIuMzgtLjI0LjU3LS4zNiwxLjQyLS45MiwyLjgyLTEuODUsNC4yMS0yLjc4LjA3LS4wNS4xNC0uMDkuMjEtLjE0LDE0LjU4LTkuNzgsMjcuNDgtMTkuOTgsMzguNy0zMC41Niw2LjMtNi44NCwxMi4xMS0xMy45NSwxNy40MS0yMS4zNCwxMTIuMjctMzI4LjQtMTEzLjEyLTU3MC40LTI3Ny4zLTY5OC4zOS45LDEuMiwxLjc5LDIuNDMsMi42OCwzLjY3WiIvPgogIDxwb2x5Z29uIGNsYXNzPSJzdDAiIHBvaW50cz0iMi42MiA0MS4yIDIuNjEgNDEuMjEgMi42MSA0MS4yMSAyLjYxIDQxLjIxIDIuNjIgNDEuMjEgMi42MiA0MS4yIi8+CiAgPHBhdGggY2xhc3M9InN0MCIgZD0iTTk4MC44LDg0OS45N3MtLjAyLjAyLS4wMy4wM2MtNS4zLDMuODgtMTAuODMsNy43LTE2LjU5LDExLjQ1LS4wNS4wMy0uMDkuMDYtLjE0LjA5LTUuNzMsMy43My0xMS42OSw3LjM5LTE3Ljg4LDEwLjk5LS4xMS4wNi0uMjEuMTItLjMyLjE4LTEuOTksMS4xNS00LDIuMy02LjA0LDMuNDQtLjA2LjAzLS4xMi4wNy0uMTguMS00LjE5LDIuMzQtOC40OCw0LjY2LTEyLjg4LDYuOTUtLjE5LjEtLjM4LjItLjU3LjMtMi4wMywxLjA2LTQuMDksMi4xMS02LjE2LDMuMTUtLjE2LjA4LS4zMi4xNi0uNDguMjQtNC40MywyLjIzLTguOTcsNC40Mi0xMy41OSw2LjYtLjI5LjE0LS41OC4yNy0uODcuNDEtMi4wNi45Ni00LjEzLDEuOTItNi4yMywyLjg3LS4yOC4xMy0uNTUuMjUtLjgzLjM4LTQuNjYsMi4xMS05LjQyLDQuMTktMTQuMjcsNi4yNC0uNDEuMTctLjgyLjM1LTEuMjQuNTItMi4wNi44Ny00LjEzLDEuNzMtNi4yMywyLjU5LS40MS4xNy0uODEuMzMtMS4yMi41LTQuODksMS45OS05Ljg2LDMuOTYtMTQuOTMsNS45LS41My4yLTEuMDcuNDEtMS42MS42MS0yLjA1Ljc4LTQuMTIsMS41Ni02LjIsMi4zMy0uNTUuMi0xLjA5LjQxLTEuNjQuNjEtNS4xLDEuODgtMTAuMywzLjc0LTE1LjU4LDUuNTctLjY1LjIzLTEuMzEuNDUtMS45Ni42OC0yLjA2LjcxLTQuMTMsMS40MS02LjIxLDIuMTEtLjY3LjIyLTEuMzMuNDUtMi4wMS42Ny01LjMzLDEuNzgtMTAuNzUsMy41My0xNi4yNSw1LjI2LS43Ni4yNC0xLjUzLjQ4LTIuMjkuNzItMi4wOC42NS00LjE3LDEuMjktNi4yOCwxLjkzLS43Ny4yNC0xLjU1LjQ3LTIuMzMuNzEtMi44Ljg0LTUuNjEsMS42OC04LjQ0LDIuNTItLjAxLDAtLjAyLDAtLjAzLDAtMi44MS44Mi01LjY0LDEuNjQtOC40OSwyLjQ1LS44NS4yNC0xLjcuNDgtMi41NS43Mi0yLjEzLjYtNC4yNywxLjItNi40MiwxLjc5LS44Ni4yNC0xLjcyLjQ4LTIuNTguNzEtMi45Mi44LTUuODUsMS41OS04LjgxLDIuMzgtMTQ3LjYxLDM5LjIxLTI5OS42NSw1MC41Ny0zNTguMTcsNTMuNjQtMjYuMzYsMS4zOC01My4wNCwxLjc5LTc4LjgzLDIuMTgtMjQuMjkuMzctNDcuMjYuNzMtNjkuODgsMS44Mi05LjM1LDEwLjYxLTE4Ljk5LDIxLjQzLTI4Ljg5LDMyLjM3LTYyLjAzLDY4LjU1LTEyMS44NSwxMjguNjMtMTc3LjgsMTc4LjU3LTIuODEsMi41LTUuNiw0Ljk3LTguMzgsNy40My0uNjQuNTYtMS4yOCwxLjEyLTEuOTEsMS42OC0yLjYyLDIuMy01LjIzLDQuNTgtNy44NCw2LjgzLS4xMy4xMi0uMjcuMjMtLjQuMzUtNi4wNyw1LjI1LTEyLjA4LDEwLjM3LTE4LjA1LDE1LjM3LDkzLjA3LDIzLjIxLDczOC44MSw4Ny41OCw5ODUuNzQtNDA2LjgxLDAsMCwwLDAsMCwwLTQuODQsNC4wMi05LjkxLDcuOTgtMTUuMjMsMTEuODhaIi8+CiAgPHBvbHlnb24gY2xhc3M9InN0MCIgcG9pbnRzPSIyLjYyIDQxLjIgMi42MSA0MS4yMSAyLjYxIDQxLjIxIDIuNjIgNDEuMjEgMi42MiA0MS4yIi8+CiAgPHBhdGggY2xhc3M9InN0MCIgZD0iTTI2OC40LDI0Ni4yMWMtNi43Ni0yLjM4LTEzLjQxLTQuOS0xOS45MS03LjU4LTQ0LjA0LTE4LjE4LTExNi40MS02MC43MS0xNTYuMzctODkuMDNDNTguNTMsMTI1LjgsMjMuMjQsOTcuNTcsNS40NCw2NC4wOWMyLjYxLDIwLjc4LDYuMjIsNDkuMTEsNy4xOCw1NS40Niw1Ljk5LDM5LjMsOC41LDc5LjA1LDEwLjUzLDExOC43MkMzMi44LDQyNi42Niw1NS43NCw4MzguMTMsMCwxMjMzLjk1YzEyLjA4LTEwLjExLDI0LjM2LTIwLjczLDM2LjgzLTMxLjg2LDU1LjU0LTQ5LjU3LDExNC45Ny0xMDkuMjUsMTc2LjYzLTE3Ny4zOSwyMS44MS0yNC4xLDQyLjM3LTQ3LjU4LDYxLjI3LTY5LjY3LDg3LjI3LTE4MC4zNSwxMTEuOTYtNTk4LjE0LTYuMzMtNzA4LjgzWiIvPgo8L3N2Zz4=" alt=""><b>DAIT Partners CRM</b><button type="button" class="menu-btn" aria-expanded="false" aria-controls="sidebar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg>Menu</button></div><nav id="sidebar" class="sidebar" aria-label="Main navigation"><div class="brand"><img src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyBpZD0iTGF5ZXJfMSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayIgdmVyc2lvbj0iMS4xIiB2aWV3Qm94PSIwIDAgMTA1Ljk4IDEyNy43Ij4KICA8IS0tIEdlbmVyYXRvcjogQWRvYmUgSWxsdXN0cmF0b3IgMzAuNC4wLCBTVkcgRXhwb3J0IFBsdWctSW4gLiBTVkcgVmVyc2lvbjogMi4xLjQgQnVpbGQgMjI2KSAgLS0+CiAgPGRlZnM+CiAgICA8c3R5bGU+CiAgICAgIC5zdDAgewogICAgICAgIGZpbGw6IHVybCgjbGluZWFyLWdyYWRpZW50Mik7CiAgICAgIH0KCiAgICAgIC5zdDEgewogICAgICAgIGZpbGw6IHVybCgjbGluZWFyLWdyYWRpZW50MSk7CiAgICAgIH0KCiAgICAgIC5zdDIgewogICAgICAgIGZpbGw6IHVybCgjbGluZWFyLWdyYWRpZW50Myk7CiAgICAgIH0KCiAgICAgIC5zdDMgewogICAgICAgIGZpbGw6IHVybCgjbGluZWFyLWdyYWRpZW50NSk7CiAgICAgIH0KCiAgICAgIC5zdDQgewogICAgICAgIGZpbGw6IHVybCgjbGluZWFyLWdyYWRpZW50NCk7CiAgICAgIH0KCiAgICAgIC5zdDUgewogICAgICAgIGZpbGw6IHVybCgjbGluZWFyLWdyYWRpZW50KTsKICAgICAgfQoKICAgICAgLnN0NiB7CiAgICAgICAgZmlsbDogI2ZmZjsKICAgICAgfQogICAgPC9zdHlsZT4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0ibGluZWFyLWdyYWRpZW50IiB4MT0iLjI2IiB5MT0iNC4xNiIgeDI9Ii4zOSIgeTI9IjQuMTYiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjNjYxYjhmIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iLjEyIiBzdG9wLWNvbG9yPSIjNzcyNmEyIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iLjMiIHN0b3AtY29sb3I9IiM4MTI5YjEiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIuNDUiIHN0b3AtY29sb3I9IiM3NzI2YTIiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIuNTgiIHN0b3AtY29sb3I9IiM1ZTEyODYiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIuNyIgc3RvcC1jb2xvcj0iIzQ2MDM2OCIvPgogICAgICA8c3RvcCBvZmZzZXQ9Ii44MiIgc3RvcC1jb2xvcj0iIzNhMDI1MyIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMzOTAyNGYiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImxpbmVhci1ncmFkaWVudDEiIHgxPSIxLjE4IiB5MT0iMTYuNDciIHgyPSI4MS40NiIgeTI9IjE2LjQ3IiB4bGluazpocmVmPSIjbGluZWFyLWdyYWRpZW50Ii8+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImxpbmVhci1ncmFkaWVudDIiIHgxPSI1Ny40MyIgeTE9IjM5Ljg0IiB4Mj0iMTA4LjkzIiB5Mj0iNjkuNTgiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjYmM1N2Q4Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iLjA2IiBzdG9wLWNvbG9yPSIjY2Q2YWRjIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iLjEzIiBzdG9wLWNvbG9yPSIjZGU3MmQ5Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iLjIiIHN0b3AtY29sb3I9IiNkOTVlOTUiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIuMjciIHN0b3AtY29sb3I9IiNkMjNmNTYiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIuMzQiIHN0b3AtY29sb3I9IiNjMTNkMmQiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIuNDEiIHN0b3AtY29sb3I9IiNiOTM0MTkiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIuNDkiIHN0b3AtY29sb3I9IiNiNzJlMGQiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIuNTYiIHN0b3AtY29sb3I9IiNiZTMwMDYiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIuNjMiIHN0b3AtY29sb3I9IiNjMzM1MDUiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIuNyIgc3RvcC1jb2xvcj0iI2NhM2QwNSIvPgogICAgICA8c3RvcCBvZmZzZXQ9Ii43OCIgc3RvcC1jb2xvcj0iI2QzNDUwNSIvPgogICAgICA8c3RvcCBvZmZzZXQ9Ii44NyIgc3RvcC1jb2xvcj0iI2UwNGYwNiIvPgogICAgICA8c3RvcCBvZmZzZXQ9Ii45NSIgc3RvcC1jb2xvcj0iI2VhNTcwNiIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNlZjVhMDYiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImxpbmVhci1ncmFkaWVudDMiIHgxPSIxLjA0IiB5MT0iMTA2LjI5IiB4Mj0iMTAwLjg3IiB5Mj0iMTA2LjI5IiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iI2U2NzgzMiIvPgogICAgICA8c3RvcCBvZmZzZXQ9Ii4yNSIgc3RvcC1jb2xvcj0iI2Y2OGU0NiIvPgogICAgICA8c3RvcCBvZmZzZXQ9Ii40NSIgc3RvcC1jb2xvcj0iI2ZiOWE1NSIvPgogICAgICA8c3RvcCBvZmZzZXQ9Ii42MiIgc3RvcC1jb2xvcj0iI2Y5OTU0ZSIvPgogICAgICA8c3RvcCBvZmZzZXQ9Ii44IiBzdG9wLWNvbG9yPSIjZjQ5MDQ5Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iI2ZiOWM1NyIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0ibGluZWFyLWdyYWRpZW50NCIgeDE9Ii4yNiIgeTE9IjQuMTciIHgyPSIuMjYiIHkyPSI0LjE3IiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iIzMzMDI0ZCIvPgogICAgICA8c3RvcCBvZmZzZXQ9Ii4wNyIgc3RvcC1jb2xvcj0iIzQ2MGM2NCIvPgogICAgICA8c3RvcCBvZmZzZXQ9Ii4xMyIgc3RvcC1jb2xvcj0iIzVkMGY3ZiIvPgogICAgICA8c3RvcCBvZmZzZXQ9Ii4xOCIgc3RvcC1jb2xvcj0iIzc2MWM5MCIvPgogICAgICA8c3RvcCBvZmZzZXQ9Ii4yNCIgc3RvcC1jb2xvcj0iIzkzMjZhNCIvPgogICAgICA8c3RvcCBvZmZzZXQ9Ii4zIiBzdG9wLWNvbG9yPSIjYjcyYmI1Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iLjM1IiBzdG9wLWNvbG9yPSIjYzcyZjlkIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iLjQxIiBzdG9wLWNvbG9yPSIjZDEzYjcxIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iLjQ2IiBzdG9wLWNvbG9yPSIjZDM0MjQ5Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iLjUyIiBzdG9wLWNvbG9yPSIjZDQ2MDQ5Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iLjU3IiBzdG9wLWNvbG9yPSIjZGQ2YzQ2Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iLjYzIiBzdG9wLWNvbG9yPSIjZTc3OTQ0Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iLjY5IiBzdG9wLWNvbG9yPSIjZjI4NTQ3Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iLjc0IiBzdG9wLWNvbG9yPSIjZjk5MzUxIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iLjgiIHN0b3AtY29sb3I9IiNmYmEzNjUiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIuODUiIHN0b3AtY29sb3I9IiNmYmFkNzAiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIuOTEiIHN0b3AtY29sb3I9IiNmYmFkNzEiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIuOTYiIHN0b3AtY29sb3I9IiNmNTkzNGUiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjZWM4ODQzIi8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJsaW5lYXItZ3JhZGllbnQ1IiB4MT0iMTcuNjYiIHkxPSI2LjQ5IiB4Mj0iMTcuNjYiIHkyPSIxMjQuOTciIHhsaW5rOmhyZWY9IiNsaW5lYXItZ3JhZGllbnQ0Ii8+CiAgPC9kZWZzPgogIDxnPgogICAgPHBhdGggY2xhc3M9InN0NSIgZD0iTS4yNiw0LjE3bC4xMy0uMDNoLS4xM3MwLC4wMywwLC4wM2MwLDAsMCwwLDAsMFoiLz4KICAgIDxwYXRoIGNsYXNzPSJzdDEiIGQ9Ik03MC43MSw3LjY4Yy0zLjk1LTIuNzQtMTIuNjItNC41MS0xNy40NC01LjMyLTQuNzctLjgtMTAuMDMtMS40Mi0xNS42My0xLjg0LS40MS0uMDMtMTAuMDctLjc1LTE5Ljc3LS40NS00LjYxLjE0LTguMzcuNDktMTEuMTYsMS4wNEMyLjU0LDEuOTQsMS40NywzLjAzLDEuMiwzLjZjLS4wMi4wNS0uMDIuMDgsMCwuMjYsMCwuMDcuMDIuMTQuMDIuMjFoLS4wNGMxLjEzLDMuODMsNS4xOSw3LjEyLDkuMDIsOS44NCwzLjk4LDIuODIsMTEuMTcsNy4wNSwxNS41NCw4Ljg1LDcuODcsMy4yNSwxNy45NSw0LjIsMjcuNzEsNS4xMywzLjg2LjM3LDcuNTEuNzEsMTAuOTQsMS4xOSw2LjU4LjkyLDExLjksMi4xMiwxNy4wNiwzLjg3LS4xMy0uNjktLjI3LTEuMzktLjQyLTIuMTItMi40OS0xMi4zMy01Ljk3LTIwLjEyLTEwLjMzLTIzLjE1WiIvPgogIDwvZz4KICA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNNzUuMTEsMTAuMDZzLjAzLjA1LjA1LjA3Yy4wNy4xLjE0LjIuMjEuMy4wMy4wNC4wNS4wNy4wOC4xMS4wNi4wOS4xMi4xOC4xOC4yOC4wMy4wNC4wNS4wOC4wOC4xMi4wNi4xLjEyLjE5LjE4LjI5LjAyLjA0LjA1LjA4LjA3LjEyLjA3LjEyLjE0LjIzLjIyLjM1LjAxLjAyLjAyLjA0LjA0LjA2LjA5LjE0LjE3LjI5LjI1LjQ0LjAxLjAyLjAzLjA1LjA0LjA3LjA3LjEyLjE0LjI0LjIxLjM3LjAyLjA1LjA1LjA5LjA3LjE0LjA2LjEuMTEuMjEuMTcuMzIuMDMuMDUuMDUuMS4wOC4xNi4wNS4xLjExLjIxLjE2LjMyLjAzLjA1LjA1LjEuMDguMTYuMDYuMTIuMTIuMjQuMTguMzYuMDIuMDQuMDQuMDguMDYuMTIuMDguMTYuMTYuMzMuMjMuNDksMCwuMDIuMDIuMDQuMDMuMDYuMDcuMTQuMTMuMjkuMi40NC4wMi4wNi4wNS4xMS4wNy4xNy4wNS4xMi4xLjIzLjE1LjM1LjAzLjA2LjA1LjEzLjA4LjE5LjA1LjExLjEuMjMuMTQuMzQuMDMuMDcuMDUuMTMuMDguMi4wNS4xMi4xLjI1LjE1LjM3LjAyLjA2LjA1LjEyLjA3LjE3LjA3LjE4LjE0LjM3LjIyLjU2LDEuMzYsMy41OCwyLjUzLDcuODIsMy41NywxMi45Ny42NiwzLjI2LDEuMTksNi4wNCwxLjU1LDkuNjIuODUsOC41MS44NiwxNy43NC4wMywyNy40NC0uNzEsOC4yNS0yLjAyLDE2Ljg1LTMuOTEsMjUuNiw1LjU4LTEuNjgsMTAuMzUtMy42MiwxNC4yMS01Ljc4LjE3LS4wOS4zMy0uMTkuNS0uMjguMDgtLjA1LjE2LS4wOS4yNC0uMTQuMDgtLjA1LjE3LS4xLjI1LS4xNS4xLS4wNi4yLS4xMi4zMS0uMTguMDYtLjAzLjEyLS4wNy4xNy0uMS4xMi0uMDguMjUtLjE1LjM3LS4yMy4wMy0uMDIuMDctLjA0LjEtLjA2LjEzLS4wOS4yNy0uMTcuNC0uMjYuMDItLjAxLjA0LS4wMi4wNi0uMDQuMTQtLjA5LjI5LS4xOS40My0uMjgsMCwwLC4wMSwwLC4wMi0uMDEsMS40OC0uOTksMi43OC0yLjAyLDMuOTItMy4xLjI0LS4yNi40Ny0uNTIuNjktLjc4LjM4LS40NSwxLjY1LTMuMTIsMS45LTMuOTgsOS4zNS0zMS45NC0xMi43Mi01NS41MS0yOC45MS02OC4xMy4wOS4xMi4xOC4yNS4yNy4zN1oiLz4KICA8cG9seWdvbiBjbGFzcz0ic3Q2IiBwb2ludHM9Ii4yNyA0LjE3IC4yNiA0LjE3IC4yNiA0LjE3IC4yNiA0LjE3IC4yNyA0LjE3IC4yNyA0LjE3Ii8+CiAgPHBhdGggY2xhc3M9InN0MiIgZD0iTTk5LjMzLDg2LjA4czAsMCwwLDBjLS41NC4zOS0xLjEuNzgtMS42OCwxLjE2LDAsMCwwLDAtLjAxLDAtLjU4LjM4LTEuMTguNzUtMS44MSwxLjExLS4wMSwwLS4wMi4wMS0uMDMuMDItLjIuMTItLjQxLjIzLS42MS4zNSwwLDAtLjAxLDAtLjAyLjAxLS40Mi4yNC0uODYuNDctMS4zLjctLjAyLjAxLS4wNC4wMi0uMDYuMDMtLjIxLjExLS40MS4yMS0uNjIuMzItLjAyLDAtLjAzLjAyLS4wNS4wMi0uNDUuMjMtLjkxLjQ1LTEuMzguNjctLjAzLjAxLS4wNi4wMy0uMDkuMDQtLjIxLjEtLjQyLjE5LS42My4yOS0uMDMuMDEtLjA2LjAzLS4wOC4wNC0uNDcuMjEtLjk1LjQyLTEuNDUuNjMtLjA0LjAyLS4wOC4wNC0uMTMuMDUtLjIxLjA5LS40Mi4xOC0uNjMuMjYtLjA0LjAyLS4wOC4wMy0uMTIuMDUtLjQ5LjItMSwuNC0xLjUxLjYtLjA1LjAyLS4xMS4wNC0uMTYuMDYtLjIxLjA4LS40Mi4xNi0uNjMuMjQtLjA2LjAyLS4xMS4wNC0uMTcuMDYtLjUyLjE5LTEuMDQuMzgtMS41OC41Ni0uMDcuMDItLjEzLjA1LS4yLjA3LS4yMS4wNy0uNDIuMTQtLjYzLjIxLS4wNy4wMi0uMTQuMDUtLjIuMDctLjU0LjE4LTEuMDkuMzYtMS42NS41My0uMDguMDItLjE1LjA1LS4yMy4wNy0uMjEuMDctLjQyLjEzLS42NC4yLS4wOC4wMi0uMTYuMDUtLjI0LjA3LS4yOC4wOS0uNTcuMTctLjg2LjI1LDAsMCwwLDAsMCwwLS4yOC4wOC0uNTcuMTctLjg2LjI1LS4wOS4wMi0uMTcuMDUtLjI2LjA3LS4yMi4wNi0uNDMuMTItLjY1LjE4LS4wOS4wMi0uMTcuMDUtLjI2LjA3LS4zLjA4LS41OS4xNi0uODkuMjQtMTQuOTUsMy45Ny0zMC4zNSw1LjEyLTM2LjI3LDUuNDMtMi42Ny4xNC01LjM3LjE4LTcuOTguMjItMi40Ni4wNC00Ljc5LjA3LTcuMDguMTgtLjk1LDEuMDctMS45MiwyLjE3LTIuOTMsMy4yOC02LjI4LDYuOTQtMTIuMzQsMTMuMDMtMTguMDEsMTguMDgtLjI4LjI1LS41Ny41LS44NS43NS0uMDYuMDYtLjEzLjExLS4xOS4xNy0uMjcuMjMtLjUzLjQ2LS43OS42OS0uMDEuMDEtLjAzLjAyLS4wNC4wNC0uNjEuNTMtMS4yMiwxLjA1LTEuODMsMS41Niw5LjQzLDIuMzUsNzQuODIsOC44Nyw5OS44My00MS4yLDAsMCwwLDAsMCwwLS40OS40MS0xLC44MS0xLjU0LDEuMloiLz4KICA8Zz4KICAgIDxwb2x5Z29uIGNsYXNzPSJzdDQiIHBvaW50cz0iLjI3IDQuMTcgLjI2IDQuMTcgLjI2IDQuMTcgLjI3IDQuMTcgLjI3IDQuMTciLz4KICAgIDxwYXRoIGNsYXNzPSJzdDMiIGQ9Ik0yNS4xNywyNC4xN2MtNC40Ni0xLjg0LTExLjc5LTYuMTUtMTUuODQtOS4wMkM1LjkzLDEyLjc0LDIuMzUsOS44OC41NSw2LjQ5Yy4yNiwyLjEuNjMsNC45Ny43Myw1LjYyLjYxLDMuOTguODYsOC4wMSwxLjA3LDEyLjAyLjk4LDE5LjA4LDMuMyw2MC43NS0yLjM0LDEwMC44NCwxLjIyLTEuMDIsMi40Ny0yLjEsMy43My0zLjIzLDUuNjItNS4wMiwxMS42NC0xMS4wNiwxNy44OS0xNy45NiwxLjgtMS45OSwzLjUyLTMuOTQsNS4xMy01LjguMzYtLjQyLDEuNzctMi43NSwyLjEtMy41NSw3LjYxLTE4LjQsOS42NS01NS4xLS4xNS02Ny44LS4yOS0uMzctLjU5LS43My0uOS0xLjA2LS4yLS4yMi0xLjk4LTEuMTItMi42NC0xLjM5WiIvPgogIDwvZz4KPC9zdmc+" alt=""><div class="brand-t"><b>DAIT Partners</b><small>Sales CRM</small></div><button type="button" class="side-toggle" aria-expanded="true" aria-controls="sidebar" aria-label="Collapse sidebar" title="Collapse sidebar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 17l-5-5 5-5"></path><path d="M18 17l-5-5 5-5"></path></svg></button></div><a class="nav" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg><span class="nav-l">Dashboard</span></a><div class="navsec">Modules</div><a aria-current="page" class="nav on" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"></circle><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"></path><path d="M16 4.5a3.5 3.5 0 0 1 0 7"></path><path d="M17 14c2.8.5 4 2.9 4 6"></path></svg><span class="nav-l">Leads</span><span class="cnt">409</span></a><a class="nav" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="1"></rect><path d="M9 7h2M13 7h2M9 11h2M13 11h2M9 15h2M13 15h2M10 21v-3h4v3"></path></svg><span class="nav-l">Companies</span></a><a class="nav" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="15" height="18" rx="2"></rect><circle cx="11.5" cy="10" r="2.5"></circle><path d="M7.5 17c.6-2 2.2-3 4-3s3.4 1 4 3M2 7h3M2 12h3M2 17h3"></path></svg><span class="nav-l">Contacts</span></a><a class="nav" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 7l9 6 9-6"></path></svg><span class="nav-l">Email</span></a><a class="nav" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 3L10 14M21 3l-7 18-4-7-7-4z"></path></svg><span class="nav-l">Mailer</span></a><a class="nav" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M3 10h18M8 3v4M16 3v4"></path></svg><span class="nav-l">Calendar</span></a><a class="nav" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"></path><path d="M14 3v4h4M9 12h6M9 16h6"></path></svg><span class="nav-l">Quotations</span></a><a class="nav" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"></rect><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path><path d="M3 13h18"></path></svg><span class="nav-l">Projects</span></a><div class="navsec">Work</div><a class="nav" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M8 12l3 3 5-6"></path></svg><span class="nav-l">Tasks</span></a><a class="nav" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"></path><path d="M10 21a2 2 0 0 0 4 0"></path></svg><span class="nav-l">Notifications</span></a><a class="nav" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"></path></svg><span class="nav-l">Reports</span></a><div class="grow"></div><a class="nav" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"></path></svg><span class="nav-l">Settings</span></a><div class="me"><span class="av" aria-hidden="true">DS</span><div class="who"><div class="nm">Deepak Singh</div><small>Administrator</small><button type="button" class="signout" aria-label="Sign out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><path d="M16 17l5-5-5-5"></path><path d="M21 12H9"></path></svg><span class="nav-l">Sign out</span></button></div></div></nav><div class="nav-scrim" aria-hidden="true"></div><main>
+    <header class="topbar">
+      <div class="topbar-t">
+        <div class="crumb"><a href="#">Leads</a> / <span id="crumbHere">Import leads</span></div>
+        <h1 id="pageTitle">Import leads</h1>
+        <div class="sub" id="pageSub">Upload lead lists in any format. The CRM sorts the data, researches what is missing, and you approve before anything is saved.</div>
+      </div>
+      <div class="grow"></div>
+      <a class="btn" href="#">Back to Leads</a>
+    </header>
+    <div role="tablist" aria-label="Import views" class="tabs profile-tabs">
+      <button type="button" role="tab" id="vWizard" class="tab on" aria-selected="true">New import</button>
+      <button type="button" role="tab" id="vManager" class="tab" aria-selected="false">Data manager <span class="n">4</span></button>
+    </div>
+
+    <!-- ============ WIZARD ============ -->
+    <div class="page" id="paneWizard">
+      <ol class="wsteps" aria-label="Import steps">
+        <li class="on" data-step="1" role="button" tabindex="0" aria-current="step" title="Language and files"><span>1</span>Upload</li>
+        <li data-step="2" role="button" tabindex="0" title="Engine builds the table"><span>2</span>Sort the data</li>
+        <li data-step="3" role="button" tabindex="0" title="Fill missing details"><span>3</span>AI research</li>
+        <li data-step="4" role="button" tabindex="0" title="Approve and save"><span>4</span>Review and import</li>
+      </ol>
+
+      <!-- Step 1 -->
+      <section class="wiz" id="s1" aria-label="Step 1 of 4: Upload">
+        <p class="muted-text">Step 1 of 4 · Language and files</p>
+        <div class="grid2">
+          <div class="card">
+            <h2>Outreach language</h2>
+            <p class="muted-text">Every lead in this import gets this language. It decides who they are allocated to and which templates are used. <b>Choose one; nothing is pre-selected.</b></p>
+            <fieldset class="radio-group" id="grpLang">
+              <legend class="sr">Outreach language</legend>
+              <div class="grid2">
+              <label class="radio-card"><input type="radio" name="lang" value="en"><span><strong>English leads</strong><small>English market (US and Canada) · Deepak, Lakshita</small></span></label>
+              <label class="radio-card"><input type="radio" name="lang" value="es"><span><strong>Spanish leads (Español)</strong><small>Spanish market · Carlos, Sebastian</small></span></label>
+              </div>
+              <div class="err-msg" id="errLang" hidden>Choose English or Spanish.</div>
+            </fieldset>
+            <h3>Import as</h3>
+            <fieldset class="radio-group" id="grpType">
+              <legend class="sr">Import as</legend>
+              <div class="grid2">
+              <label class="radio-card"><input type="radio" name="type" value="Prospect"><span><strong>Prospects</strong><small>Researched companies, not yet contacted</small></span></label>
+              <label class="radio-card"><input type="radio" name="type" value="Lead"><span><strong>Leads</strong><small>Already showed interest</small></span></label>
+              </div>
+              <div class="err-msg" id="errType" hidden>Choose Prospects or Leads.</div>
+            </fieldset>
+          </div>
+          <div class="card">
+            <h2>Files</h2>
+            <p class="muted-text">Excel, CSV, PDF, Word or plain text. Data can be messy: tables, lists, business cards pasted into a document, a trade-show PDF.</p>
+            <div class="file-pick">
+              <input id="imp-files" type="file" multiple>
+              <label for="imp-files" class="btn sm">Choose files</label>
+              <span class="dim">or drag files here · .xlsx .xls .csv .pdf .docx .txt · up to 20 MB each · up to 10 files</span>
+            </div>
+            <ul class="conn-list">
+              <li class="conn-row"><span class="conn-logo">XLS</span><div class="conn-main"><div class="conn-addr">Expo-Dubai-visitors.xlsx</div><div class="conn-meta">3 sheets · 412 rows · 1.2 MB</div></div><span class="badge b-ok">Read</span></li>
+              <li class="conn-row"><span class="conn-logo">PDF</span><div class="conn-main"><div class="conn-addr">GITEX exhibitor list 2026.pdf</div><div class="conn-meta">18 pages · text found</div></div><span class="badge b-ok">Read</span></li>
+              <li class="conn-row"><span class="conn-logo">DOC</span><div class="conn-main"><div class="conn-addr">Carlos – contacts from Madrid trip.docx</div><div class="conn-meta">4 pages · notes and business cards</div></div><span class="badge b-ok">Read</span></li>
+              <li class="conn-row"><span class="conn-logo">PDF</span><div class="conn-main"><div class="conn-addr">Scanned cards.pdf</div><div class="conn-meta">6 pages · images only, no text</div></div><span class="badge b-warn">Can't read scans yet</span></li>
+            </ul>
+          </div>
+        </div>
+        <div class="note danger" id="s1err" role="alert" hidden></div>
+        <div class="actions-row"><span class="muted-text">Nothing is saved to the CRM until step 4.</span><span class="grow"></span><button type="button" class="btn primary" data-go="2">Sort the data →</button></div>
+      </section>
+
+      <!-- Step 2 -->
+      <section class="wiz" id="s2" aria-label="Step 2 of 4: Sort the data" hidden>
+        <p class="muted-text">Step 2 of 4 · The engine builds the table. It read each file, found the people and companies in it, and put every value in the right column.</p>
+        <div class="tiles t5">
+          <div class="tile"><div class="l">Rows found</div><div class="v">468</div><div class="m">from 3 files</div></div>
+          <div class="tile"><div class="l">Ready</div><div class="v">301</div><div class="m ok">company + country + a way to contact</div></div>
+          <div class="tile"><div class="l">Missing details</div><div class="v">121</div><div class="m warn">go to AI research</div></div>
+          <div class="tile"><div class="l">Already in CRM</div><div class="v">39</div><div class="m">matched by website or name</div></div>
+          <div class="tile"><div class="l">Not a lead</div><div class="v">7</div><div class="m">headers, totals, blank lines</div></div>
+        </div>
+        <div class="note warn" id="mapAsk" role="status">
+          <div class="actions-row">
+            <span class="grow">Column <b>"Firma"</b> in Expo-Dubai-visitors.xlsx — is this the <b>Company name</b>? <span class="dim">First values: Al Noor Logistics LLC, Meridian Textiles Ltd, TOTAL VISITORS DAY 2</span></span>
+            <label class="sr" for="mapField">CRM field for column Firma</label>
+            <select id="mapField" class="chip">
+              <option>Company name</option><option>Contact name</option><option>Designation</option><option>Industry</option><option>City</option><option>Country</option><option>Website</option><option>Email</option><option>Phone</option><option>Notes</option><option>Not needed (skip column)</option>
+            </select>
+            <button type="button" class="btn sm primary" id="mapConfirm">Confirm</button>
+          </div>
+        </div>
+        <div class="note ok" id="mapDone" role="status" hidden></div>
+        <section class="card flush l2" aria-label="Sorted rows">
+          <div class="head"><h2>Sorted into lead and company fields</h2><span class="head-note">Click any cell to edit it.</span><span class="grow"></span>
+            <label class="sr" for="rowFilter">Show rows</label>
+            <select id="rowFilter" class="chip"><option>All rows (468)</option><option>Missing details (121)</option><option>Already in CRM (39)</option><option>Not a lead (7)</option></select></div>
+          <div class="tbl-wrap"><div class="tbl sticky-2">
+          <table>
+            <thead><tr><th scope="col" class="ck"><input type="checkbox" aria-label="Include all rows" checked></th><th scope="col">Company</th><th scope="col">Website</th><th scope="col">Country</th><th scope="col">City</th><th scope="col">Contact</th><th scope="col">Designation</th><th scope="col">Email</th><th scope="col">Phone</th><th scope="col">Industry</th><th scope="col">From</th><th scope="col">Status</th></tr></thead>
+            <tbody>
+              <tr><td class="ck"><input type="checkbox" checked aria-label="Include"></td><td class="strong" contenteditable="true">Al Noor Logistics LLC</td><td contenteditable="true">alnoorlogistics.ae</td><td contenteditable="true">United Arab Emirates</td><td contenteditable="true">Dubai</td><td contenteditable="true">Omar Haddad</td><td contenteditable="true">Operations Director</td><td contenteditable="true">omar.h@alnoorlogistics.ae</td><td contenteditable="true">+971 4 555 0192</td><td contenteditable="true">Logistics</td><td class="muted">Expo xlsx · row 14</td><td><span class="badge b-ok">Ready</span></td></tr>
+              <tr><td class="ck"><input type="checkbox" checked aria-label="Include"></td><td class="strong" contenteditable="true">Brightline Dental Clinics</td><td contenteditable="true"><span class="dim">missing</span></td><td contenteditable="true">Canada</td><td contenteditable="true">Toronto</td><td contenteditable="true">Dr. Priya Shah</td><td contenteditable="true"><span class="dim">missing</span></td><td contenteditable="true"><span class="dim">missing</span></td><td contenteditable="true">+1 416 555 0144</td><td contenteditable="true"><span class="dim">missing</span></td><td class="muted">GITEX pdf · p.7</td><td><span class="badge b-warn">Missing details</span></td></tr>
+              <tr><td class="ck"><input type="checkbox" checked aria-label="Include"></td><td class="strong" contenteditable="true">Construcciones Ibéricas SL</td><td contenteditable="true">construibericas.es</td><td contenteditable="true">Spain</td><td contenteditable="true">Madrid</td><td contenteditable="true">Lucía Romero</td><td contenteditable="true">Gerente</td><td contenteditable="true"><span class="dim">missing</span></td><td contenteditable="true"><span class="dim">missing</span></td><td contenteditable="true">Construction</td><td class="muted">Madrid docx · card 3</td><td><span class="badge b-warn">Missing details</span></td></tr>
+              <tr><td class="ck"><input type="checkbox" aria-label="Include"></td><td class="strong" contenteditable="true">Meridian Textiles Ltd</td><td contenteditable="true">meridiantextiles.co.uk</td><td contenteditable="true">United Kingdom</td><td contenteditable="true">Manchester</td><td contenteditable="true">James Booth</td><td contenteditable="true">CEO</td><td contenteditable="true">j.booth@meridiantextiles.co.uk</td><td contenteditable="true"></td><td contenteditable="true">Manufacturing</td><td class="muted">Expo xlsx · row 88</td><td><span class="badge b-info">Already in CRM · CO-1042</span></td></tr>
+              <tr><td class="ck"><input type="checkbox" checked aria-label="Include"></td><td class="strong" contenteditable="true">Northgate Retail Group</td><td contenteditable="true">northgateretail.com</td><td contenteditable="true"><span class="dim">missing</span></td><td contenteditable="true"><span class="dim">missing</span></td><td contenteditable="true"><span class="dim">missing</span></td><td contenteditable="true"><span class="dim">missing</span></td><td contenteditable="true">info@northgateretail.com</td><td contenteditable="true"></td><td contenteditable="true">Retail</td><td class="muted">GITEX pdf · p.12</td><td><span class="badge b-warn">Missing details</span></td></tr>
+              <tr><td class="ck"><input type="checkbox" aria-label="Include"></td><td contenteditable="true"><span class="dim">TOTAL VISITORS DAY 2</span></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="muted">Expo xlsx · row 211</td><td><span class="badge b-grey">Not a lead</span></td></tr>
+            </tbody>
+          </table>
+          </div></div>
+          <div class="foot">121 rows go to research. Rows already in the CRM are skipped unless you tick them.</div>
+        </section>
+        <div class="actions-row"><button type="button" class="btn" data-go="1">← Back</button><span class="grow"></span><button type="button" class="btn primary" data-go="3">Research missing details →</button></div>
+      </section>
+
+      <!-- Step 3 -->
+      <section class="wiz" id="s3" aria-label="Step 3 of 4: AI research" hidden>
+        <p class="muted-text">Step 3 of 4 · Fill missing details</p>
+        <div class="card">
+          <div class="sec-title-row"><h2>AI research</h2><span class="badge b-purple">Running · one company at a time</span><span class="grow"></span><button type="button" class="btn sm">Pause</button></div>
+          <p class="muted-text">For each row with missing details the engine reads the company's own website first (free), then uses Claude Code with web search to find what is still missing. Every value found shows where it came from.</p>
+          <div class="actions-row"><div class="grow"><div class="bar"><div style="width:38%"></div></div></div><strong>46 / 121</strong><span class="muted-text">about 25 min left</span></div>
+          <div class="tiles">
+            <div class="tile"><div class="l">Found everything</div><div class="v">29</div></div>
+            <div class="tile"><div class="l">Found some</div><div class="v">14</div></div>
+            <div class="tile"><div class="l">Found nothing</div><div class="v">3</div></div>
+            <div class="tile"><div class="l">Claude runs this month</div><div class="v">146 / 300</div><div class="m">your monthly cap</div></div>
+          </div>
+        </div>
+        <section class="card flush" aria-label="Research results">
+          <div class="head"><h2>Research results</h2><span class="head-note">Values marked <span class="tag-ai flat">AI</span> were found by research; the line under each shows the source and confidence.</span></div>
+          <div class="tbl-wrap"><div class="tbl sticky-1">
+          <table>
+            <thead><tr><th scope="col">Company</th><th scope="col">Website</th><th scope="col">Country</th><th scope="col">City</th><th scope="col">Contact</th><th scope="col">Designation</th><th scope="col">Email</th><th scope="col">Industry</th><th scope="col">Research</th></tr></thead>
+            <tbody>
+              <tr><td class="strong">Brightline Dental Clinics</td><td>brightlinedental.ca<span class="tag-ai">AI</span><span class="cell-sub">website search · 90%</span></td><td>Canada</td><td>Toronto</td><td>Dr. Priya Shah</td><td>Clinical Director<span class="tag-ai">AI</span><span class="cell-sub">brightlinedental.ca/team · 85%</span></td><td>info@brightlinedental.ca<span class="tag-ai">AI</span><span class="cell-sub">brightlinedental.ca/contact · 90%</span></td><td>Healthcare<span class="tag-ai">AI</span><span class="cell-sub">Claude · 80%</span></td><td><span class="badge b-ok">Done</span></td></tr>
+              <tr><td class="strong">Construcciones Ibéricas SL</td><td>construibericas.es</td><td>Spain</td><td>Madrid</td><td>Lucía Romero</td><td>Gerente</td><td>contacto@construibericas.es<span class="tag-ai">AI</span><span class="cell-sub">construibericas.es/contacto · 90%</span></td><td>Construction</td><td><span class="badge b-ok">Done</span></td></tr>
+              <tr><td class="strong">Northgate Retail Group</td><td>northgateretail.com</td><td>United States<span class="tag-ai">AI</span><span class="cell-sub">northgateretail.com/about · 90%</span></td><td>Columbus<span class="tag-ai">AI</span><span class="cell-sub">northgateretail.com/about · 85%</span></td><td><span class="dim">not found</span></td><td><span class="dim">not found</span></td><td>info@northgateretail.com</td><td>Retail</td><td><span class="badge b-warn">Found some</span></td></tr>
+              <tr><td class="strong">Harbourview Hotels</td><td><span class="dim">searching…</span></td><td>Australia</td><td>Sydney</td><td>Mark Ellis</td><td><span class="dim">…</span></td><td><span class="dim">…</span></td><td><span class="dim">…</span></td><td><span class="badge b-purple">Researching</span></td></tr>
+              <tr><td class="strong">Quantum Pharma Pvt Ltd</td><td><span class="dim">—</span></td><td>India</td><td><span class="dim">—</span></td><td><span class="dim">—</span></td><td><span class="dim">—</span></td><td><span class="dim">—</span></td><td><span class="dim">—</span></td><td><span class="badge b-grey">Waiting</span></td></tr>
+            </tbody>
+          </table>
+          </div></div>
+        </section>
+        <div class="card">
+          <h2>Activity</h2>
+          <ul class="agenda">
+            <li><span class="ag-time">14:32</span><div class="ag-body">Brightline Dental Clinics — website found by search, 3 pages read, 3 fields filled</div></li>
+            <li><span class="ag-time">14:31</span><div class="ag-body">Construcciones Ibéricas SL — contacto page read, email filled</div></li>
+            <li><span class="ag-time">14:30</span><div class="ag-body">Northgate Retail Group — about page read; contact person not on the site</div></li>
+            <li><span class="ag-time">14:29</span><div class="ag-body">Started research for 121 rows · Website reader + Claude Code (sonnet)</div></li>
+          </ul>
+        </div>
+        <div class="actions-row"><button type="button" class="btn" data-go="2">← Back</button><span class="grow"></span><span class="muted-text">You can review rows already done while research continues.</span><button type="button" class="btn primary" data-go="4">Review →</button></div>
+      </section>
+
+      <!-- Step 4 -->
+      <section class="wiz" id="s4" aria-label="Step 4 of 4: Review and import" hidden>
+        <p class="muted-text">Step 4 of 4 · Approve and save</p>
+        <div class="tiles">
+          <div class="tile"><div class="l">Will be imported</div><div class="v">412</div><div class="m">as Prospects · English</div></div>
+          <div class="tile"><div class="l">New companies</div><div class="v">371</div></div>
+          <div class="tile"><div class="l">Added to existing companies</div><div class="v">41</div></div>
+          <div class="tile"><div class="l">Skipped</div><div class="v">56</div><div class="m">39 already in CRM · 7 not leads · 10 unticked</div></div>
+        </div>
+        <div class="grid2">
+          <div class="card">
+            <h2>Before you import</h2>
+            <ul class="rules">
+              <li>Values found by research are saved as <b>suggestions</b> on the company (AI Intelligence tab), not as confirmed facts, unless you tick <b>Accept research values ≥ 80%</b>.</li>
+              <li>Leads are allocated by your existing rule: <b>English market → Deepak, Lakshita</b>.</li>
+              <li>Source on each lead: <b>Import · IMPORT-2026-11-24</b>, so you can find or undo this batch in the Data manager.</li>
+            </ul>
+            <label class="check"><input type="checkbox" checked> Accept research values with confidence 80% or higher</label>
+            <label class="check"><input type="checkbox"> Send each assignee one notification for the batch</label>
+          </div>
+          <div class="card">
+            <h2>Rows that still need you</h2>
+            <p class="info-text">14 rows have no email or phone after research. Import them anyway (they wait in research) or leave them out.</p>
+            <div class="actions-row"><label class="mradio"><input type="radio" name="inc" checked> Import them</label><label class="mradio"><input type="radio" name="inc"> Leave them out</label></div>
+            <div class="note warn">3 rows have a country the CRM doesn't know yet (Chile ×2, Mexico ×1). <a href="#">Add these countries</a> or leave the rows out.</div>
+          </div>
+        </div>
+        <div class="actions-row"><button type="button" class="btn" data-go="3">← Back</button><span class="grow"></span><button type="button" class="btn primary" id="doImport">Import 412 prospects</button></div>
+      </section>
+    </div>
+
+    <!-- ============ DATA MANAGER ============ -->
+    <div class="page" id="paneManager" hidden>
+      <div class="tiles">
+        <div class="tile"><div class="l">Imported this month</div><div class="v">643</div><div class="m">in 4 batches</div></div>
+        <div class="tile"><div class="l">Waiting for review</div><div class="v">1</div><div class="m">batch</div></div>
+        <div class="tile"><div class="l">Still being researched</div><div class="v">17</div><div class="m">leads</div></div>
+        <div class="tile"><div class="l">Duplicates skipped</div><div class="v">52</div><div class="m">this month</div></div>
+      </div>
+      <section class="card flush" aria-label="Import batches">
+        <div class="head"><h2>Import batches</h2></div>
+        <div class="filters">
+          <label class="sr" for="dm-lang">Language</label>
+          <select id="dm-lang" class="chip"><option>Language: Any</option><option>Language: English</option><option>Language: Español</option></select>
+          <label class="sr" for="dm-status">Status</label>
+          <select id="dm-status" class="chip"><option>Status: Any</option><option>Imported</option><option>Waiting for review</option><option>Researching</option><option>Undone</option></select>
+          <div class="grow"></div>
+          <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4.3-4.3"></path></svg><span class="sr">Search batches</span><input type="search" placeholder="Search file or batch…"></label>
+        </div>
+        <div class="tbl-wrap"><div class="tbl sticky-1">
+        <table>
+          <thead><tr><th scope="col">Batch</th><th scope="col">Date</th><th scope="col">By</th><th scope="col">Language</th><th scope="col">Files</th><th scope="col">Rows</th><th scope="col">Imported</th><th scope="col">New companies</th><th scope="col">Skipped</th><th scope="col">Research</th><th scope="col">Status</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
+          <tbody>
+            <tr><td><a class="id-link" href="#">IMPORT-2026-11-24</a></td><td class="muted">24 Nov 2026, 14:20</td><td>Deepak Singh</td><td>English</td><td>Expo-Dubai-visitors.xlsx<span class="cell-sub">+ 2 more</span></td><td>468</td><td><span class="dim">—</span></td><td><span class="dim">—</span></td><td><span class="dim">—</span></td><td>46 / 121</td><td><span class="badge b-purple">Researching</span></td><td><button type="button" class="btn xs">Open</button></td></tr>
+            <tr class="sel"><td><a class="id-link" href="#">IMPORT-2026-11-22</a></td><td class="muted">22 Nov 2026, 11:05</td><td>Deepak Singh</td><td>English</td><td>leads-master.csv</td><td>488</td><td>231</td><td>198</td><td>257</td><td>Done</td><td><span class="badge b-ok">Imported</span></td><td><button type="button" class="btn xs">Open</button></td></tr>
+            <tr><td><a class="id-link" href="#">IMPORT-2026-11-21</a></td><td class="muted">21 Nov 2026, 17:40</td><td>Deepak Singh</td><td>English</td><td>prospects.xlsx</td><td>178</td><td>178</td><td>178</td><td>0</td><td>Done</td><td><span class="badge b-ok">Imported</span></td><td><button type="button" class="btn xs">Open</button></td></tr>
+            <tr><td><a class="id-link" href="#">IMPORT-2026-11-18</a></td><td class="muted">18 Nov 2026, 09:12</td><td>Carlos Ruiz</td><td>Español</td><td>Madrid trip.docx</td><td>36</td><td>34</td><td>30</td><td>2</td><td>Done</td><td><span class="badge b-grey">Undone 19 Nov</span></td><td><button type="button" class="btn xs">Open</button></td></tr>
+          </tbody>
+        </table>
+        </div></div>
+      </section>
+      <section class="card flush" aria-label="Batch IMPORT-2026-11-22">
+        <div class="head"><h2>Batch IMPORT-2026-11-22</h2><span class="head-note">Everything about one import: the original files, every row and what happened to it, and the leads it created.</span></div>
+        <div role="tablist" aria-label="Batch rows" class="tabs">
+          <button type="button" role="tab" class="tab on" aria-selected="true">Imported <span class="n">231</span></button>
+          <button type="button" role="tab" class="tab" aria-selected="false">Skipped <span class="n">257</span></button>
+          <button type="button" role="tab" class="tab" aria-selected="false">Errors <span class="n">0</span></button>
+          <button type="button" role="tab" class="tab" aria-selected="false">Original files</button>
+        </div>
+        <div class="l2col">
+          <div class="actions-row">
+            <button type="button" class="btn sm">Download rows (CSV)</button>
+            <button type="button" class="btn sm">Open leads in Leads list</button>
+            <button type="button" class="btn sm danger">Undo this import…</button>
+          </div>
+          <div class="note info">Undo removes leads and companies this batch created that nobody has worked on yet (no emails, notes, tasks or quotations). Anything already worked on stays, and you're shown a list first.</div>
+        </div>
+      </section>
+      <p class="muted-text">Mockup · sample data only</p>
+    </div>
+
+</main></div>
+<script>
+(function(){
+  var $=function(s){return document.querySelector(s);}, $$=function(s){return Array.prototype.slice.call(document.querySelectorAll(s));};
+  var steps=$$('.wsteps li');
+  function go(n){
+    n=Number(n);
+    for(var i=1;i<=4;i++) document.getElementById('s'+i).hidden = i!==n;
+    steps.forEach(function(s){var k=Number(s.dataset.step);s.classList.toggle('on',k===n);s.classList.toggle('done',k<n);if(k===n)s.setAttribute('aria-current','step');else s.removeAttribute('aria-current');});
+    window.scrollTo({top:0});
+    updateCues();
+  }
+  function step1Missing(){
+    var miss=[];
+    if(!$('input[name="lang"]:checked')) miss.push('the outreach language (English or Spanish)');
+    if(!$('input[name="type"]:checked')) miss.push('whether to import them as Prospects or Leads');
+    return miss;
+  }
+  // The app's error styles: .note.danger (role=alert) for the message, .err-msg under each unanswered group.
+  function flash(miss){
+    var e=$('#s1err');
+    $('#errLang').hidden=!!$('input[name="lang"]:checked');
+    $('#errType').hidden=!!$('input[name="type"]:checked');
+    if(!miss.length){e.hidden=true;return;}
+    e.textContent='Choose '+miss.join(' and ')+' before continuing.';
+    e.hidden=false;
+    if(e.animate) e.animate([{opacity:1},{opacity:.25},{opacity:1},{opacity:.25},{opacity:1}],{duration:900});
+    e.scrollIntoView({block:'center',behavior:'smooth'});
+  }
+  function tryGo(n){
+    if(Number(n)>1){var miss=step1Missing();if(miss.length){go(1);flash(miss);return;}}
+    go(n);
+  }
+  steps.forEach(function(s){
+    s.addEventListener('click',function(){tryGo(s.dataset.step);});
+    s.addEventListener('keydown',function(ev){if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();tryGo(s.dataset.step);}});
+  });
+  $$('[data-go]').forEach(function(b){b.addEventListener('click',function(){tryGo(b.dataset.go);});});
+  // Radio cards: .radio-card.on on the chosen one (as CloseLeadModal / NewLeadPage).
+  $$('.radio-card input').forEach(function(inp){inp.addEventListener('change',function(){
+    $$('input[name="'+inp.name+'"]').forEach(function(i){i.closest('.radio-card').classList.toggle('on',i.checked);});
+    if(!$('#s1err').hidden) flash(step1Missing());
+  });});
+  // Views: New import / Data manager tabs.
+  var vW=$('#vWizard'), vM=$('#vManager');
+  function view(m){
+    $('#paneWizard').hidden=m;$('#paneManager').hidden=!m;
+    vW.classList.toggle('on',!m);vM.classList.toggle('on',m);vW.setAttribute('aria-selected',String(!m));vM.setAttribute('aria-selected',String(m));
+    $('#pageTitle').textContent=m?'Data manager':'Import leads';
+    $('#crumbHere').textContent=m?'Data manager':'Import leads';
+    $('#pageSub').textContent=m?'Every import: when, who, from which files, what was imported or skipped, and undo.':'Upload lead lists in any format. The CRM sorts the data, researches what is missing, and you approve before anything is saved.';
+    updateCues();
+  }
+  vW.addEventListener('click',function(){view(false);history.replaceState(null,'',location.pathname);});
+  vM.addEventListener('click',function(){view(true);history.replaceState(null,'','#manager');});
+  $('#doImport').addEventListener('click',function(){view(true);});
+  // Step 2: the column question.
+  $('#mapConfirm').addEventListener('click',function(){
+    var f=$('#mapField').value, d=$('#mapDone');
+    d.textContent='Column "Firma" in Expo-Dubai-visitors.xlsx is now '+(f.indexOf('Not needed')===0?'skipped.':'the '+f+'.');
+    $('#mapAsk').hidden=true;d.hidden=false;
+  });
+  // Table scroll cue (ScrollBox): .more-l / .more-r on .tbl-wrap where columns are out of view.
+  function cue(box){var w=box.parentElement,l=box.scrollLeft>1,r=box.scrollWidth-box.clientWidth-box.scrollLeft>1;w.classList.toggle('more-l',l);w.classList.toggle('more-r',r);}
+  function updateCues(){$$('.tbl-wrap > .tbl').forEach(cue);}
+  $$('.tbl-wrap > .tbl').forEach(function(b){b.addEventListener('scroll',function(){cue(b);});});
+  window.addEventListener('resize',updateCues);
+  // Shell: « folds the sidebar to the icon rail; Menu opens it on a phone.
+  var side=$('#sidebar'), tog=$('.side-toggle'), menu=$('.menu-btn'), scrim=$('.nav-scrim');
+  tog.addEventListener('click',function(){var c=!side.classList.contains('collapsed');side.classList.toggle('collapsed',c);tog.setAttribute('aria-expanded',String(!c));tog.setAttribute('aria-label',c?'Expand sidebar':'Collapse sidebar');tog.title=tog.getAttribute('aria-label');$('.shell').classList.toggle('side-collapsed',c);setTimeout(updateCues,250);});
+  function menuOpen(o){side.classList.toggle('open',o);scrim.classList.toggle('open',o);menu.setAttribute('aria-expanded',String(o));}
+  menu.addEventListener('click',function(){menuOpen(!side.classList.contains('open'));});
+  scrim.addEventListener('click',function(){menuOpen(false);});
+  $$('a[href="#"]').forEach(function(a){a.addEventListener('click',function(ev){ev.preventDefault();});});
+  if(location.hash==='#manager') view(true);
+  updateCues();
+})();
+</script>
