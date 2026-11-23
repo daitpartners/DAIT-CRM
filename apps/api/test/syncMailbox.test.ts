@@ -309,6 +309,15 @@ describe('mail sync scheduling (2B-2)', () => {
     expect(await scheduleMailSync(prisma)).toBe(0);
   });
 
+  test("a run already queued when the user is deactivated reads nothing from the mailbox", async () => {
+    const { user, account } = await mailbox();
+    await prisma.user.update({ where: { id: user.id }, data: { isActive: false } });
+    const { graph, seen } = scripted({});
+    await syncMailboxHandler(job(account.id), { graph });
+    expect(seen).toEqual([]);
+    expect(await prisma.emailMessage.count()).toBe(0);
+  });
+
   test('after a failed run the next one waits 5 minutes, not one', async () => {
     const { account } = await mailbox({ lastSyncAt: new Date(Date.now() - 3600_000) });
     const failedAt = new Date(Date.now() - 60_000);
