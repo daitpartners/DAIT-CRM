@@ -128,7 +128,7 @@ describe('leads API', () => {
     const body = res.json();
     expect(body).toMatchObject({ total: 4, page: 1, pageSize: 25 });
     expect(body.counts).toEqual({ all: 4, leads: 3, prospects: 1, mine: 2, overdue: 1, unassigned: 1 });
-    expect(body.tiles).toEqual({ newThisWeek: 3, newThisWeekFromWebsite: 1, followUpsDueToday: 1, overdue: 1, unassigned: 1 });
+    expect(body.tiles).toEqual({ newThisWeek: 3, newThisWeekFromWebsite: 1, followUpsDueToday: 1, overdue: 1, unassigned: 1, unassignedProspects: 0 });
     // Newest first by default.
     expect(body.items[0].id).toBe(due.id);
 
@@ -153,7 +153,10 @@ describe('leads API', () => {
     await followUp(due.id, rep.user.id, today);
     const repBody = (await req('GET', '/api/leads', rep.cookie)).json();
     expect(repBody.counts).toEqual({ all: 1, leads: 1, prospects: 0, mine: 0, overdue: 0, unassigned: 1 });
-    expect(repBody.tiles).toEqual({ newThisWeek: 1, newThisWeekFromWebsite: 1, followUpsDueToday: 0, overdue: 0, unassigned: 1 });
+    expect(repBody.tiles).toEqual({ newThisWeek: 1, newThisWeekFromWebsite: 1, followUpsDueToday: 0, overdue: 0, unassigned: 1, unassignedProspects: 0 });
+    // The Unassigned tile splits its count into prospects and leads (review #08: no fixed "mostly CSV" sentence).
+    await makeLead({ leadType: 'Prospect' });
+    expect((await req('GET', '/api/leads', mgr.cookie)).json().tiles).toMatchObject({ unassigned: 2, unassignedProspects: 1 });
     expect((await req('GET', '/api/leads?archived=1', rep.cookie)).statusCode).toBe(403);
   });
 

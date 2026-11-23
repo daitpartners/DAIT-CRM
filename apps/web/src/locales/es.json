@@ -867,7 +867,6 @@
   "exact legal company name": "razón social exacta",
   "exact website domain": "dominio web exacto",
   "mobile": "móvil",
-  "mostly CSV + Google Places prospects": "sobre todo prospectos de CSV + Google Places",
   "never": "nunca",
   "no access": "sin acceso",
   "no contact": "sin contacto",
@@ -1618,5 +1617,7 @@
   "1 overdue": "1 vencida",
   "1 new": "1 nueva",
   "Collapse folders": "Contraer las carpetas",
-  "Expand folders": "Expandir las carpetas"
+  "Expand folders": "Expandir las carpetas",
+  "Prospects {p} · Leads {l}": "Prospectos {p} · Leads {l}",
+  "every lead has an owner": "todos los leads tienen responsable"
 }

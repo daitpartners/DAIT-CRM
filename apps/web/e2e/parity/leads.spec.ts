@@ -22,7 +22,8 @@ test('leads list: prototype topbar, tiles, tabs, filters, columns and pager', as
   expect(actions).toEqual(['Search leads', 'Import CSV', 'New lead']);
 
   expect(await page.locator('.tiles .tile .l').allTextContents()).toEqual(TILES);
-  await expect(page.locator('.tiles .tile').nth(2).locator('.m')).toHaveText('mostly CSV + Google Places prospects');
+  // Review #08: what is waiting (prospects / leads), not the prototype's fixed demo sentence.
+  await expect(page.locator('.tiles .tile').nth(2).locator('.m')).toHaveText(/^(Prospects \d+ · Leads \d+|every lead has an owner)$/);
   // The Unassigned tile opens the list filtered to unassigned leads (the prototype has no Unassigned tab).
   await expect(page.locator('.tiles .tile').nth(2)).toHaveAttribute('href', '/leads?assignedTo=none');
 

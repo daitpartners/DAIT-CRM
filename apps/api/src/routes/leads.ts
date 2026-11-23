@@ -180,7 +180,7 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
     const weekAgo = new Date(Date.now() - 7 * DAY_MS);
     const dir = query.sort ? query.dir : 'desc';
 
-    const [total, rows, all, leads, prospects, mine, overdue, unassigned, newThisWeek, newFromWebsite, dueToday, overdueTasks] =
+    const [total, rows, all, leads, prospects, mine, overdue, unassigned, newThisWeek, newFromWebsite, dueToday, overdueTasks, unassignedProspects] =
       await Promise.all([
         prisma.lead.count({ where }),
         prisma.lead.findMany({ where, include: leadSummaryInclude, orderBy: orderBy(query.sort, dir), ...pageArgs(query) }),
@@ -189,13 +189,14 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
         prisma.lead.count({ where: { AND: [live, { createdAt: { gte: weekAgo }, leadSource: WEBSITE_SOURCE }] } }),
         prisma.task.count({ where: followUpTasks(user, { equals: dateOnly(today) }) }),
         prisma.task.count({ where: followUpTasks(user, { lt: dateOnly(today) }) }),
+        prisma.lead.count({ where: { AND: [live, tabWhere('unassigned', user, today), { leadType: 'Prospect' }] } }),
       ]);
     return {
       items: rows.map((r) => leadSummary(r, today)),
       total,
       page: query.page,
       pageSize: query.pageSize,
-      tiles: { newThisWeek, newThisWeekFromWebsite: newFromWebsite, followUpsDueToday: dueToday, overdue: overdueTasks, unassigned },
+      tiles: { newThisWeek, newThisWeekFromWebsite: newFromWebsite, followUpsDueToday: dueToday, overdue: overdueTasks, unassigned, unassignedProspects },
       counts: { all, leads, prospects, mine, overdue, unassigned },
     };
   });

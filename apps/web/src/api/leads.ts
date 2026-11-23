@@ -95,6 +95,8 @@ export type LeadTiles = {
   followUpsDueToday: number;
   overdue: number;
   unassigned: number;
+  /** Of `unassigned`, how many are prospects (the tile's meta line). */
+  unassignedProspects: number;
 };
 
 export type LeadPage = {

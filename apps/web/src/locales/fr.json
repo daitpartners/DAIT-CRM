@@ -867,7 +867,6 @@
   "exact legal company name": "raison sociale identique",
   "exact website domain": "domaine du site identique",
   "mobile": "mobile",
-  "mostly CSV + Google Places prospects": "surtout des prospects CSV + Google Places",
   "never": "jamais",
   "no access": "pas d'accès",
   "no contact": "aucun contact",
@@ -1618,5 +1617,7 @@
   "1 overdue": "1 en retard",
   "1 new": "1 nouvelle",
   "Collapse folders": "Réduire les dossiers",
-  "Expand folders": "Déplier les dossiers"
+  "Expand folders": "Déplier les dossiers",
+  "Prospects {p} · Leads {l}": "Prospects {p} · Leads {l}",
+  "every lead has an owner": "tous les leads ont un responsable"
 }

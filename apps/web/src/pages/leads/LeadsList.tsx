@@ -265,7 +265,14 @@ export function LeadsList() {
           <Tile
             label={t('Unassigned')}
             value={tiles?.unassigned ?? '—'}
-            meta={t('mostly CSV + Google Places prospects')}
+            meta={
+              // Review #08: what is actually waiting, not the prototype's fixed demo sentence.
+              tiles
+                ? tiles.unassigned
+                  ? t('Prospects {p} · Leads {l}', { p: tiles.unassignedProspects, l: tiles.unassigned - tiles.unassignedProspects })
+                  : t('every lead has an owner')
+                : undefined
+            }
             to="/leads?assignedTo=none"
           />
         </div>
@@ -414,6 +421,7 @@ export function LeadsList() {
             ) : (
               <Table
                 rawHead
+                sticky={2}
                 head={head}
                 isEmpty={isPending || !rows?.length}
                 empty={isPending ? t('Loading…') : filtered ? t('No leads match these filters') : t('No leads here yet')}
