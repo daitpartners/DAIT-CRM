@@ -5,13 +5,15 @@ in the git history).
 
 ## Where things stand (23 Nov 2026)
 
-- **Everything built so far is live** at crm.daitpartners.com, release `08ee5da` (AI research with the Claude Code
-  engine). The repository's `main` has one more commit, `c01e562`, which only changes the GitHub test-deploy workflow;
-  nothing to deploy.
+- **Live** at crm.daitpartners.com: release `79b9415` (minor fixes + handover documents, 23 Nov).
+- **Ready, waiting for "deploy":** branch `ui-review-fixes` — collapsible sidebar and Email folders column, and the 39
+  findings of the 23 Nov UI review (`~/Documents/DAIT-CRM/ui-review-2026-11-23/report.md`), reviewed and tested.
 - **There is no test copy on the server.** Each release was checked on the developer's machine (automatic tests and
   side-by-side screenshots against the prototype) and then put live by hand, only after you said "deploy". How that is
   done, and how to undo it, is in `docs/DEPLOYMENT.md`.
-- **Backups:** a copy of the database is taken before every deploy, in `/home/daitcrm/backups/` on the server.
+- **Backups:** a copy of the database is taken before every deploy, and every night at 02:30 UTC (kept 14 days), in
+  `/home/daitcrm/backups/` on the server. All copies are on that one server; a copy to OneDrive needs you to sign in
+  once there (not set up).
 - **Handover documents:** `docs/DEPLOYMENT.md` (server, deploy, rollback, backup and restore, logs),
   `docs/MIGRATIONS.md` (database changes), `docs/ENVIRONMENT.md` (server settings), `docs/data-model.md` (tables), and
   `docs/DAIT-CRM-Specification-v2.md` (the specification, marked with what was built, built differently or not built).
@@ -33,6 +35,7 @@ in the git history).
 | 3B | Projects | `2c14c1c` |
 | 4 | AI research (Claude off) | `fa12206` |
 | Claude Code engine | Claude through the server's Claude Code, monthly run cap | `08ee5da` |
+| Minor fixes | 26 review follow-ups (time zones, mail linking, Mailer wizard, quotations, keyboard) + handover docs | `79b9415` |
 
 ## Owner to do
 
@@ -115,60 +118,35 @@ migration (`docs/MIGRATIONS.md`).
 
 ## Open minor follow-ups
 
-Small issues found in reviews and not fixed yet. Wording kept as recorded.
+Small issues found in reviews and not fixed yet.
 
-**From release 3A (Quotations):**
-- The PDF uses Helvetica (not Montserrat), always prints dates as "22 Nov 2026", and shows characters outside
-  Western European letters as "?"; a very long item name with a discount can run over; a line taller than a page is
-  cut to one page. PDF wording follows the quotation owner's language but is not in the translation check.
-- Changing the quotation date into another year keeps the old number (Q-2026-… stays). Valid until is not checked
-  against the quotation date.
-- Accepting writes two similar lines on the lead timeline. Quotation history lines are in English only.
-- Clearing the lead on a quotation can hide it from a sales representative who could see it only through that lead
-  (they are told it was saved).
-- If the database is down for the whole last send attempt, the quotation can stay on "Sending…" until an
-  administrator retries the job. A re-send uses today's logo from Company details.
-- The Quotations list is not paged (fine at today's numbers); search is by the URL `?q=` and also matches the legal
-  name; New quotation is offered on a closed company.
-- Email pager: changing Rows does not scroll back to the top; an invalid `?size=` stays in the address bar.
-- Pre-existing (not 3A): on the company Leads tab the lead number is dark text, not a purple link as in the
-  prototype (the whole row opens the lead).
+**Need your decision (or a screen the prototype does not have):**
+- Very long email conversations show only the latest 50 messages; the prototype has no way to load older ones.
+- The mail list stops at 5000 messages without saying so (a notice is not in the prototype; removing the limit means
+  rewriting the list).
+- Quotation PDF: uses Helvetica (not Montserrat), prints dates one fixed way ("22 Nov 2026"), and shows letters outside
+  Western European alphabets as "?". Fixing needs font files and a date-format choice.
+- Changing a quotation's date into another year keeps the old number (Q-2026-… stays) — renumber or not?
+- "Valid until" is not checked against the quotation date (the prototype does not check it).
+- Clearing the lead on a quotation can hide it from a sales representative who could see it only through that lead —
+  refuse, or warn?
+- The Quotations list has no pages (fine at today's numbers).
+- Accepting a quotation on a lead already marked Lost / Not Relevant moves it to Won without a warning (as before).
+- Companies list keeps row tick boxes (they drive the bulk status change); the prototype has none — keep?
 
-**Found during the 3B check (older than 3B, not changed):**
-- The lead page's "Coming up" card lists only follow-ups, calls and meetings; the prototype also lists the lead's
-  quotations ("Q-2026-038 · EUR 57,120.00 · Accepted") — release 3A.
-- On the Email screen the prototype shows a quotation chip (Q-…) on mail about a quotation; the app's mail has no
-  quotation tag — release 2B-2 / 3A.
-
-**From release 3C (Calendar):**
-- All-day Outlook events may show one day off for users in UTC+12 to +14 (New Zealand, Tonga, Kiribati).
+**Known, small, left as they are for now:**
+- Quotation stays on "Sending…" if the database is down for the whole last send attempt (an administrator retries the
+  job); a re-send uses today's logo from Company details. A line taller than a page is cut to one page (as the
+  prototype).
+- Mail has no quotation chip (needs a link between mail and quotations in the database).
+- An email that sync left unmatched stays unmatched until someone links a message in its conversation.
+- A 2-letter state code typed in the city field ("TX", "ON") no longer narrows the Mailer's time zone (falls back to
+  the country's zones — never wrong, just wider). "Edo. Méx." is not recognised.
+- If Microsoft sends an event change in another time zone, the old time shows until the daily full re-sync (needs a
+  Windows-to-IANA time-zone table).
+- While a mailbox is in error its old Outlook events keep showing until it is fixed, switched off or disconnected.
+- Administrators' Everyone view loads every overdue team task at once (fine now).
+- An impossible date typed into the address bar (e.g. 31 Feb) is accepted, and empty calendar days cannot be reached
+  with the keyboard — both as the prototype.
 - Check the first live Outlook sync: compare times and all-day events with Outlook for a couple of users.
-- No "plan a follow-up" link from the lead page to the calendar dialog (the prototype's `?new=1&lead=` link is not
-  built); plan from the Calendar or add a task on the lead.
-- While a mailbox is in error ("needs reconnecting") its old copied Outlook events keep showing until it is fixed,
-  switched off or disconnected.
-- If Microsoft sends an event change in another time zone (not UTC under any of its names), the old time shows until
-  the daily full re-sync.
-- The calendar entry written on the lead timeline when a call or meeting is planned is not in the lead's audit log
-  (other notes are).
-- An impossible date typed into the address bar (e.g. 31 Feb) is accepted, as in the prototype.
-- Empty calendar days cannot be reached with the keyboard (as the prototype); the New follow-up button can.
-- On narrow screens the type / time text on the lead page's open tasks can squeeze the title.
-- Administrators' Everyone view loads every overdue team task at once (fine now, slower with many users).
-
-**From the mail follow-ups review (Email and Mailer):**
-- A mail sync already queued still runs once after a user is deactivated (later syncs stop).
-- Opening a message straight from a link (/email/…) may keep its list row bold until the list refreshes.
-- Two incoming mails in a row in a thread both read "reply received".
-- Your own sent message, opened, reads "sent by <your name>" instead of "sent" as in the prototype.
-- Very long conversations show only the latest 50 messages.
-- An older message in a linked conversation can still show as unmatched.
-- The Mailer wizard closes if the Leads list refreshes and the ticked leads clear.
-- A mailbox disconnected after the Leads page loaded is only refused when you press Queue in the wizard.
-- Ticking Do not email on two leads of the same contact at the same moment could leave one flag unsaved (rare);
-  ticking lead B when the contact is already unsubscribed does not set B's own flag.
-- Mexican state codes such as JAL, NLE are not recognised (full state names are).
-- Brazilian 2-letter state codes may match a city name instead and pick the wrong time zone.
-- The mail list stops at 5000 messages without saying so; the company filter can match through a lead you cannot see.
-- The Compose contact line "· COO · primary" is not greyed out as in the prototype; Details values wrap slightly earlier.
-- Keyboard: Shift+Tab can leave an open dialog.
+- Database tidy-up: the unused column `claude_monthly_cap_usd` can be dropped in a later migration.
