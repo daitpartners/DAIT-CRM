@@ -35,7 +35,8 @@ test('an administrator adds a company and sees a duplicate warning', async ({ pa
   await expect(modal).toBeHidden();
   const row = page.getByRole('row').filter({ hasText: `Newco ${stamp}` });
   await expect(row).toBeVisible();
-  await expect(row).toContainText(/CO-\d{4,}/);
+  // The list names the company as the prototype (legal name, no CO number line: review #07); the number is on its page.
+  await expect(row.getByRole('link', { name: `Newco ${stamp}` })).toHaveAttribute('href', /^\/companies\/\d+$/);
   await expect(row).toContainText('India');
 });
 

@@ -17,7 +17,8 @@ test('« folds the sidebar to an icon rail and the Email folders to a strip; bot
   const nav = page.getByRole('navigation', { name: 'Main navigation' });
   await page.getByRole('button', { name: 'Collapse sidebar' }).click();
   await expect(nav).toHaveClass(/collapsed/);
-  expect(await nav.evaluate((el) => el.getBoundingClientRect().width)).toBe(64);
+  // After the .2 s width transition.
+  await expect.poll(() => nav.evaluate((el) => el.getBoundingClientRect().width)).toBe(64);
   await expect(nav.getByRole('link', { name: 'Leads', exact: false }).first()).toHaveAttribute('title', /^Leads/);
   await expect(nav.getByRole('button', { name: 'Sign out' })).toBeVisible();
 
