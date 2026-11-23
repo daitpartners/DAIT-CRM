@@ -90,6 +90,15 @@ export function EmailPage() {
   };
   const setQuery = (change: Record<string, string | undefined>) => navigate(href(change));
 
+  // An unknown or default ?size= (typed or left from an old link) leaves the address, as choosing 50 does.
+  const sizeRaw = params.get('size');
+  useEffect(() => {
+    if (sizeRaw !== null && (sizeParam !== pageSize || pageSize === MAIL_PAGE_SIZE)) {
+      navigate(href({ size: undefined, page: params.get('page') ?? undefined }, true), { replace: true });
+    }
+    // Only a change of the size in the address should trigger this.
+  }, [sizeRaw]);
+
   // A Compose link (`?compose=1&company=…&lead=…&project=…`) opens Compose once; the filters stay in the address.
   const composeLink = params.get('compose') === '1';
   useEffect(() => {
@@ -301,7 +310,10 @@ export function EmailPage() {
                 listRef.current?.scrollIntoView?.({ block: 'start' });
               }}
               sizes={MAIL_PAGE_SIZES}
-              onPageSize={(size) => setQuery({ size: size === MAIL_PAGE_SIZE ? undefined : String(size) })}
+              onPageSize={(size) => {
+                setQuery({ size: size === MAIL_PAGE_SIZE ? undefined : String(size) });
+                listRef.current?.scrollIntoView?.({ block: 'start' });
+              }}
             />
           ) : null}
         </section>

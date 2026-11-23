@@ -404,6 +404,25 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       await waitFor(() => expect(where()).toBe('/email'));
     });
 
+    it('changing Rows shows the list from its top; an invalid ?size= is dropped from the address', async () => {
+      const u = userEvent.setup();
+      paged();
+      const scrolled = vi.fn();
+      const own = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = scrolled;
+      try {
+        show('/email?size=7');
+        const list = screen.getByRole('region', { name: 'Message list' });
+        expect(await within(list).findByText('Message 1')).toBeTruthy();
+        await waitFor(() => expect(where()).toBe('/email'));
+        const pager = within(list).getByRole('navigation', { name: 'Pagination' });
+        await u.selectOptions(within(pager).getByRole('combobox', { name: 'Rows per page' }), '25');
+        expect(scrolled).toHaveBeenCalled();
+      } finally {
+        Element.prototype.scrollIntoView = own;
+      }
+    });
+
     it('a search goes back to page 1', async () => {
       const u = userEvent.setup();
       paged();
