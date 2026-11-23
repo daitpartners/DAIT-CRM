@@ -61,8 +61,8 @@ employee range — each with the source URL it relied on; values it cannot suppo
 Claude model configured by env `ANTHROPIC_MODEL`. Cost is recorded per run from the API's token usage; a run is refused
 before it starts when the month's spend has reached the cap.
 
-**Suggestions and the golden rule (prototype store.js).** A run proposes a value only for a field that is not verified
-and whose current value differs. Accepting writes the value to the company, records it in `ai_fields` (confidence,
+**Suggestions and the golden rule (prototype store.js).** A run proposes a value only for a field that is empty and not
+verified (builder's call below). Accepting writes the value to the company, records it in `ai_fields` (confidence,
 source, run) and counts towards "Applied"; rejecting records the decision. "Accept all ≥ 80%" accepts every pending
 suggestion with confidence ≥ 80. A field a user edits by hand, or that is accepted, becomes verified; verified fields
 show "Locked · verified" and are never suggested again. "Mark profile verified" marks every filled field verified and
