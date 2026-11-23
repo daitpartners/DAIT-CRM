@@ -23,7 +23,7 @@ It must cost nothing to run today and be ready to use the Claude API when the ow
   verified", a free website reader that runs now, a Claude API provider that is built but off, a daily run limit and a
   monthly spending cap, research started by hand and automatically for a new lead's company, notification when a run
   finishes, lead page AI line.
-- Non-goals: Google Places, Apollo.io, public registries (shown as "not connected"); Ollama (shown as not installed on
+- Non-goals: Apollo.io and public registries (shown as "not connected"); Ollama (shown as not installed on
   this server); research on contacts or people; scheduled re-research; reports changes; the parked Enquiries flow.
 - Anti-goals: overwriting a verified field; a suggestion without a source; an invented value (a guess presented as
   fact); any spending without a key and a cap the owner set; the CRM server slowed down by fetching sites; fetching
@@ -91,7 +91,7 @@ source manually" (Title, URL, Type, Fields, Notes — type Manual research, by "
 **Enrichment engine card (Administrators, prototype layout).** Engine: "Website reader · built in, free" (always on);
 "Claude API · intelligence + web search" (radio; disabled with "Add ANTHROPIC_API_KEY on the server to enable" when no
 key, otherwise with the monthly cap field and "spent this month USD n"); "Ollama · not installed on this server"
-(disabled). Sources: Public company website (on), Web search (needs Claude), Google Places API, Apollo.io (disabled,
+(disabled). Sources: Public company website (on), Web search (needs Claude), Google Places API (disabled with "Add GOOGLE_PLACES_API_KEY on the server to enable" when no key, otherwise a switch and a monthly call cap), Apollo.io (disabled,
 "not connected"). Daily run limit field. Text "Credentials live in server environment variables, never in the browser
 or public site." Deviation from the prototype (Ollama/Places/Apollo selectable there) recorded for the owner.
 
@@ -103,6 +103,14 @@ Run research, engine line). Lead page side AI line: research status and "Run res
 company (existing company edit rights). Engine settings, limits and cap: Administrators.
 
 **Languages.** UI in en / es / fr. Extracted values as found.
+
+**Google Places (owner 23 Nov: "go-ahead with your plan" — built but off).** Provider 3, used only when env
+`GOOGLE_PLACES_API_KEY` is set and an Administrator turns the "Google Places API" source on with a monthly call cap
+(default 0 = off). Per run: one ID-only Text Search (name + city/country; free) then one Place Details request with the
+field mask `formattedAddress, addressComponents, location, googleMapsUri, nationalPhoneNumber, websiteUri` (Enterprise
+tier). Suggestions (empty fields only): street / city / state / zip, latitude / longitude, Maps URL, website; phone kept
+in the snapshot as for the reader. Source record type "Google Places API" with the place id. Calls counted per month and
+refused once the cap is reached. No real calls in tests (fake client). Apollo.io stays "not connected" (paid plan).
 
 ## Builder's calls (from the builder check, marked as such)
 
