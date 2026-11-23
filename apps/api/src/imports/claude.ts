@@ -282,23 +282,27 @@ export async function claudeExtractRows(
   const draft = opts.draft ?? draftDocument(extract, opts.known ?? []);
   const maxChunks = opts.maxChunks ?? MAX_CLAUDE_CHUNKS_PER_FILE;
   const deadline = (opts.startedAt ?? Date.now()) + (opts.budgetMs ?? CLAUDE_FILE_BUDGET_MS);
-  /** Deterministic rows that ran on past the chunk that emitted them: a later chunk's Claude rows must not repeat them. */
-  const straddling: RowFields[] = [];
+  /**
+   * Deterministic rows the previous chunk gave (as its fallback) that run on into the current chunk: the current
+   * chunk's Claude rows must not repeat them.
+   */
+  let crossing: RowFields[] = [];
+  let crossingNext: RowFields[] = [];
   const rowsOf = (chunk: Chunk): DraftRow[] => {
     const own = draft.rows.filter((r) => chunk.owns.has(`${r.block}:${r.start}`));
-    for (const r of own) if (!chunk.owns.has(`${r.block}:${r.end}`)) straddling.push(r.fields);
+    for (const r of own) if (!chunk.owns.has(`${r.block}:${r.end}`)) crossingNext.push(r.fields);
     return own.map(({ block: _block, start: _start, end: _end, ...row }: BlockRow) => row);
   };
   const phoneKey = (v: string | undefined) => (v ? v.replace(/\D/g, '') : '');
-  /** A Claude row from the tail of a record a fallback chunk already gave (same company, email or phone). */
-  const repeatsStraddler = (f: RowFields) => straddling.some((d) =>
-    (!!f.companyName && f.companyName.toLowerCase() === d.companyName?.toLowerCase())
-    || (!!f.email && f.email === d.email)
-    || (!!f.phone && phoneKey(f.phone) === phoneKey(d.phone)));
+  /** A Claude row from the tail of the record that crossed into this chunk: the same email or phone (never the name alone). */
+  const repeatsCrossing = (f: RowFields) => crossing.some((d) =>
+    (!!f.email && f.email === d.email) || (!!f.phone && phoneKey(f.phone) === phoneKey(d.phone)));
   const rows: DraftRow[] = [];
   let calls = 0;
   let stopped: ImportNoClaude | null = null;
   for (const chunk of documentChunks(draft.blocks)) {
+    crossing = crossingNext;
+    crossingNext = [];
     if (opts.shouldStop && await opts.shouldStop()) return { rows: [], calls, stoppedAtCap: stopped === 'cap', stopped, aborted: true };
     if (!stopped) {
       const left = deadline - Date.now();
@@ -320,7 +324,7 @@ export async function claudeExtractRows(
       });
       const answer = ANSWER.safeParse(output);
       if (!answer.success) throw new Error('unexpected answer');
-      rows.push(...verifiedRows(answer.data, chunk, extract.unit).filter((r) => !repeatsStraddler(r.fields)));
+      rows.push(...verifiedRows(answer.data, chunk, extract.unit).filter((r) => !repeatsCrossing(r.fields)));
     } catch {
       rows.push(...rowsOf(chunk));
     }

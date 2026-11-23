@@ -661,4 +661,31 @@ describe('review round 3', () => {
     expect(new Set(out.rows.map((r) => r.fields.email)).size).toBe(40);
     expect(out.rows.find((r) => r.fields.email === 'info25@company25.com')!.fields.companyName).toBe('Company 25 Ltd');
   });
+
+  it('the boundary check never drops a company listed again later with other contact values', async () => {
+    const pad = (i: number) => String(i).padStart(4, '0');
+    const doc = txt(Array.from({ length: 40 }, (_, i) => [
+      `Company ${i} Ltd`, `${i} King Street`, 'Toronto', 'Canada', `Hall ${i}`, `info${i}@company${i}.com`, `+44 20 7946 ${pad(i)}`,
+    ].join('\n')).concat(['Company 25 Ltd\nsales@company25-branch.com\n+44 20 7000 1111']).join('\n'));
+    let call = 0;
+    const runner: ClaudeRunner = async (req) => {
+      call += 1;
+      if (call === 1) throw new ClaudeRunError('timeout');
+      return {
+        output: {
+          rows: [...req.prompt.matchAll(/Company (\d+) Ltd\n(?:[^\n]*\n){0,4}?([^\n@]+@[^\n]+)\n(\+[^\n]+)/g)].map((m) => ({
+            ...blank, ref: 1, companyName: `Company ${m[1]} Ltd`, email: m[2], phone: m[3],
+          })),
+        },
+        searchUrls: [],
+      };
+    };
+    const out = await claudeExtractRows(doc, claudeWith(runner), always, { known: KNOWN });
+    // Record 25 crosses into the second chunk (given by the first chunk's fallback); the same company listed again at
+    // the end of the second chunk, with its own email and phone, is a record of its own.
+    expect(out.rows.filter((r) => r.fields.companyName === 'Company 25 Ltd').map((r) => r.fields.email)).toEqual([
+      'info25@company25.com', 'sales@company25-branch.com',
+    ]);
+    expect(out.rows).toHaveLength(41);
+  });
 });
