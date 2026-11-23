@@ -99,6 +99,8 @@ select.in:disabled,select.chip:disabled{opacity:.6;cursor:default}
 .tbl-wrap.more-l:has(> .tbl.sticky-1,> .tbl.sticky-2)::before{opacity:0}
 .tbl.sticky-1 tr>:first-child,.tbl.sticky-2 tr>:nth-child(-n+2){position:sticky;left:0;z-index:2}
 .tbl.sticky-1 td:first-child,.tbl.sticky-2 td:nth-child(-n+2){background:var(--surface)}
+.tbl.sticky-1 tbody tr:hover td,.tbl.sticky-2 tbody tr:hover td{background:#F6F2FD}
+.tbl.sticky-1 tr.sel td,.tbl.sticky-2 tr.sel td{background:var(--tint)}
 .tbl.sticky-2 tr>:first-child{width:34px;min-width:34px;max-width:34px}
 .tbl.sticky-2 tr>:nth-child(2){left:34px}
 .more-l .tbl.sticky-1 tr>:first-child,.more-l .tbl.sticky-2 tr>:nth-child(2){box-shadow:8px 0 8px -8px rgba(31,2,73,.3)}
@@ -307,6 +309,12 @@ td.strong{font-weight:600}td.muted{color:var(--muted)}
 .muted-text{margin:0;font-size:13px;color:var(--muted)}
 .in.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
 .in.file{padding:6px 10px}
+/* CSV import: the file input is a styled button (review #10); the real input stays focusable for the keyboard. */
+.file-pick{display:flex;align-items:center;gap:10px;flex-wrap:wrap;position:relative}
+.file-pick input{position:absolute;width:1px;height:1px;opacity:0}
+.file-pick input:focus-visible+label{outline:2px solid var(--purple);outline-offset:2px}
+.file-pick .dim{font-size:12.5px;color:var(--muted)}
+.csv-cols code{font-size:12px;background:var(--grey-bg);padding:1px 5px;border-radius:4px;color:var(--text)}
 .csv-summary{display:flex;flex-direction:column;gap:10px}
 .seg{display:inline-flex;gap:6px}
 .task-list{list-style:none;margin:0;padding:14px 18px;display:flex;flex-direction:column;gap:8px}

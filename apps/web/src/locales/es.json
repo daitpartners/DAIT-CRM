@@ -331,7 +331,6 @@
   "Import CSV": "Importar CSV",
   "Import batch": "Lote de importación",
   "Import batch: —": "Lote de importación: —",
-  "Import leads from CSV": "Importar leads desde CSV",
   "Import {n} rows": "Importar {n} filas",
   "Importing…": "Importando…",
   "Inactive": "Inactivo",
@@ -1619,5 +1618,9 @@
   "Collapse folders": "Contraer las carpetas",
   "Expand folders": "Expandir las carpetas",
   "Prospects {p} · Leads {l}": "Prospectos {p} · Leads {l}",
-  "every lead has an owner": "todos los leads tienen responsable"
+  "every lead has an owner": "todos los leads tienen responsable",
+  "Import prospects from CSV": "Importar prospectos desde CSV",
+  "Put the column names in the first row, for example": "Ponga los nombres de las columnas en la primera fila, por ejemplo",
+  "Company and country are required. On the next step you match the columns and choose the lead source.": "La empresa y el país son obligatorios. En el siguiente paso asigna las columnas y elige el origen del lead.",
+  "No file chosen": "Ningún archivo elegido"
 }

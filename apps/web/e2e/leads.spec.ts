@@ -72,3 +72,15 @@ test('sales rep sees unassigned leads and claims one from the list', async ({ pa
   const mine = page.getByRole('row').filter({ hasText: 'Meridian Textiles' });
   await expect(mine).toContainText('Arjun Mehta');
 });
+
+test('select-all shows a partial selection (prototype "–") and its boxes are the prototype size', async ({ page }) => {
+  await signInAs(page, MAYA);
+  await page.goto('/leads');
+  const all = page.getByRole('checkbox', { name: 'Select all leads on this page' });
+  await page.locator('tbody tr').first().getByRole('checkbox').check();
+  await expect(all).not.toBeChecked();
+  expect(await all.evaluate((el: HTMLInputElement) => el.indeterminate)).toBe(true);
+  expect(await all.evaluate((el) => el.getBoundingClientRect().width)).toBe(16);
+  await all.check();
+  expect(await all.evaluate((el: HTMLInputElement) => el.indeterminate)).toBe(false);
+});

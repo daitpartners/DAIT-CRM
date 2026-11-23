@@ -201,7 +201,21 @@ export function LeadsList() {
   );
   const head = [
     ...(canManage
-      ? [plain('select', <input type="checkbox" checked={allOnPage} onChange={toggleAll} disabled={!rows?.length} aria-label={t('Select all leads on this page')} />)]
+      ? [
+          <th key="select" scope="col" className="ck">
+            <input
+              type="checkbox"
+              checked={allOnPage}
+              // Some rows ticked: the prototype's "–" (allBox.indeterminate), review #09.
+              ref={(el) => {
+                if (el) el.indeterminate = !allOnPage && (rows ?? []).some((r) => selected.has(r.id));
+              }}
+              onChange={toggleAll}
+              disabled={!rows?.length}
+              aria-label={t('Select all leads on this page')}
+            />
+          </th>,
+        ]
       : []),
     sortable('number', t('Lead ID')),
     sortable('companyName', t('Company name')),

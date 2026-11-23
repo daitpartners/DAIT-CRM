@@ -70,9 +70,12 @@ export function CsvImportModal({ onClose }: { onClose: () => void }) {
   const [parsed, setParsed] = useState<CsvPreviewResult | null>(null);
   const [result, setResult] = useState<CsvImportResult | null>(null);
 
+  const [fileName, setFileName] = useState<string | null>(null);
+
   async function readFile(file: File | undefined) {
     if (!file) return;
     setProblem(null);
+    setFileName(file.name);
     setCsv(await file.text());
   }
 
@@ -83,7 +86,8 @@ export function CsvImportModal({ onClose }: { onClose: () => void }) {
     preview.mutate(csv, { onSuccess: setParsed, onError: (err) => setProblem(failure(t, err)) });
   }
 
-  const title = t('Import leads from CSV');
+  // Prototype title: every row becomes a prospect (review #10).
+  const title = t('Import prospects from CSV');
 
   if (result) {
     return (
@@ -132,11 +136,20 @@ export function CsvImportModal({ onClose }: { onClose: () => void }) {
       }
     >
       <p className="muted-text">{t('Rows are imported as prospects. Each company goes through the duplicate check first.')}</p>
-      <FormField id="csv-file" label={t('Choose a CSV file')}>
-        <input id="csv-file" type="file" accept=".csv,text/csv" className="in file" onChange={(e) => void readFile(e.target.files?.[0])} />
-      </FormField>
+      {/* Review #10: the columns spelled out (prototype "company,country,website,city"), not only a placeholder. */}
+      <p className="muted-text csv-cols">
+        {t('Put the column names in the first row, for example')} <code>company,country,website,city</code>.{' '}
+        {t('Company and country are required. On the next step you match the columns and choose the lead source.')}
+      </p>
+      <div className="file-pick">
+        <input id="csv-file" type="file" accept=".csv,text/csv" onChange={(e) => void readFile(e.target.files?.[0])} />
+        <label htmlFor="csv-file" className="btn sm">
+          {t('Choose a CSV file')}
+        </label>
+        <span className="dim">{fileName ?? t('No file chosen')}</span>
+      </div>
       <FormField id="csv-text" label={t('Or paste CSV text')}>
-        <textarea id="csv-text" className="in mono" rows={8} value={csv} onChange={(e) => setCsv(e.target.value)} placeholder="Company,Country,Website" />
+        <textarea id="csv-text" className="in mono" rows={8} value={csv} onChange={(e) => setCsv(e.target.value)} placeholder="company,country,website,city" />
       </FormField>
       {problem ? (
         <div className="note warn" role="alert">
