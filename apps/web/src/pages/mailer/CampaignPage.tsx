@@ -126,29 +126,29 @@ export function CampaignPage() {
             </section>
           </div>
           <aside className="col-side">
-            <section className="card">
+            <section className="card mw-detcard">
               <h2>{t('Details')}</h2>
               <dl className="kv mw-details">
                 <dt>{t('Template')}</dt>
                 <dd>{c.templateName}{c.templateUpdatedAt ? <span className="dim"> · {t('version of {date}', { date: day(c.templateUpdatedAt) })}</span> : null}</dd>
-                <dt>{t('From')}</dt><dd>{c.sender.name}<div className="dim">{c.senderAddress}</div></dd>
+                <dt>{t('From')}</dt><dd>{c.sender.name}<div className="dim mw-light">{c.senderAddress}</div></dd>
                 <dt>{t('Cc')}</dt><dd>{c.cc.join(', ') || <span className="dim">—</span>}</dd>
                 <dt>{t('Bcc')}</dt><dd>{c.bcc.join(', ') || <span className="dim">—</span>}</dd>
                 <dt>{t('Start')}</dt><dd>{c.startAt ? date(c.startAt) : t('Immediately')}</dd>
                 <dt>{t('Delay')}</dt><dd>{t('One every {minutes}', { minutes: minutes(c.intervalMinutes) })}{c.workingHoursOnly ? ` · ${t("client's working hours only")}` : ''}</dd>
                 <dt>{t('Opt-out line')}</dt><dd>{c.unsubscribeLine ? t('Included') : t('Not included')}</dd>
-                <dt>{t('Lawful basis')}</dt><dd>{t(c.lawfulBasis)}</dd>
+                <dt>{t('Lawful basis')}</dt><dd className="mw-light">{t(c.lawfulBasis)}</dd>
                 {/* The sender is the campaign's creator: only the sender creates and acts on a campaign. */}
                 <dt>{t('Created')}</dt><dd>{`${c.sender.name} · ${date(c.createdAt)}`}</dd>
               </dl>
             </section>
-            <section className="card">
+            <section className="card mw-queued">
               <h2>{t('Email as queued')}</h2>
               <div className="mprev">
                 <div className="msub">{c.subject}</div>
                 <pre>{c.body}</pre>
               </div>
-              <div className="dim mw-help">{t('Saved with the campaign, so later template edits do not change this record.')}</div>
+              <div className="dim mw-queued-note">{t('Saved with the campaign, so later template edits do not change this record.')}</div>
             </section>
           </aside>
         </div>

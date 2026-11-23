@@ -649,7 +649,7 @@ td.nowrap{white-space:nowrap}
 .mailside .link-sub{display:block;color:var(--muted)}
 .mail-thread{font-size:12.5px;color:var(--body);display:flex;flex-direction:column;gap:6px}
 .mail-loop{display:flex;gap:6px 14px;flex-wrap:wrap}
-.mail-loop .sw{font-size:12.5px}
+.mail-loop .sw{font-size:12.5px}.mail-loop .dim{color:var(--muted)}
 .mail-context{font-size:12.5px;color:var(--body);padding-top:9px}
 @media (max-width:760px){
   .mail-filters{padding:10px 16px}
@@ -681,6 +681,8 @@ td.nowrap{white-space:nowrap}
 .mw-err{font-size:12px;margin-top:3px}
 .mw-kv{grid-template-columns:120px 1fr}
 .mw-details{grid-template-columns:110px 1fr}
+/* Prototype campaign side cards: Details gap 10px, address and lawful basis at normal weight; Email as queued gap 8px, 12px note. */
+.mw-detcard{gap:10px}.mw-details .mw-light{font-weight:400}.mw-queued{gap:8px}.mw-queued-note{font-size:12px}
 .modal:has(> .wiz){width:760px}
 .modal .actions .btn svg{width:14px;height:14px}
 /* Leads bulk bar (prototype .mbulk). */
