@@ -116,7 +116,8 @@ export function MailerWizard({ leadIds, check, onClose, onQueued }: Props) {
   const [lawMissing, setLawMissing] = useState(false);
   const [st, setSt] = useState({
     name: '', templateId: 0, cc: '', bcc: '', when: 'now' as 'now' | 'later', startAt: nextHour(), intervalMinutes: 3,
-    workingHoursOnly: false, unsubscribeLine: true, lawfulBasis: LAWFUL_BASES[0] as string,
+    // The lawful basis starts empty, as the prototype: it is the rep's active choice (a GDPR record).
+    workingHoursOnly: false, unsubscribeLine: true, lawfulBasis: '',
   });
   const ccRef = useRef<HTMLInputElement>(null);
   // The prototype focuses the first field of each step; the dialog itself focuses step 1's on opening.
