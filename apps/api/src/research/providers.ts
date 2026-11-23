@@ -435,12 +435,15 @@ export function createClaudeCodeRunner({ bin, token, timeoutMs = CLAUDE_CALL_TIM
         child.stdin.on('error', () => undefined); // the child may exit before reading stdin
         child.on('error', () => finish(() => reject(new ClaudeRunError('failed'))));
         // 'close' waits for every holder of its pipes; a process it left behind must not keep the run open.
-        child.on('exit', (code) => later(CLAUDE_KILL_GRACE_MS, () => settle(code)));
+        child.on('exit', (code) => {
+          if (!settled) later(CLAUDE_KILL_GRACE_MS, () => settle(code));
+        });
         child.on('close', (code) => settle(code));
         child.stdin.end(prompt);
       });
     } finally {
-      await rm(cwd, { recursive: true, force: true });
+      // Never overrides the run's result.
+      await rm(cwd, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }).catch(() => undefined);
     }
   };
 }
