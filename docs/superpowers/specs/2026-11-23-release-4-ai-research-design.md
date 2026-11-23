@@ -141,3 +141,41 @@ usage and prompt, job queue details (follow existing jobs), API shapes, tests (w
 pages; Claude provider against a fake client — no real API calls in tests). Before calling it done: screenshot parity
 of the AI Intelligence tab (empty, with suggestions, history), Research Sources tab, Overview card, engine card, lead AI
 line against the prototype; differences fixed or listed for the owner.
+
+## Addendum, 23 Nov 2026: Claude through the server's Claude Code instead of the API
+
+Owner: "We have installed claude code on our server and authenticated, use instead of API"; "do not disturb other
+projects"; "copy the token". Release 4 (fa12206) is live with Claude off.
+
+**What the server has (checked read-only).** Claude Code 2.1.311 at `/root/.local/bin/claude` (world-executable; the
+CRM user `daitcrm` can run it). Root's own saved login is expired; the working login is the subscription token
+`CLAUDE_CODE_OAUTH_TOKEN`, which another project (the accounting app) passes to `claude -p` on every call. That token
+line has been copied into the CRM's `/home/daitcrm/live/shared/.env` (owner approved). Probed as `daitcrm` from Node:
+`claude -p` with a minimal env (HOME, PATH, the token), an empty temp cwd, `--tools ""`, `--strict-mcp-config`,
+`--setting-sources ""`, `--no-session-persistence`, `--output-format json`, `--json-schema` → structured output in
+~2.4 s on claude-sonnet-5-5.
+
+**Decided.**
+- The Claude provider's transport changes from the Anthropic SDK to a spawned `claude -p` run; prompt, output schema,
+  zod validation, the golden rule and how findings map to fields/`ai_*` columns stay as built.
+- Never disturb anything else: the binary is used as is (path from env `CLAUDE_BIN`, default
+  `/root/.local/bin/claude`); nothing installed, updated or configured; root's `~/.claude`, settings, hooks and other
+  projects' files are never read or written. The child runs as the worker's user (`daitcrm`) with ONLY `HOME`, `PATH`
+  and `CLAUDE_CODE_OAUTH_TOKEN` in its environment (never DATABASE_URL or other CRM secrets), in a fresh empty temp
+  directory removed afterwards, with user/project settings and MCP servers off and no session saved.
+- No tools: website text is untrusted. `--tools ""`; when the Web search source is on, `--tools WebSearch` and
+  `--allowedTools WebSearch` (the only tool it can ever get). Page text goes in on stdin, not argv.
+- One call at a time (the research lane is serial), 120 s timeout per call inside the existing 5-minute step budget,
+  killed on timeout/abort, output capped.
+- Enabled only when `CLAUDE_CODE_OAUTH_TOKEN` is set, the binary is executable, the Administrator switch is on and the
+  monthly run cap is above 0. The USD cap becomes a **monthly run cap** (runs that used Claude this calendar month,
+  UTC; default 0 = off): a subscription has no per-call price. Migration replaces `claude_monthly_cap_usd` with
+  `claude_monthly_run_cap` (live value is 0, nothing to carry).
+- Model: env `CLAUDE_MODEL` (optional), default the `sonnet` alias, recorded on the run's engine line.
+- "Not logged in" / expired token → the run's error "Claude Code is not logged in on the server"; other CLI failures →
+  "Claude Code failed"; timeout → "Claude took too long".
+- Engine card: "Claude Code on this server · intelligence + web search"; disabled text "Add CLAUDE_CODE_OAUTH_TOKEN on
+  the server to enable"; cap field "Monthly run cap" with "used this month n". The Anthropic SDK dependency and the
+  price table are removed (YAGNI); the API route can be rebuilt later if wanted.
+- Tests: a fake runner for the provider; the spawn wrapper tested against a fake `claude` script (env passed, args,
+  stdin, timeout, bad JSON, not-logged-in). No real Claude calls in tests.
