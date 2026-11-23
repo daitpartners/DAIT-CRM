@@ -1,7 +1,7 @@
 /**
  * Reading an uploaded import file: a spreadsheet becomes tables of cell text, a document becomes page text. A file
  * the reader refuses comes back Failed with the reason's code; anything unexpected is thrown (the job then marks the
- * file `unreadable`). The job never calls these directly: it reads in a worker thread (`isolated.ts`), so a hostile
+ * file `unreadable`). The job never calls these directly: it reads in a child process (`isolated.ts`), so a hostile
  * file can only time out or run out of its own memory, never block or crash the worker process.
  */
 import type { FileMeta, ImportExt, ImportFileError } from '@dait-crm/shared';

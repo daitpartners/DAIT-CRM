@@ -7,7 +7,7 @@ import * as cptable from 'xlsx/dist/cpexcel.full.mjs';
 import { IMPORT_MAX_ROWS } from '@dait-crm/shared';
 import type { ReadResult } from './index.js';
 import { MAX_TABLE_CHARS, ReadFailure, assertTextSize, isEncryptedPackage, isOle } from './failure.js';
-import { assertZipSize, isZip } from './zip.js';
+import { isZip, rebuildZip } from './zip.js';
 
 // Legacy .xls text in a Windows code page needs the code page tables.
 XLSX.set_cptable(cptable);
@@ -54,7 +54,8 @@ export async function readSpreadsheet(data: Buffer, ext: 'xlsx' | 'xls'): Promis
   try {
     if (isEncryptedPackage(data)) throw new ReadFailure('password');
     // A renamed .xls / .xlsx still reads (SheetJS looks at the content); anything else is refused before parsing.
-    if (isZip(data)) await assertZipSize(data);
+    // A zip is checked and rewritten (entries inflated under caps, stored): SheetJS never sees the uploaded bytes.
+    if (isZip(data)) data = rebuildZip(data);
     else if (!isOle(data)) throw new ReadFailure('invalid');
     let book: XLSX.WorkBook;
     try {

@@ -4,9 +4,12 @@
  *    directory ends (and the end record begins), so a lying entry count cannot hide an entry that JSZip would still read.
  * 2. Every entry is inflated here, capped at its declared size + 1 byte, and the declared sizes must add up to at most
  *    the budget, so a lying size is caught after at most one byte too many instead of after gigabytes.
- * Only then do SheetJS / mammoth parse the file; they read the same (now verified) entries.
+ * 3. Each local header must agree with its central entry (method, encryption bit, sizes), since some parsers (SheetJS)
+ *    trust the local header instead.
+ * The parsers never get the original bytes: `rebuildZip` writes a new zip, every entry stored (no compression), from the
+ * entries inflated under the caps, with headers written here.
  */
-import { inflateRawSync } from 'node:zlib';
+import { crc32, inflateRawSync } from 'node:zlib';
 import { ReadFailure } from './failure.js';
 
 const EOCD = 0x06054b50;
@@ -18,7 +21,7 @@ const MAX16 = 0xffff;
 const MAX32 = 0xffffffff;
 
 /** Uncompressed bytes a whole .xlsx / .docx may hold. */
-export const ZIP_MAX_BYTES = 200 * 1024 * 1024;
+export const ZIP_MAX_BYTES = 100 * 1024 * 1024;
 
 /** The file starts like a zip ("PK"). */
 export const isZip = (data: Buffer) => data.length >= 4 && data[0] === 0x50 && data[1] === 0x4b;
@@ -135,7 +138,22 @@ function inflateEntry(data: Buffer, e: Entry): Buffer {
   if (e.flags & 0x1) throw new ReadFailure('password');
   const at = e.localOffset;
   if (u32(data, at) !== LOCAL_HEADER) throw invalid();
-  const start = at + 30 + u16(data, at + 26) + u16(data, at + 28);
+  // The local header must say what the central entry says: a parser that trusts it must not see another method/size.
+  const localFlags = u16(data, at + 6);
+  const localMethod = u16(data, at + 8);
+  let localCompressed = u32(data, at + 18);
+  let localSize = u32(data, at + 22);
+  const localName = u16(data, at + 26);
+  const localExtra = u16(data, at + 28);
+  if (localMethod !== e.method || (localFlags & 0x1) !== (e.flags & 0x1)) throw invalid();
+  if (localSize === MAX32 || localCompressed === MAX32) {
+    const z = zip64Values(data, at + 30 + localName, localExtra, { size: localSize === MAX32, compressed: localCompressed === MAX32, offset: false });
+    localSize = z.size ?? localSize;
+    localCompressed = z.compressed ?? localCompressed;
+  }
+  const deferred = (localFlags & 0x8) !== 0 && localSize === 0 && localCompressed === 0;
+  if (!deferred && (localSize !== e.size || localCompressed !== e.compressed)) throw invalid();
+  const start = at + 30 + localName + localExtra;
   if (start + e.compressed > data.length) throw invalid();
   const raw = data.subarray(start, start + e.compressed);
   let out: Buffer;
@@ -169,6 +187,58 @@ export async function assertZipSize(data: Buffer, maxBytes = ZIP_MAX_BYTES): Pro
     if (total > maxBytes) throw new ReadFailure('too_large');
   }
   for (const e of entries) inflateEntry(data, e);
+}
+
+/**
+ * The zip checked as `assertZipSize` does, rewritten from its inflated entries: every entry stored, headers written
+ * here (no data descriptors, no extra fields), so a parser reads exactly the verified bytes whatever header it trusts.
+ */
+export function rebuildZip(data: Buffer, maxBytes = ZIP_MAX_BYTES): Buffer {
+  if (!isZip(data) || data.length < 22) throw invalid();
+  const entries = readEntries(data);
+  if (entries.length > MAX16 - 1) throw new ReadFailure('too_large');
+  let total = 0;
+  for (const e of entries) {
+    total += e.size;
+    if (total > maxBytes) throw new ReadFailure('too_large');
+  }
+  const parts: Buffer[] = [];
+  const central: Buffer[] = [];
+  let offset = 0;
+  for (const e of entries) {
+    const body = inflateEntry(data, e);
+    const name = Buffer.from(e.name, 'utf8');
+    const crc = crc32(body) >>> 0;
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(LOCAL_HEADER, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0x0800, 6); // UTF-8 names
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(body.length, 18);
+    local.writeUInt32LE(body.length, 22);
+    local.writeUInt16LE(name.length, 26);
+    const head = Buffer.alloc(46);
+    head.writeUInt32LE(CENTRAL_HEADER, 0);
+    head.writeUInt16LE(20, 4);
+    head.writeUInt16LE(20, 6);
+    head.writeUInt16LE(0x0800, 8);
+    head.writeUInt32LE(crc, 16);
+    head.writeUInt32LE(body.length, 20);
+    head.writeUInt32LE(body.length, 24);
+    head.writeUInt16LE(name.length, 28);
+    head.writeUInt32LE(offset, 42);
+    parts.push(local, name, body);
+    central.push(head, name);
+    offset += 30 + name.length + body.length;
+  }
+  const dir = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(EOCD, 0);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(dir.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...parts, dir, end]);
 }
 
 /** One entry's bytes through the same capped path, or undefined when the zip has no such entry. */

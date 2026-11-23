@@ -2,15 +2,15 @@ import type { Job, Prisma } from '@prisma/client';
 import type { ImportExt } from '@dait-crm/shared';
 import { prisma } from '../../db.js';
 import { readImportFile } from '../../imports/storage.js';
-import { readInWorker } from '../../imports/read/isolated.js';
+import { readInWorker, type ReadInWorkerOptions } from '../../imports/read/isolated.js';
 import type { ImportReadFilePayload } from '../types.js';
 import type { JobContext } from '../runner.js';
 
-/** Test seam: the read timeout (default READ_TIMEOUT_MS). */
-export const importReadOptions: { timeoutMs?: number } = {};
+/** Test seam: the read process's options (timeout, memory, busy time); defaults in isolated.ts. */
+export const importReadOptions: ReadInWorkerOptions = {};
 
 /**
- * `import_read_file` (Import leads): reads one stored upload in a worker thread (timeout, memory ceiling) and records
+ * `import_read_file` (Import leads): reads one stored upload in a child process (timeout, heap ceiling) and records
  * its status (Read / Scan / Failed), meta and failure code. Anything thrown marks the file Failed `unreadable` and
  * fails the job (one attempt only, so its error stays on the job for diagnosis). Results are written only while the
  * file is still Reading, so the job and the sweep never overwrite each other. Staging the rows after a Read comes in

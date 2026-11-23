@@ -188,3 +188,39 @@ export function repeatedPagePdf(pages: number): Buffer {
   out += `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   return Buffer.from(out);
 }
+
+/**
+ * A zip whose central directory says an entry is stored (and honest about it) while the entry's local header says
+ * deflate: `size` = local size 1,000; `deferred` = local size 0 with flag bit 3 (sizes in a data descriptor). The
+ * entry's bytes are 64 MB of zeros, deflated: a parser that trusts the local header would inflate all of it.
+ */
+export function localHeaderLieZip(kind: 'size' | 'deferred', entryName = 'xl/workbook.xml'): Buffer {
+  const key = `local-${kind}-${entryName}`;
+  const cached = lying.get(key);
+  if (cached) return cached;
+  const comp = deflateRawSync(Buffer.alloc(64 * 1024 * 1024));
+  const entry = (name: string, body: Buffer, localMethod: number, localSize: number, flags: number, offset: number) => {
+    const n = Buffer.from(name);
+    const crc = crc32(body) >>> 0;
+    const lh = Buffer.alloc(30);
+    lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(flags, 6); lh.writeUInt16LE(localMethod, 8);
+    lh.writeUInt32LE(flags & 8 ? 0 : crc, 14); lh.writeUInt32LE(flags & 8 ? 0 : body.length, 18); lh.writeUInt32LE(localSize, 22);
+    lh.writeUInt16LE(n.length, 26);
+    const cd = Buffer.alloc(46);
+    cd.writeUInt32LE(0x02014b50, 0); cd.writeUInt16LE(20, 4); cd.writeUInt16LE(20, 6); cd.writeUInt16LE(0, 10);
+    cd.writeUInt32LE(crc, 16); cd.writeUInt32LE(body.length, 20); cd.writeUInt32LE(body.length, 24);
+    cd.writeUInt16LE(n.length, 28); cd.writeUInt32LE(offset, 42);
+    return { local: Buffer.concat([lh, n, body]), central: Buffer.concat([cd, n]) };
+  };
+  const first = entry('[Content_Types].xml', CONTENT_TYPES, 0, CONTENT_TYPES.length, 0, 0);
+  const second = kind === 'size'
+    ? entry(entryName, comp, 8, 1000, 0, first.local.length)
+    : entry(entryName, comp, 8, 0, 8, first.local.length);
+  const dir = Buffer.concat([first.central, second.central]);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0); eocd.writeUInt16LE(2, 8); eocd.writeUInt16LE(2, 10);
+  eocd.writeUInt32LE(dir.length, 12); eocd.writeUInt32LE(first.local.length + second.local.length, 16);
+  const zip = Buffer.concat([first.local, second.local, dir, eocd]);
+  lying.set(key, zip);
+  return zip;
+}

@@ -2,14 +2,15 @@
 import mammoth from 'mammoth';
 import type { ReadResult } from './index.js';
 import { MAX_TEXT_CHARS, ReadFailure, assertTextSize, isEncryptedPackage, isOle } from './failure.js';
-import { assertZipSize, docxPageCount, isZip } from './zip.js';
+import { docxPageCount, isZip, rebuildZip } from './zip.js';
 
 export async function readDocx(data: Buffer): Promise<ReadResult> {
   try {
     if (isEncryptedPackage(data)) throw new ReadFailure('password');
     if (isOle(data)) throw new ReadFailure('old_doc');
     if (!isZip(data)) throw new ReadFailure('invalid');
-    await assertZipSize(data);
+    // Checked and rewritten from the entries inflated under caps: mammoth never sees the uploaded bytes.
+    data = rebuildZip(data);
     let text: string;
     let pages: number | undefined;
     try {

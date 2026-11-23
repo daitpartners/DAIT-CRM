@@ -5,9 +5,11 @@ import {
   assertZipSize, decodeText, readImportBuffer, type TableExtract, type TextExtract,
 } from '../src/imports/read/index';
 import { readInWorker } from '../src/imports/read/isolated';
+import { readSpreadsheet } from '../src/imports/read/spreadsheet';
+import { rebuildZip, ZIP_MAX_BYTES } from '../src/imports/read/zip';
 import { PDF_MAX_PAGES } from '../src/imports/read/pdf';
 import {
-  docx, handZip, lyingZip, pdfImageOnly, pdfWithText, repeatedPagePdf, xlsBook, xlsxBook, zipBomb,
+  docx, handZip, localHeaderLieZip, lyingZip, pdfImageOnly, pdfWithText, repeatedPagePdf, xlsBook, xlsxBook, zipBomb,
 } from './importFixtures';
 
 // Spies on the parsers: a file refused by the zip size check must never reach them.
@@ -119,6 +121,54 @@ describe('zips that lie about themselves', () => {
     expect(await readImportBuffer('xlsx', lyingZip('zip64'))).toMatchObject({ status: 'Failed', error: 'invalid' });
   });
 
+  it('a local header that disagrees with its central entry is refused, with no memory growth', async () => {
+    vi.mocked(XLSX.read).mockClear();
+    vi.mocked(mammoth.extractRawText).mockClear();
+    // Fixtures first (building them allocates the 64 MB being deflated), then measure.
+    for (const kind of ['size', 'deferred'] as const) {
+      localHeaderLieZip(kind);
+      localHeaderLieZip(kind, 'word/document.xml');
+    }
+    const rss = process.memoryUsage().rss;
+    for (const kind of ['size', 'deferred'] as const) {
+      const zip = localHeaderLieZip(kind);
+      await expect(assertZipSize(zip)).rejects.toMatchObject({ code: 'invalid' });
+      expect(await readSpreadsheet(zip, 'xlsx')).toMatchObject({ status: 'Failed', error: 'invalid' });
+      expect(await readImportBuffer('docx', localHeaderLieZip(kind, 'word/document.xml'))).toMatchObject({ status: 'Failed', error: 'invalid' });
+    }
+    expect(XLSX.read).not.toHaveBeenCalled();
+    expect(mammoth.extractRawText).not.toHaveBeenCalled();
+    expect(process.memoryUsage().rss - rss).toBeLessThan(48 * 1024 * 1024);
+    // The same through the read process.
+    expect(await readInWorker('xlsx', localHeaderLieZip('size'), 'x.xlsx')).toMatchObject({ status: 'Failed', error: 'invalid' });
+  });
+
+  it(`refuses more than ${ZIP_MAX_BYTES / 1024 / 1024} MB uncompressed in total`, async () => {
+    const zip = handZip([
+      { name: 'a.xml', raw: Buffer.alloc(60 * 1024 * 1024) },
+      { name: 'b.xml', raw: Buffer.alloc(60 * 1024 * 1024) },
+    ]);
+    await expect(assertZipSize(zip)).rejects.toMatchObject({ code: 'too_large' });
+  });
+
+  it('parsers get a rebuilt zip that reads exactly like the original', async () => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Company', 'Phone', 'Met'], ['Café Ltd', 971455501920, new Date(Date.UTC(2026, 10, 22))]], { dateNF: 'dd/mm/yyyy' }), 'Exhibitors');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Total', 3]]), 'Summary');
+    // Deflated, as Excel writes it.
+    const deflated = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', compression: true }) as Buffer;
+    const rebuilt = rebuildZip(deflated);
+    expect(rebuilt.equals(deflated)).toBe(false);
+    const rows = (buf: Buffer) => {
+      const book = XLSX.read(buf, { type: 'buffer' });
+      return book.SheetNames.map((n) => [n, XLSX.utils.sheet_to_json(book.Sheets[n], { header: 1, raw: false })]);
+    };
+    expect(rows(rebuilt)).toEqual(rows(deflated));
+    const r = await readSpreadsheet(deflated, 'xlsx');
+    expect(r.status).toBe('Read');
+    expect((r.extract as TableExtract).sheets[0].rows[1]).toEqual(['Café Ltd', '971455501920', '22/11/2026']);
+  });
+
   it('docProps/app.xml is read through the same capped path', async () => {
     const zip = handZip([
       { name: '[Content_Types].xml', raw: Buffer.from('<Types/>') },
@@ -206,15 +256,28 @@ describe('pdf limits', () => {
   });
 });
 
-describe('reading in a worker thread', () => {
+describe('reading in a child process', () => {
   it('reads a file and returns the same result', async () => {
     const r = await readInWorker('csv', Buffer.from('Company;City\nAcme;Paris\n'), 'list.csv');
     expect(r).toMatchObject({ status: 'Read', meta: { rows: 2 }, extract: { kind: 'table', sheets: [{ name: 'list', rows: [['Company', 'City'], ['Acme', 'Paris']] }] } });
   });
 
-  it('a read that takes too long is stopped: Failed timeout', async () => {
-    expect(await readInWorker('pdf', repeatedPagePdf(PDF_MAX_PAGES), undefined, { timeoutMs: 1 }))
+  it('a read still running at the timeout is stopped: Failed timeout', async () => {
+    const started = Date.now();
+    // The child starts, then stays busy for 10 s (like a slow parser); the timeout stops it after 1.5 s.
+    expect(await readInWorker('csv', Buffer.from('Company\nAcme\n'), 'a.csv', { busyMs: 10_000, timeoutMs: 1500 }))
       .toEqual({ status: 'Failed', meta: {}, error: 'timeout' });
+    const elapsed = Date.now() - started;
+    expect(elapsed).toBeGreaterThanOrEqual(1400);
+    expect(elapsed).toBeLessThan(5000);
+  });
+
+  it('a read that runs out of its heap is Failed too_large, and this process carries on', async () => {
+    const tiny = Buffer.from('Company;City\nAcme;Paris\n');
+    // Same small heap: a normal read fits; a runaway one is stopped by V8 in the child, not here.
+    expect(await readInWorker('csv', tiny, 'a.csv', { memoryMb: 160 })).toMatchObject({ status: 'Read' });
+    expect(await readInWorker('csv', tiny, 'a.csv', { memoryMb: 160, exhaustHeap: true })).toEqual({ status: 'Failed', meta: {}, error: 'too_large' });
+    expect(await readInWorker('csv', tiny, 'a.csv')).toMatchObject({ status: 'Read' });
   });
 
   it('never blocks this thread: timers keep ticking while hostile PDFs are read', async () => {

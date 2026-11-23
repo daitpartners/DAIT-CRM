@@ -43,7 +43,7 @@ See the processes with `! ssh root@88.222.213.73 'sudo -iu daitcrm pm2 ls'`. (In
 | `backups/` | Database dumps (see Backups) |
 | `.pm2/logs/` | Process logs (see Logs) |
 
-**Memory limits (PM2 `max_memory_restart`, `deploy/ecosystem.config.cjs`):** the api restarts at 400M, the worker at 1G. The worker reads each Import leads file in a worker thread with its own 512 MB heap limit (and a 2-minute timeout), and that memory counts toward the worker process; 1G leaves room for a heavy read next to mail and research (the server has 32 GB).
+**Memory limits (PM2 `max_memory_restart`, `deploy/ecosystem.config.cjs`):** the api restarts at 400M, the worker at 1G. The worker reads each Import leads file in a separate child process with a 2-minute timeout and a 512 MB V8 heap limit. That limit covers the JavaScript heap only: Buffers (the uploaded file, up to 20 MB, and the inflated entries of an .xlsx / .docx, capped at 100 MB in total) come on top, so one read can use roughly 650 MB at worst. PM2 measures the worker process itself, not that child; the worker's 1G is headroom for holding the upload next to mail and research (the server has 32 GB). A read that runs out of memory only ends the child (the file is Failed "too large").
 
 **There is no test copy on the server.** `~/test`, the `crm-test` / `crm-test-worker` apps, the `dait_crm_test`
 database and crm-test.daitpartners.com were planned but never set up (see "If you later want a test copy" at the end).
