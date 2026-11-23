@@ -446,7 +446,7 @@ describe('reading mail on the Email screen (2B-2)', () => {
     expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: first.id } })).leadId).toBe(res.json().leadId);
   });
 
-  it('conversation linking leaves mail of another company, drafts and newer mail alone, and drops a contact of another company', async () => {
+  it('conversation linking also links newer mail, leaves mail of another company and drafts alone, and drops a contact of another company', async () => {
     const { rep, box, company } = await setup();
     const b = await makeCompany({ name: 'Bolt', website: 'https://bolt.io' });
     const bContact = await makeContact({ companyId: b.id, firstName: 'Bo', lastName: 'Lt', businessEmail: 'bo@bolt.io' });
@@ -464,7 +464,7 @@ describe('reading mail on the Email screen (2B-2)', () => {
     expect(await row(strayContact.id)).toMatchObject({ leadId: noContactLead.id, companyId: company.id, contactId: null });
     expect((await row(draft.id)).leadId).toBeNull();
     expect(await row(older.id)).toMatchObject({ leadId: noContactLead.id, companyId: company.id });
-    expect((await row(newer.id)).leadId).toBeNull();
+    expect(await row(newer.id)).toMatchObject({ leadId: noContactLead.id, companyId: company.id });
   });
 
   it('create lead from an email links the sender’s company by domain, allocates and links the message', async () => {

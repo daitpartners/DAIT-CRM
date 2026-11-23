@@ -106,9 +106,9 @@ const unlinkedWhere = (user: AuthUser): Prisma.EmailMessageWhereInput => ({
 });
 
 /**
- * Linking a message (Link to lead, Create lead) also links the user's older mail in the same conversation that has no
- * lead yet, so the thread does not keep showing it as unmatched. Left alone: drafts, newer mail, mail on another lead
- * and mail matched to another company. As /link: the lead's contact, else the row's own contact only when it belongs
+ * Linking a message (Link to lead, Create lead) also links the user's other mail in the same conversation that has no
+ * lead yet, so the thread does not keep showing it as unmatched. Left alone: drafts, mail on another lead and mail
+ * matched to another company. As /link: the lead's contact, else the row's own contact only when it belongs
  * to the lead's company.
  */
 async function linkConversation(db: Tx | typeof prisma, m: EmailMessage, lead: Pick<Lead, 'id' | 'companyId' | 'contactId'>) {
@@ -116,7 +116,7 @@ async function linkConversation(db: Tx | typeof prisma, m: EmailMessage, lead: P
   const rows = await db.emailMessage.findMany({
     where: {
       userId: m.userId, threadId: m.threadId, leadId: null, id: { not: m.id }, folder: { not: 'drafts' },
-      occurredAt: { lte: m.occurredAt }, OR: [{ companyId: null }, ...(lead.companyId !== null ? [{ companyId: lead.companyId }] : [])],
+      OR: [{ companyId: null }, ...(lead.companyId !== null ? [{ companyId: lead.companyId }] : [])],
     },
     select: { id: true, contact: { select: { id: true, companyId: true } } },
   });
