@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
@@ -52,13 +52,13 @@ type Call = { method: string; url: string };
 
 let signedIn: Me = seller;
 
-function stub({ items = ROWS, isClient = true }: { items?: ProjectRow[]; isClient?: boolean } = {}) {
+function stub({ items = ROWS, isClient = true, status = 'Active' }: { items?: ProjectRow[]; isClient?: boolean; status?: string } = {}) {
   const calls: Call[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     calls.push({ method: init?.method ?? 'GET', url });
     if (url === '/api/me') return Response.json(signedIn);
     if (url === '/api/companies/4/projects') return Response.json({ items, isClient });
-    if (url === '/api/companies/4') return Response.json({ ...COMPANY, isClient });
+    if (url === '/api/companies/4') return Response.json({ ...COMPANY, isClient, status });
     if (url.startsWith('/api/projects/form-options')) return Response.json({ ...OPTIONS, company: { ...OPTIONS.company, isClient } });
     if (url.startsWith('/api/companies?')) return Response.json({ items: [], total: 0, page: 1, pageSize: 100 });
     if (url.startsWith('/api/leads') || url.startsWith('/api/contacts') || url.startsWith('/api/quotations')) {
@@ -209,6 +209,18 @@ describe('Company profile: Projects', () => {
     await u.click(await screen.findByRole('button', { name: 'Create project' }));
     expect(await screen.findByRole('dialog', { name: 'Create project' })).toBeTruthy();
     await waitFor(() => expect(calls.some((c) => c.url === '/api/projects/form-options?company=4')).toBe(true));
+  });
+
+  it('header Run AI research (release 4): live for an active company, disabled on a closed one like its neighbours', async () => {
+    stub({ status: 'Closed' });
+    mount(<CompanyProfile />, { at: '/companies/4', path: '/companies/:id' });
+    const run = await screen.findByRole('button', { name: 'Run AI research' });
+    expect(run).toBeDisabled();
+    expect(run).toHaveAttribute('title', 'This company is closed');
+    cleanup();
+    stub();
+    mount(<CompanyProfile />, { at: '/companies/4', path: '/companies/:id' });
+    expect(await screen.findByRole('button', { name: 'Run AI research' })).toBeEnabled();
   });
 
   it('Overview side column: the real Projects card', async () => {

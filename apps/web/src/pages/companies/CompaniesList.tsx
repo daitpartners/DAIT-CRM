@@ -196,10 +196,11 @@ export function CompaniesList() {
             value={tiles?.verified ?? '—'}
             meta={tiles ? t('{partial} partially · {unverified} unverified', { partial: tiles.partiallyVerified, unverified: tiles.unverified }) : undefined}
           />
-          {/* Queue = Pending + Processing (design); the meta line splits it and adds Failed, as the prototype. */}
+          {/* Prototype views-companies.js: pending + processing + failed, split in the meta line. (The API's aiQueue
+              is Pending + Processing only, the runs still to finish.) */}
           <Tile
             label={t('AI research queue')}
-            value={tiles?.aiQueue ?? '—'}
+            value={tiles ? tiles.aiPending + tiles.aiProcessing + tiles.aiFailed : '—'}
             meta={tiles ? t('{pending} pending · {processing} processing · {failed} failed', { pending: tiles.aiPending, processing: tiles.aiProcessing, failed: tiles.aiFailed }) : undefined}
             metaClass="warn"
           />

@@ -78,6 +78,7 @@ export function EngineCard() {
                 label={t('Monthly cap (USD)')}
                 value={data.claudeMonthlyCapUsd}
                 step="0.01"
+                disabled={save.isPending}
                 onSave={(n) => put({ claudeMonthlyCapUsd: n }, t('Saved'))}
               />
               <span>{t('spent this month USD {n}', { n: usd })}</span>
@@ -122,7 +123,7 @@ export function EngineCard() {
           </label>
           {data.placesKeyPresent ? (
             <div className="engine-sub">
-              <NumberField label={t('Monthly call cap')} value={data.placesMonthlyCallCap} onSave={(n) => put({ placesMonthlyCallCap: n }, t('Saved'))} />
+              <NumberField label={t('Monthly call cap')} value={data.placesMonthlyCallCap} disabled={save.isPending} onSave={(n) => put({ placesMonthlyCallCap: n }, t('Saved'))} />
               <span>{t('{n} calls this month', { n: data.placesCallsThisMonth })}</span>
             </div>
           ) : (
@@ -138,7 +139,7 @@ export function EngineCard() {
             </span>
           </label>
           <div className="engine-sep" />
-          <NumberField label={t('Daily run limit')} value={data.dailyRunLimit} onSave={(n) => put({ dailyRunLimit: n }, t('Saved'))} />
+          <NumberField label={t('Daily run limit')} value={data.dailyRunLimit} disabled={save.isPending} onSave={(n) => put({ dailyRunLimit: n }, t('Saved'))} />
         </div>
       )}
       <div className="engine-note">{t('Credentials live in server environment variables, never in the browser or public site.')}</div>
@@ -146,8 +147,11 @@ export function EngineCard() {
   );
 }
 
-/** A small number input that saves on blur (or Enter) when it holds a valid, changed value; otherwise it resets. */
-function NumberField({ label, value, step = '1', onSave }: { label: string; value: number; step?: string; onSave: (n: number) => void }) {
+/**
+ * A small number input that saves on blur (or Enter) when it holds a valid, changed value; otherwise it resets.
+ * Disabled while a save is in flight, so a second field cannot PUT a body built from the settings before that save.
+ */
+function NumberField({ label, value, step = '1', disabled, onSave }: { label: string; value: number; step?: string; disabled: boolean; onSave: (n: number) => void }) {
   const id = useId();
   const [text, setText] = useState(String(value));
   useEffect(() => setText(String(value)), [value]);
@@ -170,6 +174,7 @@ function NumberField({ label, value, step = '1', onSave }: { label: string; valu
         min={0}
         step={step}
         value={text}
+        disabled={disabled}
         onChange={(e) => setText(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => {

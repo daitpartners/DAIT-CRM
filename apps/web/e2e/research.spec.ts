@@ -104,7 +104,7 @@ test('run research on a company website → suggestions → accept one → verif
   await expect(address.locator('dt', { hasText: /^City$/ }).locator('xpath=following-sibling::dd[1]')).toHaveText(/^Pune\s*VERIFIED$/);
   await expect(page.locator('.legend')).toContainText('Completed');
 
-  // The Companies list counts the queue (Pending + Processing): nothing queued now.
+  // The Companies list AI research queue tile: pending + processing + failed, split in its meta line.
   await page.goto('/companies');
   await expect(page.locator('.tiles .tile').nth(2).locator('.m')).toHaveText(/^\d+ pending · \d+ processing · \d+ failed$/);
 });

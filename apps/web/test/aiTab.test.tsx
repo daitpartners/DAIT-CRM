@@ -30,6 +30,8 @@ const SUGGESTIONS: ResearchView['pending'] = [
     sourceLabel: 'northwind.in/contact', currentValue: null, locked: false },
   { id: 12, runId: 3, field: 'yearEstablished', label: 'Year established', value: 2004, display: null, confidence: 85,
     sourceUrl: 'https://northwind.in/about', sourceLabel: null, currentValue: 2003, locked: true },
+  { id: 14, runId: 3, field: 'zip', label: 'ZIP / Postal code', value: '411001', display: null, confidence: 90,
+    sourceUrl: 'https://northwind.in/contact', sourceLabel: null, currentValue: '411014', locked: true },
   { id: 13, runId: 3, field: 'websiteTechnology', label: 'Website technology', value: 'WordPress', display: null, confidence: 70,
     sourceUrl: 'https://northwind.in/', sourceLabel: null, currentValue: null, locked: false },
 ];
@@ -48,7 +50,7 @@ type Call = { method: string; url: string; body?: unknown };
 
 let signedIn: Me = rep;
 
-function stub({ research = view(), engine = ENGINE, post = {} as Record<string, Response | (() => Response)> } = {}) {
+function stub({ research = view(), engine = ENGINE, post = {} as Record<string, Response | (() => Response | Promise<Response>)> } = {}) {
   const calls: Call[] = [];
   let current = research;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
@@ -141,7 +143,14 @@ describe('AI Intelligence tab (prototype views-companies.js tab ai)', () => {
     expect(year).toHaveTextContent('2003VERIFIED');
     expect(year).toHaveTextContent('Locked · verified');
     expect(within(year).queryByRole('button')).toBeNull();
-    expect(within(suggestions()).getByRole('heading')).toHaveTextContent('Suggestions awaiting review 3');
+    // Filled since the run but never verified: not overwritten, and not called verified.
+    const zip = screen.getByRole('row', { name: /^ZIP/ });
+    expect(zip).toHaveTextContent('411014');
+    expect(zip).not.toHaveTextContent('VERIFIED');
+    expect(zip).toHaveTextContent('Field already filled');
+    expect(zip).not.toHaveTextContent('Locked · verified');
+    expect(within(zip).queryByRole('button')).toBeNull();
+    expect(within(suggestions()).getByRole('heading')).toHaveTextContent('Suggestions awaiting review 4');
     const run = screen.getByRole('row', { name: /Manual · Maya Pillai/ });
     expect(run).toHaveTextContent('Manual · Maya PillaiWebsite readernorthwind.in (3 pages)3 suggestions1Completed');
   });
@@ -261,6 +270,30 @@ describe('AI Intelligence tab (prototype views-companies.js tab ai)', () => {
     const puts = calls.filter((c) => c.method === 'PUT').map((c) => c.body);
     expect(puts[0]).toEqual({ dailyRunLimit: 50, claudeEnabled: true, claudeMonthlyCapUsd: 10, placesEnabled: false, placesMonthlyCallCap: 0, webSearchEnabled: false });
     expect(puts[1]).toMatchObject({ dailyRunLimit: 20, claudeEnabled: true });
+  });
+
+  it('engine card: number fields are disabled while a save is in flight, so a second blur cannot PUT stale settings', async () => {
+    const u = userEvent.setup();
+    let release: (r: Response) => void = () => {};
+    const { calls } = stub({
+      engine: { ...ENGINE, claudeKeyPresent: true, placesKeyPresent: true },
+      post: { 'PUT /api/settings/enrichment': () => new Promise<Response>((r) => { release = r; }) },
+    });
+    mount(admin);
+    const engine = await screen.findByRole('region', { name: /Enrichment engine/ });
+    const limit = await within(engine).findByLabelText('Daily run limit');
+    await u.clear(limit);
+    await u.type(limit, '20');
+    await u.click(within(engine).getByLabelText('Monthly cap (USD)'));
+    await waitFor(() => expect(within(engine).getByLabelText('Monthly cap (USD)')).toBeDisabled());
+    expect(within(engine).getByLabelText('Monthly call cap')).toBeDisabled();
+    expect(within(engine).getByLabelText('Daily run limit')).toBeDisabled();
+    release(Response.json({ ...ENGINE, claudeKeyPresent: true, placesKeyPresent: true, dailyRunLimit: 20 }));
+    await waitFor(() => expect(within(engine).getByLabelText('Monthly cap (USD)')).toBeEnabled());
+    expect(within(engine).getByLabelText('Daily run limit')).toHaveValue(20);
+    expect(calls.filter((c) => c.method === 'PUT').map((c) => c.body)).toEqual([
+      { dailyRunLimit: 20, claudeEnabled: false, claudeMonthlyCapUsd: 0, placesEnabled: false, placesMonthlyCallCap: 0, webSearchEnabled: false },
+    ]);
   });
 });
 

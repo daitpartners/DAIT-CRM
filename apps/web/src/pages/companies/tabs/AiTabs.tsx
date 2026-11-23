@@ -230,8 +230,11 @@ function SuggestionRow({ s, verified, canEdit, busy, onDecide }: RowProps) {
         <SourceLink url={s.sourceUrl} label={s.sourceLabel} />
       </td>
       <td className="num nowrap">
-        {s.locked ? (
+        {verified ? (
           <span className="locked-note">{t('Locked · verified')}</span>
+        ) : s.locked ? (
+          // Filled since the run (by hand or another suggestion): never overwritten, but not verified.
+          <span className="locked-note">{t('Field already filled')}</span>
         ) : canEdit ? (
           <>
             <button type="button" className="btn xs" disabled={busy} onClick={() => onDecide(false)}>

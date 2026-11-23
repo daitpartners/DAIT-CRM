@@ -20,10 +20,11 @@ test('companies list: prototype tiles, tabs with counts and columns', async ({ p
   const total = (await page.locator('.tiles .tile').first().locator('.v').textContent())?.trim();
   await expect(page.getByRole('tab', { name: /All companies/ })).toContainText(`All companies ${total}`);
   await expect(page.locator('.tiles .tile').first().locator('.m')).toContainText(/\d+ active · \d+ inactive · \d+ closed/);
-  // AI research queue (release 4): Pending + Processing, the meta line as the prototype.
+  // AI research queue (release 4, prototype): the figure is pending + processing + failed from the meta line.
   const ai = page.locator('.tiles .tile').nth(2);
-  await expect(ai.locator('.v')).toHaveText(/^\d+$/);
   await expect(ai.locator('.m')).toHaveText(/^\d+ pending · \d+ processing · \d+ failed$/);
+  const [pending, processing, failed] = ((await ai.locator('.m').textContent()) ?? '').match(/\d+/g)!.map(Number);
+  await expect(ai.locator('.v')).toHaveText(String(pending! + processing! + failed!));
 
   const tabs = await page.getByRole('tab').evaluateAll((els) => els.map((el) => (el.textContent ?? '').replace(/\s*\d+$/, '').trim()));
   expect(tabs).toEqual(TABS);

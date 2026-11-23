@@ -180,7 +180,7 @@ export function CompanyProfile() {
       >
         <div className="hdr-actions">
           {canManage ? (
-            <button type="button" className="btn" onClick={research.run} disabled={research.busy}>
+            <button type="button" className="btn" onClick={research.run} disabled={research.busy || closed} title={closedTitle}>
               {t('Run AI research')}
             </button>
           ) : null}
