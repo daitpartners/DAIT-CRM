@@ -323,6 +323,9 @@ describe('quotations API', () => {
     })]);
     const acts = await prisma.leadActivity.findMany({ where: { leadId: a.lead.id, activityType: 'quote' }, orderBy: { id: 'asc' } });
     expect(acts.map((x) => x.title)).toEqual([`Quotation drafted · ${q.number}`, `Quotation accepted · ${q.number}`]);
+    // One "Quotation accepted" line: the status change under it does not repeat it.
+    const won = await prisma.leadActivity.findFirstOrThrow({ where: { leadId: a.lead.id, activityType: 'status', statusTo: 'Won' } });
+    expect(won.body).toBeNull();
     expect((await req('POST', `/api/quotations/${q.id}/accept`, manager.cookie, {})).json()).toEqual({ error: 'locked' });
     expect((await req('POST', `/api/quotations/${q.id}/reject`, manager.cookie, {})).json()).toEqual({ error: 'locked' });
   });

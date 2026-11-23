@@ -573,7 +573,8 @@ export async function decideQuotation(tx: Tx, user: AuthUser, id: number, to: 'A
       // Lock order everywhere: quotation, then lead.
       await tx.$queryRaw`SELECT id FROM leads WHERE id = ${updated.leadId} FOR UPDATE`;
       const lead = await tx.lead.findUniqueOrThrow({ where: { id: updated.leadId } });
-      const won = await applyStatusChange(tx, lead, 'Won', { userId: user.id }, { sourceTitle: `Quotation accepted · ${q.number}` });
+      // No source text: the "Quotation accepted" line just above already says why (one line, not two alike).
+      const won = await applyStatusChange(tx, lead, 'Won', { userId: user.id });
       if (won.status !== lead.status) {
         await audit(tx, { entityType: 'lead', entityId: lead.id, action: 'update', userId: user.id, before: { status: lead.status }, after: { status: won.status } });
       }
