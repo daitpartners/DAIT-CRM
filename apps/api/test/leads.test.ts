@@ -605,6 +605,24 @@ describe('leads API', () => {
     expect(await prisma.leadActivity.findFirst({ where: { leadId: b.id, title: 'Marked do not email' } })).not.toBeNull();
   });
 
+  it('Do not email and moving the contact to another company at the same moment never deadlock (same lock order)', async () => {
+    const admin = await as('ADMINISTRATOR');
+    for (let i = 0; i < 40; i += 1) {
+      const from = await makeCompany();
+      const to = await makeCompany();
+      const contact = await makeContact({ companyId: from.id, businessEmail: `c${i}@x.com` });
+      const lead = await makeLead({ companyId: from.id, contactId: contact.id, assignedToId: admin.user.id });
+      const [dne, move] = await Promise.all([
+        req('POST', `/api/leads/${lead.id}/do-not-email`, admin.cookie, { doNotEmail: true, updatedAt: stamp(lead) }),
+        req('POST', `/api/contacts/${contact.id}/move`, admin.cookie, { companyId: to.id, updatedAt: contact.updatedAt.toISOString() }),
+      ]);
+      // One may find the record changed by the other (409 stale); neither fails (a deadlock is a 500), one always saves.
+      expect([200, 409], move.body).toContain(move.statusCode);
+      expect([200, 409], dne.body).toContain(dne.statusCode);
+      expect([move.statusCode, dne.statusCode]).toContain(200);
+    }
+  });
+
   it('ticking two leads of one contact at the same moment saves both flags', async () => {
     const { rep, contact, a, b } = await twoLeadsOneContact();
     const [ra, rb] = await Promise.all([
