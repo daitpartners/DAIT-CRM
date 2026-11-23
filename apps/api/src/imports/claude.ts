@@ -282,8 +282,19 @@ export async function claudeExtractRows(
   const draft = opts.draft ?? draftDocument(extract, opts.known ?? []);
   const maxChunks = opts.maxChunks ?? MAX_CLAUDE_CHUNKS_PER_FILE;
   const deadline = (opts.startedAt ?? Date.now()) + (opts.budgetMs ?? CLAUDE_FILE_BUDGET_MS);
-  const rowsOf = (chunk: Chunk): DraftRow[] =>
-    draft.rows.filter((r) => chunk.owns.has(`${r.block}:${r.start}`)).map(({ block: _block, start: _start, ...row }: BlockRow) => row);
+  /** Deterministic rows that ran on past the chunk that emitted them: a later chunk's Claude rows must not repeat them. */
+  const straddling: RowFields[] = [];
+  const rowsOf = (chunk: Chunk): DraftRow[] => {
+    const own = draft.rows.filter((r) => chunk.owns.has(`${r.block}:${r.start}`));
+    for (const r of own) if (!chunk.owns.has(`${r.block}:${r.end}`)) straddling.push(r.fields);
+    return own.map(({ block: _block, start: _start, end: _end, ...row }: BlockRow) => row);
+  };
+  const phoneKey = (v: string | undefined) => (v ? v.replace(/\D/g, '') : '');
+  /** A Claude row from the tail of a record a fallback chunk already gave (same company, email or phone). */
+  const repeatsStraddler = (f: RowFields) => straddling.some((d) =>
+    (!!f.companyName && f.companyName.toLowerCase() === d.companyName?.toLowerCase())
+    || (!!f.email && f.email === d.email)
+    || (!!f.phone && phoneKey(f.phone) === phoneKey(d.phone)));
   const rows: DraftRow[] = [];
   let calls = 0;
   let stopped: ImportNoClaude | null = null;
@@ -309,7 +320,7 @@ export async function claudeExtractRows(
       });
       const answer = ANSWER.safeParse(output);
       if (!answer.success) throw new Error('unexpected answer');
-      rows.push(...verifiedRows(answer.data, chunk, extract.unit));
+      rows.push(...verifiedRows(answer.data, chunk, extract.unit).filter((r) => !repeatsStraddler(r.fields)));
     } catch {
       rows.push(...rowsOf(chunk));
     }
@@ -360,7 +371,7 @@ export async function stageDocument(
     rows = out.rows;
     noClaude = out.stopped;
   } else {
-    rows = doc.rows.map(({ block: _block, start: _start, ...row }) => row);
+    rows = doc.rows.map(({ block: _block, start: _start, end: _end, ...row }) => row);
     noClaude = 'off';
   }
   const { noClaude: _was, ...meta } = file.meta as FileMeta;

@@ -608,3 +608,57 @@ describe('review round 2', () => {
     expect(out.rows).toEqual([{ originKind: 'page', originN: 1, fields: { companyName: 'Maria Lopez Design', email: 'maria@gmail.com' } }]);
   });
 });
+
+describe('review round 3', () => {
+  it('trailing contact names, titles, cities and addresses stay with their own record', () => {
+    const fields = (text: string) => extractBlocks(pdf(text), KNOWN).map((r) => r.fields);
+    expect(fields('Acme Widgets Ltd\nsales@acme.com\n+44 20 7946 0001\nJohn Smith\nSales Manager\nBeta Trading LLC\ninfo@beta.co.uk\n+44 20 7946 0002\nAna Lopez\nDirector')).toEqual([
+      { companyName: 'Acme Widgets Ltd', email: 'sales@acme.com', phone: '+44 20 7946 0001', contactName: 'John Smith', designation: 'Sales Manager' },
+      { companyName: 'Beta Trading LLC', email: 'info@beta.co.uk', phone: '+44 20 7946 0002', contactName: 'Ana Lopez', designation: 'Director' },
+    ]);
+    expect(fields('Acme Widgets Ltd\nsales@acme.com\n+1 416 555 0001\nToronto\nCanada\nBeta Trading LLC\ninfo@beta.co.uk\n+44 20 7946 0002\nLeeds\nUnited Kingdom')).toEqual([
+      { companyName: 'Acme Widgets Ltd', email: 'sales@acme.com', phone: '+1 416 555 0001', country: 'Canada' },
+      { companyName: 'Beta Trading LLC', email: 'info@beta.co.uk', phone: '+44 20 7946 0002', country: 'United Kingdom' },
+    ]);
+    expect(fields('Acme Widgets Ltd\nsales@acme.com\n12 King Street West\nToronto, Canada\nBeta Trading LLC\ninfo@beta.co.uk\n5 Park Row\nLeeds, United Kingdom')).toEqual([
+      { companyName: 'Acme Widgets Ltd', email: 'sales@acme.com', country: 'Canada' },
+      { companyName: 'Beta Trading LLC', email: 'info@beta.co.uk', country: 'United Kingdom' },
+    ]);
+    // Name-first lists and companies without a legal suffix are unchanged.
+    expect(fields('John Smith\nAcme Widgets\njohn@acme.com\nAna Lopez\nBeta Foods\nana@betafoods.es')).toEqual([
+      { companyName: 'Acme Widgets', contactName: 'John Smith', email: 'john@acme.com' },
+      { companyName: 'Beta Foods', contactName: 'Ana Lopez', email: 'ana@betafoods.es' },
+    ]);
+    expect(fields('Northwind\nsales@northwind.com\nContoso\ninfo@contoso.com')).toEqual([
+      { companyName: 'Northwind', email: 'sales@northwind.com' }, { companyName: 'Contoso', email: 'info@contoso.com' },
+    ]);
+  });
+
+  it('a record across a chunk boundary is not given twice (fallback chunk, then Claude on the next)', async () => {
+    const pad = (i: number) => String(i).padStart(4, '0');
+    // 7-line records: record 25 starts on line 176 and runs past the first chunk's 180 lines.
+    const doc = txt(Array.from({ length: 40 }, (_, i) => [
+      `Company ${i} Ltd`, `${i} King Street`, 'Toronto', 'Canada', `Hall ${i}`, `info${i}@company${i}.com`, `+44 20 7946 ${pad(i)}`,
+    ].join('\n')).join('\n'));
+    const chunks = documentChunks(doc);
+    expect(chunks).toHaveLength(2);
+    let call = 0;
+    const runner: ClaudeRunner = async (req) => {
+      call += 1;
+      if (call === 1) throw new ClaudeRunError('timeout');
+      return {
+        output: {
+          rows: [...req.prompt.matchAll(/info(\d+)@/g)].map((m) => ({
+            ...blank, ref: 1, email: `info${m[1]}@company${m[1]}.com`, phone: `+44 20 7946 ${pad(Number(m[1]))}`,
+            companyName: req.prompt.includes(`Company ${m[1]} Ltd`) ? `Company ${m[1]} Ltd` : null,
+          })),
+        },
+        searchUrls: [],
+      };
+    };
+    const out = await claudeExtractRows(doc, claudeWith(runner), always, { known: KNOWN });
+    expect(out.rows).toHaveLength(40);
+    expect(new Set(out.rows.map((r) => r.fields.email)).size).toBe(40);
+    expect(out.rows.find((r) => r.fields.email === 'info25@company25.com')!.fields.companyName).toBe('Company 25 Ltd');
+  });
+});

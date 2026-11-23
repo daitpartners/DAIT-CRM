@@ -26,7 +26,7 @@ export type Block = { i: number; kind: OriginKind; n: number; lines: { n: number
  * A deterministic row and where its record starts (block `block`, line index `start`): a chunk Claude could not read
  * falls back to exactly the rows that start on its own lines.
  */
-export type BlockRow = DraftRow & { block: number; start: number };
+export type BlockRow = DraftRow & { block: number; start: number; end: number };
 /** What the read child sends back for a document: its blocks and the deterministic reader's rows. */
 export type DocumentDraft = { blocks: Block[]; rows: BlockRow[] };
 
@@ -314,12 +314,15 @@ function isHeadingSegment(lines: string[]): boolean {
   return heading;
 }
 
+/** A strong record start: a line with a legal suffix or a business word. */
+const strongStart = (text: string) => LEGAL_SUFFIX.test(text) || COMPANY_WORD.test(text);
+
 /**
- * Where a record starts in a list: a line with a legal suffix or a business word, or a line with no contact value that
- * is no title, country or heading.
+ * Where a record may start in a list: a strong start, or (weak) a line with no contact value that is no title, country
+ * or heading (a name, a city, an address).
  */
 function startsRecord(text: string, known: readonly string[]): boolean {
-  if (LEGAL_SUFFIX.test(text) || COMPANY_WORD.test(text)) return true;
+  if (strongStart(text)) return true;
   if (hasContact(text) || TITLE_WORD.test(text) || HEADING_WORD.test(text)) return false;
   const last = text.includes(',') ? text.slice(text.lastIndexOf(',') + 1).trim() : text;
   return !matchCountry(text, known) && !matchCountry(last, known);
@@ -338,26 +341,44 @@ export function rowsFromBlocks(blocks: readonly Block[], known: readonly string[
       if (lines.length === 0 || isHeadingSegment(lines.map((l) => l.text))) return;
       const fields = recordOf(lines.map((l) => l.text), known);
       if (fields) {
-        rows.push({ fields, originKind: block.kind, originN: block.kind === 'line' ? lines[0]!.n : block.n, block: block.i, start: lines[0]!.k });
+        rows.push({
+          fields, originKind: block.kind, originN: block.kind === 'line' ? lines[0]!.n : block.n,
+          block: block.i, start: lines[0]!.k, end: lines[lines.length - 1]!.k,
+        });
       }
     };
     if (block.lines.filter((l) => hasEmail(l.text)).length < 2) {
       add(block.lines);
       continue;
     }
-    const segments: Block['lines'][] = [];
+    // A list whose first record opens with its company: there, a weak line after a record's contact values (a contact
+    // name, a city, an address) is that record's tail, and the next company line always starts a new record.
+    const companyFirst = strongStart(block.lines[0]!.text);
+    const split: Block['lines'][] = [];
     let segment: Block['lines'] = [];
     let withContact = false;
+    let openedWeak = false;
     for (const line of block.lines) {
-      if (withContact && startsRecord(line.text, known)) {
-        segments.push(segment);
+      const strong = strongStart(line.text);
+      const starts = segment.length > 0
+        && ((withContact && startsRecord(line.text, known)) || (strong && openedWeak && companyFirst));
+      if (starts) {
+        split.push(segment);
         segment = [];
         withContact = false;
+        openedWeak = !strong;
       }
       segment.push(line);
       if (hasContact(line.text)) withContact = true;
     }
-    segments.push(segment);
+    split.push(segment);
+    // A segment with no contact value and no company line is the tail of the record before it.
+    const segments: Block['lines'][] = [];
+    for (const seg of split) {
+      const tail = segments.length > 0 && !seg.some((l) => hasContact(l.text) || strongStart(l.text));
+      if (tail) segments[segments.length - 1]!.push(...seg);
+      else segments.push(seg);
+    }
     if (segments.length > 1) {
       for (const seg of segments) add(seg);
       continue;
@@ -377,7 +398,7 @@ export function rowsFromBlocks(blocks: readonly Block[], known: readonly string[
 
 /** The deterministic reader: the document's records, without Claude. */
 export function extractBlocks(extract: TextExtract, knownCountries: readonly string[]): DraftRow[] {
-  return rowsFromBlocks(documentBlocks(extract), knownCountries).map(({ block: _block, start: _start, ...row }) => row);
+  return rowsFromBlocks(documentBlocks(extract), knownCountries).map(({ block: _block, start: _start, end: _end, ...row }) => row);
 }
 
 /** The document's blocks and deterministic rows (run in the read child process). */
