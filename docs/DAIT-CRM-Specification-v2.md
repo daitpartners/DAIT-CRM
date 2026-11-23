@@ -10,6 +10,42 @@ Companion material: the design canvas (18 screens) and the HTML/CSS/JS prototype
 
 ---
 
+## Build status (handover, 23 Nov 2026)
+
+This specification was written before the build. It is kept as written, with **As built** notes added under each
+section. Where a note and the original text disagree, the note describes what runs at crm.daitpartners.com (live
+release `08ee5da`). The decisions behind every difference are in the design specs in `docs/superpowers/specs/` (cited
+below by file name) and in `docs/PENDING.md`; the tables and columns are in `docs/data-model.md`.
+
+Two decisions change the premise of the whole document:
+- **Fresh build, not an enhancement.** There was no existing CRM with data (crm.daitpartners.com served the static
+  prototype). The owner decided on 21 Nov 2026: "it's a fresh build, ignore the existing." Every instruction about
+  inspecting, preserving or extending existing code, tables, roles or integrations is void
+  (`2026-11-21-dait-crm-fresh-build-design.md` §1).
+- **Screens match the prototype.** The prototype (`prototype/index.html`, `prototype/js/views-*.js`) is the reference
+  for every screen; build only what it shows; each screen is checked side by side against it
+  (`2026-11-21-prototype-parity-design.md`). Where the prototype and this document differ on presentation, the
+  prototype won.
+
+| § | Section | Status |
+|---|---|---|
+| 2 | Stack and hosting | Built differently: new Node 24 / Fastify / Prisma / PostgreSQL / React app; Claude Code instead of Ollama |
+| 3 | Design and branding | Built |
+| 4 | Lead Management | Built (releases 1C, outreach language, leads exact-match) |
+| 5 | Company Management | Built (1B; AI fields filled by release 4) |
+| 6 | Website Contact Us form | **Not built — release 1D parked by the owner** |
+| 7 | Email | Built differently (Microsoft 365 only, polling sync, private mail, Mailer added) — releases 2A, 2B-1, 2B-2, 2C |
+| 8 | Calendar | Built differently (calls and meetings are tasks; read-only private Outlook copy) — release 3C |
+| 9 | Quotations | Built (3A); no price list |
+| 9a | Projects | Built (3B) |
+| 10 | Database | Built differently: see `docs/data-model.md` |
+| 11 | Duplicate detection | Built (1B), tightened |
+| 12 | Data sources and AI enrichment | Built differently: website reader + Claude Code; Places built but off; Apollo, Ollama not built — release 4 |
+| 13 | User interface | Built (no Contact Enquiries screen; Mailer, Projects, Contacts added) |
+| 14 | Permissions and security | Built |
+| 15 | Preserve existing functionality | Void (fresh build) |
+| 16–17 | Development instructions and rules | Superseded by the fresh-build design and the per-release designs; handover in `docs/DEPLOYMENT.md`, `docs/MIGRATIONS.md`, `docs/ENVIRONMENT.md` |
+
 ## 1. Project objective
 
 Establish a company-centric CRM with independent Lead Management, public enquiry capture, integrated email, calendar
@@ -37,6 +73,15 @@ Rules:
 - Secrets (SMTP/IMAP, AI keys, Google Places key) live in server environment variables, never in the repo or the public site.
 - The public Contact Us endpoint is the only unauthenticated API. Everything else requires the existing CRM session/token.
 
+> **As built:** a new application (`2026-11-21-dait-crm-fresh-build-design.md` §4–5): Node 24, Fastify 5, Prisma 6 on
+> PostgreSQL (database `dait_crm`), React + Vite frontend, npm workspaces `apps/api`, `apps/worker`, `apps/web`,
+> `packages/shared`. Two PM2 processes as Linux user `daitcrm` (`crm-live` API on 127.0.0.1:3090, `crm-live-worker`)
+> behind OpenLiteSpeed on the shared AlmaLinux 9 / CyberPanel server; job queue in PostgreSQL (no Redis). Sign-in with
+> Microsoft 365 (Entra, PKCE) plus a break-glass local administrator. AI: Ollama was not built (no GPU on the server);
+> Claude runs through the server's Claude Code CLI with a subscription token, not the paid API
+> (`2026-11-23-release-4-ai-research-design.md`, addendum). Secrets are in `~/live/shared/.env` only
+> (`docs/ENVIRONMENT.md`). There is no unauthenticated API at all (1D parked), apart from `/api/health` and sign-in.
+
 ## 3. Design and branding
 
 - Primary palette (from the approved theme): `#1F0249` ink, `#6811CF` purple, `#812BE1` purple-light, `#BA5425` orange,
@@ -45,6 +90,9 @@ Rules:
 - Logo: full-colour logo on light backgrounds (public site, PDFs); the "D" mark on the dark sidebar.
 - All six modules share one visual language: the sidebar, top bar, tables, badges, cards, forms and modals in `css/app.css`.
 - Text contrast ≥ 4.5:1; AI-suggested values are always visibly tagged and distinguishable from verified values.
+
+> **As built:** the prototype's `css/app.css` is ported as the global stylesheet (`apps/web/src/styles/app.css`) with
+> components matching the prototype markup; no UI kit.
 
 ## 4. Module 1 — Lead Management
 
@@ -97,6 +145,25 @@ Won, Lost, Not Relevant (administrators can add more). Dropdown values come from
 - CSV and Google Places imports create Prospects and run the company duplicate check before creating any company.
 - **Must stay connected to the existing task management, allocation and notification system**; extend, do not replace.
 
+> **As built** (`2026-11-21-release-1c-leads-tasks-design.md`, `2026-11-21-leads-exact-match-design.md`,
+> `2026-11-22-outreach-language-design.md`):
+> - Lead IDs are `LD-1001` upward from a database sequence. Added field **Outreach language** (English / Español, default
+>   from the country); allocation rules can match on it as well as country. Lead sources and statuses are lookup values.
+> - Lead page actions kept: edit details, archive (confirm), transfer with mandatory note, close with reason (Lost and
+>   Not Relevant need a reason), switch contact. Dropped: clone and note-less reassign. Sales Representatives also see
+>   unassigned leads and can claim them; Data Research Users see prospects and their own leads.
+> - The Won rule, closing rule, follow-up ↔ task sync and transfer rules are one server-side service, as specified.
+>   Picking Won on the lead page opens the prototype's "Mark … as Won?" confirmation, which offers "Mark Won and create
+>   project".
+> - CSV import creates Prospects with the company duplicate check. **Google Places import of prospects was not built**
+>   (Places exists only as an optional research source, off).
+> - The Leads list bulk bar also has Assign to… and Archive (not in the prototype; kept pending the owner's decision,
+>   see `docs/PENDING.md`). The lead page is contact-first as the prototype (profile, experience, education, skills,
+>   languages on the contact).
+> - The "existing" task / allocation / notification system did not exist; they were built new (Tasks page, Settings →
+>   Lead allocation rules, in-app Notifications). Notifications are **in-app only**: no assignment, transfer or reminder
+>   emails are sent.
+
 ## 5. Module 2 — Company Management
 
 Master database of all organisations. A company is an independent entity, never a lead. One company has many contacts,
@@ -119,6 +186,15 @@ Rules:
   render: only `http`, `https`, `mailto` and `tel` are allowed; anything else (e.g. `javascript:`) is rejected.
 - Profile tabs: Overview, Contacts, Locations, Leads & Prospects, Activities, AI Intelligence, Research Sources.
 
+> **As built** (`2026-11-21-release-1b-companies-contacts-design.md`, `2026-11-23-release-4-ai-research-design.md`):
+> company numbers `CO-0001` from a sequence; Companies list with tiles, tabs (including **Duplicate review**), filters
+> and pager; Contacts are both a company tab and their own page, with Deactivate and Move to another company; exactly
+> one primary contact per company (database index). The profile also has a **Projects** tab (release 3B).
+> Deactivate (Inactive / Closed) instead of delete. Suggestions are stored in `enrichment_suggestions` (one row each)
+> linked to `enrichment_runs`, not a JSON column; research proposes values only for **empty, unverified** fields and
+> never touches verified ones. AI Research Status adds "Not started" (never researched). Without Claude, the AI summary,
+> classification and opportunity score stay empty ("not yet computed").
+
 ## 6. Module 3 — Website Contact Us form
 
 Public form on daitpartners.com, separate from the CRM lead form. Exactly six fields: Full Name*, Business Email*,
@@ -138,6 +214,14 @@ Submission workflow (server side, synchronous part must return within ~1 s):
 
 Spam protection: honeypot field, per-IP rate limiting, server-issued form token, optional CAPTCHA. The public site calls one
 public endpoint only; it never receives CRM API keys or database access.
+
+> **Not built.** Release 1D (public form, `contact_enquiries`, Enquiries screen with the Needs-review queue) is **parked
+> by the owner** ("keep contact in pending, i will decide lateron", 22 Nov 2026). daitpartners.com/contact keeps its own
+> form (contact.php → Mailjet). The design for when it is picked up is in `2026-11-21-dait-crm-fresh-build-design.md` §5
+> (form served at crm.daitpartners.com/contact, `POST /api/public/enquiries`, company auto-linked only on an exact
+> business-email domain, everything else to Needs review). Ready in the code: the CSRF guard already exempts
+> `/api/public/` and `leads.enquiry_id` exists as a plain column. The Reports page's "Enquiry conversion" card shows 0s
+> until then.
 
 ## 7. Module 4 — Email Management
 
@@ -175,6 +259,27 @@ template is used. Templates carry a language; the user's language is listed firs
 Tables: `email_accounts` (per user, encrypted credentials), `email_messages` (message_id, thread_id, folder, from, to,
 subject, body, received_at, lead_id, contact_id, company_id, quotation_id), `email_templates`.
 
+> **As built** (`2026-11-22-release-2a-connections-templates-design.md`, `2026-11-22-release-2b-email-design.md`,
+> `2026-11-22-release-2b2-sync-email-screen-design.md`, `2026-11-22-release-2c-mailer-design.md`):
+> - **Microsoft 365 only** (owner's choice); Google Workspace and IMAP show "Coming later". One Entra app serves sign-in
+>   and mail. A **system mailbox** (connected by an administrator) exists for CRM mail; each user connects their own
+>   **personal mailbox** in Settings → Email & calendar connections. Refresh tokens are AES-256-GCM encrypted.
+> - **Privacy rule (owner):** a user's mail is visible only to that user, administrators included. On the lead timeline
+>   others see only "Email sent · by {name}", the sender also sees the subject.
+> - **Sync polls Graph** with delta queries every 5 minutes per folder (inbox, sent, drafts, archive; last 90 days), not
+>   change-notification webhooks. Bodies are plain text; attachments are listed by name, not downloaded; drafts are view
+>   only; shared mailboxes are stored in Options but not synced.
+> - Email screen as the prototype: folders, smart views, search, reader, Reply, Log as activity, linked records, create
+>   lead from email, Compose with Client → Lead → Project; pager (owner request). Emailing a New / Not Contacted lead
+>   moves it to Contacted.
+> - Templates: written in the CRM or read from an uploaded `.oft` / `.msg` (parsed in the browser); the file itself is
+>   not kept; plain-text body; merge fields `{first_name}`, `{company}`, `{me}`, `{lead_id}`, `{quote_no}`.
+> - **Added: the Mailer** (release 2C): a template sent to ticked leads one by one from the sender's mailbox, spaced 1–15
+>   minutes, optionally only in the **client's** working hours (Mon–Fri 09:00–18:00 in the recipient's time zone), at
+>   most 200 per mailbox per day, with Do not email / unsubscribe and an audit row per recipient.
+> - No assignment / transfer / reminder emails (notifications are in-app). The system mailbox sends the test email.
+> - `email_messages` has no `quotation_id`; it has `project_id` (release 3B).
+
 ## 8. Module 5 — Calendar Management
 
 - Day / week / month views; event types Meeting, Call, Appointment, Follow-up, Internal.
@@ -185,6 +290,15 @@ subject, body, received_at, lead_id, contact_id, company_id, quotation_id), `ema
 
 Tables: `calendar_events` (title, type, starts_at, ends_at, timezone, location, organiser_id, lead_id, company_id,
 contact_id, reminder_minutes, external_id), `calendar_event_attendees` (event_id, user_id or contact_id, status).
+
+> **As built** (`2026-11-22-release-3c-calendar-design.md`): calls and meetings planned in the CRM are **tasks** with a
+> type and a time (call 30 min, meeting 60 min), so they appear on Tasks, overdue counts, the dashboard and the lead
+> timeline. Each user's own Outlook calendar is copied read-only every 5 minutes into a private `calendar_events` table
+> (when Sync calendar is on); nobody else sees it, administrators included. **Nothing is written to Outlook**: no
+> invitations, no attendees, no Outlook events created from the CRM. Day / Week / Month views, mini month, Overdue list
+> and New follow-up dialog as the prototype; the Mine / Everyone switch is for Administrators only and Everyone shows
+> the team's CRM tasks, never their Outlook events. Not built: event types beyond follow-up / call / meeting,
+> `calendar_event_attendees`, `calendar_connections`, reminders and invite emails, Google Calendar.
 
 ## 9. Module 6 — Quotation Management
 
@@ -205,6 +319,17 @@ Tables: `quotations` (number, company_id, contact_id, lead_id, owner_id, status,
 valid_until, notes, current_revision), `quotation_revisions` (quotation_id, revision_no, total, pdf_path, sent_at, snapshot_json),
 `quotation_lines` (revision_id, item, description, qty, unit, unit_price, discount_pct), `price_list_items`, `projects`.
 
+> **As built** (`2026-11-22-release-3a-quotations-design.md`): numbers `Q-YYYY-NNN` per calendar year. Currencies
+> **USD, CAD and INR** only (default from the client's country: India → INR, Canada → CAD, else USD); one **GST** line
+> (default 18 % on INR, 0 % on USD / CAD, from Settings → Company details); no exchange rates. One issuer (DAIT Partners
+> LLP, Delhi) for every currency. The PDF is drawn on the server with pdfkit (no browser) and is not stored: it is
+> redrawn from the revision's frozen snapshot. A quotation counts as sent only when Microsoft confirms the email from
+> the sender's own mailbox ("Sending…" until then); the sent email is the sender's private mail. `quotation_lines` hold
+> the working copy (not per revision); each send freezes a `quotation_revisions` row. Rejecting never changes the lead's
+> status. Expired is set automatically by the worker after the valid-until date. Settings → Company details (issuer,
+> GSTIN, default GST per currency, default notes) was added. **Not built:** `price_list_items` (not in the prototype),
+> CGST / SGST split, invoices, client acceptance page.
+
 ## 9a. Projects (client engagements)
 
 - A company becomes a **Client** when a lead is marked Won or a quotation is accepted. From then on the lead page, the company
@@ -216,6 +341,14 @@ valid_until, notes, current_revision), `quotation_revisions` (quotation_id, revi
   client). The lead contact goes in To, the project's primary stakeholders are pre-filled in Cc with per-person tick boxes, and the
   sent email is stored with `company_id`, `lead_id` and `project_id` so it appears on all three records. The Email page filters by
   Client, Lead and Project.
+
+> **As built** (`2026-11-22-release-3b-projects-design.md`): numbers `PRJ-<n>`. Projects page (tiles, Client / Status
+> filters, Email a project, Create project), Create / Edit project dialog, Projects cards on the lead page and company
+> Overview, company Projects tab, "Mark Won and create project", **Convert to project** on an accepted quotation (once;
+> value = net before GST). No project detail page (the prototype has none); projects are never deleted (Cancelled is
+> the end state); a project's client cannot change. The project tag on an email never widens who sees it: mail stays
+> private to its owner, and the Project filter only narrows the viewer's own mail. Client names show the legal name
+> where set (owner, 23 Nov 2026).
 
 ## 10. Common database architecture
 
@@ -245,12 +378,24 @@ Lead 1–n Activities, Tasks, Assignments, Quotations, Events, Emails. Enquiry �
 Quotation 1–n Revisions 1–n Lines. Use the existing ID strategy; add foreign keys and indexes on every FK, on
 `companies.domain`, `contacts.email`, `leads.status`, `leads.assigned_to`, `tasks.due_date`.
 
+> **As built:** see `docs/data-model.md` (column level, matches `prisma/schema.prisma`) and `docs/MIGRATIONS.md`.
+> Differences from the table above: `enrichment_history` is `enrichment_runs` + `enrichment_suggestions`;
+> `contact_enquiries`, `calendar_event_attendees`, `calendar_connections` and `price_list_items` do not exist; added
+> `users`, `sessions`, `jobs`, `notifications`, `email_campaigns`, `email_campaign_recipients`, `project_stakeholders`,
+> `company_settings`, `enrichment_settings`; the audit table is `audit_logs`. Integer ids; `LD-` and `CO-` numbers from
+> sequences, `Q-` and `PRJ-` numbers from per-year / global counters under an advisory lock.
+
 ## 11. Duplicate detection
 
 Company priority: 1 exact website domain, 2 exact legal name, 3 normalised name + country, 4 manual review.
 Contact priority: 1 exact email, 2 normalised phone, 3 name + company. Never merge on similar names alone; show the existing
 record and let an authorised user decide. A new enquiry still creates a new lead when company and contact exist.
 Duplicate review queue lives under Companies.
+
+> **As built** (`2026-11-21-release-1b-companies-contacts-design.md`): only the first key links automatically — company
+> on the business-email / website **domain** (free-mail domains ignored), contact on exact email; legal-name,
+> name + country, phone and name + company matches are shown as "possible duplicates" for the user to decide, live on
+> the create forms. The Companies list has a **Duplicate review** tab. Nothing is ever merged automatically.
 
 ## 12. Data sources and AI enrichment
 
@@ -260,6 +405,21 @@ website identified → information collected → AI analysis → structured JSON
 validation → suggestions stored → verified fields untouched → sources recorded → owner notified.
 Provider interface: `analyse(companyContext) → { fields: { name: { value, confidence, source } }, summary, score }`.
 Ollama (self-hosted) and Claude API implement it; switching providers is configuration only.
+
+> **As built** (`2026-11-23-release-4-ai-research-design.md` and its 23 Nov addendum): research is a worker job
+> (`research_company`, its own lane, one run at a time), started by hand ("Run AI research") or automatically when a
+> lead is created for a company with a website that was never researched. Providers:
+> - **Website reader** (free, always on): reads the company's own public site (robots.txt respected, private addresses
+>   refused) and proposes values for empty, unverified fields only, each with its source page.
+> - **Claude Code on this server** (built; off until an Administrator switches it on with a monthly run cap above 0):
+>   the server's `claude` CLI with a subscription token (`CLAUDE_CODE_OAUTH_TOKEN`), not the paid Claude API. Adds
+>   summary, classification, potential services, opportunity score, website assessment; optional **Web search** source.
+> - **Google Places API** (built, off; needs `GOOGLE_PLACES_API_KEY`, a switch and a monthly call cap).
+> - **Not built:** Ollama (no GPU on the shared server; shown "not installed"), Apollo.io (needs a paid plan; shown "not
+>   connected"), public registries, research on contacts, scheduled re-research.
+> Users Accept / Reject each suggestion (or "Accept all ≥ 80%"); accepted values are applied, rejected ones kept in the
+> history; every page read becomes a Research Sources record with a read-only snapshot. A daily run limit (default 50,
+> UTC day) caps runs. The owner is notified when a run finishes.
 
 ## 13. CRM user interface
 
@@ -288,6 +448,15 @@ with the English phrase as the key; lookup values keep a `label_es` / `label_fr`
 quotation layouts exist per language; the public Contact Us form reads the visitor's browser language with a manual switch.
 Adding a language means adding a resource file, no code changes.
 
+> **As built:** sidebar Dashboard · Leads · Companies · **Contacts** · Email · **Mailer** · Calendar · Quotations ·
+> **Projects** · Tasks · Notifications · Reports · Settings. There is **no Contact Enquiries** screen (1D parked).
+> Email and Mailer show only to users with the email right. Reports is the prototype's view only (Leads by source,
+> Enquiry conversion at 0 until 1D; `2026-11-22-reports-design.md`). The Calendar opens on the month view (the spec said week), as the
+> prototype. Combobox rule and the three languages are built: `apps/web/src/locales/en.json`, `es.json`, `fr.json`
+> keyed by English phrase, lookup labels with `label_es` / `label_fr`; a translation check runs in CI. Templates carry a
+> language; the quotation PDF wording follows the quotation owner's language. Deliberate screen differences from the
+> prototype the owner accepted or still has to confirm are listed in `docs/PENDING.md`.
+
 ## 14. Permissions and security
 
 Respect the existing role system. Suggested: Administrator (full, config, merges, engine), Manager (team leads, companies,
@@ -295,11 +464,23 @@ quotations, transfers), Sales Representative (assigned leads and their companies
 Data Research User (prospects, companies, research records). Audit logging on create/update/delete of all new entities.
 Validate all input server-side; protect the public endpoint (Section 6).
 
+> **As built** (`2026-11-21-dait-crm-fresh-build-design.md` §5, `2026-11-21-release-1c-leads-tasks-design.md`): the
+> four roles, enforced in the API (a hidden row answers 404). Administrator and Manager see all leads; Sales
+> Representative sees own and unassigned leads (can claim) and their companies; Data Research User sees prospects, own
+> leads, companies and research, no quotations or email. Only Administrators edit Settings, Company details and the
+> Enrichment engine. **Mail and Outlook calendar are private to their owner, administrators included** (owner rule).
+> Every write is validated with Zod and audited; every editable record uses `updated_at` concurrency (409 on a stale
+> write); every browser write must come from the site's own origin; only `http`, `https`, `mailto`, `tel` URLs are
+> accepted.
+
 ## 15. Existing functionality that must be preserved
 
 User management, role-based permissions, lead allocation, lead transfer and notifications, task management, pending and
 overdue tasks, follow-up scheduling, status updates, activity history, dashboard and reporting, and any existing email or
 communication integration. Extend rather than replace.
+
+> **Void:** there was no existing CRM (fresh build). Each of these was built new: users and roles (Settings → Users),
+> allocation rules, transfers, in-app notifications, tasks, follow-ups, activity history, dashboard, reports.
 
 ## 16. Development instructions
 
@@ -319,6 +500,13 @@ convert → project; verified field survives enrichment; public endpoint rejects
 call log flags the client; Lost closes open tasks; `javascript:` URLs are rejected; a quotation converts only once.
 **Phase 7 — Handover:** modifications, migrations, endpoints, components, relationships, test results, limitations,
 deployment steps for AlmaLinux 9 / CyberPanel / OpenLiteSpeed (vhost proxy, PM2/systemd units, env vars, log paths).
+
+> **As run:** inspection (Phase 1) was dropped (fresh build). The work followed `docs/development-plan.md` releases
+> 1–4, each with its own design in `docs/superpowers/specs/`, built with unit, API and end-to-end tests plus
+> side-by-side prototype screenshots, and deployed to live by hand when the owner said "deploy" (there is no test copy
+> on the server). The public-endpoint tests in Phase 6 do not apply while 1D is parked. Handover: `docs/DEPLOYMENT.md`
+> (server, deploy, rollback, backup, restore, logs), `docs/MIGRATIONS.md`, `docs/ENVIRONMENT.md`,
+> `docs/data-model.md`, `deploy/openlitespeed.md`, and the owner's list in `docs/PENDING.md`.
 
 ## 17. Development rules
 

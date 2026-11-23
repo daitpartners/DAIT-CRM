@@ -1,8 +1,18 @@
 # DAIT Partners CRM — Data model (column level)
 
-One shared relational database, extended by migrations. Tables marked **existing** are already in the CRM and are
-extended, never recreated. Follow the CRM's current ID strategy (UUID or auto-increment); IDs below are shown as `id PK`.
-Every FK gets an index. `created_at`, `updated_at`, `created_by`, `updated_by` exist on every new table and are omitted below.
+As built, 23 Nov 2026: one PostgreSQL database (`dait_crm`), defined by `prisma/schema.prisma` and created by the
+migrations listed in `docs/MIGRATIONS.md`. When this document and the schema differ, the schema wins.
+
+Conventions:
+- Every table is new (the CRM was a fresh build; there was no existing CRM to extend). Primary keys are integer
+  `id SERIAL` unless noted. Business numbers come from sequences or per-year counters, never from row counts.
+- Column names are snake_case in the database (camelCase in Prisma). "text" means PostgreSQL `text` (Prisma `String`
+  without a length); timestamps are `timestamp(3)` in UTC.
+- `created_at` / `updated_at` are listed where they exist; `updated_at` doubles as the optimistic-concurrency token
+  (writes send the value they loaded; a stale write gets 409).
+- Allowed values in the notes come from the shared package (`packages/shared`) or `lookup_values`; the database stores
+  them as text, without enums, except `users.role`.
+- Every create / update / delete of a business record also writes an `audit_logs` row.
 
 ## Module 2 — Company Management
 
@@ -10,390 +20,563 @@ Every FK gets an index. `created_at`, `updated_at`, `created_by`, `updated_by` e
 | Column | Type | Notes |
 |---|---|---|
 | id | PK | |
-| name | varchar(200) | required |
-| legal_name | varchar(200) | |
-| website | varchar(255) | |
-| domain | varchar(150) | normalised from website / business email; **unique index**; first duplicate-check key |
-| industry | varchar(100) | lookup_values group `industry` |
-| business_category | varchar(100) | lookup |
-| business_type | varchar(60) | lookup |
+| number | text | `CO-0001` …, **unique**; default `next_company_number()` over sequence `company_number_seq` (migration SQL); padding grows past 4 digits |
+| name | text | required |
+| name_normalised | text | normalised name, set on every write; index with `country` for duplicate matching |
+| legal_name | text | |
+| website | text | |
+| domain | text | from website, else business email; **unique index**; first duplicate-check key |
+| business_email | text | |
+| industry | text | lookup `industry` |
+| business_category | text | lookup `business_category` |
+| business_type | text | lookup `business_type` |
 | year_established | smallint | |
 | description | text | |
-| logo_path | varchar(255) | upload |
-| linkedin_url | varchar(255) | |
-| status | enum Active / Inactive / Closed | |
-| is_client | bool | set when a lead is Won or a quotation accepted |
-| country, state, city, street, zip | varchar | HQ address |
-| timezone | varchar(60) | |
+| logo_path | text | not used by any screen yet |
+| linkedin_url | text | |
+| status | text | Active / Inactive / Closed, default Active; index |
+| is_client | bool | set when a lead is Won or a quotation accepted; Administrators / Managers may edit |
+| country, state, city, street, zip | text | HQ address; `country` required, indexed |
+| timezone | text | IANA zone; used by the Mailer's working hours; one-time fill from the address (release 2C) |
 | lat, lng | decimal(9,6) | |
-| maps_url | varchar(255) | Google Maps / Places |
+| maps_url | text | |
 | employee_count | int | |
-| employee_range | varchar(20) | lookup |
+| employee_range | text | lookup `employee_range` |
 | annual_revenue | decimal(18,2) | |
 | revenue_currency | char(3) | |
-| revenue_range | varchar(20) | lookup |
-| ownership_type | varchar(60) | lookup |
-| registration_number | varchar(60) | index |
-| stock_exchange, stock_symbol | varchar | |
+| revenue_range | text | lookup `revenue_range` |
+| ownership_type | text | lookup `ownership_type` |
+| registration_number | text | index |
+| stock_exchange, stock_symbol | text | |
 | main_products, main_services | text | |
-| business_verticals, target_markets, geographic_markets | json array | multi-select |
-| key_brands | varchar(255) | |
+| business_verticals, target_markets, geographic_markets | jsonb array | default `[]` |
+| key_brands | text | |
 | specialisation | text | |
-| social_facebook, social_instagram, social_x, social_youtube, social_other | varchar(255) | |
-| website_technology | varchar(255) | |
-| website_assessment, digital_summary | text | AI-generated |
-| ai_summary | text | AI |
-| ai_industry, ai_business_category | varchar(100) | AI |
-| ai_potential_services | json array | AI |
-| ai_opportunity_score | tinyint 0–100 | AI |
-| ai_confidence | enum High / Medium / Low | AI |
-| ai_research_status | enum Pending / Processing / Completed / Failed | |
-| ai_last_research_at | datetime | |
-| verification_status | enum Verified / Partially Verified / Unverified | computed |
-| verified_fields | json | `{ "industry": true, ... }` — fields a user confirmed; AI never overwrites these |
-| ai_fields | json | fields currently holding an accepted AI value, with confidence and source |
+| social_facebook, social_instagram, social_x, social_youtube, social_other | text | |
+| website_technology | text | research may fill it |
+| website_assessment, digital_summary | text | Claude may fill them |
+| ai_summary | text | Claude |
+| ai_industry, ai_business_category | text | Claude |
+| ai_potential_services | jsonb array | Claude; default `[]` |
+| ai_opportunity_score | smallint 0–100 | Claude |
+| ai_confidence | text | High / Medium / Low |
+| ai_research_status | text | Not started / Pending / Processing / Completed / Failed, default Not started |
+| ai_last_research_at | timestamp | |
+| verification_status | text | Verified / Partially Verified / Unverified, default Unverified |
+| verified_fields | jsonb | `{ "industry": true, ... }` — fields a user confirmed; research never suggests for these |
+| ai_fields | jsonb | fields currently holding an accepted research value, with confidence and source |
+| created_by_id | FK users, nullable | set null on user delete |
+| created_at, updated_at | timestamp | |
+
+Indexes: `name`, (`name_normalised`, `country`), `country`, `status`, `registration_number`, unique `number`, unique
+`domain`.
 
 ### contacts
 | Column | Type | Notes |
 |---|---|---|
 | id | PK | |
-| company_id | FK companies | index |
-| first_name, last_name | varchar(100) | |
-| designation, department | varchar(100) | |
-| business_email | varchar(255) | index; first contact-match key |
-| phone, mobile | varchar(40) | stored raw; matched on normalised digits (`phone_normalised` indexed column) |
-| linkedin_url | varchar(255) | |
-| contact_type | enum Decision Maker / Influencer / Other | |
-| is_primary | bool | one per company |
-| is_active | bool | default true (release 1C) |
-| headline, location | varchar(200) | profile header (prototype lead page) |
+| company_id | FK companies | required; restrict delete |
+| first_name, last_name | text | index (`company_id`, `last_name`) |
+| designation, department | text | |
+| business_email | text | index; first contact-match key |
+| phone, mobile | text | stored raw |
+| phone_normalised, mobile_normalised | text | digits only; indexed; second contact-match key |
+| linkedin_url | text | |
+| contact_type | text | lookup `contact_type`, default Other |
+| is_primary | bool | at most one per company: partial unique index `contacts_one_primary_per_company` (migration SQL) |
+| unsubscribed_at | timestamp, nullable | set with a lead's Do not email (release 2C); the Mailer skips the contact |
+| is_active | bool | default true; deactivated contacts are hidden from pickers (release 1C) |
+| headline, location | text | lead page profile header (prototype parity) |
 | about | text | |
-| experience | json array | `[ { title, company, from, to, description } ]` |
-| education | json array | `[ { school, degree, from, to } ]` |
-| skills, languages | json array of strings | |
+| experience | jsonb array | `[ { title, company, from, to, description } ]` |
+| education | jsonb array | `[ { school, degree, from, to } ]` |
+| skills, languages | jsonb array of strings | |
+| created_at, updated_at | timestamp | |
 
 ### company_locations
 | Column | Type | Notes |
 |---|---|---|
 | id | PK | |
-| company_id | FK companies | |
-| name | varchar(120) | |
-| location_type | enum Headquarters / Branch / Warehouse / Registered office / Factory | lookup |
-| country, state, city, street, zip, timezone | varchar | |
+| company_id | FK companies | cascade delete; index |
+| name | text | |
+| location_type | text | lookup `location_type` (Headquarters / Branch / Warehouse / Registered office / Factory) |
+| country, state, city, street, zip, timezone | text | `country` required |
 | lat, lng | decimal(9,6) | |
-| maps_url, phone | varchar | |
+| maps_url, phone | text | |
 | is_verified | bool | |
-| source | varchar(120) | e.g. "Google Places", "Manual" |
+| source | text | default Manual |
+| created_at, updated_at | timestamp | |
 
-### enrichment_history
+### enrichment_runs (was planned as `enrichment_history`)
+One row per research run on a company (release 4). Suggestions are their own table instead of a JSON column.
+
 | Column | Type | Notes |
 |---|---|---|
 | id | PK | |
-| company_id | FK companies | |
-| lead_id | FK leads, nullable | the lead that triggered the run |
-| triggered_by | varchar(120) | "New lead LD-…", "Manual · user" |
-| engine | varchar(80) | "ollama:llama3.1:8b", "claude:…" |
-| sources_used | json array | website, places, apollo, websearch |
-| suggestions | json | `[ { field, value, confidence, source, decision, decided_by, decided_at } ]` |
+| company_id | FK companies | cascade delete; index (`company_id`, `created_at`) |
+| lead_id | FK leads, nullable | the new lead that triggered an automatic run |
+| trigger | varchar(120) | "Manual · <user>", "New lead LD-…" |
+| engine | varchar(120) | "Website reader", "Website reader + Claude Code <model>" |
+| sources | jsonb array | sources used: website, places, websearch |
+| result | text | "n suggestions", "No website on file", or the error shown in the history |
 | applied_count | int | |
-| status | enum Pending / Processing / Completed / Failed | |
+| status | varchar(20) | Pending / Processing / Completed / Failed, default Pending |
 | error | text | |
-| started_at, finished_at | datetime | |
+| cost_usd | decimal(10,4) | always 0 (Claude Code runs on a subscription); kept for the history |
+| places_calls | int | Google Places Place Details calls made; summed per month against the call cap |
+| started_at, finished_at | timestamp | |
+| created_by_id | FK users, nullable | |
+| created_at | timestamp | index |
+
+### enrichment_suggestions
+A value a run proposes for one empty, unverified company field.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | PK | |
+| run_id | FK enrichment_runs | cascade delete; index |
+| company_id | FK companies | cascade delete; index (`company_id`, `decision`) |
+| field | varchar(40) | research field key (shared `RESEARCH_FIELDS`) |
+| label | varchar(80) | |
+| value | jsonb | |
+| display | text | how a non-string value reads in the table |
+| confidence | smallint | 0–100 |
+| source_url | text | the page it came from (required) |
+| source_label | varchar(200) | |
+| decision | varchar(12) | pending / accepted / rejected / superseded, default pending; decided once |
+| decided_by_id | FK users, nullable | |
+| decided_at | timestamp | |
 
 ### source_records
 | Column | Type | Notes |
 |---|---|---|
 | id | PK | |
-| company_id | FK companies | |
-| lead_id | FK leads, nullable | for research notes saved on a lead |
+| company_id | FK companies | cascade delete; index (`company_id`, `collected_at`) |
+| lead_id | FK leads, nullable | |
 | title | varchar(200) | |
 | url | varchar(500) | |
-| source_type | enum Company website / Google Places API / Public registry / Business directory / Social profile / Contact form / Manual research / CSV import | |
-| collected_at | datetime | |
-| collected_by | varchar(120) | worker or user |
+| source_type | varchar(40) | Company website / Google Places API / Public registry / Business directory / Social profile / Contact form / Manual research / CSV import; manual records also allow Other |
+| collected_at | timestamp | |
+| collected_by | varchar(120) | "Enrichment worker" or "<user> (manual)" |
 | fields_populated | varchar(500) | |
 | confidence | varchar(20) | |
-| snapshot | mediumtext | raw extract, read-only |
+| snapshot | text | read-only extract (first 4,000 visible characters of a page, or manual notes) |
+
+### enrichment_settings
+Single row (`id` = 1, CHECK in the migration SQL), seeded by the migration. Administrators edit it in the Enrichment
+engine card. API keys and tokens are never stored here (server environment, see `docs/ENVIRONMENT.md`).
+
+| Column | Type | Notes |
+|---|---|---|
+| id | int PK | always 1 |
+| daily_run_limit | int | research runs per day across the CRM (UTC day), default 50 |
+| claude_enabled | bool | default false |
+| claude_monthly_run_cap | int | runs that use Claude Code per calendar month (UTC); 0 = Claude off |
+| places_enabled | bool | default false |
+| places_monthly_call_cap | int | Place Details calls per calendar month; 0 = Places off |
+| web_search_enabled | bool | default false; needs Claude Code |
+| updated_at | timestamp | |
+| claude_monthly_cap_usd | decimal | **in the table only** (not in the Prisma schema); unused since the Claude Code change; drop in a later migration |
 
 ## Module 1 — Lead Management
 
-### leads (existing — extend)
+### leads
 | Column | Type | Notes |
 |---|---|---|
-| id | PK | existing Lead ID format kept |
-| lead_type | enum Lead / Prospect | **new** |
-| company_name | varchar(200) | required |
-| company_id | FK companies | **new**; nullable only until duplicate check resolves |
-| contact_id | FK contacts | **new**, nullable (prospects) |
-| website, business_email, phone | varchar | |
-| country | varchar(80) | required |
-| city | varchar(100) | |
-| lead_source | varchar(60) | lookup `lead_source` |
-| source_url | varchar(500) | |
-| import_batch | varchar(40) | CSV / Places batch id |
-| assigned_to | FK users | existing |
-| priority | enum High / Medium / Low | default Medium |
-| status | varchar(40) | lookup `lead_status`, default New |
-| next_follow_up | date | drives tasks |
+| id | PK | |
+| number | text | `LD-1001` …, **unique**; default `next_lead_number()` over sequence `lead_number_seq` |
+| lead_type | text | Lead / Prospect, default Lead; index |
+| company_name | text | required |
+| company_id | FK companies, nullable | restrict delete; index |
+| contact_id | FK contacts, nullable | set null |
+| website, business_email, phone | text | |
+| country | text | required; index |
+| city | text | |
+| lead_source | text | lookup `lead_source`, required |
+| outreach_language | char(2) | `en` / `es`, default `en`; default by country for new leads; allocation rules may match it |
+| source_url | text | |
+| import_batch | text | e.g. `IMPORT-2026-11-21` |
+| assigned_to_id | FK users, nullable | set null; index |
+| priority | text | High / Medium / Low, default Medium |
+| status | text | lookup `lead_status`, default New; index |
+| next_follow_up | date | drives the follow-up task; index |
 | notes | text | |
-| enquiry_id | FK contact_enquiries | **new** |
-| enrichment_status | enum Pending / Processing / Completed / Failed | **new** |
-| converted_to | enum client / project, nullable | |
-| archived_at | datetime | |
+| enquiry_id | int, nullable | **plain column, no foreign key**: `contact_enquiries` was never built (1D parked) |
+| enrichment_status | text | default Pending; not driven by research (research status lives on the company) |
+| converted_to | text, nullable | `client` when Won |
+| do_not_email | bool | default false; the Mailer skips the lead (release 2C) |
+| archived_at | timestamp | |
+| created_by_id | FK users, nullable | |
+| created_at, updated_at | timestamp | `created_at` indexed |
 
-### lead_activities (existing activity notes — extend)
+### lead_activities
 | Column | Type | Notes |
 |---|---|---|
 | id | PK | |
-| lead_id | FK leads | index |
-| activity_type | enum call / email / meeting / note / research / status / assign / transfer / ai / created / quote | |
-| title | varchar(200) | |
+| lead_id | FK leads | cascade delete; index (`lead_id`, `occurred_at`) |
+| activity_type | text | call / email / meeting / note / research / status / assign / transfer / ai / created / quote |
+| title | text | |
 | body | text | |
-| url | varchar(500) | research links |
-| status_from, status_to | varchar(40) | for status changes |
-| related_type, related_id | varchar / id | email_message, calendar_event, quotation |
-| by_user | FK users, nullable | null = system |
-| occurred_at | datetime | |
+| url | text | |
+| status_from, status_to | text | for status changes |
+| related_type, related_id | text / int | e.g. `email_message`, a task, a quotation |
+| by_user_id | FK users, nullable | null = system |
+| occurred_at | timestamp | |
 
-### lead_assignments (existing transfer history — extend)
+An `email` activity shows its subject only to its sender; everyone else sees "Email sent" (privacy rule, release 2B).
+
+### lead_assignments
 | Column | Type | Notes |
 |---|---|---|
 | id | PK | |
-| lead_id | FK leads | |
-| from_user | FK users, nullable | |
-| to_user | FK users | |
-| by_user | FK users, nullable | null = allocation rule |
+| lead_id | FK leads | cascade delete; index (`lead_id`, `assigned_at`) |
+| from_user_id | FK users, nullable | |
+| to_user_id | FK users, nullable | null = unassigned |
+| by_user_id | FK users, nullable | null = allocation rule |
 | rule_id | FK allocation_rules, nullable | |
 | note | text | required on manual transfer |
-| assigned_at | datetime | |
+| assigned_at | timestamp | |
 
-### tasks (existing — extend)
+### tasks
 | Column | Type | Notes |
 |---|---|---|
 | id | PK | |
-| lead_id | FK leads, nullable | **new** |
-| quotation_id | FK quotations, nullable | |
-| title | varchar(200) | |
-| due_date | date | index |
-| assigned_to | FK users | |
-| is_done, done_at | bool, datetime | |
-| origin | enum follow-up date / new assignment / transfer / manual / quotation | |
+| lead_id | FK leads, nullable | cascade delete |
+| quotation_id | FK quotations, nullable | set null; index |
+| title | text | |
+| due_date | date | |
+| kind | text | followup / call / meeting, default followup (release 3C) |
+| due_time | varchar(5) | `HH:MM` wall-clock time as entered; required for call and meeting |
+| duration_minutes | int | call 30, meeting 60; null for a follow-up |
+| assigned_to_id | FK users | required; restrict delete |
+| is_done, done_at | bool, timestamp | |
+| origin | text | follow_up / new_assignment / transfer / manual / quotation |
+| closed_reason | text | set when closing a lead closes the task |
+| created_at, updated_at | timestamp | |
 
-## Module 3 — Contact Us
+Indexes: (`assigned_to_id`, `is_done`, `due_date`), (`lead_id`, `origin`, `is_done`), `quotation_id`. Calls and
+meetings planned in the CRM are tasks; nothing is written to Outlook.
 
-### contact_enquiries (immutable)
-| Column | Type | Notes |
-|---|---|---|
-| id | PK | |
-| full_name | varchar(150) | as submitted |
-| business_email | varchar(255) | as submitted |
-| phone | varchar(40) | |
-| company_name | varchar(200) | as submitted |
-| company_website | varchar(255) | |
-| message | text | as submitted; never edited |
-| submitted_at | datetime | |
-| source_page, ip_hash, user_agent | varchar | |
-| spam_check | enum Passed / Failed, + reason | |
-| processing_status | enum Received / Needs review / Enrichment pending / Enrichment processing / Processed / Spam | |
-| company_id, contact_id, lead_id | FK, nullable | filled by the workflow; never changes the submitted columns |
-| review_candidates | json | company ids offered for manual review |
-| processing_trace | json | step log |
+## Module 3 — Contact Us (not built)
 
-Application rule: UPDATE on the submitted columns is refused (trigger or model guard); only `processing_*` and FK columns change.
+Release 1D (public contact form, `contact_enquiries`, Enquiries screen with the Needs-review queue) is **parked by the
+owner** (22 Nov 2026). No table exists. The planned shape, kept for when it is picked up:
+
+### contact_enquiries (planned, immutable)
+id PK; full_name, business_email, phone, company_name, company_website, message (as submitted, never edited);
+submitted_at; source_page, ip_hash, user_agent; spam_check (Passed / Failed + reason); processing_status (Received /
+Needs review / Enrichment pending / Enrichment processing / Processed / Spam); company_id, contact_id, lead_id (FK,
+nullable, filled by the workflow); review_candidates json; processing_trace json. A trigger rejects UPDATE on the
+submitted columns. `leads.enquiry_id` then gets its foreign key.
 
 ## Module 4 — Email
 
 ### email_accounts
+One `system` row (the CRM's notification mailbox) and at most one `personal` row per user.
+
 | Column | Type | Notes |
 |---|---|---|
 | id | PK | |
-| user_id | FK users | |
-| address | varchar(255) | |
-| provider | enum microsoft_graph / gmail_api / imap_smtp | Microsoft 365 Business Basic connects via microsoft_graph |
-| display_name | varchar(150) | |
-| tenant_id, external_user_id | varchar | Microsoft tenant and Graph user id (or Google account id) |
-| refresh_token | text, encrypted (AES-256) | never returned by the API |
-| access_token, token_expires_at | text encrypted, datetime | refreshed server-side |
-| scopes | json array | Mail.ReadWrite, Mail.Send, Calendars.ReadWrite, User.Read, offline_access |
-| sync_mail, sync_calendar | bool | user options |
-| shared_mailboxes | json array | addresses included with delegated access |
-| mail_delta_link, calendar_delta_link | text | Graph delta tokens |
-| mail_subscription_id, subscription_expires_at | varchar, datetime | Graph change-notification subscription |
-| imap_host, smtp_host, username | varchar | IMAP/SMTP only |
-| status | enum connected / needs_reauth / disconnected | |
-| connected_at, last_sync_at, last_error | datetime, text | |
+| user_id | FK users, nullable | set null |
+| address | text | unique with `kind` (the same address may be both the system and a personal mailbox) |
+| send_as | text, nullable | system mailbox: a shared mailbox the connecting user has Send-As on; null = `address` |
+| provider | text | `microsoft` (Microsoft 365 through Graph; the only provider built) |
+| kind | text | `system` / `personal` |
+| refresh_token_enc | text | AES-256-GCM with `TOKEN_ENCRYPTION_KEY`; never returned by the API |
+| token_expires_at | timestamp | |
+| status | text | connected / error / disconnected |
+| last_error | text | e.g. `token_unreadable` |
+| sync_mail | bool | default true |
+| sync_calendar | bool | default false |
+| shared_mailboxes | text[] | stored from the Options dialog; not synced yet |
+| last_sync_at | timestamp | |
+| message_count | int | |
+| sync_state | jsonb | mail sync: per folder the Graph next or delta link (release 2B-2) |
+| calendar_sync_state | jsonb, nullable | calendar sync: `{ link, userId, full?, at }` (release 3C) |
+| calendar_sync_at | timestamp | last full calendar restart (daily) |
+| created_at, updated_at | timestamp | |
+
+Planned but not built: display name, tenant / external user id columns (Graph `/me` is read at connect), stored access
+tokens (access tokens are cached in memory only), scopes, Graph change-notification subscriptions (sync polls with
+delta queries every 5 minutes instead), IMAP / SMTP and Gmail columns.
 
 ### email_messages
+A user's own mail, private to `user_id` (administrators included).
+
 | Column | Type | Notes |
 |---|---|---|
 | id | PK | |
-| account_id | FK email_accounts | |
-| message_id | varchar(255) | RFC message id; unique with account |
-| thread_id | varchar(255) | index |
-| folder | enum inbox / sent / drafts / archive | |
-| from_address, to_addresses, cc_addresses | varchar / json | |
+| user_id | FK users | cascade delete |
+| account_id | FK email_accounts, nullable | set null |
+| lead_id, contact_id, company_id | FK, nullable | set null; auto-linked by sync matching, or by hand |
+| folder | text | sent / inbox / drafts / archive |
+| status | text | CRM-sent: queued / sending / sent / failed; synced: received / sent / draft |
+| source | text | `crm` written in the CRM, `sync` read from the mailbox |
+| from_address | text | |
+| from_name | varchar(255) | |
+| to_addresses, cc_addresses, bcc_addresses | jsonb arrays | |
+| campaign_id | FK email_campaigns, nullable | the Mailer campaign that sent it |
+| project_id | FK projects, nullable | project tag set when sent (release 3B); never widens who sees the message |
 | subject | varchar(500) | |
-| body_text, body_html | mediumtext | |
-| received_at | datetime | index |
+| body_text | text | plain text only (synced bodies kept to 50,000 characters); no HTML body |
+| graph_id | varchar(255) | Graph immutable id; unique with `user_id` |
+| message_id, thread_id | varchar(255) | RFC message id and Graph conversation id |
 | is_read | bool | |
-| lead_id, contact_id, company_id, quotation_id, project_id | FK, nullable | auto-linked on sender address; manual link allowed; project set from the compose context |
-| cc_addresses | json | stakeholders copied |
-| attachments | json | paths |
+| occurred_at | timestamp | |
+| attachment_names | jsonb array | names only; attachments are not downloaded |
+| reply_to_id | FK email_messages, nullable | the message this one answers |
+| logged_at | timestamp | when it was logged on the lead ("Log as activity") |
+| last_error | text | |
+| created_at, updated_at | timestamp | |
+
+Indexes: unique (`user_id`, `graph_id`); (`user_id`, `thread_id`), (`user_id`, `lead_id`), (`user_id`, `folder`,
+`occurred_at`), (`user_id`, `project_id`). There is no `quotation_id`: a quotation's sent email is found through
+`quotations.sending_message_id` while sending, and the timeline.
 
 ### email_templates
 | Column | Type | Notes |
 |---|---|---|
 | id | PK | |
 | name | varchar(150) | |
-| language | char(2) | en / es / fr; user's language listed first |
-| subject | varchar(500) | with merge fields |
-| body_text, body_html | text | parsed from .oft or written in the CRM |
-| source_type | enum manual / oft | |
-| file_path, file_name, file_size | varchar, int | original uploaded .oft kept on disk |
-| merge_fields | json array | detected placeholders |
-| created_by | FK users | |
+| language | char(2) | en / es / fr |
+| subject | varchar(500) | merge fields `{first_name}`, `{company}`, `{me}`, `{lead_id}`, `{quote_no}` |
+| body | text | plain text, written in the CRM or read from an uploaded `.oft` / `.msg` |
+| source_type | text | manual / oft |
+| file_name, file_size | varchar(255), int | of the uploaded file; **the file itself is not kept** |
+| created_by | FK users, nullable | |
+| created_at, updated_at | timestamp | |
+
+### email_campaigns (Mailer, release 2C)
+| Column | Type | Notes |
+|---|---|---|
+| id | PK (int) | shown as `MC-001` (id padded) |
+| name | varchar(160) | |
+| template_id | FK email_templates, nullable | set null |
+| template_name | varchar(150) | |
+| template_updated_at | timestamp | which version of the template was used |
+| language | varchar(5) | the template's language at queueing (for the opt-out line); default en |
+| subject, body | varchar(500), text | copy of the template as queued |
+| sender_id | FK users | cascade delete |
+| account_id | FK email_accounts, nullable | |
+| sender_address | text | mailbox used |
+| cc, bcc | text[] | applied to every email |
+| start_at | timestamp, nullable | null = start immediately |
+| interval_minutes | int | spacing between emails (1–15) |
+| working_hours_only | bool | Mon–Fri 09:00–18:00 in the **recipient's** time zone |
+| unsubscribe_line | bool | default true |
+| lawful_basis | varchar(160) | required |
+| status | text | Scheduled / Sending / Paused / Completed / Cancelled |
+| pause_reason | text | while Paused ("Paused by …", "Mailbox disconnected", …) |
+| wait_reason | text | while Sending: working_hours / daily_limit |
+| next_send_at | timestamp | index (`status`, `next_send_at`) |
+| created_at, completed_at, updated_at | timestamp | |
+| cancelled_by_id | int, nullable | |
+
+### email_campaign_recipients
+| Column | Type | Notes |
+|---|---|---|
+| id | PK | |
+| campaign_id | FK email_campaigns | cascade delete; index (`campaign_id`, `status`, `position`) |
+| lead_id | FK leads, nullable | set null; index |
+| contact_id | FK contacts, nullable | |
+| to_address | text | |
+| name, company | text | as queued |
+| timezones | text[] | zones used for working hours |
+| timezone_source | text | company / address / country / sender |
+| status | text | Queued / Sending / Sent / Failed / Skipped ("Replied" is derived, not stored) |
+| position | int | send order |
+| sent_at | timestamp | |
+| email_message_id | FK email_messages, nullable | the filed sent email |
+| error | text | skip or failure reason |
+
+Daily limit: 200 Mailer emails per mailbox per sender's calendar day (code constant, not a column).
 
 ## Module 5 — Calendar
+
+Built differently from the plan: calls and meetings planned in the CRM are **tasks** (`tasks.kind`, `due_time`,
+`duration_minutes`); `calendar_events` is a private, read-only copy of each user's own Outlook calendar. Nothing is
+written to Outlook. Not built: `calendar_event_attendees`, `calendar_connections`, reminders, event types.
 
 ### calendar_events
 | Column | Type | Notes |
 |---|---|---|
 | id | PK | |
-| title | varchar(200) | |
-| event_type | enum meeting / call / appointment / follow-up / internal | |
-| starts_at, ends_at | datetime | index on starts_at |
-| timezone | varchar(60) | |
-| location | varchar(255) | |
-| organiser_id | FK users | |
-| lead_id, company_id, contact_id | FK, nullable | |
-| reminder_minutes | int | |
-| external_provider, external_id | varchar | future Outlook / Google sync |
-| notes | text | |
+| user_id | FK users | cascade delete; private to this user, administrators included |
+| account_id | FK email_accounts | cascade delete; index |
+| graph_id | text | Graph immutable id; unique with `user_id` |
+| subject | varchar(500) | |
+| starts_at, ends_at | timestamp (UTC) | index (`user_id`, `starts_at`); all-day events run midnight to midnight UTC |
+| is_all_day | bool | |
+| location | varchar(500) | |
+| organizer_name | varchar(255) | |
+| organizer_address | varchar(320) | |
+| attendee_addresses | jsonb array | lower-cased, organiser excluded |
+| is_online | bool | |
+| lead_id | FK leads, nullable | an attendee's open lead the user could see when synced |
+| company_id | FK companies, nullable | |
+| created_at, updated_at | timestamp | |
 
-### calendar_event_attendees
-id PK, event_id FK, user_id FK nullable, contact_id FK nullable, response enum (invited / accepted / declined), notified_at.
+Rows are deleted when Sync calendar is switched off or the mailbox disconnected.
 
-### calendar_connections (future)
-id PK, user_id FK, provider, credentials (encrypted), last_sync_at.
-
-## Module 6 — Quotations
+## Module 6 — Quotations and Projects
 
 ### quotations
 | Column | Type | Notes |
 |---|---|---|
 | id | PK | |
-| number | varchar(20) | `Q-YYYY-NNN`, unique, sequential per year |
-| company_id | FK companies | |
-| contact_id | FK contacts | |
-| lead_id | FK leads | |
-| owner_id | FK users | |
-| quotation_date, valid_until | date | |
-| currency | char(3) | |
+| number | varchar(20) | `Q-YYYY-NNN`, **unique**, sequential per calendar year of the quotation date (advisory lock per year, in the API) |
+| company_id | FK companies | restrict delete; index |
+| contact_id | FK contacts, nullable | |
+| lead_id | FK leads, nullable | index |
+| owner_id | FK users | restrict delete; index |
+| quotation_date | date | index |
+| valid_until | date, nullable | |
+| currency | varchar(3) | USD / CAD / INR |
 | subject | varchar(300) | |
-| tax_rate, overall_discount_pct | decimal(5,2) | |
-| notes_terms | text | |
-| status | enum Draft / Sent / Negotiating / Accepted / Rejected / Expired | lookup |
-| current_revision | int | |
-| project_id | FK projects, nullable | set on conversion |
-
-### quotation_revisions
-id PK, quotation_id FK, revision_no, subtotal, discount_total, tax_total, grand_total, pdf_path, sent_at, sent_to, note, snapshot_json (frozen copy of header + lines).
+| tax_rate | decimal(5,2) | GST %, one line |
+| overall_discount | decimal(5,2) | % |
+| notes | text | notes / terms |
+| status | varchar(20) | Draft / Sent / Negotiating / Accepted / Rejected / Expired, default Draft; index |
+| revision | int | the revision being worked on |
+| editing_new_revision | bool | a sent quotation was edited: `revision` is the unsent n+1 |
+| sending_message_id | FK email_messages, nullable | the queued email while the quotation shows "Sending…" |
+| project_id | FK projects, nullable | the project made from or linked to it; index |
+| history | jsonb | `[ { at, text } ]`, oldest first |
+| created_at, updated_at | timestamp | |
 
 ### quotation_lines
-id PK, revision_id FK, sort_order, item, description, quantity decimal(12,2), unit varchar(30), unit_price decimal(14,2), discount_pct decimal(5,2), line_total decimal(14,2).
+The working copy's lines (they belong to the quotation, not to a revision).
 
-### price_list_items
-id PK, name, description, unit, default_price, currency, is_active.
-
-### projects (existing client/project record — extend)
 | Column | Type | Notes |
 |---|---|---|
 | id | PK | |
-| company_id | FK companies | the client |
-| lead_id | FK leads | the lead this project came from; many projects per company |
-| quotation_id | FK quotations, nullable | |
-| name | varchar(200) | |
-| status | enum Active / On hold / Completed / Cancelled | |
-| start_date | date | |
-| value, currency | decimal(14,2), char(3) | |
-| manager_id | FK users | |
+| quotation_id | FK quotations | cascade delete; index (`quotation_id`, `sort_order`) |
+| sort_order | int | |
+| item | varchar(300) | |
 | description | text | |
+| qty | decimal(12,2) | |
+| unit | varchar(30) | |
+| unit_price | decimal(14,2) | |
+| discount | decimal(5,2) | line discount % |
+
+No `line_total` column: totals are computed.
+
+### quotation_revisions
+A sent revision, frozen when the send succeeds. A re-send without edits adds no row.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | PK | |
+| quotation_id | FK quotations | cascade delete; unique with `revision_no` |
+| revision_no | int | |
+| sent_at | timestamp | |
+| sent_to | varchar(320) | the contact address |
+| subtotal, discount_total, tax_total, grand_total | decimal(14,2) | |
+| note | text | |
+| snapshot | jsonb | header + lines + totals + company / contact display fields, as printed |
+| created_at | timestamp | |
+
+No `pdf_path`: the PDF is drawn again from the snapshot on demand (pdfkit, server-side).
+
+### company_settings
+Settings → Company details (Administrators). Single row (`id` = 1, CHECK in the migration SQL), seeded with the issuer
+(DAIT Partners LLP, Delhi).
+
+| Column | Type | Notes |
+|---|---|---|
+| id | int PK | always 1 |
+| legal_name | varchar(200) | |
+| address_lines | jsonb array | printed one per line |
+| email | varchar(255) | |
+| gstin | varchar(15), nullable | printed only on INR quotations, when set |
+| tax_inr, tax_usd, tax_cad | decimal(5,2) | default GST per currency: 18 / 0 / 0 |
+| default_notes | text | |
+| updated_at | timestamp | |
+
+### price_list_items (not built)
+Not in the prototype UI; not built.
+
+### projects
+| Column | Type | Notes |
+|---|---|---|
+| id | PK | |
+| number | varchar(20) | `PRJ-<n>`, **unique**, sequential (advisory lock, in the API) |
+| company_id | FK companies | the client; restrict delete; index |
+| lead_id | FK leads, nullable | the lead it came from; index |
+| quotation_id | FK quotations, nullable | **unique** (one project per quotation); `quotations.project_id` points back |
+| name | varchar(200) | |
+| status | varchar(20) | Active / On hold / Completed / Cancelled, default Active; index |
+| start_date | date | |
+| value | decimal(14,2), nullable | from a quotation: net before GST |
+| currency | varchar(3) | USD / CAD / INR |
+| manager_id | FK users | restrict delete; index |
+| description | text | |
+| created_by_id | FK users | |
+| completed_at | timestamp | set when status becomes Completed |
+| created_at, updated_at | timestamp | |
 
 ### project_stakeholders
-id PK, project_id FK, contact_id FK, role (primary / member), is_primary bool. Primary stakeholders are pre-filled in Cc on every email composed with the project selected.
+Primary stakeholders (every row is one), copied (Cc) on every email sent with the project selected.
+Composite PK (`project_id`, `contact_id`); both cascade delete; index `contact_id`. No `role` / `is_primary` columns.
 
 ## Shared / configuration
 
-### users (existing) — id, name, email, role (Administrator / Manager / Sales Representative / Data Research User), **language** char(2) default `en` (new), timezone.
-### lookup_values — id PK, group (lead_source, lead_status, industry, business_category, employee_range, revenue_range, ownership_type, contact_type, location_type, quote_status), value, label, sort_order, is_active. Administrators add values here; forms read them.
-### allocation_rules — id PK, name, match_country (json array or `*`), assign_to (user id or json list for round-robin), priority, is_active.
-### notifications (existing) — id PK, user_id FK, text, detail, link, is_read, created_at.
-### audit_log — id PK, entity_type, entity_id, action (create / update / delete / merge / verify), user_id FK, before_json, after_json, at.
+### users
+id PK; email (unique); name; role (enum `role`: ADMINISTRATOR / MANAGER / SALES_REPRESENTATIVE / DATA_RESEARCH_USER);
+language (default `en`; en / es / fr); timezone (default `Europe/London`); date_format (default `DD MMM YYYY`);
+is_active; microsoft_oid (unique, set at first Microsoft sign-in); last_login_at; password_hash (argon2id, local
+administrators only); is_local_admin; created_at, updated_at.
+
+### sessions
+id (random text PK, the cookie value); user_id FK (cascade); expires_at (index); created_at; last_seen_at.
+
+### lookup_values
+id PK; group; value (unique with group); label; label_es; label_fr; sort_order; is_active. Groups seeded on every
+deploy: lead_source, lead_status, lead_type, priority, industry, business_category, business_type, employee_range,
+revenue_range, ownership_type, contact_type, location_type, country, currency, quote_status. Administrators add values
+in Settings; forms read them.
+
+### allocation_rules
+id PK; name; match_countries (jsonb: country list or `["*"]`); match_language (char(2), nullable = any); assign_to
+(jsonb user-id list, round robin); round_robin_pos; priority; is_active.
+
+### jobs
+Background job queue for the worker (PostgreSQL, `FOR UPDATE SKIP LOCKED`; no Redis). id PK; type (send_email,
+send_user_email, sync_mailbox, mail_action, campaign_step, sync_calendar, research_company); payload jsonb; run_at;
+attempts; max_attempts (default 8); status (queued / running / done / failed); last_error; locked_at; created_at,
+updated_at. Index (`status`, `run_at`). Done jobs are deleted after 7 days, failed after 30.
+
+### notifications
+id PK; user_id FK (cascade); text; detail; link; is_read; created_at. Index (`user_id`, `is_read`). In-app only.
+
+### audit_logs
+id PK; entity_type; entity_id (text); action; user_id FK (nullable); before jsonb; after jsonb; at. Index
+(`entity_type`, `entity_id`).
+
+Planned but not built: `password_resets` (no password sign-in except the break-glass admin), `updated_by` columns.
 
 ## Relationships
 
 ```
-companies 1─n contacts            companies 1─n company_locations
-companies 1─n leads               contacts  1─n leads
-companies 1─n enrichment_history  companies 1─n source_records
-contact_enquiries 1─1 leads (lead_id)   contact_enquiries n─1 companies, contacts
-leads 1─n lead_activities         leads 1─n lead_assignments        leads 1─n tasks
-leads 1─n quotations              quotations 1─n quotation_revisions 1─n quotation_lines
-quotations 1─1 projects           leads 1─n email_messages          leads 1─n calendar_events
-calendar_events 1─n calendar_event_attendees      email_accounts 1─n email_messages
-users ← assigned_to / owner_id / organiser_id / by_user on the tables above
+companies 1─n contacts            companies 1─n company_locations      companies 1─n leads
+contacts  1─n leads               companies 1─n enrichment_runs 1─n enrichment_suggestions
+companies 1─n source_records      leads 1─n lead_activities / lead_assignments / tasks
+companies 1─n quotations          leads 1─n quotations                 quotations 1─n quotation_lines
+quotations 1─n quotation_revisions                                     quotations 1─n tasks
+quotations 1─1 projects (projects.quotation_id unique; quotations.project_id back)
+companies 1─n projects            leads 1─n projects                   projects n─n contacts (project_stakeholders)
+users 1─n email_accounts 1─n email_messages     email_messages n─1 leads / contacts / companies / projects
+email_templates 1─n email_campaigns 1─n email_campaign_recipients     email_campaigns 1─n email_messages
+users 1─n calendar_events         email_accounts 1─n calendar_events   calendar_events n─1 leads / companies
+users ← assigned_to / owner / manager / created_by / by_user / decided_by on the tables above
 ```
 
 ## Indexes that matter
 
-- `companies(domain)` unique, `companies(registration_number)`, `companies(lower(legal_name))`
-- `contacts(lower(business_email))`, `contacts(phone_normalised)`, `contacts(company_id)`
-- `leads(status)`, `leads(assigned_to)`, `leads(company_id)`, `leads(created_at)`, `leads(next_follow_up)`
-- `tasks(assigned_to, due_date, is_done)`
-- `email_messages(thread_id)`, `email_messages(lead_id)`, `calendar_events(starts_at)`, `quotations(status)`
-
-## Mailer (added with the mailer module)
-
-The prototype keeps recipients inside each campaign record; the real build uses two tables.
-
-### email_campaigns
-
-| Column | Type | Notes |
-|---|---|---|
-| id | varchar(12) PK | e.g. MC-001 |
-| name | varchar(160) | |
-| template_id | FK email_templates | |
-| template_name, template_version | varchar / datetime | which template and which version of it was used |
-| subject, body | varchar(255) / text | copy of the template as queued, so later edits do not change the record |
-| sender_user_id | FK users | must have a connected mailbox |
-| sender_address | varchar(255) | mailbox used |
-| cc, bcc | text | comma-separated, applied to every email |
-| start_at | datetime NULL | NULL = start immediately |
-| interval_seconds | int | spacing between emails (the prototype stores minutes) |
-| working_hours_only | boolean | 09:00–18:00 office time |
-| unsubscribe_line | boolean | |
-| lawful_basis | varchar(160) | required |
-| status | enum | Scheduled, Sending, Paused, Completed, Cancelled |
-| created_by, created_at, completed_at | FK users / datetime | |
-
-### email_campaign_recipients
-
-| Column | Type | Notes |
-|---|---|---|
-| id | bigint PK | |
-| campaign_id | FK email_campaigns | index |
-| lead_id | FK leads | index |
-| contact_id | FK contacts NULL | |
-| to_address | varchar(255) | unique per campaign |
-| status | enum | Queued, Sent, Failed, Skipped (Replied is derived from a later inbound email on the lead) |
-| sent_at | datetime NULL | |
-| message_id | varchar(255) NULL | Graph message id; links to the filed email |
-| error | varchar(255) NULL | skip or failure reason |
-
-### Additions to existing tables
-
-| Table | Column | Notes |
-|---|---|---|
-| leads | do_not_email boolean | blocks the mailer |
-| contacts | unsubscribed_at datetime NULL | set with do_not_email |
-| emails | bcc text, campaign_id FK NULL | which campaign sent it |
+- `companies(domain)` unique, `companies(name_normalised, country)`, `companies(registration_number)`
+- `contacts(business_email)`, `contacts(phone_normalised)`, `contacts(mobile_normalised)`, one primary per company
+- `leads(status)`, `leads(assigned_to_id)`, `leads(company_id)`, `leads(created_at)`, `leads(next_follow_up)`,
+  `leads(lead_type)`, `leads(country)`
+- `tasks(assigned_to_id, is_done, due_date)`
+- `email_messages(user_id, graph_id)` unique, `(user_id, thread_id)`, `(user_id, folder, occurred_at)`
+- `calendar_events(user_id, starts_at)`, `quotations(status)`, `jobs(status, run_at)`

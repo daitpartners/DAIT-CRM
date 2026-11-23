@@ -1,23 +1,70 @@
 # Pending items (owner's list)
 
-Kept here at the owner's request; picked up when the owner says so.
+Kept here at the owner's request; picked up when the owner says so. Items that were fixed are no longer listed (they are
+in the git history).
 
-## Where things stand (22 Nov 2026, end of session)
-- **Live:** crm.daitpartners.com runs release `4bb3601` (2A connections + templates, 2B-1 send from lead, 2B-2 mail
-  sync + Email screen, 2C Mailer). Backups on the server in `~/backups/` (`dait_crm-pre-release-2c.dump` is the latest).
-- **Ready, not merged, not deployed:** branch `mail-follow-ups` holds the 2B-2 / 2C follow-ups below plus visual-parity
-  fixes so Email, Compose, Link to lead, the Mailer list, the campaign page, the wizard and the Leads bulk bar match the
-  prototype. Local `main` = live. Needs merge + "deploy" from the owner.
-- **Owner to do:** run a small test Mailer campaign to your own addresses (1-minute delay, Send now, working hours off)
-  and check delivery, Outlook Sent Items, and Queued → Sent on the campaign page; ask Carlos, Lakshita and Sebastian to
-  connect their mailboxes (Settings → Email & calendar connections); add Mexico / Chile to the country list; templates
-  in English and Spanish; remove LOCAL_ADMIN_LOGIN once everyone signs in with Microsoft; answer the owner decisions below.
-- **Decided:** Mailer daily limit stays 200 per mailbox ("go with 200 only"); mail stays private to its owner,
-  administrators included; Mailer working hours are the client's (Mon–Fri 09:00–18:00 their time).
-- **Next release options:** deploy `mail-follow-ups`, the follow-ups from this round, 1D (parked), or release 3
-  (calendar, quotations, projects).
+## Where things stand (23 Nov 2026)
+
+- **Everything built so far is live** at crm.daitpartners.com, release `08ee5da` (AI research with the Claude Code
+  engine). The repository's `main` has one more commit, `c01e562`, which only changes the GitHub test-deploy workflow;
+  nothing to deploy.
+- **There is no test copy on the server.** Each release was checked on the developer's machine (automatic tests and
+  side-by-side screenshots against the prototype) and then put live by hand, only after you said "deploy". How that is
+  done, and how to undo it, is in `docs/DEPLOYMENT.md`.
+- **Backups:** a copy of the database is taken before every deploy, in `/home/daitcrm/backups/` on the server.
+- **Handover documents:** `docs/DEPLOYMENT.md` (server, deploy, rollback, backup and restore, logs),
+  `docs/MIGRATIONS.md` (database changes), `docs/ENVIRONMENT.md` (server settings), `docs/data-model.md` (tables), and
+  `docs/DAIT-CRM-Specification-v2.md` (the specification, marked with what was built, built differently or not built).
+
+| Release | What it added | Live as |
+|---|---|---|
+| 1A, 1B, 1C, prototype parity | Sign-in, users, settings; Companies and Contacts; Leads, Prospects and Tasks; screens matching the prototype | live 21 Nov (1B `2f8f310`, parity gaps `f869dda`) |
+| Leads exact-match | Lead page as the prototype, Profile card | `8236e97` |
+| Experience on every lead | Experience section on every lead | `54a2040` |
+| 1E Reports | Reports page as the prototype | `baff803` |
+| 2A | Personal mailbox connections, email templates | `7d695e6` |
+| Outreach language | English / Español on leads, allocation by language | `b97aa6c` |
+| 2B-1 | Send email from the lead page through your own mailbox | `ccfb2b4` |
+| 2B-2 | Mail sync and the Email screen | `8b1a8d9` |
+| 2C | Mailer | `4bb3601` |
+| Mail follow-ups | Fixes to Email and Mailer, prototype look, Email reader crash fix | `2d4e618` |
+| 3C | Calendar | `efaf872` |
+| 3A | Quotations, Email pager | `436dc98` |
+| 3B | Projects | `2c14c1c` |
+| 4 | AI research (Claude off) | `fa12206` |
+| Claude Code engine | Claude through the server's Claude Code, monthly run cap | `08ee5da` |
+
+## Owner to do
+
+- **GSTIN:** fill it in under Settings → Company details (printed only on INR quotations). Tell us if the accountant
+  wants GST split into CGST / SGST (one "GST" line for now).
+- **Calendar:** switch on "Sync calendar" for your mailbox in Settings → Email & calendar connections (and ask the team
+  to do the same) so your Outlook meetings show on the CRM calendar.
+- **Mailboxes:** ask Carlos, Lakshita and Sebastian to connect their mailboxes (Settings → Email & calendar
+  connections).
+- **Mailer test:** run a small test campaign to your own addresses (1-minute delay, Send now, working hours off) and
+  check delivery, Outlook Sent Items, and Queued → Sent on the campaign page.
+- **Templates:** add your email templates in English and Spanish (Settings → Email templates).
+- **Countries:** add Mexico and Chile to the country list (Settings → lookup values) so Spanish-market leads can use them.
+- **Claude Code (AI research):** the token is already on the server. In any company's AI Intelligence tab →
+  Enrichment engine, switch Claude Code on and set a monthly run cap (runs that use Claude per calendar month). Then test
+  Web search once, on one company, before relying on it.
+- **Google Places (optional, paid):** needs a Google Cloud project with billing, a budget alert and a quota for the
+  Places API (New), and a key restricted to the Places API set on the server as `GOOGLE_PLACES_API_KEY`; then switch
+  "Google Places API" on in the engine card with a monthly call cap.
+- **Apollo.io:** needs a paid Apollo plan; not built (shows "not connected").
+- **Break-glass sign-in:** once everyone signs in with Microsoft, have `LOCAL_ADMIN_LOGIN` removed from the server
+  settings.
+- **Answer the owner decisions below.**
+
+Good to know: the AI daily run limit (default 50 across the CRM) resets at midnight UTC (05:30 IST); the Claude monthly
+run cap and the Places monthly call cap reset at midnight UTC on the 1st of the month.
+
+Later clean-up (developer): the unused `enrichment_settings.claude_monthly_cap_usd` column can be dropped in a later
+migration (`docs/MIGRATIONS.md`).
 
 ## Owner decisions (please confirm)
+
 - **Leads bulk bar: Assign to… and Archive** are not in the prototype. Owner (22 Nov): "keep in pending list" — kept as
   built for now; decide later whether to drop them to match the prototype exactly.
 - **Email reader Archive button** is not in the prototype; it was approved in the 2B-2 design. Keep or remove?
@@ -26,244 +73,90 @@ Kept here at the owner's request; picked up when the owner says so.
 - **Mailer list shows the pause reason** ("Paused by …", "Mailbox needs reconnecting"); the prototype does not. Keep?
 - **Background job clean-up:** finished jobs are now deleted after 7 days and failed jobs after 30 days (old failures
   can no longer be retried from the jobs view). OK?
+- **Lead page Status** is a select (decided earlier); picking Won opens the prototype's "Mark LD-… as Won?"
+  confirmation from its stepper. (The prototype's own Status select on the new lead page marks Won at once, without
+  the confirmation.)
+
+## Decided (recorded)
+
+- Mailer daily limit stays 200 per mailbox; Mailer working hours are the client's (Mon–Fri 09:00–18:00 their time).
+- Mail and the Outlook calendar stay private to their owner, administrators included. Calendar **Mine / Everyone** is
+  for Administrators only; Everyone adds the team's CRM tasks, never anyone's Outlook events.
+- Calls and meetings planned in the CRM stay in the CRM: nothing is written to Outlook, no invitations or emails. Edit
+  task gains Type and Time (Tasks page only).
+- Quotations: currencies USD, CAD and INR only (India → INR, Canada → CAD, everyone else USD); GST 18 % on INR and 0 %
+  on USD and CAD by default, one "GST" line; issuer DAIT Partners LLP, D-303, Sagar Sadan, IP Extension, Delhi 110092,
+  India, info@daitpartners.com; the PDF is drawn on the server.
+- Projects: value = net before GST; legal name shown where set (Projects list, project dialog, Email client filter,
+  Compose Client picker); a project manager sees the client's contacts in the project dialog.
+- AI research: free Website reader always on; Claude through the server's Claude Code (no paid API); nothing invented,
+  only empty, unverified fields get suggestions.
 
 ## Parked by the owner
+
 - **1D public contact form + Enquiries** — "keep contact in pending, i will decide lateron" (22 Nov 2026). Open point:
   daitpartners.com/contact already has its own brief form (contact.php → Mailjet).
 
-## Release 4 — AI research (23 Nov 2026) — ready on `release-4-ai-research`, not merged, not deployed
-- **Status:** branch `release-4-ai-research` (from main `2c14c1c`), five tasks done and checked side by side against the
-  prototype (screenshots and `parity-report.md` in `parity-screenshots-4-ai-research/` next to the repo); unit, API,
-  e2e, build, translations and database checks green. One database migration (`20261204100000_ai_research`). Needs
-  merge + "deploy" from the owner.
-- **What it adds:** "Run AI research" on a company (header, Overview AI card, AI Intelligence tab, lead page AI line)
-  and an automatic run when a lead is created for a company with a website that was never researched. The free Website
-  reader reads the company's own site (robots.txt respected) and proposes values for empty, unverified fields only;
-  users Accept / Reject them (or "Accept all ≥ 80%"), see the Enrichment history and the Research Sources tab (one
-  record per page read, read-only snapshot, "+ Add source manually"). The Companies list "AI research queue" tile
-  counts pending · processing · failed runs. Administrators get the Enrichment engine card.
-- **Fixed in the parity check:** the Research Sources tab now shows its count ("Research Sources 5"); source
-  confidence reads "90%" / "70–90%" as the prototype (was "90"); the Overview legend reads "Empty fields stay NULL.
-  Nothing is invented." and "Last research: <date>, <time>" as the prototype; the lead page AI line has the prototype's
-  lilac note background and a normal-weight "Run research". Also fixed (older, release 3B): a company with no leads and
-  no projects answered 404 to Administrators and Managers on its Projects tab (no "Projects 0" count) and in the
-  Create project dialog.
-- **Kept different from the prototype (approved design):**
-  - Enrichment engine card follows the design, not the prototype, including its order: Engine — Website reader (built
-    in, free, always on), Claude Code on this server (off until CLAUDE_CODE_OAUTH_TOKEN is on the server, the `claude`
-    binary is there and a monthly run cap is set), Ollama ("not installed on this server", disabled); Sources — Public
-    company website (on), Web search (needs Claude Code),
-    Google Places API (off until GOOGLE_PLACES_API_KEY and a monthly call cap), Apollo.io ("not connected"); plus the
-    Daily run limit field. The prototype has Ollama on, Places on, Apollo / Web search selectable.
-  - No AI summary, AI classification or opportunity score until Claude is turned on: the AI card shows "Opportunity
-    score not yet computed" and "No AI summary yet. Run research to generate one."; the lead page AI line shows the
-    research status ("AI research Completed · Run research") instead of the prototype's AI summary.
-  - The lead page AI line's "Run research" starts a run (as the design); the prototype's links to the AI tab.
-- **Owner to do:**
-  - **Claude (through the server's Claude Code, 23 Nov addendum):** the subscription token is already on the server
-    (`CLAUDE_CODE_OAUTH_TOKEN`, copied into the CRM's shared `.env` on 23 Nov). All that is left: in a company's AI
-    Intelligence tab → Enrichment engine, switch Claude Code on and set a monthly run cap (runs that use Claude per
-    calendar month). Optional env: `CLAUDE_MODEL` (default `sonnet`), `CLAUDE_BIN` (default `/root/.local/bin/claude`).
-    Test Web search once on the live server, on one company, before relying on it.
-  - **Later clean-up (developer):** the unused `enrichment_settings.claude_monthly_cap_usd` column is kept for the
-    deploy window of the Claude Code change; drop it in a later migration.
-  - **Google Places (optional, paid):** a Google Cloud project with a billing account, a budget alert and an API quota
-    for the Places API (New); create `GOOGLE_PLACES_API_KEY` (restricted to the Places API) and set it in the server
-    environment; then switch "Google Places API" on in the engine card with a monthly call cap.
-  - **Apollo.io:** needs a paid Apollo plan; not built (shows "not connected").
-  - **Limits:** the daily run limit (default 50 across the CRM) resets at midnight UTC (05:30 IST); the Claude monthly
-    run cap and the Places monthly call cap reset at midnight UTC on the 1st of the month (05:30 IST).
+## Kept by design (differences from the prototype you accepted)
 
-## Release 3A — Quotations (22 Nov 2026) — ready on `release-3a-quotations`, not merged, not deployed
-- **Status:** branch `release-3a-quotations` (from main `4e14d50`), all tasks done and checked side by side against the
-  prototype (screenshots in `parity-screenshots-3a-quotations/` next to the repo); unit, API, e2e, build, translations
-  and database checks green. One database migration (`20261202100000_quotations`) and one new library (pdfkit, draws
-  the PDF on the server). Needs merge + "deploy" from the owner.
-- **Before deploying:** on live, `SELECT count(*) FROM tasks WHERE quotation_id IS NOT NULL` must be 0 (the migration
-  reshapes that link).
-- **What it adds:** the Quotations list (tiles, tabs, search), the quotation editor (lines with live totals, autosave,
-  revisions, status, history), Preview PDF, Send by email with the PDF attached (from your own mailbox), Duplicate,
-  Mark accepted / rejected / Negotiating, automatic Expired after the valid-until date, New quotation from the list and
-  from the company page, the Quotation column and open quotation value on the company's Leads tab, the dashboard tile
-  "Quotes awaiting response", and Settings → Company details (Administrators).
-- **Owner decisions recorded:** currencies USD, CAD and INR only (India → INR, Canada → CAD, everyone else USD); GST
-  18 % on INR and 0 % on USD and CAD by default, one "GST" line; issuer DAIT Partners LLP, D-303, Sagar Sadan, IP
-  Extension, Delhi 110092, India, info@daitpartners.com; the PDF is drawn on the server (pdfkit), no browser needed.
-- **Builder's calls (from the design):** a quotation counts as sent only when Microsoft confirms the email (until then
-  it shows "Sending…" and cannot be edited; a failed send changes nothing and tells the owner and whoever sent it); after sending, any edit
-  to what the PDF prints opens the next revision, and sending again without edits re-sends the same revision; list,
-  tiles, dashboard and company figures use the last sent revision while a new one is unsent, and accepting or rejecting
-  then discards the unsent edit after a warning; changing the currency resets GST to that currency's default (you can
-  still change it); New quotation from the list asks for the company (and lead) first; accepting without a lead still
-  makes the company a Client; Duplicate keeps the overall discount (the prototype drops it); rejecting never changes
-  the lead's status.
-- **Owner to do:** fill in the GSTIN in Settings → Company details (printed only on INR quotations); tell us if the
-  accountant wants GST split into CGST / SGST (later, one line for now); Convert to project arrives with release 3B
-  (the button is there but greyed out).
-- **Email pagination (owner request, 22 Nov):** the Email message list now has the same pager as Leads (Rows 25 / 50 /
-  100, First / Prev / page box / Next / Last, 50 per page by default). In the narrow message column it wraps onto three
-  lines; search results count at most 2,000 messages.
-- **Differences from the prototype (accepted):** "GST" instead of "Tax"; Convert to project greyed out until 3B; the
-  send dialog has a Message box; the PDF dialog shows the real PDF with Download (instead of Print); New quotation from
-  the list opens a small dialog (the prototype creates one for the first company straight away); the Email pager.
-- **Fixed in the final check:** the editor button is "Negotiating" as in the prototype and saves your typing first;
-  a save that fails for another reason (connection, server) keeps what you typed on screen and says so, instead of
-  reloading over it; changing the currency shows the GST from Company details at once; leaving a quotation with an
-  empty subject or item now warns that those edits were not saved; the PDF prints plain amounts with the currency once
-  on "Total INR", as the prototype's preview. Final review: the test deploy now packs the PDF logo
-  (`apps/api/assets`); Preview / Download of a sent revision with no edits shows that revision exactly as a send would
-  attach it; the send dialog's default message is in the quotation owner's language (as the PDF); Send is refused
-  ("someone else changed this record") if the quotation changed after the dialog opened; a failed send is reported to
-  the sender as well as the owner; the total including GST is capped so a sent revision can always be recorded; a
-  discard on accept / reject brings back the sent contact only if it is still active.
-- **Follow-ups (not fixed):**
-  - The PDF uses Helvetica (not Montserrat), always prints dates as "22 Nov 2026", and shows characters outside
-    Western European letters as "?"; a very long item name with a discount can run over; a line taller than a page is
-    cut to one page. PDF wording follows the quotation owner's language but is not in the translation check.
-  - Changing the quotation date into another year keeps the old number (Q-2026-… stays). Valid until is not checked
-    against the quotation date.
-  - Accepting writes two similar lines on the lead timeline. Quotation history lines are in English only.
-  - Clearing the lead on a quotation can hide it from a sales representative who could see it only through that lead
-    (they are told it was saved).
-  - If the database is down for the whole last send attempt, the quotation can stay on "Sending…" until an
-    administrator retries the job. A re-send uses today's logo from Company details.
-  - The Quotations list is not paged (fine at today's numbers); search is by the URL `?q=` and also matches the legal
-    name; New quotation is offered on a closed company.
-  - Email pager: changing Rows does not scroll back to the top; an invalid `?size=` stays in the address bar.
-  - Pre-existing (not 3A): on the company Leads tab the lead number is dark text, not a purple link as in the
-    prototype (the whole row opens the lead).
+- Templates list filling up to six with other languages (matches the prototype).
+- A lead without a contact has no way to set Do not email (matches the prototype).
+- The Mailer wizard lists all templates (your language first) (matches the prototype). The campaign page links to the
+  lead page, not its Email tab (matches the prototype; the lead page opens on the Email tab).
+- Quotations: "GST" instead of "Tax"; the send dialog has a Message box; the PDF dialog shows the real PDF with Download
+  (instead of Print); New quotation from the list opens a small dialog first; the Email pager.
+- Calendar: real data instead of demo data; a CRM task without a lead opens the same details box as an Outlook event
+  without a lead; the lead picker does not repeat "— choose a lead —" as its first row; the lead page "Calls" count
+  counts logged calls only.
+- AI research: the Enrichment engine card follows the design (Website reader; Claude Code on this server; Ollama "not
+  installed on this server"; Web search needs Claude Code; Google Places off until a key and a cap; Apollo "not
+  connected"; daily run limit). No AI summary, classification or opportunity score until Claude is on. The lead page
+  AI line's "Run research" starts a run (the prototype's links to the AI tab).
 
-## Release 3B — Projects (22 Nov 2026) — ready on `release-3b-projects`, not merged, not deployed
-- **Status:** branch `release-3b-projects` (from main `436dc98`), all seven tasks done and checked side by side against
-  the prototype (screenshots and `parity-report.md` in `parity-screenshots-3b-projects/` next to the repo); unit, API,
-  e2e, build, translations and database checks green. One database migration (`20261203100000_projects`). Needs merge
-  + "deploy" from the owner.
-- **What it adds:** the Projects page (tiles, Client / Status filters, Email a project, Create project) and the Create /
-  Edit project dialog; "Projects" in the sidebar after Quotations; the Projects card on the lead page and the company
-  Overview; the company Projects tab ("How projects work"); "Mark Won and create project" in the Won confirmation;
-  Convert to project on an accepted quotation (value = net before GST), which then shows the green "Project PRJ-n"
-  badge; a Project picker in Compose and in the lead page email form (stakeholders copied), the Project filter on the
-  Email screen, and the project tag on sent mail and its replies.
-- **Fixed in the parity check:** the converted quotation showed "PRJ-n · name" as a purple link; it is now the
-  prototype's green "Project PRJ-n" badge (still a link to the client's projects). The Email screen's client filter and
-  the Compose Client picker now mark clients "name · client" as the prototype.
-- **Owner decisions (23 Nov 2026):**
-  - Owner decided 23 Nov: legal name where set, as the prototype — the Projects list (Client column and filter), the
-    Create / Edit project dialog, the Email screen's client filter and the Compose Client picker show the company's
-    legal name when one is set, else its name (Leads and Quotations unchanged).
-  - Owner OK'd 23 Nov: a project manager sees the client's contacts in the project dialog.
-- **Final-review fixes (23 Nov 2026):** a stale Edit project save now closes the dialog (reopen to load the fresh row);
-  the locked Client field keeps normal text; the Email Project filter ends with an ellipsis and a Lead change drops it;
-  clear messages for "not accepted", "quotation already linked to another project" and an unusable project on an email;
-  the quotation page names its project only to users who can see it; Edit project keeps deactivated stakeholders on
-  offer; the dialog's choices load for a rep whose only way in is an archived lead.
-- **Kept different from the prototype (please confirm):**
-  - The lead page Status is a select (decided earlier); picking Won opens the prototype's "Mark LD-… as Won?"
-    confirmation from its stepper. (The prototype's own Status select on the new lead page marks Won at once, without
-    the confirmation.)
-- **Found during the check, older than 3B (not changed):**
-  - The lead page's "Coming up" card lists only follow-ups, calls and meetings; the prototype also lists the lead's
-    quotations ("Q-2026-038 · EUR 57,120.00 · Accepted") — release 3A.
-  - On the Email screen the prototype shows a quotation chip (Q-…) on mail about a quotation; the app's mail has no
-    quotation tag — release 2B-2 / 3A.
-- **Owner to do:** nothing new for 3B beyond merge + "deploy".
+## Open minor follow-ups
 
-## Release 3C — Calendar (22 Nov 2026) — ready on `release-3c-calendar`, not merged, not deployed
-- **Status:** branch `release-3c-calendar` (from main `63cd73e`), all six tasks done and checked side by side against
-  the prototype; unit, API, e2e, build, translations and database checks all green. Two database migrations
-  (`20261201100000_task_kind_time`, `20261201110000_calendar_events`). Needs merge + "deploy" from the owner.
-- **What it adds:** the Calendar page (mini month, Overdue, Day / Week / Month, New follow-up dialog, details of an item
-  without a lead, legend); calls and meetings as timed tasks (call 30 min, meeting 60 min) shown on Tasks and the lead
-  page; a private copy of each user's own Outlook calendar, refreshed every 5 minutes when "Sync calendar" is on in
-  Settings → Email & calendar connections.
-- **Owner decisions recorded:**
-  - The calendar is private: a user's Outlook events are seen only by that user, administrators included — never on
-    the lead timeline, Tasks, dashboard, reports or anyone else's calendar.
-  - **Mine / Everyone** is for Administrators only; Everyone adds the team's CRM tasks (follow-ups, calls, meetings),
-    never anyone's Outlook events. (The prototype shows the switch to everyone.)
-  - Calls and meetings planned in the CRM stay in the CRM: nothing is written to Outlook, no invitations or emails.
-  - **Edit task gains Type and Time** (a deliberate addition beyond the prototype) — on the Tasks page only; the lead
-    page shows the text (e.g. "Call · 10:00–10:30") and you change it on Tasks.
-- **Other differences from the prototype (accepted):** real data instead of demo data; a CRM task without a lead
-  opens the same details box as an Outlook event without a lead (the prototype has no such task); the lead picker's
-  list does not repeat "— choose a lead —" as its first row (same as every other picker in the CRM); the lead page
-  "Calls" count counts logged calls only — a planned call shows in the history but is not counted (the prototype does
-  not show planned calls under Calls at all).
-- **Fixed in the parity check:** "Lead *" spacing on required fields (all forms, as the prototype); the lead picker now
-  starts with 25 open leads (closed ones filtered on the server); no "0 open items" / "Nothing overdue." flash while
-  the calendar loads; Coming up on the lead page shows calls and meetings with the calendar icon, date and time, linking
-  to that week; a done call or meeting no longer pushes its "Done" badge out of the Completed card on Tasks.
-- **Fixed in the final review (22 Nov):**
-  - Dashboard: "Meetings today" and "Today's agenda" now work as the prototype, from your own calls, meetings and
-    timed follow-ups for today (CRM tasks only, never Outlook events); the tile shows the next one ("next at 14:00 ·
-    Demo") and links to the Calendar. The calendar no longer says "release 3" (quotations still do).
-  - Planning a call or meeting no longer counts as contact: it still shows on the lead timeline, but not as the lead's
-    "Last contact" nor in the company's Activity summary.
-  - Copied Outlook events show only while "Sync calendar" is on and the mailbox is connected (or needs reconnecting).
-  - The automatic follow-up task (from the lead's follow-up date) keeps its type: Type is greyed out in Edit task and
-    the server refuses a change; its time can still be set.
-  - Outlook events sent in other names for UTC (Etc/UTC, GMT, Coordinated Universal Time, …) are no longer skipped.
-- **Follow-ups (not fixed):**
-  - All-day Outlook events may show one day off for users in UTC+12 to +14 (New Zealand, Tonga, Kiribati).
-  - Check the first live Outlook sync: compare times and all-day events with Outlook for a couple of users.
-  - No "plan a follow-up" link from the lead page to the calendar dialog (the prototype's `?new=1&lead=` link is not
-    built); plan from the Calendar or add a task on the lead.
-  - While a mailbox is in error ("needs reconnecting") its old copied Outlook events keep showing until it is fixed,
-    switched off or disconnected.
-  - If Microsoft sends an event change in another time zone (not UTC under any of its names), the old time shows until
-    the daily full re-sync.
-  - The calendar entry written on the lead timeline when a call or meeting is planned is not in the lead's audit log
-    (other notes are).
-  - An impossible date typed into the address bar (e.g. 31 Feb) is accepted, as in the prototype.
-  - Empty calendar days cannot be reached with the keyboard (as the prototype); the New follow-up button can.
-  - On narrow screens the type / time text on the lead page's open tasks can squeeze the title.
-  - Administrators' Everyone view loads every overdue team task at once (fine now, slower with many users).
+Small issues found in reviews and not fixed yet. Wording kept as recorded.
 
-## Release 2B-2 follow-ups (from the final review, 22 Nov 2026; live release 8b1a8d9) — fixed on `mail-follow-ups`
-- ~~Mail in a conversation can link to a lead the user can no longer see (thread match skips the visibility check); the
-  list may then show that lead's number.~~ Done `63c6e57`.
-- ~~A draft sent from Outlook may keep its Draft status in the CRM (status is not updated on existing rows).~~ Done `f2489c1`.
-- ~~Times show the date only (list, thread history, "synced …"); the prototype shows relative times / time of day.~~
-  Done `7531818`, `2ad59ce`.
-- ~~After opening a message its list row stays bold for up to a minute.~~ Done `7531818`.
-- ~~Background job rows are never cleaned up (~288 per mailbox per day); a deactivated user's connected mailbox gets an
-  empty sync job every minute.~~ Done `f2489c1`.
-- ~~Compose dialog shows untranslated lead status / source and contact type~~ — done `7531818`. The Templates list
-  filling up to six with other languages — kept by design (matches the prototype).
-- ~~Link-to-lead dialog falls back to "create a new lead" when a search hides the lead you had picked.~~ Done `7531818`.
-- ~~Message count on a taken-over mailbox includes the previous owner's mail~~ — done `f2489c1`. ~~Awaiting reply is
-  capped before filters~~ — done `63c6e57`.
-- ~~Reply route swallows a database error while locking the lead (inside the transaction).~~ Done `63c6e57`.
-- Visual parity (Email reader contact card, thread history, Compose, Link to lead searchable select) — done `daffce4`.
+**From release 3A (Quotations):**
+- The PDF uses Helvetica (not Montserrat), always prints dates as "22 Nov 2026", and shows characters outside
+  Western European letters as "?"; a very long item name with a discount can run over; a line taller than a page is
+  cut to one page. PDF wording follows the quotation owner's language but is not in the translation check.
+- Changing the quotation date into another year keeps the old number (Q-2026-… stays). Valid until is not checked
+  against the quotation date.
+- Accepting writes two similar lines on the lead timeline. Quotation history lines are in English only.
+- Clearing the lead on a quotation can hide it from a sales representative who could see it only through that lead
+  (they are told it was saved).
+- If the database is down for the whole last send attempt, the quotation can stay on "Sending…" until an
+  administrator retries the job. A re-send uses today's logo from Company details.
+- The Quotations list is not paged (fine at today's numbers); search is by the URL `?q=` and also matches the legal
+  name; New quotation is offered on a closed company.
+- Email pager: changing Rows does not scroll back to the top; an invalid `?size=` stays in the address bar.
+- Pre-existing (not 3A): on the company Leads tab the lead number is dark text, not a purple link as in the
+  prototype (the whole row opens the lead).
 
-## Release 2C (Mailer) follow-ups (from the final review, 22 Nov 2026) — fixed on `mail-follow-ups`
-- ~~Daily-limit day boundary is an hour off on some daylight-saving change days (e.g. Santiago, Sydney).~~ Done `eab83c5`.
-- ~~Pause reason ("Paused by …", "Mailbox needs reconnecting") is shown in English for Spanish / French users.~~
-  Done `246ec7b`.
-- ~~The Do not email badge and tick box ignore a contact unsubscribed through another lead (the mailer still skips
-  it).~~ Done `cb90c47`.
-- A lead without a contact has no way to set Do not email — kept by design (matches the prototype).
-- ~~Over a weekend a waiting campaign re-checks every 5 minutes (extra background work; could jump to Monday 09:00).~~
-  Done `a51a424`.
-- ~~If the template is deleted, the unsubscribe line falls back to English.~~ Done `a51a424`.
-- ~~Time zone: a company with only a country ignores the lead's own city; some Mexican / Brazilian states are not in the
-  table.~~ Done `a51a424` (lead city), `eab83c5` (all states).
-- ~~Wizard still opens when none of the ticked leads can be emailed (prototype refuses with a message); more than 500
-  ticked leads shows a generic error.~~ Done `246ec7b`.
-- Wizard lists all templates (your language first) — kept by design (matches the prototype). ~~"Local time" shows the
-  zone name, not the current time there; campaign page has no Message column~~ — done `246ec7b`. Campaign page links to
-  the lead page, not its Email tab — kept by design (matches the prototype; the lead page opens on the Email tab).
-- ~~The Mailer list loads every recipient of every campaign (fine now, slower later)~~ — done `3716c44`. ~~No automated
-  test of two steps running at once~~ — done `a51a424`.
-- ~~A mailbox put in error by mail sync pauses a campaign with "Mailbox disconnected" instead of "needs
-  reconnecting".~~ Done `a51a424`.
-- Visual parity (Mailer list, campaign page, wizard, Leads bulk bar with Send via mailer at the right) — done `7b7b6c5`.
+**Found during the 3B check (older than 3B, not changed):**
+- The lead page's "Coming up" card lists only follow-ups, calls and meetings; the prototype also lists the lead's
+  quotations ("Q-2026-038 · EUR 57,120.00 · Accepted") — release 3A.
+- On the Email screen the prototype shows a quotation chip (Q-…) on mail about a quotation; the app's mail has no
+  quotation tag — release 2B-2 / 3A.
 
-## Follow-ups from this round (mail follow-ups review, 22 Nov 2026; not fixed yet unless marked)
-- ~~**Important (also on live):** the Email screen crashes ("Invalid time value") when the open message's lead has a
-  next follow-up date.~~ **Fixed (1fe84da, not deployed):** GET /api/mail/:id now gives `lead.nextFollowUp` as
-  `YYYY-MM-DD` like the lead API, so the reader's day formatter gets a calendar date. The parity mail spec also
-  re-unlinks "Website enquiry" (email.spec makes a lead from it earlier in the full run).
+**From release 3C (Calendar):**
+- All-day Outlook events may show one day off for users in UTC+12 to +14 (New Zealand, Tonga, Kiribati).
+- Check the first live Outlook sync: compare times and all-day events with Outlook for a couple of users.
+- No "plan a follow-up" link from the lead page to the calendar dialog (the prototype's `?new=1&lead=` link is not
+  built); plan from the Calendar or add a task on the lead.
+- While a mailbox is in error ("needs reconnecting") its old copied Outlook events keep showing until it is fixed,
+  switched off or disconnected.
+- If Microsoft sends an event change in another time zone (not UTC under any of its names), the old time shows until
+  the daily full re-sync.
+- The calendar entry written on the lead timeline when a call or meeting is planned is not in the lead's audit log
+  (other notes are).
+- An impossible date typed into the address bar (e.g. 31 Feb) is accepted, as in the prototype.
+- Empty calendar days cannot be reached with the keyboard (as the prototype); the New follow-up button can.
+- On narrow screens the type / time text on the lead page's open tasks can squeeze the title.
+- Administrators' Everyone view loads every overdue team task at once (fine now, slower with many users).
+
+**From the mail follow-ups review (Email and Mailer):**
 - A mail sync already queued still runs once after a user is deactivated (later syncs stop).
 - Opening a message straight from a link (/email/…) may keep its list row bold until the list refreshes.
 - Two incoming mails in a row in a thread both read "reply received".
