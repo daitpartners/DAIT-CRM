@@ -137,7 +137,9 @@ Small issues found in reviews and not fixed yet.
 **Known, small, left as they are for now:**
 - Email reader (HTML bodies, 23 Nov): pictures embedded in an email (Outlook "inline" images, `cid:`) are not fetched
   yet, so they are hidden rather than shown broken; remote pictures show, as in Outlook. A body is stored up to 50,000
-  characters, so a very long newsletter is cut (still shown formatted, up to the cut). The HTML body sits in a sandboxed
+  characters, so a very long newsletter is cut (still shown formatted, up to the cut). Before anything reads it, a body
+  is cut to its first 1,000,000 characters and to 256 nested elements (security review 24 Nov: keeps one hostile email
+  from blocking the CRM). The HTML body sits in a sandboxed
   frame that fills the reader and scrolls on its own: with no scripts and no same-origin access the CRM cannot measure
   the email to grow the frame to its height.
 - Quotation stays on "Sending…" if the database is down for the whole last send attempt (an administrator retries the
