@@ -593,4 +593,27 @@ describe('leads API', () => {
     expect(same.statusCode).toBe(200);
     expect(await prisma.leadActivity.count({ where: { leadId: b.id } })).toBe(notes);
   });
+
+  it("ticking lead B when its contact is already unsubscribed sets B's own flag (the contact keeps its date)", async () => {
+    const { rep, contact, a, b } = await twoLeadsOneContact();
+    await req('POST', `/api/leads/${a.id}/do-not-email`, rep.cookie, { doNotEmail: true, updatedAt: stamp(a) });
+    const stampedAt = (await prisma.contact.findUniqueOrThrow({ where: { id: contact.id } })).unsubscribedAt;
+    const res = await req('POST', `/api/leads/${b.id}/do-not-email`, rep.cookie, { doNotEmail: true, updatedAt: stamp(await reload(b.id)) });
+    expect(res.statusCode).toBe(200);
+    expect((await reload(b.id)).doNotEmail).toBe(true);
+    expect((await prisma.contact.findUniqueOrThrow({ where: { id: contact.id } })).unsubscribedAt).toEqual(stampedAt);
+    expect(await prisma.leadActivity.findFirst({ where: { leadId: b.id, title: 'Marked do not email' } })).not.toBeNull();
+  });
+
+  it('ticking two leads of one contact at the same moment saves both flags', async () => {
+    const { rep, contact, a, b } = await twoLeadsOneContact();
+    const [ra, rb] = await Promise.all([
+      req('POST', `/api/leads/${a.id}/do-not-email`, rep.cookie, { doNotEmail: true, updatedAt: stamp(a) }),
+      req('POST', `/api/leads/${b.id}/do-not-email`, rep.cookie, { doNotEmail: true, updatedAt: stamp(b) }),
+    ]);
+    expect([ra.statusCode, rb.statusCode]).toEqual([200, 200]);
+    expect((await reload(a.id)).doNotEmail).toBe(true);
+    expect((await reload(b.id)).doNotEmail).toBe(true);
+    expect((await prisma.contact.findUniqueOrThrow({ where: { id: contact.id } })).unsubscribedAt).not.toBeNull();
+  });
 });
