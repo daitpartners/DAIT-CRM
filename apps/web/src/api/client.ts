@@ -29,7 +29,25 @@ export async function api<T>(path: string, init: ApiInit = {}): Promise<T> {
     headers: { Accept: 'application/json', ...(hasBody ? { 'Content-Type': 'application/json' } : {}), ...headers },
     body: hasBody ? JSON.stringify(body) : undefined,
   });
+  return read<T>(res, noAuthRedirect);
+}
 
+/**
+ * Uploads one file as raw bytes (`Content-Type: application/octet-stream`, the file itself as the body), e.g. an import
+ * file; errors as `ApiError`, as `api`.
+ */
+export async function apiUpload<T>(path: string, file: File): Promise<T> {
+  const res = await fetch(path.startsWith('/api') ? path : `/api${path}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/octet-stream' },
+    body: file,
+  });
+  return read<T>(res);
+}
+
+/** A response's JSON, or an `ApiError` (a 401 goes to sign-in unless `noAuthRedirect`). */
+async function read<T>(res: Response, noAuthRedirect?: boolean): Promise<T> {
   if (res.status === 204) return undefined as T;
   const text = await res.text();
   let data: unknown = undefined;

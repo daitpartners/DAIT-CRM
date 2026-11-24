@@ -4,6 +4,7 @@ node_modules/
 .env
 dist/
 apps/api/uploads/
+.storage/
 test-results/
 playwright-report/
 **/.env

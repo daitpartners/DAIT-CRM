@@ -245,14 +245,16 @@ describe('CSV lead import', () => {
     expect(lead.notes).toBe(`${long}\nCSV contact: Ravi Kumar`.slice(0, 5000));
   });
 
-  it('import refuses an unassignable assignee and a caller without manage_leads', async () => {
+  it('the old CSV endpoints need import_leads (Administrators and Managers): a Sales Representative is refused', async () => {
     const rep = await as('SALES_REPRESENTATIVE');
     const other = await makeUser();
     const csv = `${HEADER}\nAcme,,,India,,,,,\n`;
     const res = await req('POST', '/api/imports/leads', rep.cookie, { csv, mapping, assignedToId: other.id });
-    expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: 'cannot_assign_hidden' });
+    expect(res.statusCode).toBe(403);
+    expect((await req('POST', '/api/imports/leads/preview', rep.cookie, { csv })).statusCode).toBe(403);
     expect(await prisma.lead.count()).toBe(0);
+    const manager = await as('MANAGER');
+    expect((await req('POST', '/api/imports/leads/preview', manager.cookie, { csv })).statusCode).toBe(200);
     expect((await req('POST', '/api/imports/leads', undefined, { csv, mapping })).statusCode).toBe(401);
   });
 });

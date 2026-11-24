@@ -179,8 +179,10 @@ export type LeadCreateExtras = {
  * `quiet`: no "Review new lead" task and no notification (bulk migrations).
  * `trustedLink`: the caller resolved `linkCompanyId` itself (CLI), so it is not checked against
  * the acting user's company visibility.
+ * `noDefaultContact`: without a `contactId` the lead has no contact (Import leads decides the contact itself), instead
+ * of the company's primary contact.
  */
-export type CreateLeadOptions = { quiet?: boolean; trustedLink?: boolean };
+export type CreateLeadOptions = { quiet?: boolean; trustedLink?: boolean; noDefaultContact?: boolean };
 
 /** Company fields as derived from a lead's details (the lead form, a CSV row, resolve-company). */
 export function companyDataFromLead(
@@ -264,7 +266,7 @@ export async function createLeadWithCompany(
     const ok = companyId !== null && (await tx.contact.count({ where: { id: input.contactId, companyId, isActive: true } })) > 0;
     if (!ok) throw new ValidationError([{ path: ['contactId'], message: 'Contact must be an active contact of the company' }]);
     contactId = input.contactId;
-  } else if (companyId !== null) {
+  } else if (companyId !== null && !opts.noDefaultContact) {
     contactId = (await tx.contact.findFirst({ where: { companyId, isPrimary: true, isActive: true }, select: { id: true } }))?.id ?? null;
   }
 

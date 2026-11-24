@@ -10,26 +10,37 @@ import { syncCalendarHandler } from './jobs/handlers/syncCalendar.js';
 import { mailActionHandler } from './jobs/handlers/mailAction.js';
 import { campaignStepHandler } from './jobs/handlers/campaignStep.js';
 import { researchCompanyHandler } from './jobs/handlers/researchCompany.js';
+import { importReadFileHandler } from './jobs/handlers/importReadFile.js';
+import { importResearchHandler } from './jobs/handlers/importResearch.js';
+import { importCommitHandler } from './jobs/handlers/importCommit.js';
 import { scheduleCampaigns } from './mailer/schedule.js';
 import { scheduleMailSync } from './mail/schedule.js';
 import { scheduleCalendarSync } from './calendar/schedule.js';
 import { scheduleQuotationExpiry } from './jobs/quotationExpiry.js';
 import { sweepStuckRuns } from './research/service.js';
+import { sweepImportFiles } from './imports/batches.js';
+import { sweepImportResearch } from './imports/research.js';
+import { sweepImportCommit } from './imports/commit.js';
+import { pruneImports } from './imports/manager.js';
 
 export { runOnce, runForever } from './jobs/runner.js';
 
 const HANDLERS: Partial<Record<JobType, JobHandler>> = {
   send_email: sendEmailHandler, send_user_email: sendUserEmailHandler, sync_mailbox: syncMailboxHandler, mail_action: mailActionHandler,
   campaign_step: campaignStepHandler, sync_calendar: syncCalendarHandler, research_company: researchCompanyHandler,
+  import_read_file: importReadFileHandler, import_research: importResearchHandler, import_commit: importCommitHandler,
 };
 
 /**
  * The worker's job lanes, each claimed by its own loop (concurrency 1 per lane). Mail jobs are quick; an AI research
- * run can take minutes (website read + Claude), so it has its own lane.
+ * run can take minutes (website read + Claude), so it has its own lane, shared with Import leads research (one staged
+ * row per job, so company research waits for one row at most); Import leads also has its own lane (reading a 20 MB
+ * file, importing a batch row by row), so a big import never holds up mail or research.
  */
 export const WORKER_LANES: readonly { name: string; types: readonly JobType[] }[] = [
   { name: 'mail', types: ['send_email', 'send_user_email', 'sync_mailbox', 'mail_action', 'campaign_step', 'sync_calendar'] },
-  { name: 'research', types: ['research_company'] },
+  { name: 'research', types: ['research_company', 'import_research'] },
+  { name: 'import', types: ['import_read_file', 'import_commit'] },
 ];
 
 /** How often the worker checks which mailboxes are due a sync. */
@@ -72,13 +83,23 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<void> 
     scheduleQuotationExpiry().catch(warn('quotation expiry')),
     // AI research (release 4): runs a worker will never finish become Failed "Interrupted".
     sweepStuckRuns().catch(warn('research sweep')),
+    // Import leads: files left Reading after their job was lost become Failed "Reading was interrupted".
+    sweepImportFiles().catch(warn('import sweep')),
+    // Import research: rows left running by a lost job are waiting again; a Researching batch without a job gets one.
+    sweepImportResearch().catch(warn('import research sweep')),
+    // Import: a lost import job is queued again (it resumes), or the batch becomes Failed and can be continued.
+    sweepImportCommit().catch(warn('import commit sweep')),
   ]);
   // At startup no research job is running yet, so every Processing run was interrupted.
   await sweepStuckRuns({ startup: true }).catch(warn('research startup sweep'));
+  await sweepImportFiles().catch(warn('import startup sweep'));
+  await sweepImportResearch({ startup: true }).catch(warn('import research startup sweep'));
+  await sweepImportCommit({ startup: true }).catch(warn('import commit startup sweep'));
   void schedule();
   const scheduler = setInterval(schedule, SCHEDULE_EVERY_MS);
-  // Old done / failed job rows are deleted at start and hourly.
-  const cleanup = () => pruneJobs(prisma).catch(warn('job cleanup'));
+  // Old done / failed job rows are deleted at start and hourly; so are import originals past 90 days, and batches never
+  // imported that nobody touched for 90 days.
+  const cleanup = () => Promise.all([pruneJobs(prisma).catch(warn('job cleanup')), pruneImports().catch(warn('import retention'))]);
   void cleanup();
   const cleaner = setInterval(cleanup, CLEANUP_EVERY_MS);
 

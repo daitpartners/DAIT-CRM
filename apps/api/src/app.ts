@@ -19,6 +19,7 @@ import { calendarRoutes } from './routes/calendar.js';
 import { notificationRoutes } from './routes/notifications.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { importRoutes } from './routes/imports.js';
+import { importBatchRoutes } from './routes/importBatches.js';
 import { navCountRoutes } from './routes/navCounts.js';
 import { reportRoutes } from './routes/reports.js';
 import { emailTemplateRoutes } from './routes/emailTemplates.js';
@@ -161,5 +162,6 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(researchRoutes, { prefix: '/api' });
   await app.register(dashboardRoutes, { prefix: '/api' });
   await app.register(importRoutes, { prefix: '/api' });
+  await app.register(importBatchRoutes, { prefix: '/api' });
   return app;
 }

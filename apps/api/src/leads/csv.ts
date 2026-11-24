@@ -138,7 +138,8 @@ export type CsvImportResult = {
   errors: { row: number; message: string }[];
 };
 
-function rowMessage(e: unknown): string | null {
+/** A row error in plain words (shared with Import leads), or null when it was unexpected (logged by the caller). */
+export function rowMessage(e: unknown): string | null {
   if (e instanceof RowError) return e.message;
   if (e instanceof ValidationError) return e.issues.map((i) => `${i.path.join('.') || 'row'}: ${i.message}`).join('; ');
   if (e instanceof RuleError) return e.code;

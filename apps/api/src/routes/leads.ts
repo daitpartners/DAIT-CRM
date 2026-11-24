@@ -2,7 +2,8 @@ import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { Prisma, type Lead } from '@prisma/client';
 import {
   CLOSED_STATUSES, CompanyActivityQuery, DuplicateCheck, LeadBulk, LeadCreate, LeadDoNotEmail, LeadListQuery, LeadStatusChange, LeadTransfer, LeadUnassign,
-  LeadUpdate, LogCall, MeetingNote, ResearchNote, ResolveCompany, SwitchContact, UpdatedAtOnly, can, checkDomain, isClosedStatus, pageArgs, type CompanyCandidate,
+  LeadUpdate, LogCall, MeetingNote, ResearchNote, ResolveCompany, SwitchContact, UpdatedAtOnly, BATCH_NUMBER_RE, can, checkDomain, isClosedStatus, pageArgs,
+  type CompanyCandidate,
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { audit } from '../audit.js';
@@ -144,7 +145,10 @@ function filterWhere(query: LeadListQuery): Prisma.LeadWhereInput[] {
   if (query.priority) and.push({ priority: query.priority });
   if (query.from) and.push({ createdAt: { gte: dateOnly(query.from) } });
   if (query.to) and.push({ createdAt: { lt: new Date(dateOnly(query.to).getTime() + DAY_MS) } });
-  if (query.q) {
+  if (query.q && BATCH_NUMBER_RE.test(query.q.trim())) {
+    // "Open leads in Leads list" from the Data manager: the batch's leads exactly (not IMPORT-…-2 for IMPORT-…).
+    and.push({ importBatch: { equals: query.q.trim(), mode: 'insensitive' } });
+  } else if (query.q) {
     const contains = { contains: query.q, mode: 'insensitive' as const };
     and.push({
       OR: [

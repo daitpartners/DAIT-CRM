@@ -45,6 +45,8 @@ export interface ResearchDeps {
 
 /** Serialises run starts across the CRM (one at a time per company, and the daily limit). */
 const START_LOCK = 4_042_001;
+/** Serialises import Claude reservations, so two at once never both take the month's last run. */
+const CLAUDE_RESERVE_LOCK = 4_042_201;
 /** A run still Pending this long after it was queued is treated as lost (the worker never picked it up). */
 const PENDING_STALE_MS = 4 * STALE_AFTER_MS;
 const RESEARCH_FIELD_KEYS = new Set<string>(RESEARCH_FIELDS.map((f) => f.field));
@@ -70,14 +72,37 @@ export async function loadEnrichmentSettings(db: Db): Promise<EnrichmentSettings
 const startOfUtcDay = (now: Date) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 const startOfUtcMonth = (now: Date) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 
-/** Runs that used Claude and Places Details calls recorded on runs this calendar month (UTC). */
+/**
+ * This calendar month (UTC): Claude runs (research runs that used Claude, import rows researched with Claude and Claude
+ * calls made reading import files) and Places Details calls recorded on runs.
+ */
 export async function monthTotals(db: Db, now = new Date()): Promise<{ claudeRuns: number; placesCalls: number }> {
   const since = startOfUtcMonth(now);
-  const [sum, claudeRuns] = await Promise.all([
+  const [sum, runs, importRows, importFiles] = await Promise.all([
     db.enrichmentRun.aggregate({ where: { createdAt: { gte: since } }, _sum: { placesCalls: true } }),
     db.enrichmentRun.count({ where: { createdAt: { gte: since }, sources: { array_contains: ['claude'] } } }),
+    db.importRow.count({ where: { claudeAt: { gte: since } } }),
+    db.importFile.aggregate({ where: { readAt: { gte: since } }, _sum: { claudeCalls: true } }),
   ]);
-  return { claudeRuns, placesCalls: sum._sum.placesCalls ?? 0 };
+  return { claudeRuns: runs + importRows + (importFiles._sum.claudeCalls ?? 0), placesCalls: sum._sum.placesCalls ?? 0 };
+}
+
+/**
+ * Reserves one Claude call for an import (file reading or row research) before it is made: while Claude is on and the
+ * month's run cap is not reached, `record` writes the spend in the same transaction (`import_files.claude_calls + 1`
+ * and `read_at`, or `import_rows.claude_at`) and the answer is true; otherwise nothing is written and it is false. The
+ * call counts even if its result is later discarded. Imports never count toward the daily run limit.
+ */
+export async function reserveClaudeRun(record: (tx: Prisma.TransactionClient) => Promise<void>): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${CLAUDE_RESERVE_LOCK})`;
+    const settings = await loadEnrichmentSettings(tx);
+    if (!settings.claudeEnabled || settings.claudeMonthlyRunCap <= 0) return false;
+    const { claudeRuns } = await monthTotals(tx);
+    if (claudeRuns >= settings.claudeMonthlyRunCap) return false;
+    await record(tx);
+    return true;
+  });
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -108,7 +133,7 @@ const VERIFICATION_FIELDS = [
   'mainProducts', 'websiteTechnology',
 ];
 
-function verificationStatus(company: Company, verified: Record<string, boolean>): string {
+export function verificationStatus(company: Company, verified: Record<string, boolean>): string {
   const filled = VERIFICATION_FIELDS.filter((f) => !isEmpty((company as unknown as Record<string, unknown>)[f]));
   const done = filled.filter((f) => verified[f]);
   if (filled.length > 0 && done.length === filled.length) return 'Verified';
@@ -205,7 +230,10 @@ export async function startResearch(opts: StartOptions): Promise<number | null> 
       await interruptRun(tx, run, now);
     }
     const settings = await loadEnrichmentSettings(tx);
-    const today = await tx.enrichmentRun.count({ where: { createdAt: { gte: startOfUtcDay(now) } } });
+    // Runs an import created (to hold its suggestions) never use up company research's daily limit.
+    const today = await tx.enrichmentRun.count({
+      where: { createdAt: { gte: startOfUtcDay(now) }, NOT: { sources: { array_contains: ['import'] } } },
+    });
     if (today >= settings.dailyRunLimit) {
       if (opts.auto) return null;
       throw new ResearchError('daily_limit', 429);
@@ -480,7 +508,11 @@ async function visibleSuggestion(tx: Prisma.TransactionClient, user: AuthUser, i
   return { s };
 }
 
-async function applySuggestion(
+/**
+ * Accepts one suggestion: the value written, the field verified, `ai_fields` records its confidence and source (also
+ * used by Import leads for research values accepted at 80% or higher). The caller checks the field is not locked.
+ */
+export async function applySuggestion(
   tx: Prisma.TransactionClient, user: AuthUser, s: { id: number; runId: number; field: string; value: Prisma.JsonValue; confidence: number; sourceUrl: string },
   company: Company,
 ): Promise<Company> {

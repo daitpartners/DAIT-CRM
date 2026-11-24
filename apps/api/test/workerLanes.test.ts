@@ -11,9 +11,11 @@ beforeEach(resetDb);
 const lane = (name: string) => WORKER_LANES.find((l) => l.name === name)!;
 
 describe('worker lanes', () => {
-  it('research has a lane of its own; every job type is in exactly one lane', () => {
-    expect(lane('research').types).toEqual(['research_company']);
+  it('research and import have lanes of their own; every job type is in exactly one lane', () => {
+    expect(lane('research').types).toEqual(['research_company', 'import_research']);
     expect(lane('mail').types).not.toContain('research_company');
+    expect(lane('import').types).toEqual(['import_read_file', 'import_commit']);
+    expect(JOB_TYPES).toContain('import_research');
     const all = WORKER_LANES.flatMap((l) => l.types);
     expect(new Set(all).size).toBe(all.length);
     expect([...all].sort()).toEqual([...JOB_TYPES].sort());

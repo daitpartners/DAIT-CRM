@@ -43,11 +43,13 @@ See the processes with `! ssh root@88.222.213.73 'sudo -iu daitcrm pm2 ls'`. (In
 | `live/releases/<sha>/` | One folder per installed release (the newest 5 are kept, in install order from `live/releases.log`) |
 | `live/current` | Symlink to the release that is running; PM2 runs from it |
 | `live/shared/.env` | Environment file, shared by every release |
-| `live/shared/storage/` | Created at setup; nothing in the current code writes there (template uploads are not kept; the quotation PDF logo ships in `apps/api/assets`) |
+| `live/shared/storage/` | Created at setup; `STORAGE_DIR` for the api and worker (set in `deploy/ecosystem.config.cjs`). Import leads uploads live in `shared/storage/imports` (`imports/<batch>/<file>`, files 0600). Template uploads are not kept; the quotation PDF logo ships in `apps/api/assets` |
 | `build/<sha>/` | Where a release is built on the server during a manual deploy |
 | `incoming/<sha>.tgz` | The packed release that `release.sh` installs |
 | `backups/` | Database dumps (see Backups) |
 | `.pm2/logs/` | Process logs (see Logs) |
+
+**Memory limits (PM2 `max_memory_restart`, `deploy/ecosystem.config.cjs`):** the api restarts at 400M, the worker at 1G. The worker reads each Import leads file in a separate child process with a 2-minute timeout and a 512 MB V8 heap limit. That limit covers the JavaScript heap only: Buffers (the uploaded file, up to 20 MB, and the inflated entries of an .xlsx / .docx, capped at 100 MB in total) come on top, so one read can use roughly 650 MB at worst. PM2 measures the worker process itself, not that child; the worker's 1G is headroom for holding the upload next to mail and research (the server has 32 GB). A read that runs out of memory only ends the child (the file is Failed "too large").
 
 **There is no test copy on the server.** `~/test`, the `crm-test` / `crm-test-worker` apps, the `dait_crm_test`
 database and crm-test.daitpartners.com were planned but never set up (see "If you later want a test copy" at the end).
@@ -276,6 +278,19 @@ password prompt, at least 12 characters):
 Or set `LOCAL_ADMIN_PASSWORD` for that one command instead of typing it. Running it again for the same email resets
 the password. For a break-glass sign-in (Microsoft sign-in broken): add `LOCAL_ADMIN_LOGIN=1`, reload with
 `--update-env`, sign in, then remove it and reload again.
+
+## Release 5 (Import leads): checks and notes
+
+- **Build:** `npm ci` on the server needs `cdn.sheetjs.com` reachable; the `xlsx` package is installed from its tarball
+  there (not from the npm registry).
+- **After the deploy:** upload one 20 MB file (Leads → Import leads) through OpenLiteSpeed on live, to confirm the proxy
+  passes a body that size.
+- **One lane:** file reads and imports share the worker's `import` lane. A 5,000-row import takes about 100 s (more on
+  live), and other uploads wait at "Reading" until it finishes.
+- **Rollback:** the `company_name_normalise` migration (number 20 on this branch, 21 after `email-reader-html`)
+  rewrites the derived `companies.name_normalised` keys. A rolled-back release runs its older normaliser against the
+  rewritten keys, so duplicate matching by company name is weaker until the next deploy; no data is lost. The few
+  seconds between `migrate deploy` and the reload behave the same way.
 
 ## One-time steps after a release
 

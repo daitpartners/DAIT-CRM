@@ -8,9 +8,18 @@ test.each([
   ['Northwind Logistics Private Limited', 'northwind logistics'], ['Meyer Bauhaus GmbH', 'meyer bauhaus'],
   ['Acme, Inc.', 'acme'], ['  Zenith   Retail LLC ', 'zenith retail'],
 ])('normaliseCompanyName(%s)', (input, out) => expect(normaliseCompanyName(input)).toBe(out));
-test('normaliseCompanyName of only legal suffixes is empty (callers treat as no key)', () => {
-  expect(normaliseCompanyName('Company Group Ltd')).toBe('');
+test('normaliseCompanyName keeps a name that is only legal forms (never empty)', () => {
+  expect(normaliseCompanyName('Company Group Ltd')).toBe('company');
+  expect(normaliseCompanyName('Eurl')).toBe('eurl');
+  expect(normaliseCompanyName('S.A.')).toBe('sa');
+  expect(normaliseCompanyName('')).toBe('');
 });
+test.each([
+  ['AG Foods', 'ag foods'], ['NV Energy', 'nv energy'], ['Sa Pa Travel', 'sa pa travel'], ['LP Gas Co', 'lp gas'],
+  ['KG Logistics', 'kg logistics'], ['Lda Imports', 'lda imports'], ['Co-op', 'co op'], ['Meridian Group', 'meridian'],
+  ['Grupo Bimbo S.A.B. de C.V.', 'grupo bimbo'], ['Acme S.de R.L.', 'acme'], ['Acme S. de R.L. de C.V.', 'acme'],
+  ['Acme S de RL', 'acme'], ['Acme Corporation Inc.', 'acme'],
+])('normaliseCompanyName removes legal forms only at the end: %s', (input, out) => expect(normaliseCompanyName(input)).toBe(out));
 test('FREE_MAIL_DOMAINS covers the common consumer providers, including Indian ones', () => {
   for (const d of ['gmail.com', 'hotmail.com', 'icloud.com', 'outlook.com', 'yahoo.com', 'yahoo.co.in', 'rediffmail.com', 'zohomail.in', 'proton.me']) {
     expect(FREE_MAIL_DOMAINS.has(d)).toBe(true);
@@ -34,3 +43,21 @@ test('isSharedHost covers social, builder and marketplace hosts and their subdom
   expect(isSharedHost('myfacebook.com')).toBe(false);
 });
 test.each([['+91 98220 41178', '9822041178'], ['98220 41178', '9822041178'], ['020 6710', ''], [null, '']])('normalisePhone(%s)', (i, o) => expect(normalisePhone(i)).toBe(o));
+test('isFreeMail knows provider families on any country suffix, and national ISPs', () => {
+  for (const d of [
+    'hotmail.es', 'yahoo.es', 'outlook.es', 'hotmail.fr', 'live.com.mx', 'yahoo.com.mx', 'outlook.com.br', 'gmx.fr',
+    'aol.fr', 'msn.es', 'yandex.ua', 'protonmail.ch', 'googlemail.de', 'terra.com.mx', 'terra.es',
+    'orange.fr', 'wanadoo.fr', 'free.fr', 'sfr.fr', 'laposte.net', 'neuf.fr', 'telefonica.net', 'movistar.es',
+    'prodigy.net.mx', 'bigpond.com', 't-online.de', 'mail.ru', 'web.de', 'libero.it', 'mail.hotmail.es',
+  ]) expect(isFreeMail(d), d).toBe(true);
+  for (const d of ['acme.es', 'live.acme.com', 'hotmailer.com', 'orange.com', 'yahooligans-tours.es', 'terrazas.mx']) {
+    expect(isFreeMail(d), d).toBe(false);
+  }
+});
+test.each([
+  ['Acme S.L.', 'acme'], ['Acme SL', 'acme'], ['Acme S. A.', 'acme'], ['Construcciones Ibéricas S.A. de C.V.', 'construcciones ibericas'],
+  ['Société Générale', 'societe generale'], ['Societe Generale SAS', 'societe generale'], ['Dupont SARL', 'dupont'],
+  ['Rossi S.r.l.', 'rossi'], ['Müller AG', 'muller'], ['Van Dijk B.V.', 'van dijk'], ['Acme Corp.', 'acme'],
+  ['Acme Pvt. Ltd.', 'acme'], ['A.Smith Trading', 'a smith trading'], ['J. Booth & Sons', 'j booth sons'],
+  ['Banco de España', 'banco de espana'], ['Meridian Textiles Limited', 'meridian textiles'],
+])('normaliseCompanyName folds accents and es/fr legal forms: %s', (input, out) => expect(normaliseCompanyName(input)).toBe(out));

@@ -24,7 +24,7 @@ async function csvGuard<T>(reply: FastifyReply, fn: () => Promise<T>): Promise<T
 }
 
 export const importRoutes: FastifyPluginAsync = async (app) => {
-  app.post('/imports/leads/preview', { bodyLimit, preHandler: [requireRight('manage_leads')] }, async (request, reply) => {
+  app.post('/imports/leads/preview', { bodyLimit, preHandler: [requireRight('import_leads')] }, async (request, reply) => {
     const { csv } = parseBody(CsvPreview, request.body);
     return csvGuard(reply, async () => {
       const parsed = parseCsv(csv);
@@ -38,7 +38,7 @@ export const importRoutes: FastifyPluginAsync = async (app) => {
     });
   });
 
-  app.post('/imports/leads', { bodyLimit, preHandler: [requireRight('manage_leads')] }, async (request, reply) => {
+  app.post('/imports/leads', { bodyLimit, preHandler: [requireRight('import_leads')] }, async (request, reply) => {
     const body = parseBody(CsvImport, request.body);
     const user = request.user!;
     return csvGuard(reply, () => guard(reply, async () => {

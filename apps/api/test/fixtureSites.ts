@@ -26,7 +26,7 @@ const ROUTES: Record<string, Record<string, string>> = {
 /** Hosts the reader tests may reach (all served by this server on 127.0.0.1). */
 export const FIXTURE_HOSTS = [
   'site.test', 'meta.test', 'other.test', 'slow.test', 'big.test', 'blocked.test', 'hop.test', 'gzip.test',
-  'mailto.test',
+  'mailto.test', 'freight.test', 'nomail.test',
 ];
 
 export const BIG_PAGE_BYTES = 2 * 1024 * 1024;
@@ -109,6 +109,24 @@ export async function startFixtureServer(): Promise<FixtureServer> {
       const hostile = 'mailto:' + 'a'.repeat(500_000) + '@' + 'b'.repeat(500_000);
       res.writeHead(200, { 'content-type': 'text/html' })
         .end(`<html><body><a href="${hostile}">x</a><a href="mailto:office@mailto.test">office</a></body></html>`);
+      return;
+    }
+    if (host === 'nomail.test') {
+      // Import research: an email and a phone written as text only (no mailto, no JSON-LD), for Claude to cite.
+      if (path !== '/') { res.writeHead(404).end(); return; }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><html><head><title>No Mail Ltd</title></head>
+<body><h1>No Mail Ltd</h1><p>Sales: sales@nomail.test, or ring +91 (20) 5555-0199.</p>
+<p>Hall 12 34, stand 5678 90.</p></body></html>`);
+      return;
+    }
+    if (host === 'freight.test') {
+      // Import research: JSON-LD address in Pune and a same-domain mailto; no phone, no links to other pages.
+      if (path !== '/') { res.writeHead(404).end(); return; }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><html><head><title>Fixture Freight</title>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Fixture Freight",
+"address":{"@type":"PostalAddress","addressLocality":"Pune","addressCountry":"IN"}}</script></head>
+<body><h1>Fixture Freight</h1><p>Road and rail freight across Maharashtra.</p>
+<p>Write to <a href="mailto:office@freight.test">office@freight.test</a>.</p></body></html>`);
       return;
     }
     if (host === 'other.test' || host === 'hop.test' || host === 'mailto.test') {

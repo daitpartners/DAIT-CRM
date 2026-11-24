@@ -13,5 +13,9 @@ export TEST_LOGIN=1
 export SESSION_SECRET=e2e-session-secret-0123456789-abcdefghijklmnopqrstuv
 export TOKEN_ENCRYPTION_KEY=BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=
 export WEB_DIST="$PWD/apps/web/dist"
+# Import leads uploads go to a folder emptied on every run; apps/api/test/e2e-import-jobs.ts reads the same one
+export STORAGE_DIR="${E2E_STORAGE_DIR:-${TMPDIR:-/tmp}/dait-crm-e2e-storage}"
+rm -rf "$STORAGE_DIR"
+mkdir -p "$STORAGE_DIR"
 npm run e2e:seed -w apps/api
 exec node apps/api/dist/server.js

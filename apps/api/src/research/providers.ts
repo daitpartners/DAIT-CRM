@@ -545,7 +545,7 @@ export interface ClaudeProviderOptions {
 }
 
 /** For comparing sources: http and https alike, host lowercased without `www.`, no fragment, no trailing slash. */
-const normaliseUrl = (u: string) => {
+export const normaliseUrl = (u: string) => {
   try {
     const url = new URL(u.trim());
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return u.trim();

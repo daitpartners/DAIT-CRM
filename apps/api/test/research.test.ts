@@ -4,7 +4,9 @@ import { ClaudeRunError, type ClaudeRunner } from '../src/research/providers';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '../src/db';
 import { buildApp } from '../src/app';
-import { runResearch, startResearch, sweepStuckRuns, type ResearchDeps } from '../src/research/service';
+import {
+  monthTotals, reserveClaudeRun, runResearch, startResearch, sweepStuckRuns, ResearchError, type ResearchDeps,
+} from '../src/research/service';
 import { STALE_AFTER_MS } from '../src/jobs/queue';
 import { researchCompanyHandler } from '../src/jobs/handlers/researchCompany';
 import { fakeGraph, resetDb, seedLookups } from './helpers';
@@ -777,5 +779,107 @@ describe('final review fixes', () => {
     expect((await req('GET', `/api/leads/${pool.id}`, admin.cookie)).json().companyVisible).toBe(true);
     const mine = await makeLead({ companyId: hidden.id, assignedToId: rep.user.id });
     expect((await req('GET', `/api/leads/${mine.id}`, rep.cookie)).json().companyVisible).toBe(true);
+  });
+});
+
+describe('imports and the Claude run cap', () => {
+  const lastMonth = () => {
+    const now = new Date();
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1) - 86_400_000);
+  };
+
+  let batchN = 0;
+  /** A batch with one file and one staged row. */
+  async function stagedRow(file: { claudeCalls?: number; readAt?: Date | null } = {}, row: { claudeAt?: Date | null; researchedAt?: Date | null } = {}) {
+    const batch = await prisma.importBatch.create({ data: { number: `IMPORT-2026-11-24-${(batchN += 1)}`, language: 'en', leadType: 'Prospect' } });
+    const f = await prisma.importFile.create({
+      data: { batchId: batch.id, name: 'list.xlsx', ext: 'xlsx', size: 100, storagePath: 'imports/x', claudeCalls: file.claudeCalls ?? 0, readAt: file.readAt ?? null },
+    });
+    const r = await prisma.importRow.create({
+      data: {
+        batchId: batch.id, fileId: f.id, position: 1, originKind: 'row', originN: 2, status: 'Missing details', include: true,
+        claudeAt: row.claudeAt ?? null, researchedAt: row.researchedAt ?? null,
+      },
+    });
+    return { batch, file: f, row: r };
+  }
+
+  it('monthTotals counts import rows researched with Claude and Claude calls made reading files this month', async () => {
+    const now = new Date();
+    await stagedRow({ claudeCalls: 2, readAt: now }, { claudeAt: now });
+    // Last month's spend and a row researched without Claude count for nothing.
+    await stagedRow({ claudeCalls: 5, readAt: lastMonth() }, { claudeAt: lastMonth() });
+    await stagedRow({}, { researchedAt: now });
+    expect(await prisma.enrichmentRun.count()).toBe(0);
+    expect((await monthTotals(prisma)).claudeRuns).toBe(3);
+  });
+
+  it('runs an import created are left out of the daily limit; other runs still count', async () => {
+    const admin = await as('ADMINISTRATOR');
+    await prisma.enrichmentSettings.create({ data: { id: 1, dailyRunLimit: 1 } });
+    const a = await makeCompany({ website: null });
+    const b = await makeCompany({ website: null });
+    await prisma.enrichmentRun.create({ data: { companyId: a.id, trigger: 'Import', engine: 'Website reader', status: 'Completed', sources: ['import', 'website'] } });
+    expect(await startResearch({ companyId: b.id, trigger: 't', userId: admin.user.id })).toEqual(expect.any(Number));
+    // b's own run (sources []) now fills the day.
+    const c = await makeCompany({ website: null });
+    await expect(startResearch({ companyId: c.id, trigger: 't', userId: admin.user.id })).rejects.toMatchObject({ code: 'daily_limit', status: 429 });
+  });
+
+  it('a run with other sources today reaches the limit (429)', async () => {
+    const admin = await as('ADMINISTRATOR');
+    await prisma.enrichmentSettings.create({ data: { id: 1, dailyRunLimit: 1 } });
+    const a = await makeCompany({ website: null });
+    const b = await makeCompany({ website: null });
+    await prisma.enrichmentRun.create({ data: { companyId: a.id, trigger: 'x', engine: 'Website reader', status: 'Completed', sources: ['website'] } });
+    const refused = startResearch({ companyId: b.id, trigger: 't', userId: admin.user.id });
+    await expect(refused).rejects.toBeInstanceOf(ResearchError);
+    await expect(refused).rejects.toMatchObject({ code: 'daily_limit', status: 429 });
+  });
+
+  it('import rows researched today (with or without Claude) never affect the daily limit', async () => {
+    const admin = await as('ADMINISTRATOR');
+    await prisma.enrichmentSettings.create({ data: { id: 1, dailyRunLimit: 1 } });
+    const now = new Date();
+    await stagedRow({ claudeCalls: 3, readAt: now }, { claudeAt: now, researchedAt: now });
+    await stagedRow({}, { researchedAt: now });
+    const c = await makeCompany({ website: null });
+    expect(await startResearch({ companyId: c.id, trigger: 't', userId: admin.user.id })).toEqual(expect.any(Number));
+  });
+
+  it('reserveClaudeRun records the spend while runs are left this month, and refuses at the cap', async () => {
+    await prisma.enrichmentSettings.create({ data: { id: 1, claudeEnabled: true, claudeMonthlyRunCap: 2 } });
+    const c = await makeCompany({ website: null });
+    await prisma.enrichmentRun.create({ data: { companyId: c.id, trigger: 'x', engine: 'Claude', status: 'Completed', sources: ['website', 'claude'] } });
+    const { row } = await stagedRow();
+    const first = vi.fn(async (tx: Parameters<Parameters<typeof reserveClaudeRun>[0]>[0]) => {
+      await tx.importRow.update({ where: { id: row.id }, data: { claudeAt: new Date() } });
+    });
+    expect(await reserveClaudeRun(first)).toBe(true);
+    expect(first).toHaveBeenCalledTimes(1);
+    expect((await prisma.importRow.findUniqueOrThrow({ where: { id: row.id } })).claudeAt).not.toBeNull();
+    const second = vi.fn(async () => {});
+    expect(await reserveClaudeRun(second)).toBe(false);
+    expect(second).not.toHaveBeenCalled();
+  });
+
+  it('reserveClaudeRun refuses when Claude is off or the cap is 0', async () => {
+    await prisma.enrichmentSettings.create({ data: { id: 1, claudeEnabled: false, claudeMonthlyRunCap: 10 } });
+    const record = vi.fn(async () => {});
+    expect(await reserveClaudeRun(record)).toBe(false);
+    await prisma.enrichmentSettings.update({ where: { id: 1 }, data: { claudeEnabled: true, claudeMonthlyRunCap: 0 } });
+    expect(await reserveClaudeRun(record)).toBe(false);
+    expect(record).not.toHaveBeenCalled();
+  });
+
+  it('two reservations at once with one run left: exactly one succeeds', async () => {
+    await prisma.enrichmentSettings.create({ data: { id: 1, claudeEnabled: true, claudeMonthlyRunCap: 1 } });
+    const { file } = await stagedRow();
+    const spend = async (tx: Parameters<Parameters<typeof reserveClaudeRun>[0]>[0]) => {
+      await tx.importFile.update({ where: { id: file.id }, data: { claudeCalls: { increment: 1 }, readAt: new Date() } });
+    };
+    const results = await Promise.all([reserveClaudeRun(spend), reserveClaudeRun(spend)]);
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect((await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } })).claudeCalls).toBe(1);
   });
 });

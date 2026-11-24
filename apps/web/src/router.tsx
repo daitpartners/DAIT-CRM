@@ -9,6 +9,7 @@ import { NotFound } from './pages/NotFound';
 import { CompaniesList } from './pages/companies/CompaniesList';
 import { CompanyProfile } from './pages/companies/CompanyProfile';
 import { ContactsList } from './pages/contacts/ContactsList';
+import { ImportLeadsPage } from './pages/imports/ImportLeadsPage';
 import { LeadPage } from './pages/leads/LeadPage';
 import { LeadsList } from './pages/leads/LeadsList';
 import { NewLeadPage } from './pages/leads/NewLeadPage';
@@ -43,6 +44,8 @@ export const router = createBrowserRouter([
       { index: true, element: <Dashboard /> },
       { path: 'leads', element: <LeadsList /> },
       { path: 'leads/new', element: <NewLeadPage /> },
+      { path: 'leads/import', element: <ImportLeadsPage view="wizard" /> },
+      { path: 'leads/import/manager', element: <ImportLeadsPage view="manager" /> },
       { path: 'leads/:id', element: <LeadPage /> },
       { path: 'companies', element: <CompaniesList /> },
       { path: 'companies/:id', element: <CompanyProfile /> },

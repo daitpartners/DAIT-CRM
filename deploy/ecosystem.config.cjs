@@ -19,9 +19,13 @@ function app(env, kind, port) {
       NODE_ENV: 'production',
       ...(worker ? {} : { PORT: String(port), HOST: '127.0.0.1' }),
       WEB_DIST: `${cwd}/apps/web/dist`,
+      // Import leads uploads (imports/<batch>/<file>), kept across releases.
+      STORAGE_DIR: `${root}/${env}/shared/storage`,
       RELEASE: release(cwd),
     },
-    max_memory_restart: '400M',
+    // The worker also holds Import leads uploads while handing them to the read process (a separate child with its
+    // own 512 MB heap limit): 1G leaves headroom next to mail and research. The api stays at 400M.
+    max_memory_restart: worker ? '1G' : '400M',
     // A worker may be mid-send when it is told to stop; the api only has to finish requests.
     kill_timeout: worker ? 30000 : 10000,
   };

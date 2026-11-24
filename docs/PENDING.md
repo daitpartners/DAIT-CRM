@@ -58,6 +58,10 @@ in the git history).
 - **Apollo.io:** needs a paid Apollo plan; not built (shows "not connected").
 - **Break-glass sign-in:** once everyone signs in with Microsoft, have `LOCAL_ADMIN_LOGIN` removed from the server
   settings.
+- **Import leads (release 5, after it is deployed):** Claude Code must be switched on with a monthly run cap (see the
+  Claude Code item above) for Import leads to read PDF / Word / text files with Claude and to research rows with web
+  search; with Claude off only the deterministic reader and the free website reader run. Optionally add a catch-all
+  English allocation rule in Settings (see "Import leads" below, Q4).
 - **Answer the owner decisions below.**
 
 Good to know: the AI daily run limit (default 50 across the CRM) resets at midnight UTC (05:30 IST); the Claude monthly
@@ -162,3 +166,64 @@ Small issues found in reviews and not fixed yet.
   with the keyboard — both as the prototype.
 - Check the first live Outlook sync: compare times and all-day events with Outlook for a couple of users.
 - Database tidy-up: the unused column `claude_monthly_cap_usd` can be dropped in a later migration.
+
+## Import leads (release 5, branch `import-leads`, not yet released)
+
+**Decided: controller rulings of 24 Nov 2026 (you may overturn any of them).** Q1 and Q3 differ from the written spec;
+both are recorded in the spec's "Deviations from the spec" section
+(`docs/superpowers/specs/2026-11-24-import-leads-design.md`).
+- **Q1, Ready rule (deviation):** a row is "Ready" when it has a company, a country and an **email** (as the approved
+  mockup). A row with only a phone or only a website is "Missing details" and goes to research. Research values never
+  change a row's status.
+- **Q2, unticked "Accept research values ≥ 80%":** research values stay suggestions. Rows that rely on them for their
+  only email or phone are listed under "Rows that still need you" (Import them / Leave them out, nothing pre-chosen);
+  rows whose country exists only from research are listed there too and in the rows-to-fix download.
+- **Q3, daily research limit (deviation):** imports are exempt from the daily research limit. Rows read only by the free
+  website reader count toward nothing; every Claude call an import makes (reading a document or researching a row)
+  counts toward the monthly Claude run cap only, reserved before the call. Company research (release 4) keeps the daily
+  limit as today.
+- **Q4, allocation:** unchanged. Rows that no allocation rule matches import **unassigned** (as today); step 4 says so.
+  If you want every English import assigned, add a catch-all English rule in Settings.
+- **Q5, who can import:** the right `import_leads` is given to Administrators and Managers; Undo (`undo_imports`) to
+  Administrators only. A Sales Representative does not see the Import leads button and is refused the page.
+
+**Notes for the release:**
+- `STORAGE_DIR` (uploads, `shared/storage/imports`) is set for the API and the worker in `deploy/ecosystem.config.cjs`
+  (live and any future test copy); see `docs/ENVIRONMENT.md` and `docs/DEPLOYMENT.md`. Migrations 20 and 21
+  (`docs/MIGRATIONS.md`).
+- Original files are deleted 90 days after upload (the batch, its rows and its leads stay; the Data manager then shows
+  "Deleted after 90 days").
+- The old one-step CSV endpoints `/api/imports/leads/preview` and `/api/imports/leads` are no longer used by the
+  screens and now need `import_leads` (Administrators and Managers); remove them in the release after this one.
+- **One worker lane for imports and file reads:** reading uploads and importing batches share the worker's `import`
+  lane. A 5,000-row import takes about 100 s (more on live, with allocation), and other people's uploads wait at
+  "Reading" until it finishes.
+- **Rollback after the migrations:** the `company_name_normalise` migration (20 on this branch, 21 once
+  `email-reader-html` is merged first) rewrites `companies.name_normalised`. If a deploy is rolled back, the previous
+  release runs against the rewritten keys, so duplicate matching by name is weaker until the next deploy (nothing is
+  lost; the keys are derived).
+- **Release checks:** the server build (`npm ci`) must reach `cdn.sheetjs.com` (the `xlsx` package is a tarball from
+  there); after the deploy, upload one 20 MB file through OpenLiteSpeed on live to confirm the proxy allows the body
+  size.
+- Claude counting: one monthly cap covers company research runs, import row research and import document calls; the
+  step-3 tile shows this month's total against the cap.
+
+**Known minors left as they are (from the task reviews):**
+- Row errors from field validation are stored as English text ("path: message"); store a code + field name so the Data
+  manager can translate them.
+- "M." is in the honorific list (French "Monsieur"), so an Indian initial style such as "M. Karthik" is read as
+  "Karthik" when matching and splitting names; and a row whose contact name matches an existing contact reuses that
+  contact even when its email differs.
+- The heading-word list can still drop a real company named only with heading words when the block has no contact
+  value and no matching website (e.g. "Exhibitor Services").
+- A one-line record without separators ("Contact Mr.Smith at Acme Ltd v1.2.3 info@acme.com") gives the whole line as
+  the company.
+- A document read with Claude is staged once, at the end of the file (rows appear only when the whole file is read; a
+  long file can take up to about 12 minutes). Kept so a file over 5,000 rows is refused as a whole.
+- Claude calls on a file are counted in the month of the file's last `readAt`: a read that spans midnight on the 1st,
+  or a file read again in a new month, counts its earlier calls in the newer month (over-count of the current month).
+- The public suffix list used to check found websites ages with the pinned `tldts` version; bump it now and then.
+- Real 12,000-character chunk timing: measure Claude's time per chunk on a real, dense exhibitor list after the release
+  (dense chunks may come close to the call timeout).
+- The Data manager's Errors tab shows each row's staged (step-2) status badge, so a row that failed at import usually
+  reads "Ready" next to "Why it was not imported". The Status column could be hidden on that tab if it confuses.

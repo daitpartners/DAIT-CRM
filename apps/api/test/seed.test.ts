@@ -48,3 +48,10 @@ describe('seedSampleCompanies', () => {
     expect(Number(next.number.slice(3))).toBeGreaterThan(322);
   });
 });
+
+describe('seedLookups', () => {
+  it('lead sources include Import (the source of every lead an import creates)', async () => {
+    const sources = await prisma.lookupValue.findMany({ where: { group: 'lead_source' }, select: { value: true } });
+    expect(sources.map((s) => s.value)).toContain('Import');
+  });
+});

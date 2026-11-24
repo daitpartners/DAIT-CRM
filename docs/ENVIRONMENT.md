@@ -41,6 +41,7 @@ Never write a real value into the repository, a ticket or a chat.
 | `HOST` | `127.0.0.1` (API only) | Interface the API listens on; code default `127.0.0.1`. Never `0.0.0.0`: OpenLiteSpeed is the only way in. |
 | `WEB_DIST` | `<release>/apps/web/dist` | When set, the API also serves the built web app (and `index.html` for unknown non-API paths). |
 | `RELEASE` | the release's sha (from its `RELEASE` file) | Reported by `GET /api/health`; `dev` when unset. `release.sh` waits for it to show the new sha. |
+| `STORAGE_DIR` | `/home/daitcrm/<env>/shared/storage` (API and worker) | Folder for files the CRM keeps: Import leads uploads in `imports/<batch>/<file>` (folders 0700, files 0600), shared by every release. Required when `NODE_ENV=production` (the upload and the read job refuse to run without it); in development and tests it defaults to `<repo>/.storage` (git-ignored); the e2e server uses `$TMPDIR/dait-crm-e2e-storage` (or `E2E_STORAGE_DIR`), emptied at every start and shared with `apps/api/test/e2e-import-jobs.ts`. |
 
 ## One-off commands
 

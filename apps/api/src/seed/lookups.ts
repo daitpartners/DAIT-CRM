@@ -13,7 +13,10 @@ interface Group {
 export const LOOKUP_GROUPS: Group[] = [
   {
     group: 'lead_source',
-    values: ['Website Contact Form', 'Google Places API', 'Company Website', 'Business Directory', 'CSV Import', 'Manual Entry', 'Referral', 'LinkedIn', 'Other'],
+    // 'Import' (IMPORT_LEAD_SOURCE, shared): the source of every lead "Import leads" creates; appended so existing sort
+    // orders stay as they are.
+    values: ['Website Contact Form', 'Google Places API', 'Company Website', 'Business Directory', 'CSV Import', 'Manual Entry', 'Referral', 'LinkedIn', 'Other', 'Import'],
+    translations: { Import: { es: 'Importación', fr: 'Import' } },
   },
   {
     group: 'lead_status',

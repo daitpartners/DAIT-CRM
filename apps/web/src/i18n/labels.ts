@@ -146,6 +146,8 @@ export function researchFieldText(t: TFn, field: string, fallback: string): stri
       return t('Street address');
     case 'city':
       return t('City');
+    case 'country':
+      return t('Country');
     case 'state':
       return t('State / Province');
     case 'zip':
