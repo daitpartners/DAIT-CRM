@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import { clientName } from '../../api/companies';
@@ -7,8 +7,9 @@ import { useLeads } from '../../api/leads';
 import { useComposeMail, useReplyMail } from '../../api/mail';
 import { useCompanyProjects } from '../../api/projects';
 import { useLookupText } from '../../api/queries';
-import { useTemplates } from '../../api/templates';
+import { useTemplateFiles, useTemplates } from '../../api/templates';
 import { useCurrentUser } from '../../api/useCurrentUser';
+import { AttachmentChips } from '../../components/AttachmentChips';
 import { CompanyPicker } from '../../components/CompanyPicker';
 import { MessageEditor, type MessageValue } from '../../components/MessageEditor';
 import { Modal } from '../../components/Modal';
@@ -29,6 +30,8 @@ export type ComposeStart = {
   body?: string;
   /** A formatted template's HTML, merge fields filled (the Email screen's template list). */
   bodyHtml?: string | null;
+  /** The template it was filled from: its inline pictures are shown and its attachments listed. */
+  templateId?: number;
   /** Reply mode: the message answered (To and Subject are fixed, Graph keeps the conversation). */
   replyTo?: number;
   to?: string;
@@ -67,6 +70,17 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
   const compose = useComposeMail();
   const answer = useReplyMail();
   const { data: templates } = useTemplates();
+  // The template's pictures (shown in the message) and attachments (listed under it; the sender may remove them).
+  const files = useTemplateFiles();
+  // Opened from the Email screen's template list: its pictures and attachments once the templates are loaded.
+  const [startApplied, setStartApplied] = useState(start.templateId === undefined);
+  useEffect(() => {
+    if (startApplied || !templates) return;
+    setStartApplied(true);
+    void files.apply(templates.find((x) => x.id === start.templateId), start.bodyHtml ?? null).then((html) => {
+      if (html !== undefined && html !== null) setBody((b) => ({ ...b, html }));
+    });
+  }, [templates, startApplied]);
   const { data: leadPage } = useLeads({ companyId, pageSize: 100, tab: 'all' }, !reply && companyId !== undefined);
   const { data: contactPage } = useContacts({ companyId, pageSize: 100 }, !reply && companyId !== undefined);
   const { data: companyProjects } = useCompanyProjects(companyId ?? NaN, !reply && companyId !== undefined);
@@ -122,14 +136,16 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
     }
   }
 
-  function applyTemplate(id: string) {
+  async function applyTemplate(id: string) {
     const tp = templates?.find((x) => String(x.id) === id);
     if (!tp) return;
     const contactFirst = contacts.find((c) => c.businessEmail === toValue)?.firstName ?? '';
     const ctx = { firstName: contactFirst, company: companyLabel ?? '', me: me.name, leadNumber: lead?.number ?? '' };
     setSubject(fillTemplate(tp.subject, ctx));
-    // A formatted template fills the message formatted, its merge values HTML-escaped.
-    setBody({ text: fillTemplate(tp.body, ctx), html: tp.bodyHtml ? fillTemplateHtml(tp.bodyHtml, ctx) : null });
+    // A formatted template fills the message formatted, its merge values HTML-escaped, with its inline pictures.
+    const html = await files.apply(tp, tp.bodyHtml ? fillTemplateHtml(tp.bodyHtml, ctx) : null);
+    if (html === undefined) return;
+    setBody({ text: fillTemplate(tp.body, ctx), html });
   }
 
   function send() {
@@ -149,7 +165,7 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
     } else {
       compose.mutate(
         {
-          to: target, cc: ccList, subject: subject.trim(), body: body.text.trim(), bodyHtml: body.html, leadId: leadId ?? null, companyId: companyId ?? null,
+          to: target, cc: ccList, subject: subject.trim(), body: body.text.trim(), ...files.send(body.html), leadId: leadId ?? null, companyId: companyId ?? null,
           projectId: projectId ?? null,
         },
         { onSuccess: done, onError: fail },
@@ -274,7 +290,7 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
         {reply ? null : (
           <div>
             <label className="lbl" htmlFor="cm-tpl">{t('Template')}</label>
-            <select id="cm-tpl" className="in" defaultValue="" onChange={(e) => applyTemplate(e.target.value)}>
+            <select id="cm-tpl" className="in" defaultValue="" onChange={(e) => void applyTemplate(e.target.value)}>
               <option value="">{t('— blank —')}</option>
               {sortedTemplates.map((tp) => (
                 <option key={tp.id} value={tp.id}>{tp.name}{tp.sourceType === 'oft' ? ' · .oft' : ''}</option>
@@ -295,6 +311,7 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
         <div className="span2">
           <label className="lbl" htmlFor="cm-body">{t('Message')}</label>
           <MessageEditor id="cm-body" label={t('Message')} rows={8} value={body} onChange={setBody} />
+          <AttachmentChips files={files.attachments.map((a) => ({ key: a.id, name: a.name, size: a.size }))} onRemove={(id) => files.remove(Number(id))} />
         </div>
       </div>
       {error ? <div className="note warn" role="alert">{error}</div> : null}

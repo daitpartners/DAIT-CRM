@@ -8,7 +8,8 @@ import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
 import { errorText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
-import { parseOft } from '../../lib/oft';
+import { parseOft, type OftContent } from '../../lib/oft';
+import { uploadFiles, type UploadFile } from '../../lib/templateFiles';
 import { LANGUAGE_NAMES, TemplateModal, type TemplateDraft } from './TemplateModal';
 
 /**
@@ -36,25 +37,36 @@ export function EmailTemplates() {
       if (fileRef.current) fileRef.current.value = '';
       return;
     }
-    let parsed = { subject: '', body: '', html: '' };
+    let parsed: OftContent = { subject: '', body: '', html: '', attachments: [] };
     try {
       parsed = parseOft(await file.arrayBuffer());
     } catch (err) {
       toast(t('{reason} – you can still enter the text by hand', { reason: (err as Error).message }), 'warn');
     }
-    // The file's formatting (its HTML body) is sanitised by the server before the editor shows it.
+    // Its pictures and attachments (template pictures and attachments, 24 Nov 2026): the types the CRM takes, within
+    // the size limit; the rest are named in a notice.
+    const { keep, skipped, tooLarge } = uploadFiles(parsed.attachments);
+    if (skipped.length) {
+      const names = skipped.join(', ');
+      toast(tooLarge ? t('Left out (over the 3 MB limit for a template’s files): {names}', { names }) : t('Left out (a file type the CRM does not send): {names}', { names }), 'warn');
+    }
+    let files: UploadFile[] = keep;
+    // The file's formatting (its HTML body) is sanitised by the server before the editor shows it, keeping the cid:
+    // pictures of its inline files.
     let bodyHtml: string | null = null;
     if (parsed.html.trim()) {
       try {
-        bodyHtml = await sanitizeTemplateHtml(parsed.html);
+        bodyHtml = await sanitizeTemplateHtml(parsed.html, files.filter((f) => f.inline && f.contentId).map((f) => f.contentId!));
       } catch (err) {
         const reason = err instanceof ApiError ? errorText(t, err.code) : t('Something went wrong. Try again.');
         toast(`${reason} ${t('The template is kept as plain text.')}`, 'warn');
       }
     }
+    // Inline pictures only go with a formatted template (plain text cannot show them).
+    if (!bodyHtml) files = files.filter((f) => !f.inline);
     setDraft({
       name: file.name.replace(/\.(oft|msg)$/i, ''), subject: parsed.subject, body: parsed.body, bodyHtml, language: userLang,
-      sourceType: 'oft', fileName: file.name, fileSize: file.size,
+      sourceType: 'oft', fileName: file.name, fileSize: file.size, uploads: files,
     });
     if (fileRef.current) fileRef.current.value = '';
   }
@@ -123,6 +135,14 @@ export function EmailTemplates() {
                     <>
                       {' '}
                       <span className="badge b-grey" title={t('Sent with its formatting (bold, italics, lists, links)')}>{t('Formatted')}</span>
+                    </>
+                  ) : null}
+                  {x.attachments.length ? (
+                    <>
+                      {' '}
+                      <span className="badge b-grey" title={x.attachments.map((a) => a.name).join(', ')}>
+                        {t('Files: {n}', { n: x.attachments.length })}
+                      </span>
                     </>
                   ) : null}
                 </td>

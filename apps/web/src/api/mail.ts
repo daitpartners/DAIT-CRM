@@ -69,6 +69,8 @@ export type MailMeta = {
 
 export type MailCompose = {
   to: string; cc: string[]; subject: string; body: string; bodyHtml?: string | null; leadId?: number | null; companyId?: number | null; projectId?: number | null;
+  /** A template's files: its inline pictures go with the HTML that shows them, plus the attachments kept. */
+  templateId?: number | null; attachmentIds?: number[];
 };
 
 const ROOT = ['mail'] as const;

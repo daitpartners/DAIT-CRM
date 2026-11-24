@@ -1944,5 +1944,12 @@
   "Sent with its formatting (bold, italics, lists, links)": "Envoyé avec sa mise en forme (gras, italique, listes, liens)",
   "This message is too long to send. Shorten it, or remove large pictures or formatting.": "Ce message est trop long pour être envoyé. Raccourcissez-le ou retirez les grandes images ou la mise en forme.",
   "The server is busy. Try again in a moment.": "Le serveur est occupé. Réessayez dans un instant.",
-  "The formatting is too complex to read. Simplify it, or remove the formatting.": "La mise en forme est trop complexe à lire. Simplifiez-la ou retirez la mise en forme."
+  "The formatting is too complex to read. Simplify it, or remove the formatting.": "La mise en forme est trop complexe à lire. Simplifiez-la ou retirez la mise en forme.",
+  "Attachments": "Pièces jointes",
+  "The pictures and attachments are too large to send (3 MB at most together). Remove an attachment and try again.": "Les images et pièces jointes sont trop volumineuses pour être envoyées (3 Mo au maximum au total). Retirez une pièce jointe et réessayez.",
+  "One of the files is not a type the CRM can send (pictures, PDF, Word, Excel or PowerPoint).": "L’un des fichiers n’est pas d’un type que le CRM peut envoyer (images, PDF, Word, Excel ou PowerPoint).",
+  "One of the template’s files could not be read. Upload the .oft again.": "L’un des fichiers du modèle n’a pas pu être lu. Importez à nouveau le fichier .oft.",
+  "Left out (over the 3 MB limit for a template’s files): {names}": "Non repris (au-delà de la limite de 3 Mo pour les fichiers d’un modèle) : {names}",
+  "Left out (a file type the CRM does not send): {names}": "Non repris (type de fichier que le CRM n’envoie pas) : {names}",
+  "Files: {n}": "Fichiers : {n}"
 }

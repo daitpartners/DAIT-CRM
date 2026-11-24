@@ -316,6 +316,7 @@ export function EmailPage() {
                   const ctx = { firstName: '', company: '', me: me.name, leadNumber: '' };
                   setCompose({
                     subject: fillTemplate(tp.subject, ctx), body: fillTemplate(tp.body, ctx), bodyHtml: tp.bodyHtml ? fillTemplateHtml(tp.bodyHtml, ctx) : null,
+                    templateId: tp.id,
                   });
                 }}
               >

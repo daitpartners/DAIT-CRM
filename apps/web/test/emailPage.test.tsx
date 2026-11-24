@@ -51,7 +51,7 @@ function stub(items: MailItem[], details: Record<number, MailDetail>, meta: Mail
     const m = /^\/api\/mail\/(\d+)(\?peek=1)?$/.exec(url);
     if (m) return Response.json(details[Number(m[1])]);
     if (url.startsWith('/api/email-templates')) {
-      return Response.json({ items: [{ id: 3, name: 'Intro', language: 'en', subject: 'Hello from {me}', body: 'Hi,\n{me}', sourceType: 'manual', fileName: null, fileSize: null, createdBy: null, createdAt: '', updatedAt: '' }] });
+      return Response.json({ items: [{ id: 3, name: 'Intro', language: 'en', subject: 'Hello from {me}', body: 'Hi,\n{me}', sourceType: 'manual', fileName: null, fileSize: null, attachments: [], createdBy: null, createdAt: '', updatedAt: '' }] });
     }
     if (url === '/api/me') return Response.json(me);
     if (url.startsWith('/api/leads') || url.startsWith('/api/contacts') || url.startsWith('/api/companies')) return Response.json({ items: [], total: 0, page: 1, pageSize: 25 });

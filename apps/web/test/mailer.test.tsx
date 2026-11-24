@@ -25,7 +25,7 @@ const ROWS: RecipientCheck[] = [
   { leadId: 5, leadNumber: 'LD-1005', contactId: 9, to: 'ana@andino.cl', name: 'Ana Torres', company: 'Andino', block: null, zones: ['America/Santiago'], source: 'country' },
   { leadId: 6, leadNumber: 'LD-1006', contactId: null, to: '', name: '', company: 'Nomail', block: 'No email address', zones: ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles'], source: 'country' },
 ];
-const TEMPLATE = { id: 3, name: 'Intro ES', language: 'es', subject: 'Hola {first_name}', body: 'Hola {first_name} de {company}.\n{me}', sourceType: 'manual', fileName: null, fileSize: null, createdBy: null, createdAt: '', updatedAt: '' };
+const TEMPLATE = { id: 3, name: 'Intro ES', language: 'es', subject: 'Hola {first_name}', body: 'Hola {first_name} de {company}.\n{me}', sourceType: 'manual', fileName: null, fileSize: null, attachments: [], createdBy: null, createdAt: '', updatedAt: '' };
 
 const CARLOS = { id: 4, name: 'Carlos Torres', email: 'carlos@daitpartners.com', role: 'Administrator', language: 'es', timezone: 'UTC', isActive: true, lastLoginAt: null };
 

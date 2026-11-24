@@ -26,6 +26,9 @@ export type LeadEmailSend = {
   followUpDays: 2 | 3 | 7 | null;
   /** Release 3B: tag it with one of the company's projects. */
   projectId?: number | null;
+  /** A template's files: its inline pictures go with the HTML that shows them, plus the attachments kept. */
+  templateId?: number | null;
+  attachmentIds?: number[];
   updatedAt: string;
 };
 
