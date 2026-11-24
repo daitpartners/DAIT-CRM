@@ -92,7 +92,8 @@ export async function outgoingBody(body: string | undefined, bodyHtml: string | 
   if (bodyHtml?.trim()) {
     const r = await sanitizeFormatted(bodyHtml, FORMATTED_HTML_MAX);
     if (r.kind === 'html') return { body: r.text || plain, formatted: { html: r.html, text: r.text || plain } };
-    text = (r.kind === 'fallback' ? r.text.trim() : '') || plain;
+    // The worker gave up: the plain body the user sent is the better text (re-review R2), else the fallback text.
+    text = plain || (r.kind === 'fallback' ? r.text.trim() : '');
   }
   // Nothing to send: Message is marked, as an empty plain message is.
   if (!text) throw new ValidationError([{ path: ['body'], message: 'Enter a message' }]);
@@ -105,7 +106,9 @@ export async function outgoingBody(body: string | undefined, bodyHtml: string | 
  */
 export function optOutHtml(line: string): string {
   const text = line.replace(/^\s*\n/, '');
-  return text ? `<div><br></div>${textToHtml(text)}` : '';
+  // Inline display/visibility: a template's own CSS cannot hide the line (re-review R4).
+  const shown = 'display:block!important;visibility:visible!important';
+  return text ? `<div style="${shown}"><br></div>${textToHtml(text).replace(/^<div>/, `<div style="${shown}">`)}` : '';
 }
 
 /**

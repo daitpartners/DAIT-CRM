@@ -31,7 +31,7 @@ const ATTRIBUTES: Record<string, string[]> = {
  * positioning too). An HTML entity is never CSS, only an attempt to smuggle markup: its declaration goes whole.
  */
 const BAD_CSS =
-  /expression\s*\(|javascript\s*:|vbscript\s*:|behavior\s*:|-moz-binding|\\|url\s*\(\s*(?!['"]?\s*(?:https?:|data:image\/))|position\s*:(?!\s*(?:static|relative)\s*(?:!important\s*)?$)|z-index\s*:|&#?[a-z0-9]/i;
+  /expression\s*\(|javascript\s*:|vbscript\s*:|behavior\s*:|-moz-binding|\\|url\s*\(\s*(?!['"]?\s*(?:https?:|data:image\/))|position\s*:(?!\s*(?:static|relative)\s*(?:!important\s*)?$)|z-index\s*:|&#?[a-z0-9]|(?:-webkit-)?image-set\s*\(|cross-fade\s*\(|element\s*\(/i;
 
 /** CSS without comments, @import and any declaration matching BAD_CSS; never a `<` (a <style> stays one element). */
 export function safeCss(css: string): string {
@@ -109,11 +109,13 @@ export function outgoingImageUrl(url: string): boolean {
 }
 
 const CSS_URL = /url\s*\(\s*(['"]?)([^'")]*)\1\s*\)/gi;
+/** CSS image functions that take a bare string address (no url()): never kept (re-review R1; BAD_CSS has them too). */
+const CSS_IMAGE_FN = /(?:-webkit-)?image-set\s*\(|cross-fade\s*\(|element\s*\(/i;
 
 /** CSS for outgoing HTML (after safeCss): a declaration with a url() outgoingImageUrl refuses goes whole. */
 function outgoingCss(css: string): string {
   return css
-    .replace(/[^;{}]+/g, (decl) => ([...decl.matchAll(CSS_URL)].every((m) => outgoingImageUrl(m[2] ?? '')) ? decl : ''))
+    .replace(/[^;{}]+/g, (decl) => (!CSS_IMAGE_FN.test(decl) && [...decl.matchAll(CSS_URL)].every((m) => outgoingImageUrl(m[2] ?? '')) ? decl : ''))
     .replace(/(^|[{;])(\s*;)+/g, '$1');
 }
 

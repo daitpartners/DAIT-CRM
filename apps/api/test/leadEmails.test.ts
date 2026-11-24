@@ -10,6 +10,7 @@ import { runOnce } from '../src/jobs/runner';
 import { sendUserEmailHandler } from '../src/jobs/handlers/sendUserEmail';
 import { todayIn } from '../src/leads/dates';
 import { fakeGraph, resetDb, seedLookups } from './helpers';
+import { setBodyWorkerMemoryForTests } from '../src/mail/bodies';
 import { makeCompany, makeContact, makeLead, makeProject, makeUser, signIn } from './factory';
 
 let app: FastifyInstance;
@@ -169,6 +170,19 @@ describe('sending email from a lead (release 2B-1)', () => {
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({ error: 'validation', issues: [{ path: ['body'] }] });
     expect((await call('POST', `/api/leads/${lead.id}/emails`, cookie, body(lead.updatedAt, { body: '' }))).statusCode).toBe(400);
+  });
+
+  it('when the sanitiser worker gives up on send, the plain body the user sent goes out (re-review R2)', async () => {
+    const { rep, lead } = await setup();
+    await personal(rep.id, 'seba@daitpartners.com');
+    setBodyWorkerMemoryForTests(16);
+    try {
+      const res = await call('POST', `/api/leads/${lead.id}/emails`, await signIn(app, rep), body(lead.updatedAt, { body: 'Hola Ana, plain', bodyHtml: '<p>big</p>'.repeat(90_000) }));
+      expect(res.statusCode).toBe(201);
+    } finally {
+      setBodyWorkerMemoryForTests(null);
+    }
+    expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ bodyText: 'Hola Ana, plain', bodyHtml: '<div>Hola Ana, plain</div>' });
   });
 
   it('a plain message is unchanged: its text as simple HTML', async () => {

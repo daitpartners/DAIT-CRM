@@ -312,3 +312,18 @@ describe('sanitizeEmailHtml: outgoing pictures and links (security review I1, M1
   });
 });
 
+describe('CSS image functions with bare string addresses (re-review R1)', () => {
+  const cases = [
+    '<div style="background-image:image-set(\'/api/mail/1\' 1x)">a</div>',
+    '<div style="background-image:-webkit-image-set(\'/api/mail/2\' 1x)">b</div>',
+    '<style>p{background-image:image-set("/api/mail/3" 1x)}</style><p>c</p>',
+    '<div style="background-image:cross-fade(\'/api/mail/4\', \'/api/mail/5\', 50%)">d</div>',
+    '<div style="background:element(#x)">e</div>',
+  ];
+  test.each(cases)('dropped in outgoing and incoming mode: %s', (html) => {
+    for (const out of [sanitizeEmailHtml(html, { outgoing: true }), sanitizeEmailHtml(html)]) {
+      expect(out).not.toMatch(/image-set|cross-fade|element\(|\/api\/mail/);
+    }
+  });
+});
+

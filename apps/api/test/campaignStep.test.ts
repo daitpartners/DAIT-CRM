@@ -307,7 +307,7 @@ describe('Mailer step: formatted templates (owner, 24 Nov 2026)', () => {
     expect(html).toContain('<li>Sebastian Passalacqua</li>');
     expect(html).not.toContain('javascript:');
     // The opt-out line is added after sanitising: always the end of the email.
-    expect(html.endsWith('<div><br></div><div>—<br>If you would prefer not to receive emails from DAIT Partners, reply with &quot;unsubscribe&quot; and we will not contact you again.</div>')).toBe(true);
+    expect(html.endsWith('<div style="display:block!important;visibility:visible!important"><br></div><div style="display:block!important;visibility:visible!important">—<br>If you would prefer not to receive emails from DAIT Partners, reply with &quot;unsubscribe&quot; and we will not contact you again.</div>')).toBe(true);
     // The template's plain text is the text alternative, with the opt-out line.
     expect(sent[0]!.text).toMatch(/^Hola Ana0 de Andino <b>&<\/b> Co\.\n.*unsubscribe/s);
     const msg = await prisma.emailMessage.findFirstOrThrow({ where: { campaignId: c.id } });
@@ -345,7 +345,7 @@ describe('Mailer step: a formatted template near the size cap (security review I
     await prisma.emailCampaign.update({ where: { id: c.id }, data: { bodyHtml: `${filler}<p>Fin {company}</p>` } });
     const { sent, graph } = recording();
     await campaignStepHandler(job(c.id), { graph });
-    expect(sent[0]!.html).toContain('<p>Fin Andino</p><div><br></div><div>—<br>If you would prefer not to receive emails');
+    expect(sent[0]!.html).toContain('<p>Fin Andino</p><div style="display:block!important;visibility:visible!important"><br></div><div style="display:block!important;visibility:visible!important">—<br>If you would prefer not to receive emails');
     expect(sent[0]!.html.length).toBeGreaterThan(149_000);
   });
 });
