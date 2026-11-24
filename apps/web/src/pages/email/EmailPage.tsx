@@ -11,7 +11,7 @@ import { useFormatDate } from '../../hooks/useFormatDate';
 import { useStoredFlag } from '../../hooks/useStoredFlag';
 import { initials } from '../../i18n/labels';
 import { useT, type TFn } from '../../i18n/useT';
-import { fillTemplate } from '../../lib/mergeFields';
+import { fillTemplate, fillTemplateHtml } from '../../lib/mergeFields';
 import { ComposeModal, type ComposeStart } from './ComposeModal';
 import { Reader } from './Reader';
 
@@ -314,7 +314,9 @@ export function EmailPage() {
                 title={tp.subject}
                 onClick={() => {
                   const ctx = { firstName: '', company: '', me: me.name, leadNumber: '' };
-                  setCompose({ subject: fillTemplate(tp.subject, ctx), body: fillTemplate(tp.body, ctx) });
+                  setCompose({
+                    subject: fillTemplate(tp.subject, ctx), body: fillTemplate(tp.body, ctx), bodyHtml: tp.bodyHtml ? fillTemplateHtml(tp.bodyHtml, ctx) : null,
+                  });
                 }}
               >
                 {tp.name}

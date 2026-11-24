@@ -21,6 +21,8 @@ export type LeadEmailSend = {
   cc: string[];
   subject: string;
   body: string;
+  /** A formatted message's HTML (the server sanitises it again); null / absent when plain. */
+  bodyHtml?: string | null;
   followUpDays: 2 | 3 | 7 | null;
   /** Release 3B: tag it with one of the company's projects. */
   projectId?: number | null;

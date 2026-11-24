@@ -250,3 +250,54 @@ describe('lead email form: Project picker (release 3B)', () => {
   });
 });
 
+describe('lead email form: formatted templates (24 Nov 2026)', () => {
+  const FORMATTED = {
+    id: 8, name: 'Proposal', language: 'en', subject: 'Proposal for {company}', body: 'Hi {first_name},\nThe proposal.',
+    bodyHtml: '<p>Hi <b>{first_name}</b>,</p><ul><li>For {company}</li></ul>', sourceType: 'oft', fileName: 'Proposal.oft', fileSize: 9000,
+    createdBy: null, createdAt: '', updatedAt: '',
+  };
+  const PLAIN = { ...FORMATTED, id: 9, name: 'Plain', bodyHtml: null, sourceType: 'manual', body: 'Hi {first_name}, plain.' };
+
+  it('picking a formatted template fills the editor formatted (values escaped) and sends its HTML; a plain one stays plain', async () => {
+    const u = userEvent.setup();
+    const posts: Record<string, unknown>[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        posts.push(JSON.parse(String(init.body)));
+        return Response.json({ id: 1, fromAddress: 'arjun@daitpartners.com' }, { status: 201 });
+      }
+      if (url.startsWith('/api/email-templates')) return Response.json({ items: [FORMATTED, PLAIN] });
+      if (url === '/api/mailboxes') return Response.json({ mine: { id: 7, address: 'arjun@daitpartners.com', status: 'connected' } });
+      return Response.json({ items: [], total: 0, page: 1, pageSize: 100, isClient: false });
+    }));
+    const lead = { ...baseLead, companyName: 'Meridian <Textiles> & Co', company: { ...baseLead.company!, name: 'Meridian <Textiles> & Co' }, contact: { ...makeLead().contact!, firstName: 'Tom', email: 'tom@meridian.in' } };
+    render(
+      <Wrap qc={setup()}>
+        <EmailForm lead={lead} />
+      </Wrap>,
+    );
+    const pick = screen.getByRole('combobox', { name: 'Template' });
+    await waitFor(() => expect(within(pick).getByRole('option', { name: 'Proposal · .oft' })).toBeTruthy());
+    await u.selectOptions(pick, '8');
+    expect(screen.getByRole('textbox', { name: 'Subject' })).toHaveValue('Proposal for Meridian <Textiles> & Co');
+    const frame = await waitFor(() => {
+      const f = document.querySelector('iframe#em-body') as HTMLIFrameElement;
+      expect(f.contentDocument!.body.innerHTML).toBe('<p>Hi <b>Tom</b>,</p><ul><li>For Meridian &lt;Textiles&gt; &amp; Co</li></ul>');
+      return f;
+    });
+    expect(frame).toHaveAttribute('sandbox', 'allow-same-origin');
+    await u.click(screen.getByRole('button', { name: 'Send email' }));
+    await waitFor(() => expect(posts[0]).toMatchObject({
+      bodyHtml: '<p>Hi <b>Tom</b>,</p><ul><li>For Meridian &lt;Textiles&gt; &amp; Co</li></ul>', body: 'Hi Tom,\nThe proposal.',
+    }));
+
+    // A plain template: the plain textarea, no HTML sent.
+    await u.selectOptions(pick, '9');
+    expect(document.querySelector('iframe#em-body')).toBeNull();
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('Hi Tom, plain.');
+    await u.type(screen.getByRole('textbox', { name: 'To' }), 'tom@meridian.in');
+    await u.click(screen.getByRole('button', { name: 'Send email' }));
+    await waitFor(() => expect(posts[1]).toMatchObject({ body: 'Hi Tom, plain.', bodyHtml: null }));
+  });
+});
+

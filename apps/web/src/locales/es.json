@@ -1928,5 +1928,18 @@
   "Nobody has worked on these records yet, so nothing is kept.": "Nadie ha trabajado aún en estos registros, así que no se conserva nada.",
   "Research values the import accepted go back on these companies that were already in the CRM:": "Los valores de investigación que aceptó la importación se retiran de estas empresas que ya estaban en el CRM:",
   "Files can't be added once research has started.": "No se pueden añadir archivos una vez iniciada la investigación.",
-  "Research has already run for this import. Review the rows in step 4.": "La investigación ya se hizo para esta importación. Revisa las filas en el paso 4."
+  "Research has already run for this import. Review the rows in step 4.": "La investigación ya se hizo para esta importación. Revisa las filas en el paso 4.",
+  "Formatting": "Formato",
+  "Bold": "Negrita",
+  "Italic": "Cursiva",
+  "Bulleted list": "Lista con viñetas",
+  "Numbered list": "Lista numerada",
+  "Link|format": "Enlace",
+  "Remove formatting": "Quitar formato",
+  "Link address": "Dirección del enlace",
+  "Add link": "Añadir enlace",
+  "Links must start with http://, https:// or mailto:": "Los enlaces deben empezar por http://, https:// o mailto:",
+  "The formatting could not be read – the template is kept as plain text": "No se pudo leer el formato: la plantilla se guarda como texto sin formato",
+  "Sent with its formatting (bold, lists, links, pictures)": "Se envía con su formato (negrita, listas, enlaces, imágenes)",
+  "Formatted": "Con formato"
 }

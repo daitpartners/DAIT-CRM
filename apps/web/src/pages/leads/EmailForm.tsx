@@ -10,10 +10,11 @@ import { useUsers } from '../../api/queries';
 import { useTemplates } from '../../api/templates';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Icons } from '../../components/Icons';
+import { MessageEditor, type MessageValue } from '../../components/MessageEditor';
 import { useToast } from '../../components/Toast';
 import { errorText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
-import { fillTemplate } from '../../lib/mergeFields';
+import { fillTemplate, fillTemplateHtml } from '../../lib/mergeFields';
 
 /**
  * The prototype's intro email (TPL.intro) per outreach language. Not run through t(): it follows the lead's language,
@@ -61,7 +62,7 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
   const leadLang = lead.outreachLanguage ?? 'en';
   const opening = INTRO[leadLang](first, company, me.name);
   const [subject, setSubject] = useState(opening.subject);
-  const [body, setBody] = useState(opening.body);
+  const [body, setBody] = useState<MessageValue>({ text: opening.body, html: null });
   const [follow, setFollow] = useState(true);
   const [cc, setCc] = useState<string[]>([]);
   const { data: companyProjects } = useCompanyProjects(lead.companyId ?? NaN, lead.companyId !== null);
@@ -109,7 +110,10 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
   const [templateId, setTemplateId] = useState('');
   const intro = useMemo(() => ({ subject, body }), []);
 
-  /** Picking a template fills Subject and Message with the merge fields applied; "— blank —" restores the intro. */
+  /**
+   * Picking a template fills Subject and Message with the merge fields applied; "— blank —" restores the intro. A
+   * formatted template (an .oft with its HTML) fills the message formatted, its merge values HTML-escaped.
+   */
   function pickTemplate(id: string) {
     setTemplateId(id);
     const tpl = templates?.find((x) => String(x.id) === id);
@@ -120,7 +124,7 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
     }
     const ctx = { firstName: first, company, me: me.name, leadNumber: lead.number };
     setSubject(fillTemplate(tpl.subject, ctx));
-    setBody(fillTemplate(tpl.body, ctx));
+    setBody({ text: fillTemplate(tpl.body, ctx), html: tpl.bodyHtml ? fillTemplateHtml(tpl.bodyHtml, ctx) : null });
   }
   const [days, setDays] = useState<number>(3);
   // Review #12: fields the user must fix are marked (red border, message, aria-invalid), not only named in a toast.
@@ -150,12 +154,12 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
       onSubmit={(e) => {
         e.preventDefault();
         if (noMailbox || send.isPending) return;
-        const empty = (['to', 'subject', 'body'] as const).filter((f) => !{ to, subject, body }[f].trim());
+        const empty = (['to', 'subject', 'body'] as const).filter((f) => !{ to, subject, body: body.text }[f].trim());
         if (empty.length) return markBad(empty);
         setBad({});
         send.mutate(
           {
-            to: to.trim(), cc, subject, body, followUpDays: follow ? (days as 2 | 3 | 7) : null, projectId: projectId ?? null,
+            to: to.trim(), cc, subject, body: body.text, bodyHtml: body.html, followUpDays: follow ? (days as 2 | 3 | 7) : null, projectId: projectId ?? null,
             updatedAt: lead.updatedAt,
           },
           {
@@ -255,15 +259,16 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
           <label className="lbl" htmlFor="em-body">
             {t('Message')}
           </label>
-          <textarea
+          <MessageEditor
             id="em-body"
-            className={bad.body ? 'in err' : 'in'}
+            label={t('Message')}
             rows={7}
             value={body}
             disabled={disabled}
-            {...invalid('body')}
-            onChange={(e) => {
-              setBody(e.target.value);
+            invalid={!!bad.body}
+            aria={invalid('body')}
+            onChange={(v) => {
+              setBody(v);
               clearBad('body');
             }}
           />

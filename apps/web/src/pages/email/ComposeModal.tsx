@@ -10,11 +10,12 @@ import { useLookupText } from '../../api/queries';
 import { useTemplates } from '../../api/templates';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { CompanyPicker } from '../../components/CompanyPicker';
+import { MessageEditor, type MessageValue } from '../../components/MessageEditor';
 import { Modal } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
 import { errorText, leadStatusText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
-import { fillTemplate } from '../../lib/mergeFields';
+import { fillTemplate, fillTemplateHtml } from '../../lib/mergeFields';
 
 /** What Compose opens with: a client / lead context, a filled template, or a reply to one of your messages. */
 export type ComposeStart = {
@@ -26,6 +27,8 @@ export type ComposeStart = {
   projectId?: number;
   subject?: string;
   body?: string;
+  /** A formatted template's HTML, merge fields filled (the Email screen's template list). */
+  bodyHtml?: string | null;
   /** Reply mode: the message answered (To and Subject are fixed, Graph keeps the conversation). */
   replyTo?: number;
   to?: string;
@@ -57,7 +60,9 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
   // Cc follows the project's stakeholders until the user edits it (types, or ticks Keep in the loop).
   const [ccTouched, setCcTouched] = useState(false);
   const [subject, setSubject] = useState(start.subject ?? '');
-  const [body, setBody] = useState(start.body ?? `${t('Hi,')}\n\n\n\n${t('Best regards,')}\n${me.name}`);
+  const [body, setBody] = useState<MessageValue>({
+    text: start.body ?? `${t('Hi,')}\n\n\n\n${t('Best regards,')}\n${me.name}`, html: start.bodyHtml ?? null,
+  });
   const [error, setError] = useState<string | null>(null);
   const compose = useComposeMail();
   const answer = useReplyMail();
@@ -123,7 +128,8 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
     const contactFirst = contacts.find((c) => c.businessEmail === toValue)?.firstName ?? '';
     const ctx = { firstName: contactFirst, company: companyLabel ?? '', me: me.name, leadNumber: lead?.number ?? '' };
     setSubject(fillTemplate(tp.subject, ctx));
-    setBody(fillTemplate(tp.body, ctx));
+    // A formatted template fills the message formatted, its merge values HTML-escaped.
+    setBody({ text: fillTemplate(tp.body, ctx), html: tp.bodyHtml ? fillTemplateHtml(tp.bodyHtml, ctx) : null });
   }
 
   function send() {
@@ -132,18 +138,18 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
     if (!reply && !EMAIL_RE.test(target)) return setError(t('Enter a valid To address.'));
     const badCc = ccList.find((x) => !EMAIL_RE.test(x));
     if (badCc) return setError(t('“{value}” is not an email address.', { value: badCc }));
-    if (!subject.trim() || !body.trim()) return setError(t('Subject and message are required.'));
+    if (!subject.trim() || !body.text.trim()) return setError(t('Subject and message are required.'));
     const done = () => {
       toast(t('Email queued — it is sent from {address}', { address: from ?? '' }));
       onClose();
     };
     const fail = (err: unknown) => setError(err instanceof ApiError ? errorText(t, err.code) : t('Something went wrong. Try again.'));
     if (reply) {
-      answer.mutate({ id: start.replyTo!, cc: ccList, body: body.trim() }, { onSuccess: done, onError: fail });
+      answer.mutate({ id: start.replyTo!, cc: ccList, body: body.text.trim(), bodyHtml: body.html }, { onSuccess: done, onError: fail });
     } else {
       compose.mutate(
         {
-          to: target, cc: ccList, subject: subject.trim(), body: body.trim(), leadId: leadId ?? null, companyId: companyId ?? null,
+          to: target, cc: ccList, subject: subject.trim(), body: body.text.trim(), bodyHtml: body.html, leadId: leadId ?? null, companyId: companyId ?? null,
           projectId: projectId ?? null,
         },
         { onSuccess: done, onError: fail },
@@ -288,7 +294,7 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
         </div>
         <div className="span2">
           <label className="lbl" htmlFor="cm-body">{t('Message')}</label>
-          <textarea id="cm-body" className="in" rows={8} value={body} onChange={(e) => setBody(e.target.value)} />
+          <MessageEditor id="cm-body" label={t('Message')} rows={8} value={body} onChange={setBody} />
         </div>
       </div>
       {error ? <div className="note warn" role="alert">{error}</div> : null}

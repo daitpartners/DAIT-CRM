@@ -34,13 +34,17 @@ test('email templates: write, upload .oft, edit and delete', async ({ page }) =>
   editor = page.getByRole('dialog', { name: 'Write a template' });
   await expect(editor).toContainText('Read from sample-template.oft');
   await expect(editor.getByLabel('Subject')).toHaveValue('Quotation {quote_no} from DAIT Partners');
-  await expect(editor.getByLabel('Body')).toHaveValue(/^Hi \{first_name\},/);
+  // The file's formatting (its HTML, sanitised by the server first) is kept: the body shows in the formatted editor.
+  await expect(editor.locator('iframe#tpl-body')).toHaveAttribute('sandbox', 'allow-same-origin');
+  await expect(page.frameLocator('iframe#tpl-body').locator('body p').first()).toHaveText('Hi {first_name},');
   const oftName = `Quotation send ${Date.now()}`;
   await editor.getByLabel('Name').fill(oftName);
   await editor.getByRole('button', { name: 'Save' }).click();
   const oftRow = card.getByRole('row').filter({ hasText: oftName });
   await expect(oftRow).toContainText('Outlook .oft');
   await expect(oftRow).toContainText('sample-template.oft · 9 KB');
+  await expect(oftRow).toContainText('Formatted');
+  await expect(row).not.toContainText('Formatted');
   await captureParity(page, 'templates');
 
   // Edit, then delete.

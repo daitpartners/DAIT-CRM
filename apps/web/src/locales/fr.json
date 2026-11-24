@@ -1928,5 +1928,18 @@
   "Nobody has worked on these records yet, so nothing is kept.": "Personne n’a encore travaillé sur ces enregistrements : rien n’est conservé.",
   "Research values the import accepted go back on these companies that were already in the CRM:": "Les valeurs de recherche acceptées par l’import sont retirées de ces entreprises déjà présentes dans le CRM :",
   "Files can't be added once research has started.": "Impossible d’ajouter des fichiers une fois la recherche commencée.",
-  "Research has already run for this import. Review the rows in step 4.": "La recherche a déjà été faite pour cet import. Vérifiez les lignes à l’étape 4."
+  "Research has already run for this import. Review the rows in step 4.": "La recherche a déjà été faite pour cet import. Vérifiez les lignes à l’étape 4.",
+  "Formatting": "Mise en forme",
+  "Bold": "Gras",
+  "Italic": "Italique",
+  "Bulleted list": "Liste à puces",
+  "Numbered list": "Liste numérotée",
+  "Link|format": "Lien",
+  "Remove formatting": "Supprimer la mise en forme",
+  "Link address": "Adresse du lien",
+  "Add link": "Ajouter le lien",
+  "Links must start with http://, https:// or mailto:": "Les liens doivent commencer par http://, https:// ou mailto:",
+  "The formatting could not be read – the template is kept as plain text": "La mise en forme n’a pas pu être lue : le modèle est conservé en texte brut",
+  "Sent with its formatting (bold, lists, links, pictures)": "Envoyé avec sa mise en forme (gras, listes, liens, images)",
+  "Formatted": "Mis en forme"
 }

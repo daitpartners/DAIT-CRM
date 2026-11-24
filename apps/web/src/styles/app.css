@@ -957,3 +957,10 @@ select.in.pj-locked:disabled{opacity:1;color:var(--text);-webkit-text-fill-color
 .wiz[hidden],.page[hidden]{display:none!important}
 @media (min-width:900px){.tiles.t5{grid-template-columns:repeat(5,minmax(0,1fr))}}
 .wsteps li[data-step]{cursor:pointer}
+/* Formatted message editor (24 Nov 2026): a row of .btn.xs over the message, which stays an .in field (a sandboxed frame
+   once formatted). */
+.msg-tools{display:flex;gap:4px;align-items:center;margin-bottom:6px}.msg-tools .btn.xs{min-width:28px;justify-content:center}
+.msg-link{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px}.msg-link .in{height:30px;width:auto;flex:1 1 220px}
+.msg-link .err-msg{flex-basis:100%;margin-top:0}
+.in.msg-frame{display:block;height:200px;padding:0;resize:vertical;overflow:auto}.in.msg-frame:focus-within{outline:2px solid var(--purple);outline-offset:1px;border-color:var(--purple)}
+.mprev .msg-frame{height:190px;border-color:var(--line)}

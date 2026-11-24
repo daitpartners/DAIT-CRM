@@ -10,6 +10,8 @@ export type EmailTemplate = {
   language: TemplateLanguage;
   subject: string;
   body: string;
+  /** Formatted templates (24 Nov 2026): the sanitised HTML (from an .oft, or the formatted editor); null when plain. */
+  bodyHtml: string | null;
   sourceType: 'manual' | 'oft';
   fileName: string | null;
   fileSize: number | null;
@@ -18,7 +20,7 @@ export type EmailTemplate = {
   updatedAt: string;
 };
 export type TemplateInput = Pick<EmailTemplate, 'name' | 'language' | 'subject' | 'body'> &
-  Partial<Pick<EmailTemplate, 'sourceType' | 'fileName' | 'fileSize'>>;
+  Partial<Pick<EmailTemplate, 'bodyHtml' | 'sourceType' | 'fileName' | 'fileSize'>>;
 
 const KEY = ['email-templates'] as const;
 
@@ -44,4 +46,12 @@ export function useDeleteTemplate() {
     mutationFn: (id: number) => api<void>(`/api/email-templates/${id}`, { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
   });
+}
+
+/**
+ * An uploaded .oft's HTML made safe by the server (the email reader's sanitiser) before the template editor shows it;
+ * null when nothing usable is left.
+ */
+export async function sanitizeTemplateHtml(html: string): Promise<string | null> {
+  return (await api<{ html: string | null }>('/api/email-templates/sanitize', { method: 'POST', body: { html } })).html;
 }

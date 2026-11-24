@@ -167,6 +167,16 @@ Small issues found in reviews and not fixed yet.
 - Check the first live Outlook sync: compare times and all-day events with Outlook for a couple of users.
 - Database tidy-up: the unused column `claude_monthly_cap_usd` can be dropped in a later migration.
 
+## Formatted email templates (branch `template-html`, not yet released)
+
+- **Re-upload your .oft templates** (Settings → Email templates → Upload .oft template) to get their formatting: templates
+  uploaded before this change were saved as text only and keep working as plain text. A formatted template shows a
+  "Formatted" badge.
+- **Inline pictures inside an .oft (cid: images) are not supported yet:** they are left out of the template (pictures
+  linked from the web, http/https, are kept).
+- A merge field Outlook split with formatting in the middle (e.g. `{first_<b>name</b>}`) is not filled; type merge fields
+  in one go in Outlook.
+
 ## Import leads (release 5, branch `import-leads`, not yet released)
 
 **Decided: controller rulings of 24 Nov 2026 (you may overturn any of them).** Q1 and Q3 differ from the written spec;

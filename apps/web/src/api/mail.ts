@@ -68,7 +68,7 @@ export type MailMeta = {
 };
 
 export type MailCompose = {
-  to: string; cc: string[]; subject: string; body: string; leadId?: number | null; companyId?: number | null; projectId?: number | null;
+  to: string; cc: string[]; subject: string; body: string; bodyHtml?: string | null; leadId?: number | null; companyId?: number | null; projectId?: number | null;
 };
 
 const ROOT = ['mail'] as const;
@@ -230,7 +230,8 @@ export function useReplyMail() {
   const qc = useQueryClient();
   const refresh = useRefresh();
   return useMutation({
-    mutationFn: (v: { id: number; cc: string[]; body: string }) => api<MailItem>(`/api/mail/${v.id}/reply`, { method: 'POST', body: { cc: v.cc, body: v.body } }),
+    mutationFn: (v: { id: number; cc: string[]; body: string; bodyHtml?: string | null }) =>
+      api<MailItem>(`/api/mail/${v.id}/reply`, { method: 'POST', body: { cc: v.cc, body: v.body, bodyHtml: v.bodyHtml ?? null } }),
     onSuccess: () => refresh(true),
     onError: onMailboxError(qc),
   });

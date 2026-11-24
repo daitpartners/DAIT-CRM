@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ApiError } from '../../api/client';
 import { useSaveTemplate, type EmailTemplate, type TemplateInput, type TemplateLanguage } from '../../api/templates';
+import { MessageEditor, type MessageValue } from '../../components/MessageEditor';
 import { Modal } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
 import { errorText } from '../../i18n/labels';
@@ -16,18 +17,21 @@ export function TemplateModal({ draft, onClose }: { draft: TemplateDraft; onClos
   const t = useT();
   const toast = useToast();
   const save = useSaveTemplate();
-  const [v, setV] = useState({ name: draft.name, language: draft.language, subject: draft.subject, body: draft.body });
+  const [v, setV] = useState({ name: draft.name, language: draft.language, subject: draft.subject });
+  // A formatted template (an .oft's HTML, sanitised by the server) is edited formatted; a plain one stays a textarea.
+  const [body, setBody] = useState<MessageValue>({ text: draft.body, html: draft.bodyHtml ?? null });
   const [error, setError] = useState<string | null>(null);
   const editing = draft.id !== undefined;
 
   function submit() {
     if (!v.name.trim()) return setError(t('Give the template a name'));
     if (!v.subject.trim()) return setError(t('Enter a subject'));
-    const body = editing
-      ? { ...v, updatedAt: draft.updatedAt }
-      : { ...v, sourceType: draft.sourceType ?? 'manual', fileName: draft.fileName ?? null, fileSize: draft.fileSize ?? null };
+    const fields = { ...v, body: body.text, bodyHtml: body.html };
+    const payload = editing
+      ? { ...fields, updatedAt: draft.updatedAt }
+      : { ...fields, sourceType: draft.sourceType ?? 'manual', fileName: draft.fileName ?? null, fileSize: draft.fileSize ?? null };
     save.mutate(
-      { id: draft.id, body },
+      { id: draft.id, body: payload },
       {
         onSuccess: () => {
           toast(editing ? t('Template saved') : t('Template added'));
@@ -85,7 +89,7 @@ export function TemplateModal({ draft, onClose }: { draft: TemplateDraft; onClos
           <label className="lbl" htmlFor="tpl-body">
             {t('Body')}
           </label>
-          <textarea id="tpl-body" className="in" rows={9} value={v.body} onChange={(e) => setV({ ...v, body: e.target.value })} />
+          <MessageEditor id="tpl-body" label={t('Body')} rows={9} value={body} onChange={setBody} />
         </div>
       </div>
       <div className="dim tpl-help">{t('Merge fields: {first_name} {company} {me} {quote_no} {lead_id}')}</div>

@@ -70,6 +70,26 @@ function wrap(ui: React.ReactNode, path = '/', users: unknown[] = [CARLOS]) {
 }
 
 describe('Send via mailer wizard (release 2C, prototype V.mailerWizard)', () => {
+  it('a formatted template is previewed formatted, in a frame where nothing runs (merge values escaped)', async () => {
+    const formatted = { ...TEMPLATE, bodyHtml: '<p>Hola <b>{first_name}</b> de {company}</p>', sourceType: 'oft' };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/email-templates')) return Response.json({ items: [formatted] });
+      return Response.json(url === '/api/me' ? me : { items: [CARLOS] });
+    }));
+    const check = { mailbox: { address: 'arjun@daitpartners.com' }, rows: [{ ...ROWS[0]!, company: 'Andino <S.A.>' }] };
+    wrap(<MailerWizard leadIds={[5]} check={check} onClose={() => undefined} onQueued={() => undefined} />);
+    const dialog = await screen.findByRole('dialog', { name: 'Send via mailer' });
+    const frame = await waitFor(() => {
+      const f = dialog.querySelector('.mprev iframe');
+      expect(f).not.toBeNull();
+      return f as HTMLIFrameElement;
+    });
+    expect(frame.getAttribute('sandbox')).toBe('allow-popups allow-popups-to-escape-sandbox');
+    expect(frame.getAttribute('srcdoc')).toContain('<p>Hola <b>Ana</b> de Andino &lt;S.A.&gt;</p>');
+    expect(frame.getAttribute('srcdoc')).toContain("default-src 'none'");
+    expect(dialog.querySelector('.mprev pre')).toBeNull();
+  });
+
   it('walks Template → Cc/Bcc → Timing → Review and queues the campaign', async () => {
     const u = userEvent.setup();
     const posts = stub();

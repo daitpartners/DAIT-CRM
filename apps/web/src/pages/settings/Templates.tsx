@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { TEMPLATE_FILE_MAX_BYTES } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
-import { useDeleteTemplate, useTemplates, type EmailTemplate } from '../../api/templates';
+import { sanitizeTemplateHtml, useDeleteTemplate, useTemplates, type EmailTemplate } from '../../api/templates';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { useToast } from '../../components/Toast';
@@ -36,14 +36,23 @@ export function EmailTemplates() {
       if (fileRef.current) fileRef.current.value = '';
       return;
     }
-    let parsed = { subject: '', body: '' };
+    let parsed = { subject: '', body: '', html: '' };
     try {
       parsed = parseOft(await file.arrayBuffer());
     } catch (err) {
       toast(t('{reason} – you can still enter the text by hand', { reason: (err as Error).message }), 'warn');
     }
+    // The file's formatting (its HTML body) is sanitised by the server before the editor shows it.
+    let bodyHtml: string | null = null;
+    if (parsed.html.trim()) {
+      try {
+        bodyHtml = await sanitizeTemplateHtml(parsed.html);
+      } catch {
+        toast(t('The formatting could not be read – the template is kept as plain text'), 'warn');
+      }
+    }
     setDraft({
-      name: file.name.replace(/\.(oft|msg)$/i, ''), subject: parsed.subject, body: parsed.body, language: userLang,
+      name: file.name.replace(/\.(oft|msg)$/i, ''), subject: parsed.subject, body: parsed.body, bodyHtml, language: userLang,
       sourceType: 'oft', fileName: file.name, fileSize: file.size,
     });
     if (fileRef.current) fileRef.current.value = '';
@@ -109,6 +118,12 @@ export function EmailTemplates() {
                 </td>
                 <td>
                   <span className={x.sourceType === 'oft' ? 'badge b-purple' : 'badge b-grey'}>{x.sourceType === 'oft' ? t('Outlook .oft') : t('Written here')}</span>
+                  {x.bodyHtml ? (
+                    <>
+                      {' '}
+                      <span className="badge b-grey" title={t('Sent with its formatting (bold, lists, links, pictures)')}>{t('Formatted')}</span>
+                    </>
+                  ) : null}
                 </td>
                 <td>
                   <span className="badge b-grey">{LANGUAGE_NAMES[x.language] ?? x.language}</span>

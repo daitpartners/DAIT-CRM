@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { LAWFUL_BASES, MAILER_INTERVALS, fillTemplate } from '@dait-crm/shared';
+import { LAWFUL_BASES, MAILER_INTERVALS, fillTemplate, fillTemplateHtml } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
 import { useCreateCampaign, useMailerCheck, type MailerCheckResult } from '../../api/mailer';
 import { MAILBOXES_KEY } from '../../api/mailboxes';
@@ -15,6 +15,7 @@ import { useFormatDate } from '../../hooks/useFormatDate';
 import { errorText } from '../../i18n/labels';
 import { useT, type TFn } from '../../i18n/useT';
 import { zoneSourceText, zoneText } from './zones';
+import { mailFrameDoc } from '../email/MailBody';
 
 const EMAIL_RE = /^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]{2,}$/;
 const list = (v: string) => v.split(/[,;]/).map((x) => x.trim().toLowerCase()).filter(Boolean);
@@ -231,7 +232,19 @@ export function MailerWizard({ leadIds, check, onClose, onQueued }: Props) {
               <div className="mprev">
                 <div className="lbl">{t('Preview for {who} · {to}', { who: first.name || first.company, to: first.to })}</div>
                 <div className="msub">{fillTemplate(tpl.subject, sample)}</div>
-                <pre>{fillTemplate(tpl.body, sample)}</pre>
+                {tpl.bodyHtml ? (
+                  // A formatted template is previewed formatted, as each lead receives it (sanitised HTML, merge values
+                  // escaped), in a frame where nothing can run.
+                  <iframe
+                    className="in msg-frame"
+                    title={t('Message body')}
+                    sandbox="allow-popups allow-popups-to-escape-sandbox"
+                    referrerPolicy="no-referrer"
+                    srcDoc={mailFrameDoc(fillTemplateHtml(tpl.bodyHtml, sample))}
+                  />
+                ) : (
+                  <pre>{fillTemplate(tpl.body, sample)}</pre>
+                )}
               </div>
             ) : !tpl ? (
               <div className="note warn">{t('No templates yet. Add one under Settings → Email templates.')}</div>
