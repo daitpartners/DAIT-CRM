@@ -97,6 +97,12 @@ export function Wizard() {
   }
 
   function sortAndGo() {
+    // A file still being read (or its rows still being saved): wait for it, rather than "add a file".
+    if (batchId !== null && (files?.items ?? []).some((f) => f.status === 'Reading')) {
+      setStep(1);
+      setAlert({ kind: 'text', text: importErrorText(t, 'files_reading'), flash: Date.now() });
+      return;
+    }
     if (batchId === null || !(files?.items ?? []).some((f) => f.status === 'Read')) {
       setStep(1);
       setAlert({ kind: 'noFile', flash: Date.now() });

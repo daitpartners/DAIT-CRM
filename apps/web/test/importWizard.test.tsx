@@ -221,6 +221,30 @@ describe('step 1: no default language or import type', () => {
   });
 });
 
+describe('step 1: Sort while a file is still being read', () => {
+  it('says the files are still being read (not "add a file") and does not sort', async () => {
+    const fetchFn = stubFetch((url) => {
+      if (url === '/api/imports/batches/7') return Response.json(batch('Uploading'));
+      if (url === '/api/imports/batches/7/files') {
+        return Response.json({
+          items: [
+            { id: 1, name: 'Expo.xlsx', ext: 'xlsx', size: 100, status: 'Read', meta: { sheets: 1, rows: 3 }, error: null },
+            { id: 2, name: 'GITEX.pdf', ext: 'pdf', size: 100, status: 'Reading', meta: { pages: 18, textFound: true }, error: null },
+          ],
+        });
+      }
+      return undefined;
+    });
+    renderPage('/leads/import?batch=7&step=1');
+    await screen.findByText('GITEX.pdf');
+    await userEvent.click(screen.getByRole('button', { name: 'Sort the data →' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Some files are still being read. Wait until every file is read.');
+    expect(screen.queryByText('Add at least one file the CRM can read.')).toBeNull();
+    expect(calls(fetchFn, 'POST', '/api/imports/batches/7/sort')).toHaveLength(0);
+    expect(screen.getByTestId('where')).toHaveTextContent('step=1');
+  });
+});
+
 const row = (id: number, fields: Record<string, string>, status = 'Missing details', extra = {}) => ({
   id, fields, status, include: true, problems: [], matched: null, from: 'Expo xlsx · row 14', fileName: 'Expo.xlsx',
   origin: { word: 'Expo', ext: 'xlsx', kind: 'row', n: 14 }, ...extra,
