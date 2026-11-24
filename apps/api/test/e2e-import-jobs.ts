@@ -44,6 +44,7 @@ importResearchDeps.reader = {
 const refuse = () => Promise.reject(new Error('not used in e2e'));
 const graph: GraphClient = {
   sendMail: refuse, deltaPage: refuse, attachmentNames: refuse, markRead: refuse, moveTo: refuse, reply: refuse, calendarDeltaPage: refuse,
+  messageBody: refuse,
 };
 
 const handlers = { import_read_file: importReadFileHandler, import_research: importResearchHandler, import_commit: importCommitHandler } as const;
