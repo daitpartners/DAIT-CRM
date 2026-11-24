@@ -172,8 +172,13 @@ Small issues found in reviews and not fixed yet.
 - **Re-upload your .oft templates** (Settings → Email templates → Upload .oft template) to get their formatting: templates
   uploaded before this change were saved as text only and keep working as plain text. A formatted template shows a
   "Formatted" badge.
-- **Inline pictures inside an .oft (cid: images) are not supported yet:** they are left out of the template (pictures
-  linked from the web, http/https, are kept).
+- **Pictures and attachments inside an .oft (branch `template-attachments`, not yet released):** the logos and other
+  inline pictures (cid: images) and the attached files (PDF, Word, Excel, PowerPoint, pictures) are now kept with the
+  template, shown in the message and sent with it (lead Email tab, Compose, Mailer). At most 3 MB of files per
+  template; a file over the limit or of another type is left out with a notice.
+- **Re-upload your existing .oft templates once more after that release** (e.g. "DAIT-Holiday-2026-Email_2"): templates
+  uploaded before it have no pictures or attachments stored, so they send without the logos and the PDF. Delete the
+  old copy after re-uploading.
 - A merge field Outlook split with formatting in the middle (e.g. `{first_<b>name</b>}`) is not filled; type merge fields
   in one go in Outlook.
 
