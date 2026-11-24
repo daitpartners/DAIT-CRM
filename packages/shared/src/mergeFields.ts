@@ -17,11 +17,22 @@ export function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
+/** A link or picture address in markup: merge fields are never filled there (security review M1). */
+const URL_ATTR = /(\s(?:href|src)\s*=\s*)("[^"]*"|'[^']*'|[^\s"'>]+)/gi;
+
 /**
  * A formatted (HTML) template's merge fields, by the same rules as fillTemplate, with every value HTML-escaped: a
- * company or contact name never adds markup to the message.
+ * company or contact name never adds markup to the message. Fields inside an href or src address stay as typed, so a
+ * value can never become a link's or picture's address (e.g. a "javascript:" first name).
  */
 export function fillTemplateHtml(html: string, ctx: MergeContext): string {
   const v = values(ctx);
-  return html.replace(FIELD, (m, k: string) => (Object.hasOwn(v, k) ? escapeHtml(v[k]!) : m));
+  const fill = (part: string) => part.replace(FIELD, (m, k: string) => (Object.hasOwn(v, k) ? escapeHtml(v[k]!) : m));
+  let out = '';
+  let last = 0;
+  for (const m of html.matchAll(URL_ATTR)) {
+    out += fill(html.slice(last, m.index)) + m[0];
+    last = m.index! + m[0].length;
+  }
+  return out + fill(html.slice(last));
 }

@@ -145,6 +145,32 @@ describe('sending email from a lead (release 2B-1)', () => {
     expect(graph.calls[0]!.msg.text).toBe(msg.bodyText);
   });
 
+  it('size (I2): a formatted message over the cap is refused as message_too_long, never cut; HTML needs no plain body (M5)', async () => {
+    const { rep, lead } = await setup();
+    await personal(rep.id, 'seba@daitpartners.com');
+    const cookie = await signIn(app, rep);
+    const big = '<p>' + 'x'.repeat(200_001) + '</p><p>tail</p>';
+    const res = await call('POST', `/api/leads/${lead.id}/emails`, cookie, body(lead.updatedAt, { body: '', bodyHtml: big }));
+    expect(res.statusCode).toBe(413);
+    expect(res.json()).toEqual({ error: 'message_too_long' });
+    expect(await prisma.emailMessage.count()).toBe(0);
+    const ok = await call('POST', `/api/leads/${lead.id}/emails`, cookie, body(lead.updatedAt, { body: '', bodyHtml: '<p>Hola <b>Ana</b></p>' }));
+    expect(ok.statusCode).toBe(201);
+    expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ bodyText: 'Hola Ana', bodyHtml: '<p>Hola <b>Ana</b></p>' });
+  });
+
+  it('an empty message (no text, HTML with nothing left) is a validation error on body; checks run before sanitising (M2)', async () => {
+    const { rep, lead } = await setup();
+    const cookie = await signIn(app, rep);
+    // No mailbox: refused before any sanitising.
+    expect((await call('POST', `/api/leads/${lead.id}/emails`, cookie, body(lead.updatedAt, { bodyHtml: '<p>x</p>' }))).json()).toEqual({ error: 'no_mailbox' });
+    await personal(rep.id, 'seba@daitpartners.com');
+    const res = await call('POST', `/api/leads/${lead.id}/emails`, cookie, body(lead.updatedAt, { body: '', bodyHtml: '<script>x()</script>' }));
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'validation', issues: [{ path: ['body'] }] });
+    expect((await call('POST', `/api/leads/${lead.id}/emails`, cookie, body(lead.updatedAt, { body: '' }))).statusCode).toBe(400);
+  });
+
   it('a plain message is unchanged: its text as simple HTML', async () => {
     const { rep, lead } = await setup();
     await personal(rep.id, 'seba@daitpartners.com');

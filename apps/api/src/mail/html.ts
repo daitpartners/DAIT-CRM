@@ -76,15 +76,97 @@ const OPTIONS: sanitizeHtml.Options = {
 };
 
 /**
- * What the CRM sends (formatted templates and messages, owner 24 Nov 2026): the same rules, with links limited to
- * http, https and mailto.
+ * A host that HTML the CRM sends must never point a picture at (security review I1, 24 Nov 2026): the CRM's own
+ * (PUBLIC_URL) and anything local (localhost, IP literals). The formatted editor's frame shares the CRM's origin, so
+ * such a picture would be a signed-in request to the CRM's API from every colleague who opens the template.
  */
-const OUTGOING_OPTIONS: sanitizeHtml.Options = { ...OPTIONS, allowedSchemes: ['http', 'https', 'mailto'] };
+function isOwnOrLocalHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (!host || host === 'localhost' || host.endsWith('.localhost')) return true;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':')) return true;
+  let own = '';
+  try {
+    own = process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL).hostname.toLowerCase() : '';
+  } catch {
+    own = '';
+  }
+  return !!own && (host === own || host.endsWith(`.${own}`));
+}
+
+/**
+ * A picture source outgoing HTML keeps: data:image/*, or an absolute http(s) address on another host. Relative and
+ * protocol-relative addresses (which would resolve against the CRM in the editor, and are broken in sent mail) go.
+ */
+export function outgoingImageUrl(url: string): boolean {
+  const v = url.trim();
+  if (/^data:image\//i.test(v)) return true;
+  try {
+    const u = new URL(v);
+    return (u.protocol === 'https:' || u.protocol === 'http:') && !isOwnOrLocalHost(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
+const CSS_URL = /url\s*\(\s*(['"]?)([^'")]*)\1\s*\)/gi;
+
+/** CSS for outgoing HTML (after safeCss): a declaration with a url() outgoingImageUrl refuses goes whole. */
+function outgoingCss(css: string): string {
+  return css
+    .replace(/[^;{}]+/g, (decl) => ([...decl.matchAll(CSS_URL)].every((m) => outgoingImageUrl(m[2] ?? '')) ? decl : ''))
+    .replace(/(^|[{;])(\s*;)+/g, '$1');
+}
+
+/** A link outgoing HTML keeps: absolute http(s) or mailto (a relative link is broken in sent mail). */
+const outgoingHref = (href: string) => /^(https?:\/\/[^/\s]|mailto:)/i.test(href.trim());
+
+const base = OPTIONS.transformTags!;
+type Transform = NonNullable<sanitizeHtml.Options['transformTags']>[string];
+const run = (t: Transform | undefined, tagName: string, attribs: sanitizeHtml.Attributes) => (t ? t(tagName, attribs) : { tagName, attribs });
+
+/**
+ * What the CRM sends (formatted templates and messages, owner 24 Nov 2026): the same rules, with links limited to
+ * absolute http, https and mailto, and pictures (img src, CSS url()) to outgoingImageUrl.
+ */
+const OUTGOING_OPTIONS: sanitizeHtml.Options = {
+  ...OPTIONS,
+  allowedSchemes: ['http', 'https', 'mailto'],
+  transformTags: {
+    ...base,
+    '*': (tagName, attribs) => {
+      const r = run(base['*'], tagName, attribs);
+      if (r.attribs.style !== undefined) r.attribs.style = outgoingCss(r.attribs.style);
+      return r;
+    },
+    a: (tagName, attribs) => {
+      const r = run(base.a, tagName, attribs);
+      if (r.attribs.href !== undefined && !outgoingHref(r.attribs.href)) {
+        const { href: _drop, ...rest } = r.attribs;
+        return { tagName: r.tagName, attribs: rest };
+      }
+      return r;
+    },
+    img: (tagName, attribs) => {
+      const r = run(base.img, tagName, attribs);
+      if (r.attribs.src !== undefined && !outgoingImageUrl(r.attribs.src)) {
+        const { src: _drop, ...rest } = r.attribs;
+        return { tagName: r.tagName, attribs: rest };
+      }
+      return r;
+    },
+  },
+};
 
 /** `outgoing`: HTML the CRM sends (OUTGOING_OPTIONS) rather than mail it received. */
 export interface SanitizeOptions {
   outgoing?: boolean;
 }
+
+/**
+ * emailBodies options: `deadline` a performance.now() time budget; `whole` (formatted templates and messages) sanitises
+ * the whole body and never cuts it to `max` (the caller refuses one that is too long rather than send part of it).
+ */
+export type BodyOptions = { deadline?: number; whole?: boolean } & SanitizeOptions;
 
 /** Elements open at once, at most: real email stays far below (Outlook tables nest a few dozen deep). */
 export const MAX_DEPTH = 256;
@@ -143,7 +225,10 @@ const STYLE_BLOCK = /<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi;
 /** Passes at most: one more than needed in practice, so a parser trick that survives the first pass is caught. */
 const MAX_PASSES = 3;
 
-const pass = (html: string, options = OPTIONS) => sanitizeHtml(html, options).replace(STYLE_BLOCK, (_m, css: string) => `<style>${safeCss(css)}</style>`);
+const pass = (html: string, options = OPTIONS) => {
+  const css = options === OUTGOING_OPTIONS ? (c: string) => outgoingCss(safeCss(c)) : safeCss;
+  return sanitizeHtml(html, options).replace(STYLE_BLOCK, (_m, c: string) => `<style>${css(c)}</style>`);
+};
 
 /**
  * Sanitised email HTML: formatting kept; scripts, handlers, forms, frames, meta refresh and unsafe URLs / CSS removed.
@@ -317,11 +402,13 @@ export interface GraphBody {
  * `max` characters. Over-long HTML is cut and sanitised again, so the stored part is still well-formed. Past
  * `deadline` (a performance.now() time) while reading deep nesting it throws BodyTooComplexError.
  */
-export function emailBodies(
-  body: GraphBody, max: number, opts: { deadline?: number } & SanitizeOptions = {},
-): { bodyHtml: string | null; bodyText: string } {
+export function emailBodies(body: GraphBody, max: number, opts: BodyOptions = {}): { bodyHtml: string | null; bodyText: string } {
   const how = { outgoing: opts.outgoing };
   if (body.contentType !== 'html') return { bodyHtml: null, bodyText: body.content.slice(0, max) };
+  if (opts.whole) {
+    const limited = limitNesting(body.content.slice(0, RAW_MAX), MAX_DEPTH, opts.deadline);
+    return { bodyHtml: sanitizeEmailHtml(limited, how), bodyText: htmlToText(limited) };
+  }
   // An oversized body is cut before anything reads it: the stored HTML and text are then of its first RAW_MAX
   // characters (the cut is sanitised like the rest, so it stays well-formed).
   const raw = body.content.slice(0, RAW_MAX);

@@ -85,6 +85,8 @@ describe('Send via mailer wizard (release 2C, prototype V.mailerWizard)', () => 
       return f as HTMLIFrameElement;
     });
     expect(frame.getAttribute('sandbox')).toBe('allow-popups allow-popups-to-escape-sandbox');
+    // An opaque origin with no scripts, as the reader (review M7).
+    expect(frame.getAttribute('sandbox')).not.toMatch(/allow-same-origin|allow-scripts/);
     expect(frame.getAttribute('srcdoc')).toContain('<p>Hola <b>Ana</b> de Andino &lt;S.A.&gt;</p>');
     expect(frame.getAttribute('srcdoc')).toContain("default-src 'none'");
     expect(dialog.querySelector('.mprev pre')).toBeNull();

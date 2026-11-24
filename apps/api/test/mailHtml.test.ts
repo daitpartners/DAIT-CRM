@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { BodyTooComplexError, MAX_DEPTH, RAW_MAX, emailBodies, limitNesting, htmlToText, sanitizeEmailHtml, textToHtml } from '../src/mail/html';
 
 const clean = (html: string) => sanitizeEmailHtml(html);
@@ -275,3 +275,40 @@ describe('sanitizeEmailHtml: outgoing (formatted templates and messages, 24 Nov 
     expect(sanitizeEmailHtml('<a href="tel:+1">t</a>')).toContain('href="tel:+1"');
   });
 });
+
+describe('sanitizeEmailHtml: outgoing pictures and links (security review I1, M1)', () => {
+  afterEach(() => vi.unstubAllEnvs());
+  const out = (html: string) => sanitizeEmailHtml(html, { outgoing: true });
+
+  test('relative, protocol-relative, local and the CRM\'s own picture addresses go; other absolute http(s) and data:image stay', () => {
+    vi.stubEnv('PUBLIC_URL', 'https://crm.daitpartners.com');
+    for (const src of [
+      '/api/mail/1', 'x', '../api/x', '//crm.daitpartners.com/api/x', 'https://crm.daitpartners.com/api/mail/1', 'https://CRM.daitpartners.com./x',
+      'https://sub.crm.daitpartners.com/x', 'http://localhost:3000/api/x', 'http://127.0.0.1/x', 'http://2130706433/x', 'http://[::1]/x', 'cid:image001.png',
+    ]) {
+      expect(out(`<p>a</p><img src="${src}">`), src).toBe('<p>a</p>');
+    }
+    expect(out('<img src="https://cdn.example.com/logo.png">')).toBe('<img src="https://cdn.example.com/logo.png" />');
+    expect(out('<img src="data:image/png;base64,iVBORw0KGgo=">')).toContain('src="data:image/png;base64,iVBORw0KGgo="');
+    // Incoming mail (the reader's opaque-origin frame) is unchanged.
+    expect(sanitizeEmailHtml('<img src="x">')).toBe('<img src="x" />');
+  });
+
+  test('CSS url() in style attributes and <style> blocks: only another host\'s absolute address, or data:image', () => {
+    vi.stubEnv('PUBLIC_URL', 'https://crm.daitpartners.com');
+    expect(out('<div style="color:red;background:url(/api/mail/1)">a</div>')).toBe('<div style="color:red">a</div>');
+    expect(out('<div style="background-image:url(\'https://crm.daitpartners.com/api/x\');color:red">a</div>')).toBe('<div style="color:red">a</div>');
+    expect(out('<div style="background:url(https://cdn.example.com/bg.png)">a</div>')).toBe('<div style="background:url(https://cdn.example.com/bg.png)">a</div>');
+    const block = out('<style>p{background:url(https://crm.daitpartners.com/api/x)}td{color:red}</style><p>a</p>');
+    expect(block).not.toContain('crm.daitpartners.com');
+    expect(block).toContain('td{color:red}');
+  });
+
+  test('links: relative ones lose their address (M1); absolute http(s) and mailto stay', () => {
+    expect(out('<a href="{first_name}">a</a><a href="/api/x">b</a><a href="https://x.example/p">c</a><a href="mailto:a@b.cd">d</a>')).toBe(
+      '<a target="_blank" rel="noopener noreferrer">a</a><a target="_blank" rel="noopener noreferrer">b</a>'
+      + '<a href="https://x.example/p" target="_blank" rel="noopener noreferrer">c</a><a href="mailto:a@b.cd" target="_blank" rel="noopener noreferrer">d</a>',
+    );
+  });
+});
+

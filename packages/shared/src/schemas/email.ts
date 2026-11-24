@@ -23,28 +23,44 @@ export type TemplateLanguage = (typeof TEMPLATE_LANGUAGES)[number];
 export const MESSAGE_HTML_MAX_CHARS = 1_000_000;
 /** A formatted body: null / absent for a plain-text message. */
 const bodyHtml = z.string().max(MESSAGE_HTML_MAX_CHARS).nullish();
+/** Characters of a plain-text message or template body. */
+export const PLAIN_BODY_MAX = 20000;
+/**
+ * The plain `body` beside a formatted one: the server derives the message's text from the HTML, so with HTML the
+ * plain body is only a fallback, neither required nor held to PLAIN_BODY_MAX; without HTML it is the message.
+ */
+const looseBody = z.string().trim().max(MESSAGE_HTML_MAX_CHARS);
+function plainBodyRule(required: boolean) {
+  return (v: { body?: string; bodyHtml?: string | null }, ctx: z.RefinementCtx) => {
+    if (v.bodyHtml?.trim() || v.body === undefined) return;
+    if (required && !v.body) ctx.addIssue({ code: z.ZodIssueCode.too_small, minimum: 1, type: 'string', inclusive: true, path: ['body'] });
+    if (v.body.length > PLAIN_BODY_MAX) ctx.addIssue({ code: z.ZodIssueCode.too_big, maximum: PLAIN_BODY_MAX, type: 'string', inclusive: true, path: ['body'] });
+  };
+}
 
-/** `POST /email-templates`: written in the CRM ('manual') or read from an uploaded Outlook file ('oft'). */
-export const EmailTemplateInput = z.object({
+const EmailTemplateFields = z.object({
   name: z.string().trim().min(1).max(150),
   language: z.enum(TEMPLATE_LANGUAGES),
   subject: z.string().trim().min(1).max(500),
-  body: z.string().max(20000).default(''),
+  body: z.string().max(MESSAGE_HTML_MAX_CHARS).default(''),
   /** The template's HTML (from an .oft, or written in the formatted editor); sanitised by the server. */
   bodyHtml,
   sourceType: z.enum(['manual', 'oft']).default('manual'),
   fileName: z.string().trim().max(255).nullable().optional(),
   fileSize: z.number().int().min(0).max(TEMPLATE_FILE_MAX_BYTES).nullable().optional(),
 });
+/** `POST /email-templates`: written in the CRM ('manual') or read from an uploaded Outlook file ('oft'). */
+export const EmailTemplateInput = EmailTemplateFields.superRefine(plainBodyRule(false));
 export type EmailTemplateInput = z.infer<typeof EmailTemplateInput>;
 
 /** `POST /email-templates/sanitize`: an uploaded .oft's HTML, made safe before the template editor shows it. */
 export const TemplateHtmlCheck = z.object({ html: z.string().max(MESSAGE_HTML_MAX_CHARS) });
 
 /** `PATCH /email-templates/:id`: any subset, with the `updatedAt` the editor loaded. */
-export const EmailTemplateUpdate = EmailTemplateInput.omit({ sourceType: true, fileName: true, fileSize: true })
+export const EmailTemplateUpdate = EmailTemplateFields.omit({ sourceType: true, fileName: true, fileSize: true })
   .partial()
-  .extend({ updatedAt: z.string().datetime() });
+  .extend({ updatedAt: z.string().datetime() })
+  .superRefine(plainBodyRule(false));
 export type EmailTemplateUpdate = z.infer<typeof EmailTemplateUpdate>;
 
 /** `POST /leads/:id/emails` (release 2B-1): sent through the caller's own Microsoft 365 mailbox. */
@@ -52,20 +68,20 @@ export const LeadEmailSend = z.object({
   to: z.string().trim().toLowerCase().email(),
   cc: z.array(z.string().trim().toLowerCase().email()).max(20).default([]),
   subject: z.string().trim().min(1).max(500),
-  body: z.string().trim().min(1).max(20000),
-  /** Formatted message: its HTML (sanitised again by the server); `body` is then its plain text. */
+  body: looseBody.default(''),
+  /** Formatted message: its HTML (sanitised again by the server, which derives the plain text from it). */
   bodyHtml,
   /** Set the lead's next follow-up this many days from today (prototype "Set follow-up in"); null = leave it. */
   followUpDays: z.union([z.literal(2), z.literal(3), z.literal(7)]).nullish(),
   /** Release 3B: tag it with one of the lead's company's projects (a project the sender can see). */
   projectId: z.number().int().positive().nullish(),
   updatedAt: z.string().datetime(),
-});
+}).superRefine(plainBodyRule(true));
 export type LeadEmailSend = z.infer<typeof LeadEmailSend>;
 
 const mailAddress = z.string().trim().toLowerCase().email();
 const mailCc = z.array(mailAddress).max(20).default([]);
-const mailBody = z.string().trim().min(1).max(20000);
+const mailBody = looseBody.default('');
 
 /** `POST /mail` (release 2B-2, Email screen Compose): optionally on a lead or for a client. */
 export const MailCompose = z.object({
@@ -78,11 +94,11 @@ export const MailCompose = z.object({
   companyId: z.number().int().positive().nullish(),
   /** Release 3B: a project the sender can see, of the lead's company (or the client given without a lead). */
   projectId: z.number().int().positive().nullish(),
-});
+}).superRefine(plainBodyRule(true));
 export type MailCompose = z.infer<typeof MailCompose>;
 
 /** `POST /mail/:id/reply` (release 2B-2): to the sender (or the original recipients of your own message). */
-export const MailReply = z.object({ cc: mailCc, body: mailBody, bodyHtml });
+export const MailReply = z.object({ cc: mailCc, body: mailBody, bodyHtml }).superRefine(plainBodyRule(true));
 export type MailReply = z.infer<typeof MailReply>;
 
 /**

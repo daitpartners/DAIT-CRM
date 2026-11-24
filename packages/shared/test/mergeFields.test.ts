@@ -25,4 +25,14 @@ describe('fillTemplateHtml (formatted templates)', () => {
   it('escapeHtml escapes the five special characters', () => {
     expect(escapeHtml(`<a href="x">'&'</a>`)).toBe('&lt;a href=&quot;x&quot;&gt;&#39;&amp;&#39;&lt;/a&gt;');
   });
+
+  it('never fills a merge field inside an href or src address (M1)', () => {
+    const evil = { ...ctx, firstName: 'javascript:alert(document.domain)' };
+    expect(fillTemplateHtml('<a href="{first_name}">{first_name}</a><a href=\'{company}\'>x</a><img src={me}>', evil)).toBe(
+      '<a href="{first_name}">javascript:alert(document.domain)</a><a href=\'{company}\'>x</a><img src={me}>',
+    );
+    expect(fillTemplateHtml('<a title="{company}" href="https://x.example/?c={company}">{company}</a>', ctx)).toBe(
+      '<a title="Northwind" href="https://x.example/?c={company}">Northwind</a>',
+    );
+  });
 });

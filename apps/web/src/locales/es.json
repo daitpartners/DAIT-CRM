@@ -1939,7 +1939,10 @@
   "Link address": "Dirección del enlace",
   "Add link": "Añadir enlace",
   "Links must start with http://, https:// or mailto:": "Los enlaces deben empezar por http://, https:// o mailto:",
-  "The formatting could not be read – the template is kept as plain text": "No se pudo leer el formato: la plantilla se guarda como texto sin formato",
-  "Sent with its formatting (bold, lists, links, pictures)": "Se envía con su formato (negrita, listas, enlaces, imágenes)",
-  "Formatted": "Con formato"
+  "Formatted": "Con formato",
+  "The template is kept as plain text.": "La plantilla se guarda como texto sin formato.",
+  "Sent with its formatting (bold, italics, lists, links)": "Se envía con su formato (negrita, cursiva, listas, enlaces)",
+  "This message is too long to send. Shorten it, or remove large pictures or formatting.": "Este mensaje es demasiado largo para enviarlo. Acórtelo o quite imágenes grandes o formato.",
+  "The server is busy. Try again in a moment.": "El servidor está ocupado. Vuelva a intentarlo en un momento.",
+  "The formatting is too complex to read. Simplify it, or remove the formatting.": "El formato es demasiado complejo para leerlo. Simplifíquelo o quite el formato."
 }

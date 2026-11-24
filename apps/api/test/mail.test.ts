@@ -207,6 +207,20 @@ describe('formatted compose and reply (24 Nov 2026)', () => {
   });
 });
 
+describe('formatted compose and reply: size (security review I2)', () => {
+  it('compose and reply over the cap are refused as message_too_long', async () => {
+    const { rep, box } = await setup();
+    const cookie = await signIn(app, rep);
+    const big = '<p>' + 'x'.repeat(200_001) + '</p>';
+    const c = await call('POST', '/api/mail', cookie, { to: 'ana@acme.com', cc: [], subject: 'Hello', bodyHtml: big });
+    expect([c.statusCode, c.json()]).toEqual([413, { error: 'message_too_long' }]);
+    const original = await synced(rep.id, box.id);
+    const r = await call('POST', `/api/mail/${original.id}/reply`, cookie, { cc: [], bodyHtml: big });
+    expect([r.statusCode, r.json()]).toEqual([413, { error: 'message_too_long' }]);
+    expect(await prisma.emailMessage.count({ where: { folder: 'sent' } })).toBe(0);
+  });
+});
+
 describe('mail actions through Graph (2B-2)', () => {
   const action = (emailMessageId: number, a: string) => ({ id: 1, type: 'mail_action', payload: { emailMessageId, action: a }, attempts: 0, maxAttempts: 3 }) as unknown as Job;
 

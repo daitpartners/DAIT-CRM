@@ -6,7 +6,7 @@ import { audit } from '../audit.js';
 import { requireRight, requireUser } from '../plugins/auth.js';
 import { isNotFound, StaleError } from '../prismaErrors.js';
 import { NotFoundError, parseBody } from '../validate.js';
-import { FORMATTED_BODY_LIMIT, sanitizeFormatted } from '../mail/formatted.js';
+import { FORMATTED_BODY_LIMIT, TEMPLATE_HTML_MAX, perUser, sanitizeFormatted, templateHtml } from '../mail/formatted.js';
 
 type WithCreator = EmailTemplate & { createdBy: { id: number; name: string } | null };
 const include = { createdBy: { select: { id: true, name: true } } } as const;
@@ -24,10 +24,6 @@ function auditView(t: WithCreator) {
   return { ...rest, formatted: bodyHtml !== null };
 }
 
-/** The HTML to store: sanitised here whatever the browser sent (null keeps the template plain text). */
-async function storedHtml(html: string | null | undefined): Promise<string | null> {
-  return (await sanitizeFormatted(html))?.html ?? null;
-}
 
 /**
  * The team's email templates (prototype Settings → Email templates; release 2A): read by every signed-in user (every
@@ -42,16 +38,17 @@ export const emailTemplateRoutes: FastifyPluginAsync = async (app) => {
     return { items: rows.map(templateView) };
   });
 
-  const manage = { preHandler: [requireRight('manage_leads')], bodyLimit: FORMATTED_BODY_LIMIT };
+  const manage = { preHandler: [requireRight('manage_leads')], bodyLimit: FORMATTED_BODY_LIMIT, config: perUser(30) };
 
   app.post('/email-templates', manage, async (request, reply) => {
     const body = parseBody(EmailTemplateInput, request.body);
     const user = request.user!;
-    // Sanitised before the transaction: the worker thread may take up to its time limit.
-    const bodyHtml = await storedHtml(body.bodyHtml);
+    // Sanitised before the transaction (the worker thread may take up to its time limit); with HTML, the plain body is
+    // the text derived from it.
+    const formatted = await templateHtml(body.bodyHtml);
     const created = await prisma.$transaction(async (tx) => {
       const t = await tx.emailTemplate.create({
-        data: { ...body, bodyHtml, fileName: body.fileName ?? null, fileSize: body.fileSize ?? null, createdById: user.id }, include,
+        data: { ...body, body: formatted ? formatted.text : body.body, bodyHtml: formatted?.html ?? null, fileName: body.fileName ?? null, fileSize: body.fileSize ?? null, createdById: user.id }, include,
       });
       await audit(tx, { entityType: 'email_template', entityId: t.id, action: 'create', userId: user.id, after: auditView(t) });
       return t;
@@ -61,18 +58,20 @@ export const emailTemplateRoutes: FastifyPluginAsync = async (app) => {
 
   // An uploaded .oft is read in the browser; its HTML comes back sanitised before the editor shows it (it is sanitised
   // again when the template is saved). null: nothing usable (the template stays plain text).
-  app.post('/email-templates/sanitize', manage, async (request) => {
+  app.post('/email-templates/sanitize', { ...manage, config: perUser(20) }, async (request) => {
     const { html } = parseBody(TemplateHtmlCheck, request.body);
-    const formatted = await sanitizeFormatted(html);
-    return { html: formatted?.html ?? null, text: formatted?.text ?? '' };
+    const r = await sanitizeFormatted(html, TEMPLATE_HTML_MAX);
+    return r.kind === 'html' ? { html: r.html, text: r.text } : { html: null, text: r.kind === 'fallback' ? r.text : '' };
   });
 
   app.patch<{ Params: { id: string } }>('/email-templates/:id', manage, async (request, reply) => {
     const { updatedAt, bodyHtml: html, ...rest } = parseBody(EmailTemplateUpdate, request.body);
     const user = request.user!;
     const id = Number(request.params.id);
-    // Absent: the HTML stays as it is; null or empty: the template becomes plain text.
-    const body = html === undefined ? rest : { ...rest, bodyHtml: await storedHtml(html) };
+    // Absent: the HTML stays as it is; null or empty: the template becomes plain text. With HTML, the plain body is
+    // the text derived from it.
+    const formatted = html === undefined ? undefined : await templateHtml(html);
+    const body = formatted === undefined ? rest : formatted ? { ...rest, body: formatted.text, bodyHtml: formatted.html } : { ...rest, bodyHtml: null };
     try {
       const updated = await prisma.$transaction(async (tx) => {
         const before = Number.isInteger(id) ? await tx.emailTemplate.findUnique({ where: { id }, include }) : null;

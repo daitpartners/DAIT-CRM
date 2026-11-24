@@ -264,7 +264,10 @@ export function MessageEditor({ id, label, value, onChange, rows = 7, disabled, 
           id={id}
           title={label}
           className={invalid ? 'in msg-frame err' : 'in msg-frame'}
-          // Same-origin so the CRM can edit it; no allow-scripts, so nothing in a message can run.
+          // Same-origin so the CRM can edit it; no allow-scripts, so nothing in a message can run. Where supported,
+          // `credentialless` also keeps the CRM's cookies off anything the frame loads (security review I1; the server
+          // already removes pictures that point at the CRM).
+          {...{ credentialless: '' }}
           sandbox="allow-same-origin"
           referrerPolicy="no-referrer"
           aria-invalid={aria?.['aria-invalid']}

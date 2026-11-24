@@ -80,6 +80,9 @@ describe('MessageEditor (formatted message editor, 24 Nov 2026)', () => {
     expect(seen[0]).toEqual({ text: 'Hi Ana,\n\nThanks', html: '<p>Hi Ana,</p><p>Thanks</p>' });
     expect(frame()).toHaveAttribute('sandbox', 'allow-same-origin');
     expect(frame()).toHaveAttribute('title', 'Message');
+    // No scripts in the frame; its loads carry no CRM cookies where the browser supports credentialless (review I1).
+    expect(frame().getAttribute('sandbox')).not.toContain('allow-scripts');
+    expect(frame()).toHaveAttribute('credentialless');
     await waitFor(() => expect(frameBody().innerHTML).toBe('<p>Hi Ana,</p><p>Thanks</p>'));
     expect(frameBody().getAttribute('contenteditable')).toBe('true');
     // Remove formatting goes back to the plain textarea with the text.

@@ -19,6 +19,8 @@ const OFT_HTML =
   + '<ul><li>Discovery call</li><li>Proposal</li></ul>'
   + '<p class="MsoNormal"><a href="https://daitpartners.com">daitpartners.com</a></p>'
   // An inline picture (cid:, an attachment of the .oft) is not supported yet: it goes, with its handler.
+  // A picture pointing at the CRM itself would be a signed-in request from the editor (security review I1): it goes.
+  + '<img src="/api/mail/1"><img src="http://localhost:3097/api/me">'
   + '<img src="cid:image001.png@01DB" onerror="alert(1)"><script>alert(2)</script><p onclick="alert(3)">Best regards,<br>{me}</p></body></html>';
 
 async function setLanguage(page: Page, lang: 'en' | 'es') {
@@ -45,7 +47,7 @@ test('lead page Email tab: a formatted .oft template fills the editor formatted 
   const tpl = (await tplRes.json()) as { id: number; bodyHtml: string };
   // Sanitised on upload: formatting kept, the active parts gone.
   expect(tpl.bodyHtml).toContain('<b>{first_name}</b>');
-  for (const bad of ['onerror', '<script', 'onclick', 'alert(', 'cid:', '<img']) expect(tpl.bodyHtml).not.toContain(bad);
+  for (const bad of ['onerror', '<script', 'onclick', 'alert(', 'cid:', '<img', '/api/']) expect(tpl.bodyHtml).not.toContain(bad);
 
   try {
     await page.goto(`/leads/${lead.id}`);

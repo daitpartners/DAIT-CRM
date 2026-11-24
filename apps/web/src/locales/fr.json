@@ -1939,7 +1939,10 @@
   "Link address": "Adresse du lien",
   "Add link": "Ajouter le lien",
   "Links must start with http://, https:// or mailto:": "Les liens doivent commencer par http://, https:// ou mailto:",
-  "The formatting could not be read – the template is kept as plain text": "La mise en forme n’a pas pu être lue : le modèle est conservé en texte brut",
-  "Sent with its formatting (bold, lists, links, pictures)": "Envoyé avec sa mise en forme (gras, listes, liens, images)",
-  "Formatted": "Mis en forme"
+  "Formatted": "Mis en forme",
+  "The template is kept as plain text.": "Le modèle est conservé en texte brut.",
+  "Sent with its formatting (bold, italics, lists, links)": "Envoyé avec sa mise en forme (gras, italique, listes, liens)",
+  "This message is too long to send. Shorten it, or remove large pictures or formatting.": "Ce message est trop long pour être envoyé. Raccourcissez-le ou retirez les grandes images ou la mise en forme.",
+  "The server is busy. Try again in a moment.": "Le serveur est occupé. Réessayez dans un instant.",
+  "The formatting is too complex to read. Simplify it, or remove the formatting.": "La mise en forme est trop complexe à lire. Simplifiez-la ou retirez la mise en forme."
 }

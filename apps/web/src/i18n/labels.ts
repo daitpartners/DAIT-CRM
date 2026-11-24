@@ -395,6 +395,12 @@ export function errorText(t: TFn, code: string, vars: Record<string, string | nu
   switch (code) {
     case 'email_taken':
       return t('That email is already in use');
+    case 'message_too_long':
+      return t('This message is too long to send. Shorten it, or remove large pictures or formatting.');
+    case 'try_again':
+      return t('The server is busy. Try again in a moment.');
+    case 'html_too_complex':
+      return t('The formatting is too complex to read. Simplify it, or remove the formatting.');
     case 'no_mailbox':
       return t('Connect your Microsoft 365 mailbox in Settings to send email from the CRM.');
     case 'cannot_deactivate_self':

@@ -8,9 +8,9 @@ import { emailBodies, type GraphBody } from './html.js';
  */
 const BUDGET_MS = 1000;
 
-parentPort!.on('message', (job: { id: number; body: GraphBody; max: number; outgoing?: boolean }) => {
+parentPort!.on('message', (job: { id: number; body: GraphBody; max: number; outgoing?: boolean; whole?: boolean }) => {
   try {
-    parentPort!.postMessage({ id: job.id, result: emailBodies(job.body, job.max, { deadline: performance.now() + BUDGET_MS, outgoing: job.outgoing }) });
+    parentPort!.postMessage({ id: job.id, result: emailBodies(job.body, job.max, { deadline: performance.now() + BUDGET_MS, outgoing: job.outgoing, whole: job.whole }) });
   } catch (err) {
     parentPort!.postMessage({ id: job.id, error: (err as Error)?.name ?? 'Error' });
   }

@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app';
 import { prisma } from '../src/db';
 import { resetDb } from './helpers';
+import { setBodyWorkerMemoryForTests } from '../src/mail/bodies';
 import { makeUser, signIn } from './factory';
 
 let app: FastifyInstance;
@@ -85,8 +86,54 @@ describe('email templates API', () => {
     const cookie = await signIn(app, await makeUser({ role: 'SALES_REPRESENTATIVE' }));
     const res = await call('POST', '/api/email-templates/sanitize', cookie, { html: '<html><body><p style="color:red">Hi <b>{first_name}</b></p><img src=x onerror=alert(1)><script>x()</script></body></html>' });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ html: '<p style="color:red">Hi <b>{first_name}</b></p><img src="x" />', text: 'Hi {first_name}' });
+    // The relative picture goes too (security review I1).
+    expect(res.json()).toEqual({ html: '<p style="color:red">Hi <b>{first_name}</b></p>', text: 'Hi {first_name}' });
     expect((await call('POST', '/api/email-templates/sanitize', cookie, { html: '<script>x()</script>' })).json()).toEqual({ html: null, text: '' });
+  });
+
+  it('size (security review I2): a template over its cap is refused as message_too_long, never cut; the plain body is derived (M5)', async () => {
+    const cookie = await signIn(app, await makeUser({ role: 'SALES_REPRESENTATIVE' }));
+    const big = '<p>' + 'x'.repeat(150_001) + '</p>';
+    const res = await call('POST', '/api/email-templates', cookie, { name: 'Big', language: 'en', subject: 'Hi', bodyHtml: big });
+    expect(res.statusCode).toBe(413);
+    expect(res.json()).toEqual({ error: 'message_too_long' });
+    expect(await prisma.emailTemplate.count()).toBe(0);
+    expect((await call('POST', '/api/email-templates/sanitize', cookie, { html: big })).json()).toEqual({ error: 'message_too_long' });
+    // With HTML the plain body is neither required nor limited to 20,000: the server derives it.
+    const ok = await call('POST', '/api/email-templates', cookie, { name: 'Long', language: 'en', subject: 'Hi', body: 'z'.repeat(30_000), bodyHtml: '<p>Hi <b>there</b></p>' });
+    expect(ok.statusCode).toBe(201);
+    expect(ok.json()).toMatchObject({ body: 'Hi there', bodyHtml: '<p>Hi <b>there</b></p>' });
+    // Without HTML the 20,000 limit stays.
+    expect((await call('POST', '/api/email-templates', cookie, { name: 'P', language: 'en', subject: 'Hi', body: 'z'.repeat(20_001) })).statusCode).toBe(400);
+  });
+
+  it('a worker that gives up while saving is 409 try_again, never a silent plain-text template (M3)', async () => {
+    const cookie = await signIn(app, await makeUser({ role: 'SALES_REPRESENTATIVE' }));
+    setBodyWorkerMemoryForTests(16);
+    try {
+      const res = await call('POST', '/api/email-templates', cookie, { name: 'Busy', language: 'en', subject: 'Hi', bodyHtml: '<p>big</p>'.repeat(90_000) });
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toEqual({ error: 'try_again' });
+    } finally {
+      setBodyWorkerMemoryForTests(null);
+    }
+    expect(await prisma.emailTemplate.count()).toBe(0);
+  });
+
+  it('sanitize is limited per user (security review M2)', async () => {
+    // Its own app: the limiter's counts live in the app, and user ids repeat after each test's database reset.
+    const fresh = await buildApp();
+    try {
+      const cookie = await signIn(fresh, await makeUser({ role: 'SALES_REPRESENTATIVE' }));
+      const codes: number[] = [];
+      for (let i = 0; i < 21; i++) {
+        codes.push((await fresh.inject({ method: 'POST', url: '/api/email-templates/sanitize', headers: { cookie }, payload: { html: '<p>x</p>' } })).statusCode);
+      }
+      expect(codes.slice(0, 20)).toEqual(Array(20).fill(200));
+      expect(codes[20]).toBe(429);
+    } finally {
+      await fresh.close();
+    }
   });
 
   it('validation: missing subject and an unknown language are refused; unknown id is 404', async () => {

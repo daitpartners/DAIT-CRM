@@ -20,7 +20,7 @@ import { assertLeadVisible, canSeeLead, leadWhere } from '../leads/visibility.js
 import { assertCompanyVisible } from '../companies/visibility.js';
 import { matchMail } from '../mail/match.js';
 import { assertProjectFor, queueOutgoing } from '../mail/outgoing.js';
-import { FORMATTED_BODY_LIMIT, sanitizeFormatted } from '../mail/formatted.js';
+import { FORMATTED_BODY_LIMIT, outgoingBody, perUser } from '../mail/formatted.js';
 import { projectWhere } from '../projects/visibility.js';
 import { emailView } from './leadEmails.js';
 import { domainTaken, guard, lockLeads } from './leads.js';
@@ -238,15 +238,17 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
   const pre = { preHandler: [requireRight('use_email')] };
 
   // Compose (prototype V.compose): optionally on a lead or for a client; otherwise linked by matching.
-  // A formatted message carries its HTML: a larger request, sanitised again here before the transaction.
-  const send = { ...pre, bodyLimit: FORMATTED_BODY_LIMIT };
+  // A formatted message carries its HTML: a larger request, sanitised again here (after the cheap checks, before the
+  // transaction), and at most 30 sends a minute per user.
+  const send = { ...pre, bodyLimit: FORMATTED_BODY_LIMIT, config: perUser(30) };
   app.post('/mail', send, async (request, reply) => {
     const body = parseBody(MailCompose, request.body);
     const user = request.user!;
     return guard(reply, async () => {
-      const formatted = await sanitizeFormatted(body.bodyHtml);
       const account = await myMailbox(user.id);
       if (!account) return reply.code(409).send({ error: 'no_mailbox' });
+      if (body.leadId) await assertLeadVisible(prisma, user, body.leadId);
+      const message = await outgoingBody(body.body, body.bodyHtml);
       const created = await prisma.$transaction(async (tx) => {
         const lead = body.leadId ? await lockedLead(tx, user, body.leadId) : null;
         let links = { companyId: null as number | null, contactId: null as number | null };
@@ -264,7 +266,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
         // The project's company must be the lead's, or without a lead the client chosen (not one matching guessed).
         if (body.projectId) await assertProjectFor(tx, user, body.projectId, lead ? lead.companyId : (body.companyId ?? null));
         return queueOutgoing(tx, user, account, {
-          lead, ...links, to: [body.to], cc: body.cc, subject: body.subject, body: body.body, formatted, projectId: body.projectId ?? null,
+          lead, ...links, to: [body.to], cc: body.cc, subject: body.subject, ...message, projectId: body.projectId ?? null,
         });
       });
       return reply.code(201).send(emailView(created));
@@ -276,11 +278,11 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
     const body = parseBody(MailReply, request.body);
     const user = request.user!;
     return guard(reply, async () => {
-      const formatted = await sanitizeFormatted(body.bodyHtml);
       const original = await ownMessage(prisma, user, request.params.id);
       if (original.status === 'draft') return reply.code(409).send({ error: 'draft' });
       const account = await myMailbox(user.id);
       if (!account) return reply.code(409).send({ error: 'no_mailbox' });
+      const message = await outgoingBody(body.body, body.bodyHtml);
       const to = original.status === 'received' ? [original.fromAddress] : (original.toAddresses as string[]);
       const subject = /^\s*re\s*:/i.test(original.subject) ? original.subject : `Re: ${original.subject}`.slice(0, 500);
       const created = await prisma.$transaction(async (tx) => {
@@ -292,7 +294,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
           })
           : null;
         return queueOutgoing(tx, user, account, {
-          lead, companyId: original.companyId, contactId: original.contactId, to, cc: body.cc, subject, body: body.body, formatted,
+          lead, companyId: original.companyId, contactId: original.contactId, to, cc: body.cc, subject, ...message,
           replyToId: original.id, threadId: original.threadId, projectId: original.projectId,
         });
       });

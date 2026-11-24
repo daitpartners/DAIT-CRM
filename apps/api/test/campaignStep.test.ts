@@ -306,7 +306,8 @@ describe('Mailer step: formatted templates (owner, 24 Nov 2026)', () => {
     expect(html).toContain('<p>Hola <b>Ana0</b> de <i>Andino &lt;b&gt;&amp;&lt;/b&gt; Co</i>.</p>');
     expect(html).toContain('<li>Sebastian Passalacqua</li>');
     expect(html).not.toContain('javascript:');
-    expect(html).toContain('reply with "unsubscribe" and we will not contact you again.');
+    // The opt-out line is added after sanitising: always the end of the email.
+    expect(html.endsWith('<div><br></div><div>—<br>If you would prefer not to receive emails from DAIT Partners, reply with &quot;unsubscribe&quot; and we will not contact you again.</div>')).toBe(true);
     // The template's plain text is the text alternative, with the opt-out line.
     expect(sent[0]!.text).toMatch(/^Hola Ana0 de Andino <b>&<\/b> Co\.\n.*unsubscribe/s);
     const msg = await prisma.emailMessage.findFirstOrThrow({ where: { campaignId: c.id } });
@@ -321,3 +322,31 @@ describe('Mailer step: formatted templates (owner, 24 Nov 2026)', () => {
     expect(sent[0]!.html.startsWith('<div>Hola Ana0 de Andino.<br>')).toBe(true);
   });
 });
+
+describe('Mailer step: a formatted template near the size cap (security review I2)', () => {
+  test('HTML that would pass the cap once filled goes out as the plain text, opt-out line included; never cut', async () => {
+    at(WED_NOON_SANTIAGO);
+    const { c } = await campaign({ leads: 1 });
+    // Just under the send cap as stored (an old row; templates are now capped well below), {company} pushes it over.
+    const filler = '<p>' + 'x'.repeat(199_985) + '</p>';
+    await prisma.emailCampaign.update({ where: { id: c.id }, data: { bodyHtml: `${filler}<p>{company}{company}{company}</p>` } });
+    const { sent, graph } = recording();
+    await campaignStepHandler(job(c.id), { graph });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.html.slice(0, 40)).toBe('<div>Hola Ana0 de Andino.<br>Sebastian P');
+    expect(sent[0]!.html).toContain('reply with &quot;unsubscribe&quot;');
+    expect(sent[0]!.text).toContain('reply with "unsubscribe"');
+  });
+
+  test('a template-sized formatted body keeps its whole HTML and ends with the opt-out line', async () => {
+    at(WED_NOON_SANTIAGO);
+    const { c } = await campaign({ leads: 1 });
+    const filler = '<p>' + 'y'.repeat(149_000) + '</p>';
+    await prisma.emailCampaign.update({ where: { id: c.id }, data: { bodyHtml: `${filler}<p>Fin {company}</p>` } });
+    const { sent, graph } = recording();
+    await campaignStepHandler(job(c.id), { graph });
+    expect(sent[0]!.html).toContain('<p>Fin Andino</p><div><br></div><div>—<br>If you would prefer not to receive emails');
+    expect(sent[0]!.html.length).toBeGreaterThan(149_000);
+  });
+});
+

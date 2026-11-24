@@ -47,8 +47,9 @@ export function EmailTemplates() {
     if (parsed.html.trim()) {
       try {
         bodyHtml = await sanitizeTemplateHtml(parsed.html);
-      } catch {
-        toast(t('The formatting could not be read – the template is kept as plain text'), 'warn');
+      } catch (err) {
+        const reason = err instanceof ApiError ? errorText(t, err.code) : t('Something went wrong. Try again.');
+        toast(`${reason} ${t('The template is kept as plain text.')}`, 'warn');
       }
     }
     setDraft({
@@ -121,7 +122,7 @@ export function EmailTemplates() {
                   {x.bodyHtml ? (
                     <>
                       {' '}
-                      <span className="badge b-grey" title={t('Sent with its formatting (bold, lists, links, pictures)')}>{t('Formatted')}</span>
+                      <span className="badge b-grey" title={t('Sent with its formatting (bold, italics, lists, links)')}>{t('Formatted')}</span>
                     </>
                   ) : null}
                 </td>
