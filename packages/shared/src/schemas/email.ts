@@ -38,6 +38,32 @@ function plainBodyRule(required: boolean) {
   };
 }
 
+/**
+ * Template pictures and attachments (owner, 24 Nov 2026): the files of an uploaded .oft — inline pictures the HTML
+ * shows as `cid:` and regular attachments. Each at most this many bytes, and all of a template's together too (Graph
+ * sendMail takes the attachments in the request itself).
+ */
+export const TEMPLATE_ATTACHMENTS_MAX_BYTES = 3_000_000;
+/** Files a template may keep. */
+export const TEMPLATE_ATTACHMENTS_MAX_COUNT = 20;
+/** Base64 characters of one file at most (TEMPLATE_ATTACHMENTS_MAX_BYTES encoded). */
+const ATTACHMENT_BASE64_MAX = Math.ceil(TEMPLATE_ATTACHMENTS_MAX_BYTES / 3) * 4;
+/** Characters of an attachment's content-id (what `cid:` refers to) at most. */
+export const ATTACHMENT_CID_MAX = 200;
+
+/**
+ * One file uploaded with a template, as read from the .oft in the browser: its name, its content-id when the HTML
+ * shows it inline, and its bytes as base64. The server checks the bytes (type by magic bytes, size) and the name.
+ */
+export const TemplateAttachmentUpload = z.object({
+  name: z.string().trim().min(1).max(255),
+  contentId: z.string().trim().max(ATTACHMENT_CID_MAX).nullish(),
+  inline: z.boolean().default(false),
+  data: z.string().min(1).max(ATTACHMENT_BASE64_MAX).regex(/^[A-Za-z0-9+/]+={0,2}$/, 'Not base64'),
+});
+export type TemplateAttachmentUpload = z.infer<typeof TemplateAttachmentUpload>;
+const templateAttachments = z.array(TemplateAttachmentUpload).max(TEMPLATE_ATTACHMENTS_MAX_COUNT);
+
 const EmailTemplateFields = z.object({
   name: z.string().trim().min(1).max(150),
   language: z.enum(TEMPLATE_LANGUAGES),
@@ -48,13 +74,19 @@ const EmailTemplateFields = z.object({
   sourceType: z.enum(['manual', 'oft']).default('manual'),
   fileName: z.string().trim().max(255).nullable().optional(),
   fileSize: z.number().int().min(0).max(TEMPLATE_FILE_MAX_BYTES).nullable().optional(),
+  /** The .oft's pictures and attachments; on an update, present replaces them all (absent keeps them). */
+  attachments: templateAttachments.optional(),
 });
 /** `POST /email-templates`: written in the CRM ('manual') or read from an uploaded Outlook file ('oft'). */
 export const EmailTemplateInput = EmailTemplateFields.superRefine(plainBodyRule(false));
 export type EmailTemplateInput = z.infer<typeof EmailTemplateInput>;
 
 /** `POST /email-templates/sanitize`: an uploaded .oft's HTML, made safe before the template editor shows it. */
-export const TemplateHtmlCheck = z.object({ html: z.string().max(MESSAGE_HTML_MAX_CHARS) });
+export const TemplateHtmlCheck = z.object({
+  html: z.string().max(MESSAGE_HTML_MAX_CHARS),
+  /** Content-ids of the inline pictures uploaded with it: only these `cid:` pictures are kept. */
+  cids: z.array(z.string().trim().max(ATTACHMENT_CID_MAX)).max(TEMPLATE_ATTACHMENTS_MAX_COUNT).default([]),
+});
 
 /** `PATCH /email-templates/:id`: any subset, with the `updatedAt` the editor loaded. */
 export const EmailTemplateUpdate = EmailTemplateFields.omit({ sourceType: true, fileName: true, fileSize: true })
@@ -62,6 +94,15 @@ export const EmailTemplateUpdate = EmailTemplateFields.omit({ sourceType: true, 
   .extend({ updatedAt: z.string().datetime() })
   .superRefine(plainBodyRule(false));
 export type EmailTemplateUpdate = z.infer<typeof EmailTemplateUpdate>;
+
+/**
+ * A message filled from a template with files: the template (its inline pictures go with the HTML that shows them)
+ * and the regular attachments the sender kept (each one of that template's).
+ */
+const templateFiles = {
+  templateId: z.number().int().positive().nullish(),
+  attachmentIds: z.array(z.number().int().positive()).max(TEMPLATE_ATTACHMENTS_MAX_COUNT).default([]),
+};
 
 /** `POST /leads/:id/emails` (release 2B-1): sent through the caller's own Microsoft 365 mailbox. */
 export const LeadEmailSend = z.object({
@@ -75,6 +116,7 @@ export const LeadEmailSend = z.object({
   followUpDays: z.union([z.literal(2), z.literal(3), z.literal(7)]).nullish(),
   /** Release 3B: tag it with one of the lead's company's projects (a project the sender can see). */
   projectId: z.number().int().positive().nullish(),
+  ...templateFiles,
   updatedAt: z.string().datetime(),
 }).superRefine(plainBodyRule(true));
 export type LeadEmailSend = z.infer<typeof LeadEmailSend>;
@@ -94,6 +136,7 @@ export const MailCompose = z.object({
   companyId: z.number().int().positive().nullish(),
   /** Release 3B: a project the sender can see, of the lead's company (or the client given without a lead). */
   projectId: z.number().int().positive().nullish(),
+  ...templateFiles,
 }).superRefine(plainBodyRule(true));
 export type MailCompose = z.infer<typeof MailCompose>;
 

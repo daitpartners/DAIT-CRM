@@ -21,6 +21,7 @@ import { assertCompanyVisible } from '../companies/visibility.js';
 import { matchMail } from '../mail/match.js';
 import { assertProjectFor, queueOutgoing } from '../mail/outgoing.js';
 import { FORMATTED_BODY_LIMIT, outgoingBody, perUser } from '../mail/formatted.js';
+import { outgoingWithFiles } from '../mail/templateFiles.js';
 import { projectWhere } from '../projects/visibility.js';
 import { emailView } from './leadEmails.js';
 import { domainTaken, guard, lockLeads } from './leads.js';
@@ -248,7 +249,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
       const account = await myMailbox(user.id);
       if (!account) return reply.code(409).send({ error: 'no_mailbox' });
       if (body.leadId) await assertLeadVisible(prisma, user, body.leadId);
-      const message = await outgoingBody(body.body, body.bodyHtml);
+      const message = await outgoingWithFiles(body.body, body.bodyHtml, body.templateId, body.attachmentIds);
       const created = await prisma.$transaction(async (tx) => {
         const lead = body.leadId ? await lockedLead(tx, user, body.leadId) : null;
         let links = { companyId: null as number | null, contactId: null as number | null };

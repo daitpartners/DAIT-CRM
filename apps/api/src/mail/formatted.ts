@@ -7,7 +7,8 @@ import { ValidationError } from '../validate.js';
  * Formatted (HTML) templates and messages (owner, 24 Nov 2026: an .oft template "comes as text, not in html formatted").
  * The HTML comes from the browser (an uploaded .oft, the formatted message editor), so it is never trusted: it goes
  * through the email reader's sanitiser on the same time-bounded worker thread as incoming mail (mail/bodies.ts), in
- * its outgoing mode (links absolute http, https or mailto; pictures absolute http(s) on another host, or data:image),
+ * its outgoing mode (links absolute http, https or mailto; pictures absolute http(s) on another host, data:image, or
+ * cid: naming one of the template's inline pictures),
  * when a template is saved and again when a message is sent. A body is never cut short: one over its cap is refused.
  */
 
@@ -63,18 +64,21 @@ export class MessageTooLongError extends FormattedBodyError {
  * A template's HTML to store: sanitised (TEMPLATE_HTML_MAX), with the text derived from it; null for none. Never a
  * silent plain-text template: a worker timeout is 409 `try_again`, HTML too complex to read 422 `html_too_complex`.
  */
-export async function templateHtml(html: string | null | undefined): Promise<Formatted | null> {
+export async function templateHtml(html: string | null | undefined, cids: string[] = []): Promise<Formatted | null> {
   if (!html?.trim()) return null;
-  const r = await sanitizeFormatted(html, TEMPLATE_HTML_MAX);
+  const r = await sanitizeFormatted(html, TEMPLATE_HTML_MAX, cids);
   if (r.kind === 'fallback') throw r.retry ? new FormattedBodyError('try_again', 409) : new FormattedBodyError('html_too_complex', 422);
   return r.kind === 'html' ? { html: r.html, text: r.text } : null;
 }
 
-/** Sanitises a formatted body (see the file comment); throws MessageTooLongError past `max` characters. */
-export async function sanitizeFormatted(html: string, max: number): Promise<FormattedResult> {
+/**
+ * Sanitises a formatted body (see the file comment); throws MessageTooLongError past `max` characters. `cids`: the
+ * content-ids of its inline pictures (template pictures and attachments), the only `cid:` pictures kept.
+ */
+export async function sanitizeFormatted(html: string, max: number, cids: string[] = []): Promise<FormattedResult> {
   if (!html.trim()) return { kind: 'empty' };
   if (html.length > RAW_MAX) throw new MessageTooLongError();
-  const r = await processEmailBody({ contentType: 'html', content: html }, RAW_MAX, { outgoing: true, whole: true });
+  const r = await processEmailBody({ contentType: 'html', content: html }, RAW_MAX, { outgoing: true, whole: true, ...(cids.length ? { cids } : {}) });
   if (r.fellBack) return { kind: 'fallback', text: r.bodyText, retry: r.reason === 'timeout' || r.reason === 'crash' };
   if (!r.bodyHtml) return { kind: 'empty' };
   if (r.bodyHtml.length > max) throw new MessageTooLongError();
@@ -84,13 +88,16 @@ export async function sanitizeFormatted(html: string, max: number): Promise<Form
 /**
  * The message to queue from what the browser sent: a formatted one (sanitised HTML and the text derived from it on
  * the server), or plain text. HTML that sanitising empties, or that the worker could not read, is sent as plain text
- * (its readable text, else the plain `body` sent along). No message at all is a 400 on `body`.
+ * (its readable text, else the plain `body` sent along). No message at all is a 400 on `body`. `cids`: the content-ids
+ * of the template's inline pictures the message may show.
  */
-export async function outgoingBody(body: string | undefined, bodyHtml: string | null | undefined): Promise<{ body: string; formatted: Formatted | null }> {
+export async function outgoingBody(
+  body: string | undefined, bodyHtml: string | null | undefined, cids: string[] = [],
+): Promise<{ body: string; formatted: Formatted | null }> {
   const plain = (body ?? '').trim();
   let text = plain;
   if (bodyHtml?.trim()) {
-    const r = await sanitizeFormatted(bodyHtml, FORMATTED_HTML_MAX);
+    const r = await sanitizeFormatted(bodyHtml, FORMATTED_HTML_MAX, cids);
     if (r.kind === 'html') return { body: r.text || plain, formatted: { html: r.html, text: r.text || plain } };
     // The worker gave up: the plain body the user sent is the better text (re-review R2), else the fallback text.
     text = plain || (r.kind === 'fallback' ? r.text.trim() : '');
@@ -116,9 +123,9 @@ export function optOutHtml(line: string): string {
  * it, so sanitising or a cap can never drop it. null: send the plain text instead (nothing usable, the worker gave up,
  * or the HTML is too long), which carries the opt-out line too.
  */
-export async function formattedMailerHtml(filled: string, optOut: string): Promise<string | null> {
+export async function formattedMailerHtml(filled: string, optOut: string, cids: string[] = []): Promise<string | null> {
   try {
-    const r = await sanitizeFormatted(filled, FORMATTED_HTML_MAX);
+    const r = await sanitizeFormatted(filled, FORMATTED_HTML_MAX, cids);
     return r.kind === 'html' ? r.html + optOutHtml(optOut) : null;
   } catch (err) {
     if (err instanceof MessageTooLongError) return null;

@@ -13,6 +13,9 @@ export interface MailAttachment {
   name: string;
   contentType: string;
   contentBase64: string;
+  /** Template pictures (24 Nov 2026): a picture the HTML shows as `cid:<contentId>`, not listed as an attachment. */
+  isInline?: boolean;
+  contentId?: string;
 }
 
 export interface MailMessage {
@@ -23,7 +26,7 @@ export interface MailMessage {
   subject: string;
   html: string;
   text: string;
-  /** Release 3A: the quotation PDF. */
+  /** Release 3A: the quotation PDF; template pictures (inline) and attachments (24 Nov 2026). */
   attachments?: MailAttachment[];
 }
 
@@ -354,6 +357,7 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
               ? {
                 attachments: msg.attachments.map((a) => ({
                   '@odata.type': '#microsoft.graph.fileAttachment', name: a.name, contentType: a.contentType, contentBytes: a.contentBase64,
+                  ...(a.isInline && a.contentId ? { isInline: true, contentId: a.contentId } : {}),
                 })),
               }
               : {}),

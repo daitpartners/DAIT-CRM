@@ -127,41 +127,60 @@ type Transform = NonNullable<sanitizeHtml.Options['transformTags']>[string];
 const run = (t: Transform | undefined, tagName: string, attribs: sanitizeHtml.Attributes) => (t ? t(tagName, attribs) : { tagName, attribs });
 
 /**
- * What the CRM sends (formatted templates and messages, owner 24 Nov 2026): the same rules, with links limited to
- * absolute http, https and mailto, and pictures (img src, CSS url()) to outgoingImageUrl.
+ * A picture source outgoing HTML keeps given the message's inline pictures (template pictures and attachments, owner
+ * 24 Nov 2026): outgoingImageUrl, or `cid:<id>` naming one of `cids` (lower-cased content-ids of the inline pictures
+ * of that template / message). Any other cid: goes.
  */
-const OUTGOING_OPTIONS: sanitizeHtml.Options = {
-  ...OPTIONS,
-  allowedSchemes: ['http', 'https', 'mailto'],
-  transformTags: {
-    ...base,
-    '*': (tagName, attribs) => {
-      const r = run(base['*'], tagName, attribs);
-      if (r.attribs.style !== undefined) r.attribs.style = outgoingCss(r.attribs.style);
-      return r;
-    },
-    a: (tagName, attribs) => {
-      const r = run(base.a, tagName, attribs);
-      if (r.attribs.href !== undefined && !outgoingHref(r.attribs.href)) {
-        const { href: _drop, ...rest } = r.attribs;
-        return { tagName: r.tagName, attribs: rest };
-      }
-      return r;
-    },
-    img: (tagName, attribs) => {
-      const r = run(base.img, tagName, attribs);
-      if (r.attribs.src !== undefined && !outgoingImageUrl(r.attribs.src)) {
-        const { src: _drop, ...rest } = r.attribs;
-        return { tagName: r.tagName, attribs: rest };
-      }
-      return r;
-    },
-  },
-};
+function outgoingImageSrc(src: string, cids: ReadonlySet<string>): boolean {
+  const cid = /^\s*cid:([^\s"']+)\s*$/i.exec(src);
+  return cid ? cids.has(cid[1]!.toLowerCase()) : outgoingImageUrl(src);
+}
 
-/** `outgoing`: HTML the CRM sends (OUTGOING_OPTIONS) rather than mail it received. */
+/**
+ * What the CRM sends (formatted templates and messages, owner 24 Nov 2026): the same rules, with links limited to
+ * absolute http, https and mailto, and pictures (img src, CSS url()) to outgoingImageUrl — plus `cid:` pictures that
+ * name one of the message's inline pictures (`cids`).
+ */
+function outgoingOptions(cids: ReadonlySet<string>): sanitizeHtml.Options {
+  return {
+    ...OPTIONS,
+    allowedSchemes: ['http', 'https', 'mailto'],
+    allowedSchemesByTag: { img: cids.size ? ['http', 'https', 'data', 'cid'] : ['http', 'https', 'data'] },
+    transformTags: {
+      ...base,
+      '*': (tagName, attribs) => {
+        const r = run(base['*'], tagName, attribs);
+        if (r.attribs.style !== undefined) r.attribs.style = outgoingCss(r.attribs.style);
+        return r;
+      },
+      a: (tagName, attribs) => {
+        const r = run(base.a, tagName, attribs);
+        if (r.attribs.href !== undefined && !outgoingHref(r.attribs.href)) {
+          const { href: _drop, ...rest } = r.attribs;
+          return { tagName: r.tagName, attribs: rest };
+        }
+        return r;
+      },
+      img: (tagName, attribs) => {
+        const r = run(base.img, tagName, attribs);
+        if (r.attribs.src !== undefined && !outgoingImageSrc(r.attribs.src, cids)) {
+          const { src: _drop, ...rest } = r.attribs;
+          return { tagName: r.tagName, attribs: rest };
+        }
+        return r;
+      },
+    },
+  };
+}
+const OUTGOING_OPTIONS = outgoingOptions(new Set());
+
+/**
+ * `outgoing`: HTML the CRM sends (outgoingOptions) rather than mail it received; `cids`: with it, the content-ids of
+ * the message's inline pictures, whose `cid:` pictures are kept.
+ */
 export interface SanitizeOptions {
   outgoing?: boolean;
+  cids?: readonly string[];
 }
 
 /**
@@ -228,7 +247,7 @@ const STYLE_BLOCK = /<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi;
 const MAX_PASSES = 3;
 
 const pass = (html: string, options = OPTIONS) => {
-  const css = options === OUTGOING_OPTIONS ? (c: string) => outgoingCss(safeCss(c)) : safeCss;
+  const css = options === OPTIONS ? safeCss : (c: string) => outgoingCss(safeCss(c));
   return sanitizeHtml(html, options).replace(STYLE_BLOCK, (_m, c: string) => `<style>${css(c)}</style>`);
 };
 
@@ -237,7 +256,8 @@ const pass = (html: string, options = OPTIONS) => {
  * The output is sanitised again until it no longer changes, so what is stored reads the same to any HTML parser.
  */
 export function sanitizeEmailHtml(html: string, opts: SanitizeOptions = {}): string {
-  const options = opts.outgoing ? OUTGOING_OPTIONS : OPTIONS;
+  const cids = opts.cids?.length ? new Set(opts.cids.map((c) => c.toLowerCase())) : null;
+  const options = !opts.outgoing ? OPTIONS : cids ? outgoingOptions(cids) : OUTGOING_OPTIONS;
   let out = pass(limitNesting(html), options);
   for (let i = 1; i < MAX_PASSES; i++) {
     const next = pass(out, options);
@@ -405,7 +425,7 @@ export interface GraphBody {
  * `deadline` (a performance.now() time) while reading deep nesting it throws BodyTooComplexError.
  */
 export function emailBodies(body: GraphBody, max: number, opts: BodyOptions = {}): { bodyHtml: string | null; bodyText: string } {
-  const how = { outgoing: opts.outgoing };
+  const how = { outgoing: opts.outgoing, cids: opts.cids };
   if (body.contentType !== 'html') return { bodyHtml: null, bodyText: body.content.slice(0, max) };
   if (opts.whole) {
     const limited = limitNesting(body.content.slice(0, RAW_MAX), MAX_DEPTH, opts.deadline);

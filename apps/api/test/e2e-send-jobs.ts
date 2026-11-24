@@ -20,7 +20,11 @@ const refuse = () => Promise.reject(new Error('not used in e2e'));
 const graph: GraphClient = {
   // Each message "sent" is printed as one `e2e-sent: {json}` line, so a spec can check what Graph was given.
   sendMail: async (_account, msg) => {
-    console.log(`e2e-sent: ${JSON.stringify({ to: msg.to, subject: msg.subject, html: msg.html, text: msg.text })}`);
+    // Attachments as Graph would get them (name, type, inline / content-id), with their size instead of the bytes.
+    const attachments = (msg.attachments ?? []).map((a) => ({
+      name: a.name, contentType: a.contentType, isInline: a.isInline ?? false, contentId: a.contentId ?? null, size: Buffer.from(a.contentBase64, 'base64').length,
+    }));
+    console.log(`e2e-sent: ${JSON.stringify({ to: msg.to, subject: msg.subject, html: msg.html, text: msg.text, attachments })}`);
   },
   deltaPage: refuse, attachmentNames: refuse, markRead: refuse, moveTo: refuse, reply: refuse, calendarDeltaPage: refuse, messageBody: refuse,
 };

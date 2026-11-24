@@ -7,7 +7,8 @@ import { parseBody } from '../validate.js';
 import { assertLeadVisible } from '../leads/visibility.js';
 import { assertProjectFor, queueOutgoing } from '../mail/outgoing.js';
 import { guard, lockFresh } from './leads.js';
-import { FORMATTED_BODY_LIMIT, outgoingBody, perUser } from '../mail/formatted.js';
+import { FORMATTED_BODY_LIMIT, perUser } from '../mail/formatted.js';
+import { outgoingWithFiles } from '../mail/templateFiles.js';
 
 /** An email as its owner sees it (only ever returned to its owner). */
 export function emailView(m: EmailMessage) {
@@ -32,8 +33,9 @@ export const leadEmailRoutes: FastifyPluginAsync = async (app) => {
       if (!account) return reply.code(409).send({ error: 'no_mailbox' });
       await assertLeadVisible(prisma, user, id, { includeArchived: true });
       // A formatted message is sanitised again here, whatever the browser sent: after the cheap checks, before the
-      // transaction (the worker may take up to its time limit).
-      const message = await outgoingBody(body.body, body.bodyHtml);
+      // transaction (the worker may take up to its time limit). A template's files go with it (inline pictures the
+      // HTML still shows, and the attachments the sender kept).
+      const message = await outgoingWithFiles(body.body, body.bodyHtml, body.templateId, body.attachmentIds);
       const created = await prisma.$transaction(async (tx) => {
         const { lead } = await lockFresh(tx, user, id, body.updatedAt);
         if (body.projectId) await assertProjectFor(tx, user, body.projectId, lead.companyId);

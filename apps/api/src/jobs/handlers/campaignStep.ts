@@ -10,6 +10,7 @@ import { sendBlock } from '../../mailer/rules.js';
 import { queueStep, startOfDayIn, startOfNextDayIn } from '../../mailer/schedule.js';
 import { textToHtml } from '../../mail/html.js';
 import { formattedMailerHtml } from '../../mail/formatted.js';
+import { filesToSend, type StoredFile } from '../../mail/files.js';
 import type { JobContext } from '../runner.js';
 
 /** Nobody can be sent now (working hours): never look again sooner than this. */
@@ -98,10 +99,17 @@ export async function campaignStepHandler(job: Job, ctx: JobContext): Promise<vo
   // A formatted template goes out as its HTML (merge fields HTML-escaped, sanitised again as it is sent, the opt-out
   // line added after that); a plain one, or HTML that cannot be read in time or is too long, as its text. Either way
   // the opt-out line is in it.
-  const html = (c.bodyHtml ? await formattedMailerHtml(fillTemplateHtml(c.bodyHtml, ctxFill), optOut) : null) ?? textToHtml(text);
+  // The template's pictures and attachments as queued (the campaign's copies): inline pictures only with HTML that
+  // shows them, regular attachments always.
+  const files = c.attachments as unknown as StoredFile[];
+  const cids = files.filter((f) => f.isInline && f.contentId).map((f) => f.contentId!);
+  const html = (c.bodyHtml ? await formattedMailerHtml(fillTemplateHtml(c.bodyHtml, ctxFill), optOut, cids) : null) ?? textToHtml(text);
+  let attachments: Awaited<ReturnType<typeof filesToSend>> = [];
   try {
+    attachments = await filesToSend(files, html);
     await ctx.graph.sendMail(account, {
       to: [r.toAddress], ...(c.cc.length ? { cc: c.cc } : {}), ...(c.bcc.length ? { bcc: c.bcc } : {}), subject, html, text,
+      ...(attachments.length ? { attachments } : {}),
     });
   } catch (err) {
     const reason = errorMessage(err);
@@ -131,7 +139,7 @@ export async function campaignStepHandler(job: Job, ctx: JobContext): Promise<vo
       data: {
         userId: c.senderId, accountId: account.id, leadId: lead.id, contactId: lead.contactId, companyId: lead.companyId, campaignId: c.id,
         folder: 'sent', status: 'sent', source: 'crm', fromAddress: account.address, toAddresses: [r.toAddress], ccAddresses: c.cc, bccAddresses: c.bcc,
-        subject, bodyText: text, bodyHtml: html, occurredAt: new Date(),
+        subject, bodyText: text, bodyHtml: html, occurredAt: new Date(), attachmentNames: attachments.filter((a) => !a.isInline).map((a) => a.name),
       },
     });
     await recordOnLead(tx, user, lead, msg, subject);

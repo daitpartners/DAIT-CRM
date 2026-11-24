@@ -3,6 +3,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import { FormattedBodyError } from './mail/formatted.js';
+import { AttachmentError } from './mail/files.js';
 import { healthRoutes } from './routes/health.js';
 import { authRoutes } from './routes/auth.js';
 import { meRoutes } from './routes/me.js';
@@ -133,7 +134,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ValidationError) return reply.code(400).send({ error: 'validation', issues: error.issues });
     if (error instanceof NotFoundError) return reply.code(404).send({ error: 'not_found' });
-    if (error instanceof FormattedBodyError) return reply.code(error.status).send({ error: error.code });
+    if (error instanceof FormattedBodyError || error instanceof AttachmentError) return reply.code(error.status).send({ error: error.code });
     return reply.send(error);
   });
 

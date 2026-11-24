@@ -27,7 +27,7 @@ export interface StoredBodies {
   retry?: true;
 }
 
-type Job = { id: number; body: GraphBody; max: number; outgoing?: boolean; whole?: boolean; timeoutMs: number; retryKey?: string; resolve: (r: StoredBodies) => void };
+type Job = { id: number; body: GraphBody; max: number; outgoing?: boolean; whole?: boolean; cids?: string[]; timeoutMs: number; retryKey?: string; resolve: (r: StoredBodies) => void };
 
 let worker: Worker | null = null;
 let current: (Job & { timer: NodeJS.Timeout }) | null = null;
@@ -107,24 +107,24 @@ function next(): void {
     void w?.terminate();
   }, job.timeoutMs);
   current = { ...job, timer };
-  worker.postMessage({ id: job.id, body: job.body, max: job.max, outgoing: job.outgoing, whole: job.whole });
+  worker.postMessage({ id: job.id, body: job.body, max: job.max, outgoing: job.outgoing, whole: job.whole, cids: job.cids });
 }
 
 /**
  * What to store for a body (as emailBodies in mail/html.ts): the sanitised HTML and the text derived from it, each at
  * most `max` characters, worked out in the worker thread; plain text needs no parsing and is cut here. `retryKey`
  * names the body (user and Graph id) so a timeout or crash is retried once, never more. `outgoing`: HTML the CRM is
- * about to send (formatted templates and messages: links limited to http, https and mailto); `whole`: never cut to `max`
- * (see emailBodies).
+ * about to send (formatted templates and messages: links limited to http, https and mailto), with `cids` the
+ * content-ids of its inline pictures (their `cid:` pictures are kept); `whole`: never cut to `max` (see emailBodies).
  */
 export function processEmailBody(
-  body: GraphBody, max: number, opts: { timeoutMs?: number; retryKey?: string; outgoing?: boolean; whole?: boolean } = {},
+  body: GraphBody, max: number, opts: { timeoutMs?: number; retryKey?: string; outgoing?: boolean; whole?: boolean; cids?: string[] } = {},
 ): Promise<StoredBodies> {
   if (body.contentType !== 'html') return Promise.resolve({ bodyHtml: null, bodyText: body.content.slice(0, max) });
   // Only what is read crosses to the worker (a 30 MB body is not copied whole).
   const capped: GraphBody = { contentType: 'html', content: body.content.slice(0, RAW_MAX) };
   return new Promise((resolve) => {
-    queue.push({ id: nextId++, body: capped, max, outgoing: opts.outgoing, whole: opts.whole, timeoutMs: opts.timeoutMs ?? BODY_TIMEOUT_MS, retryKey: opts.retryKey, resolve });
+    queue.push({ id: nextId++, body: capped, max, outgoing: opts.outgoing, whole: opts.whole, cids: opts.cids, timeoutMs: opts.timeoutMs ?? BODY_TIMEOUT_MS, retryKey: opts.retryKey, resolve });
     next();
   });
 }

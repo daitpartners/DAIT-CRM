@@ -7,6 +7,7 @@ import { requireRight, type AuthUser } from '../plugins/auth.js';
 import { NotFoundError, parseBody } from '../validate.js';
 import { notifyUser } from '../leads/notify.js';
 import { checkRecipients } from '../mailer/rules.js';
+import { copyFileTo, removeFolder, type StoredFile } from '../mail/files.js';
 import { guard } from './leads.js';
 
 type Tx = Prisma.TransactionClient;
@@ -136,12 +137,13 @@ export const mailerRoutes: FastifyPluginAsync = async (app) => {
     return guard(reply, async () => {
       const account = await myMailbox(user.id);
       if (!account) return reply.code(409).send({ error: 'no_mailbox' });
-      const template = await prisma.emailTemplate.findUnique({ where: { id: body.templateId } });
+      const template = await prisma.emailTemplate.findUnique({ where: { id: body.templateId }, include: { attachments: { orderBy: { id: 'asc' } } } });
       if (!template) throw new NotFoundError();
       const rows = await checkRecipients(prisma, user, body.leadIds);
       const sendable = rows.filter((r) => !r.block).length;
       if (sendable === 0) return reply.code(409).send({ error: 'nothing_to_send' });
       const startAt = body.startAt && Date.parse(body.startAt) > Date.now() ? new Date(body.startAt) : null;
+      let campaignId: number | null = null;
       const id = await prisma.$transaction(async (tx) => {
         const c = await tx.emailCampaign.create({
           data: {
@@ -157,10 +159,24 @@ export const mailerRoutes: FastifyPluginAsync = async (app) => {
             },
           },
         });
+        campaignId = c.id;
+        // The template's pictures and attachments as queued: the campaign's own copies, so editing or deleting the
+        // template later does not change what the rest of the campaign sends.
+        if (template.attachments.length) {
+          const files: StoredFile[] = [];
+          for (const a of template.attachments) {
+            files.push({ fileName: a.fileName, contentType: a.contentType, size: a.size, contentId: a.contentId, isInline: a.isInline, storagePath: await copyFileTo(a.storagePath, 'campaigns', c.id) });
+          }
+          await tx.emailCampaign.update({ where: { id: c.id }, data: { attachments: files as unknown as Prisma.InputJsonValue } });
+        }
         const when = startAt ? `starts ${startAt.toISOString().slice(0, 16).replace('T', ' ')} UTC` : 'sending now';
         await notifyUser(tx, user.id, `Mailer queued · ${c.name}`, `${plural(sendable, 'email')} · ${when}`, `/mailer/${c.id}`);
         await audit(tx, { entityType: 'email_campaign', entityId: c.id, action: 'create', userId: user.id, after: { name: c.name, recipients: rows.length, queued: sendable } });
         return c.id;
+      }).catch(async (e) => {
+        // Copies made for a campaign that was not saved go too.
+        if (campaignId !== null) await removeFolder('campaigns', campaignId);
+        throw e;
       });
       return reply.code(201).send(await view(user, id));
     });

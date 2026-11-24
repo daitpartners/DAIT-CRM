@@ -327,3 +327,31 @@ describe('CSS image functions with bare string addresses (re-review R1)', () => 
   });
 });
 
+
+describe('cid: pictures allow-list (template pictures and attachments, 24 Nov 2026)', () => {
+  const out = (html: string, cids?: string[]) => sanitizeEmailHtml(html, { outgoing: true, cids });
+
+  test('kept only when it names one of the message’s inline pictures (any case)', () => {
+    const html = '<img src="cid:dait-logo.png" alt="DAIT"><img src="CID:Sig@01DB"><img src="cid:other.png"><img src="cid:">';
+    expect(out(html, ['dait-logo.png', 'sig@01db'])).toBe('<img src="cid:dait-logo.png" alt="DAIT" /><img src="CID:Sig@01DB" />');
+    // No inline pictures: no cid: at all (as before), and the reader's mode never keeps one.
+    expect(out(html)).toBe('');
+    expect(sanitizeEmailHtml(html)).toBe('');
+  });
+
+  test('a cid: smuggling markup or a different id does not pass', () => {
+    const cids = ['logo.png'];
+    expect(out('<img src="cid:logo.png&quot; onerror=&quot;alert(1)">', cids)).not.toContain('onerror');
+    expect(out('<img src="cid:logo.png x">', cids)).toBe('');
+    expect(out('<img src="cid:logo.pngx">', cids)).toBe('');
+    // Never in CSS (url(cid:…) is not a picture Graph attaches).
+    expect(out('<p style="background:url(cid:logo.png)">x</p>', cids)).toBe('<p>x</p>');
+    // Links never take cid:.
+    expect(out('<a href="cid:logo.png">x</a>', cids)).toBe('<a target="_blank" rel="noopener noreferrer">x</a>');
+  });
+
+  test('emailBodies passes the allow-list through (the worker path)', () => {
+    const r = emailBodies({ contentType: 'html', content: '<p>Hi</p><img src="cid:logo.png"><img src="cid:x.png">' }, RAW_MAX, { outgoing: true, whole: true, cids: ['logo.png'] });
+    expect(r.bodyHtml).toBe('<p>Hi</p><img src="cid:logo.png" />');
+  });
+});
