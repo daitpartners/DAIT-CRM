@@ -82,7 +82,9 @@ export async function fixRows(batchId: number, opts?: FixOptions): Promise<FixRo
     }
     if (include) {
       const origin = rowOrigin(row.file.name, row.file.ext, row.originKind, row.originN);
-      out.push({ fields, from: originText(origin), origin, problems });
+      // The row's OWN values: a research value written here would come back as the row's own on re-upload, losing
+      // where it came from (the problems above still count the accepted research values).
+      out.push({ fields: (row.fields ?? {}) as RowFields, from: originText(origin), origin, problems });
     }
   });
   return out;

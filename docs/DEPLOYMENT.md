@@ -273,6 +273,19 @@ Or set `LOCAL_ADMIN_PASSWORD` for that one command instead of typing it. Running
 the password. For a break-glass sign-in (Microsoft sign-in broken): add `LOCAL_ADMIN_LOGIN=1`, reload with
 `--update-env`, sign in, then remove it and reload again.
 
+## Release 5 (Import leads): checks and notes
+
+- **Build:** `npm ci` on the server needs `cdn.sheetjs.com` reachable; the `xlsx` package is installed from its tarball
+  there (not from the npm registry).
+- **After the deploy:** upload one 20 MB file (Leads → Import leads) through OpenLiteSpeed on live, to confirm the proxy
+  passes a body that size.
+- **One lane:** file reads and imports share the worker's `import` lane. A 5,000-row import takes about 100 s (more on
+  live), and other uploads wait at "Reading" until it finishes.
+- **Rollback:** the `company_name_normalise` migration (number 20 on this branch, 21 after `email-reader-html`)
+  rewrites the derived `companies.name_normalised` keys. A rolled-back release runs its older normaliser against the
+  rewritten keys, so duplicate matching by company name is weaker until the next deploy; no data is lost. The few
+  seconds between `migrate deploy` and the reload behave the same way.
+
 ## One-time steps after a release
 
 All of these have already been run on live; they are kept for reference and for a rebuild.

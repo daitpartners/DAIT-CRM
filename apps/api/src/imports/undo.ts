@@ -32,7 +32,7 @@ type Keep = UndoPreview['keep'][number];
 const IMPORT_AI_TITLES = new Set(['Research found (not verified)', 'Accepted from research']);
 /** A lead activity someone added, as the reason the lead stays. */
 const ACTIVITY_REASON: Record<string, UndoReason> = {
-  status: 'status', email: 'emails', quote: 'quotations', assign: 'reassigned', transfer: 'reassigned', created: 'edited',
+  status: 'status', email: 'activity', quote: 'quotations', assign: 'reassigned', transfer: 'reassigned', created: 'edited',
 };
 
 const importTrigger = (number: string) => `Import ${number}`;
@@ -148,8 +148,9 @@ async function planUndo(db: Db, batch: Pick<ImportBatch, 'id' | 'number'>): Prom
   const batchLeads = new Set(leads.map((l) => l.id));
   for (const c of contacts) {
     const n = c._count;
-    const reason: UndoReason | null = n.emailMessages ? 'emails' : n.quotations ? 'quotations' : n.projectStakeholders ? 'projects'
-      : n.campaignRecipients ? 'mailer' : iso(c.updatedAt) !== contactStamp.get(c.id) ? 'edited'
+    // Mail is checked after the visible reasons and shown only as the neutral `activity` (mail is private to its owner).
+    const reason: UndoReason | null = n.quotations ? 'quotations' : n.projectStakeholders ? 'projects'
+      : n.campaignRecipients ? 'mailer' : n.emailMessages ? 'activity' : iso(c.updatedAt) !== contactStamp.get(c.id) ? 'edited'
         : c.leads.some((l) => !batchLeads.has(l.id)) ? 'other_leads' : null;
     if (reason) keptContact.set(c.id, reason);
   }
@@ -158,8 +159,8 @@ async function planUndo(db: Db, batch: Pick<ImportBatch, 'id' | 'number'>): Prom
     // Research someone started on the company (any run but this batch's own) is work on it.
     const research = researched.has(co.id);
     const decided = decidedAfter(co.id);
-    const reason: UndoReason | null = n.quotations ? 'quotations' : n.projects ? 'projects' : n.emailMessages ? 'emails'
-      : n.calendarEvents ? 'calendar' : research ? 'notes'
+    const reason: UndoReason | null = n.quotations ? 'quotations' : n.projects ? 'projects'
+      : n.emailMessages || n.calendarEvents || research ? 'activity'
         : n.locations || decided || co.enrichmentSuggestions.length > 0 || iso(co.updatedAt) !== companyStamp.get(co.id) ? 'edited'
         : co.leads.some((l) => !batchLeads.has(l.id)) ? 'other_leads'
           : co.contacts.some((c) => !createdContacts.has(c.id)) ? 'other_contacts' : null;
@@ -239,12 +240,11 @@ type LeadForUndo = {
 /** Why a lead the batch created stays (null: it can go). */
 function leadReason(l: LeadForUndo, stamp: string | undefined): UndoReason | null {
   const n = l._count;
-  if (n.emailMessages) return 'emails';
   if (n.quotations) return 'quotations';
   if (n.projects) return 'projects';
-  if (n.tasks) return 'tasks';
-  if (n.calendarEvents) return 'calendar';
   if (n.campaignRecipients) return 'mailer';
+  // Emails, tasks and calendar events: one neutral reason, so mail is never singled out.
+  if (n.emailMessages || n.tasks || n.calendarEvents) return 'activity';
   if (l.status !== 'New') return 'status';
   let created = 0;
   let assigned = 0;
@@ -252,7 +252,7 @@ function leadReason(l: LeadForUndo, stamp: string | undefined): UndoReason | nul
     if (a.activityType === 'created' && created++ === 0) continue;
     if (a.activityType === 'assign' && assigned++ === 0) continue;
     if (a.activityType === 'ai' && a.byUserId === null && IMPORT_AI_TITLES.has(a.title)) continue;
-    return ACTIVITY_REASON[a.activityType] ?? 'notes';
+    return ACTIVITY_REASON[a.activityType] ?? 'activity';
   }
   if (n.assignments > 1) return 'reassigned';
   if (!stamp || iso(l.updatedAt) !== stamp) return 'edited';

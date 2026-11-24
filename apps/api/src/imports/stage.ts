@@ -13,7 +13,7 @@ import {
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { NotFoundError } from '../validate.js';
-import { ImportError, isLocked } from './batches.js';
+import { ImportError, isLocked, refuseWhileFilesReading } from './batches.js';
 import { classifyColumns, columnName, findHeaderRow, looksLikeEmail, looksLikeWebsite, squash, type ColumnTarget } from './columns.js';
 import { findExistingCompanies, type CompanyRef, type Db } from './companies.js';
 import { unguardCell } from './cells.js';
@@ -195,8 +195,8 @@ export async function stageTable(fileId: number, extract: TableExtract): Promise
 export type NewRow = { sheet: string | null; originKind: string; originN: number; raw: string[]; fields: RowFields };
 
 /**
- * Replaces a file's staged rows with `rows` (then re-evaluated) and writes `data` on the file, under the batch lock so
- * two files cannot both fit under the row limit. Refused (file Failed `too_many_rows`, no rows) when the batch would
+ * Replaces a file's staged rows with `rows` (then re-evaluated) and writes `data` on the file with status Read, under
+ * the batch lock so two files cannot both fit under the row limit. A file swept as interrupted (Failed) is not staged. Refused (file Failed `too_many_rows`, no rows) when the batch would
  * pass 5,000 rows. Nothing is written when, under that lock, the file turns out deleted or the batch importing.
  */
 export async function stageRows(
@@ -205,9 +205,9 @@ export async function stageRows(
   const refused = await prisma.$transaction(async (tx) => {
     // One staging per batch at a time, so two files cannot both fit under the row limit.
     const [batch] = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM import_batches WHERE id = ${file.batchId} FOR UPDATE`;
-    const current = await tx.importFile.findUnique({ where: { id: file.id }, select: { deletedAt: true } });
-    // A file deleted meanwhile, or a batch already importing, is left as it is.
-    if (!batch || isLocked(batch.status) || !current || current.deletedAt) return 'gone';
+    const current = await tx.importFile.findUnique({ where: { id: file.id }, select: { deletedAt: true, status: true } });
+    // A file deleted meanwhile, swept as interrupted (Failed), or a batch already importing, is left as it is.
+    if (!batch || isLocked(batch.status) || !current || current.deletedAt || current.status === 'Failed') return 'gone';
     await tx.importRow.deleteMany({ where: { fileId: file.id } });
     const others = await tx.importRow.count({ where: { batchId: file.batchId } });
     if (others + rows.length > IMPORT_MAX_ROWS) {
@@ -224,7 +224,8 @@ export async function stageRows(
         })),
       });
     }
-    await tx.importFile.update({ where: { id: file.id }, data });
+    // Read only now: until its rows are saved the file counts as still being read (Sort, research and Import wait).
+    await tx.importFile.update({ where: { id: file.id }, data: { ...data, status: 'Read' } });
     return false;
   }, { timeout: 120_000, maxWait: 30_000 });
 
@@ -604,7 +605,7 @@ export async function sortBatch(batchId: number) {
     const [batch] = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM import_batches WHERE id = ${batchId} FOR UPDATE`;
     if (!batch) throw new NotFoundError();
     if (isLocked(batch.status)) throw new ImportError('batch_locked', 409);
-    if (await tx.importFile.count({ where: { batchId, status: 'Reading' } }) > 0) throw new ImportError('files_reading', 409);
+    await refuseWhileFilesReading(tx, batchId);
     if (await tx.importRow.count({ where: { batchId } }) === 0) throw new ImportError('no_rows', 400);
     if (batch.status === 'Uploading') return tx.importBatch.update({ where: { id: batchId }, data: { status: 'Sorting' } });
     return tx.importBatch.findUniqueOrThrow({ where: { id: batchId } });

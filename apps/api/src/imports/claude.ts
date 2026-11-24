@@ -338,7 +338,8 @@ async function fileGone(fileId: number, batchId: number): Promise<boolean> {
     prisma.importFile.findUnique({ where: { id: fileId }, select: { status: true, deletedAt: true } }),
     prisma.importBatch.findUnique({ where: { id: batchId }, select: { status: true } }),
   ]);
-  return !file || file.deletedAt !== null || file.status !== 'Read' || !batch || isLocked(batch.status);
+  // The file stays Reading while it is staged (Read once its rows are saved); Failed = swept as interrupted.
+  return !file || file.deletedAt !== null || file.status === 'Failed' || !batch || isLocked(batch.status);
 }
 
 /**

@@ -195,6 +195,10 @@ export function importErrorText(t: TFn, code: string): string {
       return t('The file is larger than 20 MB.');
     case 'file_type':
       return t('Only .xlsx .xls .csv .pdf .docx .txt files can be imported.');
+    case 'research_started':
+      return t("Files can't be added once research has started.");
+    case 'research_done':
+      return t('Research has already run for this import. Review the rows in step 4.');
     case 'research_stopped':
       return t("Research stopped at Claude's monthly run cap. Resume it to research the remaining rows.");
     case 'claude_cap_reached':

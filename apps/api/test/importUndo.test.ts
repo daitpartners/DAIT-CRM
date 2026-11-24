@@ -112,7 +112,7 @@ describe('undo', () => {
       ['company', luna.companyId, 'quotations'],
       ['contact', sol.contactId, 'other_leads'],
       ['contact', luna.contactId, 'other_leads'],
-      ['lead', sol.leadId, 'emails'],
+      ['lead', sol.leadId, 'activity'], // emails: the neutral reason (mail stays private, Administrators included)
       ['lead', luna.leadId, 'other_leads'],
     ].sort((a, b) => String(a).localeCompare(String(b))));
     const leadNumbers = await prisma.lead.findMany({ where: { id: { in: [mar.leadId!, noor.leadId!] } }, orderBy: { id: 'asc' } });
@@ -275,7 +275,7 @@ describe('undo', () => {
     });
     const p = await undoPreview(batch.id);
     const reasons = Object.fromEntries(p.keep.filter((k) => k.kind === 'company').map((k) => [k.id, k.reason]));
-    expect(reasons).toEqual({ [research!.companyId!]: 'notes', [decided!.companyId!]: 'edited', [calendar!.companyId!]: 'calendar' });
+    expect(reasons).toEqual({ [research!.companyId!]: 'activity', [decided!.companyId!]: 'edited', [calendar!.companyId!]: 'activity' });
     expect(p.keep.filter((k) => k.kind === 'lead').map((k) => [k.id, k.reason]))
       .toEqual([[research!.leadId, 'other_leads'], [decided!.leadId, 'other_leads'], [calendar!.leadId, 'other_leads']]);
     expect(p.remove).toMatchObject({ leads: [{ id: plainRow!.leadId }], companies: 1, contacts: 0 });

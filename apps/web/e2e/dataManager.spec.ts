@@ -23,7 +23,7 @@ function fakeImports(page: Page) {
     route.fulfill({ status: 200, headers: { 'content-type': type, 'content-disposition': `attachment; filename="${name}"` }, body });
   const preview = {
     remove: { leads: [{ id: 9101, number: 'LD-9101' }], contacts: 1, companies: 1 },
-    keep: [{ kind: 'lead', id: 9102, label: 'LD-9102 · Meridian Textiles Ltd', reason: 'emails' }],
+    keep: [{ kind: 'lead', id: 9102, label: 'LD-9102 · Meridian Textiles Ltd', reason: 'activity' }],
   };
   const handler = async (route: Route) => {
     const req = route.request();
@@ -128,7 +128,7 @@ test('Data manager: list, batch detail tabs, downloads and the undo preview (Adm
   await detail.getByRole('button', { name: 'Undo this import…' }).click();
   const dialog = page.getByRole('dialog', { name: 'Undo IMPORT-2026-11-22?' });
   await expect(dialog.getByText('Will be removed: 1 lead, 1 contact, 1 company.')).toBeVisible();
-  await expect(dialog.getByRole('listitem')).toHaveText(['LD-9102 · Meridian Textiles Ltd — Has emails']);
+  await expect(dialog.getByRole('listitem')).toHaveText(['LD-9102 · Meridian Textiles Ltd — Has activity']);
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
   expect(fake.sent.some((s) => s.method === 'POST')).toBe(false);

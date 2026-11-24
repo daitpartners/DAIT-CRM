@@ -438,9 +438,12 @@ export function importActivityText(entry: ImportActivity, lang: Lang): string {
 // Data manager: Undo (Administrators, `undo_imports`) and the copy around a long import.
 
 /** Why Undo keeps a record the batch created (someone worked on it, or it holds records Undo must not remove). */
+/**
+ * Why Undo keeps a record. `activity` is one neutral reason for emails, notes, tasks, calendar events and research, so
+ * an Administrator's preview never shows that someone emailed a lead or contact (mail is private to its owner).
+ */
 export const UNDO_REASONS = [
-  'edited', 'status', 'emails', 'notes', 'tasks', 'quotations', 'projects', 'calendar', 'mailer', 'reassigned',
-  'other_leads', 'other_contacts',
+  'edited', 'status', 'activity', 'quotations', 'projects', 'mailer', 'reassigned', 'other_leads', 'other_contacts',
 ] as const;
 export type UndoReason = (typeof UNDO_REASONS)[number];
 
@@ -457,29 +460,30 @@ export type UndoPreview = {
 
 const UNDO_REASON_TEXT: Record<Lang, Record<UndoReason, string>> = {
   en: {
-    edited: 'Edited after the import', status: 'Status changed', emails: 'Has emails', notes: 'Has notes or activity',
-    tasks: 'Has tasks', quotations: 'Has quotations', projects: 'Has projects', calendar: 'Has calendar events',
-    mailer: 'In a Mailer campaign', reassigned: 'Reassigned', other_leads: 'Linked to leads that stay',
+    edited: 'Edited after the import', status: 'Status changed', activity: 'Has activity',
+    quotations: 'Has quotations', projects: 'Has projects', mailer: 'In a Mailer campaign', reassigned: 'Reassigned', other_leads: 'Linked to leads that stay',
     other_contacts: 'Has contacts that stay',
   },
   es: {
-    edited: 'Editado después de la importación', status: 'Estado cambiado', emails: 'Tiene correos',
-    notes: 'Tiene notas o actividad', tasks: 'Tiene tareas', quotations: 'Tiene cotizaciones', projects: 'Tiene proyectos',
-    calendar: 'Tiene eventos de calendario', mailer: 'En una campaña de Mailer', reassigned: 'Reasignado',
+    edited: 'Editado después de la importación', status: 'Estado cambiado', activity: 'Tiene actividad',
+    quotations: 'Tiene cotizaciones', projects: 'Tiene proyectos', mailer: 'En una campaña de Mailer', reassigned: 'Reasignado',
     other_leads: 'Vinculado a leads que se quedan', other_contacts: 'Tiene contactos que se quedan',
   },
   fr: {
-    edited: 'Modifié après l’import', status: 'Statut modifié', emails: 'A des e-mails', notes: 'A des notes ou de l’activité',
-    tasks: 'A des tâches', quotations: 'A des devis', projects: 'A des projets', calendar: 'A des événements d’agenda',
-    mailer: 'Dans une campagne Mailer', reassigned: 'Réattribué', other_leads: 'Lié à des leads conservés',
+    edited: 'Modifié après l’import', status: 'Statut modifié', activity: 'A de l’activité',
+    quotations: 'A des devis', projects: 'A des projets', mailer: 'Dans une campagne Mailer', reassigned: 'Réattribué', other_leads: 'Lié à des leads conservés',
     other_contacts: 'A des contacts conservés',
   },
 };
 
+/** The detailed reasons of earlier builds, now all `activity`. */
+const ACTIVITY_REASONS = new Set(['emails', 'notes', 'tasks', 'calendar']);
+
 /** Why Undo keeps a record, in `lang` (an unknown reason reads as `edited`). */
 export function undoReasonText(reason: string, lang: Lang): string {
   const t = UNDO_REASON_TEXT[lang] ?? UNDO_REASON_TEXT.en;
-  return t[(UNDO_REASONS as readonly string[]).includes(reason) ? (reason as UndoReason) : 'edited'];
+  const r = ACTIVITY_REASONS.has(reason) ? 'activity' : reason;
+  return t[(UNDO_REASONS as readonly string[]).includes(r) ? (r as UndoReason) : 'edited'];
 }
 
 const CONTINUE_HINT_TEXT: Record<Lang, string> = {

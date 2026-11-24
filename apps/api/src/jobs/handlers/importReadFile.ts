@@ -18,9 +18,10 @@ export const importReadDeps: ImportDeps = {};
  * `import_read_file` (Import leads): reads one stored upload in a child process (timeout, heap ceiling) and records
  * its status (Read / Scan / Failed), meta and failure code. Anything thrown marks the file Failed `unreadable` and
  * fails the job (one attempt only, so its error stays on the job for diagnosis). Results are written only while the
- * file is still Reading, so the job and the sweep never overwrite each other. A spreadsheet that was Read is then
- * staged into rows (`stageTable`), a PDF / Word / text file through Claude or the deterministic reader (`stageDocument`);
- * both first delete the file's existing rows, so reading a file again is harmless.
+ * file is still Reading, so the job and the sweep never overwrite each other. A file that was read is then staged into
+ * rows (`stageTable` for a spreadsheet, `stageDocument` through Claude or the deterministic reader for a PDF / Word /
+ * text file) and only becomes Read when its rows are saved; both first delete the file's existing rows, so reading a
+ * file again is harmless.
  */
 export async function importReadFileHandler(job: Job, _ctx: JobContext): Promise<void> {
   // The file's Claude time budget counts from here, so reading it never pushes the job past the stale limit.
@@ -38,7 +39,10 @@ export async function importReadFileHandler(job: Job, _ctx: JobContext): Promise
     result = await readInWorker(file.ext as ImportExt, await readImportFile(file.storagePath), file.name, {
       knownCountries: await knownCountries(), ...importReadOptions,
     });
-    written = (await write({ status: result.status, meta: result.meta as Prisma.InputJsonValue, error: result.error ?? null })).count === 1;
+    // A file with rows to stage stays Reading until `stageRows` saves them (and writes Read in the same transaction), so
+    // Sort, research and Import keep waiting for it, and a staging job lost to a restart is swept like a lost read.
+    const status = result.status === 'Read' && result.extract ? 'Reading' : result.status;
+    written = (await write({ status, meta: result.meta as Prisma.InputJsonValue, error: result.error ?? null })).count === 1;
   } catch (e) {
     await write({ status: 'Failed', meta: {}, error: 'unreadable' });
     throw e;

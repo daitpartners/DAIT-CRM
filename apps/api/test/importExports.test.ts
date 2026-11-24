@@ -128,6 +128,19 @@ describe('rows to fix', () => {
     expect(rows[3]!.problems.map((p) => p.code)).toEqual(['email_missing']);
   });
 
+  it('rows to fix write the row\'s own values only, never research values (Accept ticked included)', async () => {
+    const research = { email: { value: 'info@silent.test', sourceUrl: 'https://silent.test/', sourceLabel: 'silent.test', confidence: 90 } };
+    const batch = await batchWith([
+      { companyName: 'Silent Co', website: 'silent.test', $status: 'Missing details', $research: research },
+    ]);
+    for (const acceptHigh of [false, true]) {
+      const rows = await fixRows(batch.id, { acceptHigh, noContactRows: 'leave' });
+      expect(rows.map((r) => r.fields)).toEqual([{ companyName: 'Silent Co', website: 'silent.test' }]);
+      const ws = await sheetOf(await rowsToFixWorkbook(batch.id, 'en', { acceptHigh, noContactRows: 'leave' }));
+      expect(ws.getRow(2).getCell(col('email')).text).toBe('');
+    }
+  });
+
   it('header, total and blank lines (Not a lead) never appear; unticked Already in CRM and other skipped rows do', async () => {
     const crm = await makeCompany({ name: 'Old Co', country: 'Spain' });
     const batch = await batchWith([

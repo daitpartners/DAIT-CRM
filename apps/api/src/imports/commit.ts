@@ -27,7 +27,7 @@ import { notifyUser } from '../leads/notify.js';
 import { applySuggestion, isLocked as isFieldLocked } from '../research/service.js';
 import type { AuthUser } from '../plugins/auth.js';
 import { NotFoundError } from '../validate.js';
-import { ImportError } from './batches.js';
+import { ImportError, refuseWhileFilesReading } from './batches.js';
 import { companyKeyOf, findExistingCompanies } from './companies.js';
 import { matchCountry } from './countries.js';
 import { acceptable, effectiveFields, planBatch, researchOf, summarisePlan } from './plan.js';
@@ -47,6 +47,10 @@ const GENERIC_LOCAL_PARTS = new Set([
 const HONORIFICS = new Set(['dr', 'mr', 'mrs', 'ms', 'sr', 'sra', 'srta', 'm', 'mme', 'mlle', 'prof']);
 
 const planSelect = { id: true, fields: true, research: true, status: true, include: true, matchedCompanyId: true } as const;
+/** What the import job reads of each row (never `raw`, the original cells, which can be large). */
+const commitSelect = { ...planSelect, leadId: true, outcome: true } as const;
+/** The row columns `importRow` reads. */
+export type CommitRow = Pick<ImportRow, 'id' | 'fields' | 'research' | 'matchedCompanyId'>;
 
 const has = (v: string | null | undefined): v is string => typeof v === 'string' && v.trim() !== '';
 const clean = (v: string | null | undefined): string | null => (has(v) ? v.trim() : null);
@@ -118,7 +122,7 @@ export async function reviewBatch(
  * Starts the import with the step-4 choices. Under the batch row lock (the lock every staged-row change takes, so no edit,
  * tick or re-match lands once it has started), the rows are planned: 400 `choice_required` when rows have no email or
  * phone and no choice was made, 400 `nothing_to_import` when no row would be imported, 409 `batch_locked` unless the batch
- * is Sorting, Researching or Waiting for review. The batch becomes Importing (research paused), the choices are kept,
+ * is Sorting, Researching or Waiting for review, 409 `files_reading` while a file's rows are not saved yet. The batch becomes Importing (research paused), the choices are kept,
  * and one `import_commit` job is queued.
  */
 export async function startImport(user: AuthUser, batchId: number, body: ImportCommit): Promise<void> {
@@ -127,6 +131,8 @@ export async function startImport(user: AuthUser, batchId: number, body: ImportC
     const [batch] = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM import_batches WHERE id = ${batchId} FOR UPDATE`;
     if (!batch) throw new NotFoundError();
     if (!STARTS_FROM.has(batch.status)) throw new ImportError('batch_locked', 409);
+    // A file still being read or staged would lose its rows once the batch is Importing.
+    await refuseWhileFilesReading(tx, batchId);
     const rows = await tx.importRow.findMany({ where: { batchId }, select: planSelect, orderBy: [{ position: 'asc' }, { id: 'asc' }] });
     const summary = summarisePlan(planBatch(rows, { acceptHigh: body.acceptHigh, noContactRows: body.noContactRows, knownCountries: known }));
     if (body.noContactRows === null && summary.noContactRows > 0) throw new ImportError('choice_required', 400);
@@ -292,7 +298,7 @@ async function commitUnderLease(batchId: number, run: string, deps: CommitDeps):
   if (!importer) throw new Error('import_user_missing');
   const ctx = { user: authUserOf(importer), acceptHigh: options.acceptHigh === true, knownCountries: await knownCountries() };
 
-  const rows = await prisma.importRow.findMany({ where: { batchId }, orderBy: [{ position: 'asc' }, { id: 'asc' }] });
+  const rows = await prisma.importRow.findMany({ where: { batchId }, select: commitSelect, orderBy: [{ position: 'asc' }, { id: 'asc' }] });
   const plans = planBatch(rows, { acceptHigh: ctx.acceptHigh, noContactRows: options.noContactRows ?? null, knownCountries: ctx.knownCountries });
 
   const skipped = new Map<string, number[]>();
@@ -405,7 +411,7 @@ function companyResearch(own: RowFields, research: Partial<Record<ImportField, R
  * the batch with that company, so Undo never mistakes the batch's own later writes for a person's edit.
  */
 export async function importRow(
-  tx: Tx, row: ImportRow, batch: ImportBatch, ctx: { user: AuthUser; acceptHigh: boolean; knownCountries: readonly string[] },
+  tx: Tx, row: CommitRow, batch: ImportBatch, ctx: { user: AuthUser; acceptHigh: boolean; knownCountries: readonly string[] },
 ): Promise<RowResult | null> {
   // The row, locked: a row another run imported (or recorded) meanwhile is left as it is.
   const [current] = await tx.$queryRaw<{ lead_id: number | null; outcome: string | null }[]>`

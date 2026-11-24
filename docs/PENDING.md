@@ -182,7 +182,17 @@ both are recorded in the spec's "Deviations from the spec" section
 - Original files are deleted 90 days after upload (the batch, its rows and its leads stay; the Data manager then shows
   "Deleted after 90 days").
 - The old one-step CSV endpoints `/api/imports/leads/preview` and `/api/imports/leads` are no longer used by the
-  screens; remove them in the release after this one.
+  screens and now need `import_leads` (Administrators and Managers); remove them in the release after this one.
+- **One worker lane for imports and file reads:** reading uploads and importing batches share the worker's `import`
+  lane. A 5,000-row import takes about 100 s (more on live, with allocation), and other people's uploads wait at
+  "Reading" until it finishes.
+- **Rollback after the migrations:** the `company_name_normalise` migration (20 on this branch, 21 once
+  `email-reader-html` is merged first) rewrites `companies.name_normalised`. If a deploy is rolled back, the previous
+  release runs against the rewritten keys, so duplicate matching by name is weaker until the next deploy (nothing is
+  lost; the keys are derived).
+- **Release checks:** the server build (`npm ci`) must reach `cdn.sheetjs.com` (the `xlsx` package is a tarball from
+  there); after the deploy, upload one 20 MB file through OpenLiteSpeed on live to confirm the proxy allows the body
+  size.
 - Claude counting: one monthly cap covers company research runs, import row research and import document calls; the
   step-3 tile shows this month's total against the cap.
 

@@ -1925,5 +1925,7 @@
   "Will be removed: {leads}, {contacts}, {companies}.": "Seront supprimés : {leads}, {contacts}, {companies}.",
   "Kept because someone worked on them:": "Conservés car quelqu’un y a travaillé :",
   "Nobody has worked on these records yet, so nothing is kept.": "Personne n’a encore travaillé sur ces enregistrements : rien n’est conservé.",
-  "Research values the import accepted go back on these companies that were already in the CRM:": "Les valeurs de recherche acceptées par l’import sont retirées de ces entreprises déjà présentes dans le CRM :"
+  "Research values the import accepted go back on these companies that were already in the CRM:": "Les valeurs de recherche acceptées par l’import sont retirées de ces entreprises déjà présentes dans le CRM :",
+  "Files can't be added once research has started.": "Impossible d’ajouter des fichiers une fois la recherche commencée.",
+  "Research has already run for this import. Review the rows in step 4.": "La recherche a déjà été faite pour cet import. Vérifiez les lignes à l’étape 4."
 }

@@ -7,7 +7,8 @@ import { prisma } from '../src/db';
 import { buildApp } from '../src/app';
 import { STALE_AFTER_MS } from '../src/jobs/queue';
 import { runOnce } from '../src/jobs/runner';
-import { importReadFileHandler, importReadOptions } from '../src/jobs/handlers/importReadFile';
+import { importReadDeps, importReadFileHandler, importReadOptions } from '../src/jobs/handlers/importReadFile';
+import type { ClaudeRunner } from '../src/research/providers';
 import { sweepImportFiles } from '../src/imports/batches';
 import { readImportFile, removeBatchFiles, saveImportFile, storageDir } from '../src/imports/storage';
 import { fakeGraph, resetDb, seedLookups } from './helpers';
@@ -213,7 +214,13 @@ describe('file upload', () => {
     const batch = await newBatch(cookie);
     await prisma.importBatch.update({ where: { id: batch.id }, data: { status: 'Sorting' } });
     expect((await upload(batch.id, 'a.csv', Buffer.from('Company\nAcme'), cookie)).statusCode).toBe(201);
-    await prisma.importBatch.update({ where: { id: batch.id }, data: { status: 'Waiting for review' } });
+    // Once research has started (Researching, Waiting for review): its own message.
+    for (const status of ['Researching', 'Waiting for review']) {
+      await prisma.importBatch.update({ where: { id: batch.id }, data: { status } });
+      const res = await upload(batch.id, 'b.csv', Buffer.from('Company\nAcme'), cookie);
+      expect([res.statusCode, res.json()]).toEqual([409, { error: 'research_started' }]);
+    }
+    await prisma.importBatch.update({ where: { id: batch.id }, data: { status: 'Imported' } });
     const res = await upload(batch.id, 'b.csv', Buffer.from('Company\nAcme'), cookie);
     expect([res.statusCode, res.json()]).toEqual([409, { error: 'batch_locked' }]);
   });
@@ -268,25 +275,40 @@ describe('file upload', () => {
 });
 
 describe('reading sweep', () => {
-  it('files left Reading with no job for them become Failed', async () => {
+  it('files left Reading with no job for them: read again once when no Claude was spent, else Failed', async () => {
     const { user } = await as('ADMINISTRATOR');
     const batch = await prisma.importBatch.create({ data: { number: 'IMPORT-2026-11-24', language: 'en', leadType: 'Lead', createdById: user.id } });
     const old = new Date(Date.now() - STALE_AFTER_MS - 60_000);
     const mk = (name: string, createdAt: Date, status = 'Reading') =>
       prisma.importFile.create({ data: { batchId: batch.id, name, ext: 'csv', size: 1, storagePath: '', status, createdAt } });
     const lost = await mk('lost.csv', old);
+    const twice = await mk('twice.csv', old);
+    const spent = await mk('spent.pdf', old);
+    await prisma.importFile.update({ where: { id: spent.id }, data: { claudeCalls: 2 } });
     const queued = await mk('queued.csv', old);
     const fresh = await mk('fresh.csv', new Date());
     const done = await mk('done.csv', old, 'Read');
+    const failedJob = (fileId: number) =>
+      prisma.job.create({ data: { type: 'import_read_file', payload: { fileId }, runAt: old, status: 'failed', maxAttempts: 1 } });
     await prisma.job.create({ data: { type: 'import_read_file', payload: { fileId: queued.id }, runAt: new Date(), status: 'queued', maxAttempts: 1 } });
-    await prisma.job.create({ data: { type: 'import_read_file', payload: { fileId: lost.id }, runAt: old, status: 'failed', maxAttempts: 1 } });
+    await failedJob(lost.id);
+    await failedJob(twice.id);
+    await failedJob(twice.id);
+    await failedJob(spent.id);
 
-    expect(await sweepImportFiles()).toBe(1);
+    expect(await sweepImportFiles()).toBe(3);
     const status = async (id: number) => prisma.importFile.findUniqueOrThrow({ where: { id } });
-    expect(await status(lost.id)).toMatchObject({ status: 'Failed', error: 'interrupted' });
+    // Read once, no Claude spent: a new read job, still Reading.
+    expect((await status(lost.id)).status).toBe('Reading');
+    expect(await prisma.job.count({ where: { type: 'import_read_file', status: 'queued', payload: { path: ['fileId'], equals: lost.id } } })).toBe(1);
+    // Already read again once, or Claude spent on it: Failed, never read (or charged) again.
+    expect(await status(twice.id)).toMatchObject({ status: 'Failed', error: 'interrupted' });
+    expect(await status(spent.id)).toMatchObject({ status: 'Failed', error: 'interrupted' });
     expect((await status(queued.id)).status).toBe('Reading');
     expect((await status(fresh.id)).status).toBe('Reading');
     expect((await status(done.id)).status).toBe('Read');
+    // The next sweep finds the new job alive.
+    expect(await sweepImportFiles()).toBe(0);
   });
 
   it('a running job keeps its file while its lock is fresh; a stale lock means the read was lost', async () => {
@@ -302,6 +324,7 @@ describe('reading sweep', () => {
     });
     await job(live.id, new Date());
     await job(stale.id, old);
+    await prisma.importFile.update({ where: { id: stale.id }, data: { claudeCalls: 1 } });
     expect(await sweepImportFiles()).toBe(1);
     expect((await prisma.importFile.findUniqueOrThrow({ where: { id: live.id } })).status).toBe('Reading');
     expect(await prisma.importFile.findUniqueOrThrow({ where: { id: stale.id } })).toMatchObject({ status: 'Failed', error: 'interrupted' });
@@ -314,6 +337,78 @@ describe('reading sweep', () => {
     await prisma.importFile.update({ where: { id: file.id }, data: { status: 'Failed', error: 'interrupted' } });
     expect(await runReadJob()).toBe(true);
     expect(await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } })).toMatchObject({ status: 'Failed', error: 'interrupted' });
+  });
+});
+
+describe('a file stays Reading until its rows are saved (final review I1)', () => {
+  const LINE = 'Gulf Freight Partners LLC · gulffreight.ae · sales@gulffreight.ae · United Arab Emirates';
+  afterEach(() => {
+    delete importReadDeps.claude;
+    delete importReadDeps.env;
+  });
+
+  it('while Claude stages a document, Sort, Start research and Import answer 409 files_reading; then the file is Read with its rows', async () => {
+    const { cookie } = await as('ADMINISTRATOR');
+    await prisma.enrichmentSettings.create({ data: { id: 1, claudeEnabled: true, claudeMonthlyRunCap: 10 } });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let called = false;
+    const slow: ClaudeRunner = async () => {
+      called = true;
+      await gate;
+      return {
+        output: { rows: [{
+          companyName: 'Gulf Freight Partners LLC', website: 'gulffreight.ae', email: 'sales@gulffreight.ae', country: 'United Arab Emirates',
+          contactName: null, designation: null, phone: null, city: null, industry: null,
+        }] },
+        searchUrls: [],
+      };
+    };
+    importReadDeps.claude = slow;
+    importReadDeps.env = { CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-test-token', CLAUDE_BIN: process.execPath };
+    const batch = await newBatch(cookie);
+    const file = (await upload(batch.id, 'visitors.txt', Buffer.from(`${LINE}\n`), cookie)).json() as { id: number };
+    const job = runReadJob();
+    await vi.waitFor(() => expect(called).toBe(true), { timeout: 10_000 });
+
+    // Read by the child process, its meta written, but its rows not saved yet: still Reading.
+    expect((await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } })).status).toBe('Reading');
+    const refused = async (method: 'POST', url: string, payload?: object) => {
+      const res = await json(method, url, cookie, payload);
+      expect([res.statusCode, res.json()]).toEqual([409, { error: 'files_reading' }]);
+    };
+    await refused('POST', `/api/imports/batches/${batch.id}/sort`);
+    await refused('POST', `/api/imports/batches/${batch.id}/research`);
+    await prisma.importBatch.update({ where: { id: batch.id }, data: { status: 'Sorting' } });
+    await refused('POST', `/api/imports/batches/${batch.id}/import`, { acceptHigh: false, noContactRows: 'leave', notify: false });
+    expect((await prisma.importBatch.findUniqueOrThrow({ where: { id: batch.id } })).status).toBe('Sorting');
+
+    release();
+    expect(await job).toBe(true);
+    const f = await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } });
+    expect([f.status, f.claudeCalls]).toEqual(['Read', 1]);
+    const rows = await prisma.importRow.findMany({ where: { fileId: file.id } });
+    expect(rows.map((r) => (r.fields as { companyName?: string }).companyName)).toEqual(['Gulf Freight Partners LLC']);
+    expect((await json('POST', `/api/imports/batches/${batch.id}/sort`, cookie)).statusCode).toBe(200);
+  });
+
+  it('a restart during staging: the lost spreadsheet is swept, read again, and its rows are there', async () => {
+    const { cookie } = await as('ADMINISTRATOR');
+    const batch = await newBatch(cookie);
+    const file = (await upload(batch.id, 'a.csv', Buffer.from('Company;Email;Country\nAcme Ltd;info@acme.test;India\n'), cookie)).json() as { id: number };
+    // The worker stopped mid-staging: the job was claimed (running, lock gone stale), the file still Reading, no rows.
+    const old = new Date(Date.now() - STALE_AFTER_MS - 60_000);
+    await prisma.job.updateMany({ where: { type: 'import_read_file' }, data: { status: 'running', lockedAt: old, attempts: 1 } });
+    await prisma.importFile.update({ where: { id: file.id }, data: { createdAt: old } });
+    expect(await prisma.importRow.count({ where: { fileId: file.id } })).toBe(0);
+
+    expect(await sweepImportFiles()).toBe(1);
+    expect((await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } })).status).toBe('Reading');
+    await prisma.job.updateMany({ where: { type: 'import_read_file', status: 'running' }, data: { status: 'failed' } });
+    expect(await runReadJob()).toBe(true);
+    expect((await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } })).status).toBe('Read');
+    const rows = await prisma.importRow.findMany({ where: { fileId: file.id } });
+    expect(rows.map((r) => (r.fields as { companyName?: string }).companyName)).toEqual(['Acme Ltd']);
   });
 });
 

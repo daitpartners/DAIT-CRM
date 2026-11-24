@@ -75,7 +75,12 @@ describe('undoReasonText / importContinueHintText', () => {
       expect(new Set(UNDO_REASONS.map((r) => undoReasonText(r, lang))).size).toBe(UNDO_REASONS.length);
       expect(undoReasonText('nonsense', lang)).toBe(undoReasonText('edited', lang));
     }
-    expect(undoReasonText('emails', 'en')).toBe('Has emails');
+    // Mail is never named: emails (and notes, tasks, calendar) read as the one neutral reason, in every language.
+    expect(undoReasonText('activity', 'en')).toBe('Has activity');
+    for (const lang of LANGS) {
+      for (const old of ['emails', 'notes', 'tasks', 'calendar']) expect(undoReasonText(old, lang)).toBe(undoReasonText('activity', lang));
+      expect(UNDO_REASONS.map((r) => undoReasonText(r, lang)).join(' ')).not.toMatch(/e-?mails?\b|correos?\b|courriels?\b/i);
+    }
   });
 
   test('the Data manager "Continue" hint in three languages', () => {

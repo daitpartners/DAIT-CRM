@@ -18,8 +18,8 @@ import { removeImportFile, saveImportFile } from './storage.js';
 export class ImportError extends Error {
   constructor(
     readonly code:
-      | 'batch_locked' | 'too_many_files' | 'file_type' | 'file_size' | 'files_reading' | 'no_rows'
-      | 'research_stopped' | 'claude_cap_reached' | 'choice_required' | 'nothing_to_import' | 'cannot_continue' | 'import_running'
+      | 'batch_locked' | 'research_started' | 'too_many_files' | 'file_type' | 'file_size' | 'files_reading' | 'no_rows'
+      | 'research_stopped' | 'research_done' | 'claude_cap_reached' | 'choice_required' | 'nothing_to_import' | 'cannot_continue' | 'import_running'
       | 'file_deleted' | 'try_again',
     readonly status: number,
   ) {
@@ -78,6 +78,17 @@ export async function updateBatch(id: number, body: ImportBatchUpdate): Promise<
 
 /** Files may be added while the batch is still being uploaded or sorted. */
 const ACCEPTS_FILES = new Set(['Uploading', 'Sorting']);
+/** Statuses after research has started, before the import: adding a file is refused with its own message. */
+const RESEARCH_STARTED = new Set(['Researching', 'Waiting for review']);
+
+/**
+ * 409 `files_reading` while any (not deleted) file of the batch is unfinished: still being read, or read but its rows not
+ * saved yet (a file stays Reading until `stageRows` writes Read). Sort, Start research and Start import call it under
+ * the batch row lock, so no step moves on without a file's rows.
+ */
+export async function refuseWhileFilesReading(tx: Prisma.TransactionClient, batchId: number): Promise<void> {
+  if (await tx.importFile.count({ where: { batchId, status: 'Reading', deletedAt: null } }) > 0) throw new ImportError('files_reading', 409);
+}
 
 /** The extension a file name ends in, lower case ("Expo.PDF" → "pdf"), or null when it is not an import type. */
 export function importExt(name: string): ImportExt | null {
@@ -88,7 +99,8 @@ export function importExt(name: string): ImportExt | null {
 }
 
 /**
- * Adds one uploaded file to a batch: refuses a locked batch (409 `batch_locked`), an 11th file (`too_many_files`), a
+ * Adds one uploaded file to a batch: refuses a batch whose research has started (409 `research_started`), a locked
+ * batch (409 `batch_locked`), an 11th file (`too_many_files`), a
  * type not on the list (`file_type`), an empty file or one over 20 MB (`file_size`). The row is created Reading, the
  * bytes are saved and an `import_read_file` job is queued (one attempt: a retry could spend Claude twice).
  */
@@ -101,6 +113,7 @@ export async function addFile(user: AuthUser, batchId: number, name: string, dat
       // Locks the batch row, so two uploads at once cannot both take the tenth place.
       const [batch] = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM import_batches WHERE id = ${batchId} FOR UPDATE`;
       if (!batch) throw new NotFoundError();
+      if (RESEARCH_STARTED.has(batch.status)) throw new ImportError('research_started', 409);
       if (!ACCEPTS_FILES.has(batch.status)) throw new ImportError('batch_locked', 409);
       if (await tx.importFile.count({ where: { batchId } }) >= IMPORT_MAX_FILES) throw new ImportError('too_many_files', 400);
       const ext = importExt(fileName);
@@ -130,13 +143,18 @@ export async function listFiles(batchId: number) {
 
 /**
  * Files still Reading with no queued or running `import_read_file` job for them for longer than STALE_AFTER_MS were
- * interrupted (worker stopped, host asleep): they become Failed `interrupted` ("Reading was interrupted; upload the file
- * again"). Reads time out after 2 minutes, so a live read is never swept.
- * A running job locked longer than STALE_AFTER_MS counts as lost too. Returns how many were released.
+ * interrupted (worker stopped, host asleep) while being read or while their rows were being staged (a file stays Reading
+ * until its rows are saved). A file that spent no Claude call and was read only once is read again (a new job; reading
+ * replaces its rows, so nothing is doubled); any other becomes Failed `interrupted` ("Reading was interrupted; upload
+ * the file again"), so Claude is never spent twice on it. Reads time out after 2 minutes and staging stays within about
+ * 13 minutes, so a live job is never swept. A running job locked longer than STALE_AFTER_MS counts as lost too.
+ * Returns how many were released (read again or failed).
  */
 export async function sweepImportFiles(now = new Date()): Promise<number> {
   const staleBefore = new Date(now.getTime() - STALE_AFTER_MS);
-  const reading = await prisma.importFile.findMany({ where: { status: 'Reading', createdAt: { lt: staleBefore } }, select: { id: true } });
+  const reading = await prisma.importFile.findMany({
+    where: { status: 'Reading', createdAt: { lt: staleBefore } }, select: { id: true, claudeCalls: true, deletedAt: true },
+  });
   if (reading.length === 0) return 0;
   const jobs = await prisma.job.findMany({
     where: {
@@ -147,11 +165,28 @@ export async function sweepImportFiles(now = new Date()): Promise<number> {
   });
   const alive = new Set(jobs.map((j) => (j.payload as { fileId?: unknown } | null)?.fileId));
   // Still Reading only: a job that finished meanwhile keeps its result.
-  const lost = reading.filter((f) => !alive.has(f.id)).map((f) => f.id);
+  const lost = reading.filter((f) => !alive.has(f.id));
   if (lost.length === 0) return 0;
+  let reread = 0;
+  const failed: number[] = [];
+  for (const f of lost) {
+    const reads = await prisma.job.count({ where: { type: 'import_read_file', payload: { path: ['fileId'], equals: f.id } } });
+    if (f.claudeCalls > 0 || f.deletedAt || reads > 1) {
+      failed.push(f.id);
+      continue;
+    }
+    // Queued only while the file is still Reading (a job that finished meanwhile keeps its result).
+    reread += await prisma.$transaction(async (tx) => {
+      const [row] = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM import_files WHERE id = ${f.id} FOR UPDATE`;
+      if (row?.status !== 'Reading') return 0;
+      await enqueue(tx, 'import_read_file', { fileId: f.id }, { maxAttempts: 1 });
+      return 1;
+    });
+  }
+  if (failed.length === 0) return reread;
   const { count } = await prisma.importFile.updateMany({
-    where: { id: { in: lost }, status: 'Reading' },
+    where: { id: { in: failed }, status: 'Reading' },
     data: { status: 'Failed', error: 'interrupted', readAt: now },
   });
-  return count;
+  return reread + count;
 }

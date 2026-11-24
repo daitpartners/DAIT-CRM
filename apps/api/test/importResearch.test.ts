@@ -518,6 +518,21 @@ describe('import research · jobs, pause / resume, restart', () => {
     await expect(startBatchResearch(batch.id, onDeps(runner))).rejects.toMatchObject({ code: 'research_stopped', status: 409 });
   });
 
+  it('a finished run is not started again from Waiting for review (409 research_done); a batch never researched may start', async () => {
+    const batch = await batchWith([{ companyName: 'Fixture Freight', country: 'India', website: site.url('freight.test') }]);
+    await startBatchResearch(batch.id, offDeps);
+    while (await researchNextRow(batch.id, offDeps) === 'more');
+    expect((await batchOf(batch.id)).status).toBe('Waiting for review');
+    const before = await prisma.importRow.findMany({ where: { batchId: batch.id }, select: { research: true, researchedAt: true } });
+    await expect(startBatchResearch(batch.id, offDeps)).rejects.toMatchObject({ code: 'research_done', status: 409 });
+    expect(await prisma.importRow.findMany({ where: { batchId: batch.id }, select: { research: true, researchedAt: true } })).toEqual(before);
+
+    // Waiting for review with nothing researched yet (e.g. no row needed research then): Start runs.
+    const fresh = await batchWith([{ companyName: 'Fixture Freight 2', country: 'India', website: site.url('freight.test') }]);
+    await prisma.importBatch.update({ where: { id: fresh.id }, data: { status: 'Waiting for review' } });
+    expect(await startBatchResearch(fresh.id, offDeps)).toEqual({ total: 1 });
+  });
+
   it('the ETA comes from the gaps between rows, leaving out a pause', () => {
     const t = (min: number) => new Date(Date.UTC(2026, 10, 24, 10, min));
     // Rows at 0, 2, 4, then a 30-minute pause, then 36: gaps 2, 2, 2 (the 32 is left out) → 2 min a row.

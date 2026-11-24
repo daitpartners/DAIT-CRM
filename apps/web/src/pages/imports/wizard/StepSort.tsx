@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } 
 import { IMPORT_TABLE_FIELDS, importColumnLabel, type ImportField, type RowFilter } from '@dait-crm/shared';
 import { ApiError } from '../../../api/client';
 import {
-  IMPORT_PAGE_SIZE, useAnswerColumn, useBatchRows, useIncludeAll, useStartResearch, useUpdateRow, type ImportRowView, type OpenQuestion,
+  IMPORT_PAGE_SIZE, useAnswerColumn, useBatchFiles, useBatchRows, useIncludeAll, useStartResearch, useUpdateRow, type ImportRowView, type OpenQuestion,
 } from '../../../api/imports';
 import { Pager } from '../../../components/Pager';
 import { ScrollBox } from '../../../components/Table';
@@ -22,7 +22,15 @@ export function StepSort({ batchId, batchStatus, onBack, onNext }: Props) {
   const [page, setPage] = useState(1);
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const { data } = useBatchRows(batchId, filter, page);
+  // A file added from step 1 stays Reading until its rows are saved: poll the rows meanwhile, and once more when it is done.
+  const files = useBatchFiles(batchId);
+  const reading = files.data?.items.some((f) => f.status === 'Reading') ?? false;
+  const { data, refetch } = useBatchRows(batchId, filter, page, reading);
+  const wasReading = useRef(false);
+  useEffect(() => {
+    if (wasReading.current && !reading) void refetch();
+    wasReading.current = reading;
+  }, [reading, refetch]);
   const includeAll = useIncludeAll(batchId);
   const updateRow = useUpdateRow();
   const start = useStartResearch();
@@ -66,6 +74,7 @@ export function StepSort({ batchId, batchStatus, onBack, onNext }: Props) {
         <Tile label={t('Already in CRM')} value={count(tiles?.already)} meta={t('matched by website or name')} />
         <Tile label={t('Not a lead')} value={count(tiles?.notLead)} meta={t('headers, totals, blank lines')} />
       </div>
+      {reading ? <div className="note info" role="status">{importErrorText(t, 'files_reading')}</div> : null}
       {data?.question ? <ColumnQuestionNote key={`${data.question.fileId}-${data.question.sheet}-${data.question.col}`} question={data.question} onDone={setDone} /> : null}
       {done ? (
         <div className="note ok" role="status">

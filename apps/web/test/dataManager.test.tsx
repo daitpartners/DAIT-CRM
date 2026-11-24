@@ -66,7 +66,7 @@ const failedRow = row({ id: 504, status: 'Ready', outcomeCode: 'import_error', e
 const preview = {
   remove: { leads: [{ id: 9101, number: 'LD-9101' }, { id: 9103, number: 'LD-9103' }], contacts: 1, companies: 2 },
   keep: [
-    { kind: 'lead', id: 9102, label: 'LD-9102 · Meridian Textiles Ltd', reason: 'emails' },
+    { kind: 'lead', id: 9102, label: 'LD-9102 · Meridian Textiles Ltd', reason: 'activity' },
     { kind: 'company', id: 12, label: 'CO-1042 · Meridian Textiles Ltd', reason: 'other_leads' },
   ],
   reverted: [{ id: 44, label: 'CO-0900 · Gulf Freight' }],
@@ -296,7 +296,7 @@ describe('Undo', () => {
     expect(await within(dialog).findByText('Will be removed: 2 leads, 1 contact, 2 companies.')).toBeInTheDocument();
     expect(within(dialog).getByText('Kept because someone worked on them:')).toBeInTheDocument();
     const kept = within(dialog).getAllByRole('listitem').map((li) => li.textContent);
-    expect(kept).toEqual(['LD-9102 · Meridian Textiles Ltd — Has emails', 'CO-1042 · Meridian Textiles Ltd — Linked to leads that stay', 'CO-0900 · Gulf Freight']);
+    expect(kept).toEqual(['LD-9102 · Meridian Textiles Ltd — Has activity', 'CO-1042 · Meridian Textiles Ltd — Linked to leads that stay', 'CO-0900 · Gulf Freight']);
     expect(within(dialog).getByText('Research values the import accepted go back on these companies that were already in the CRM:')).toBeInTheDocument();
     expect(calls(fetchFn, 'POST', '/api/imports/batches/8/undo')).toHaveLength(0);
     await userEvent.click(within(dialog).getByRole('button', { name: 'Undo import' }));

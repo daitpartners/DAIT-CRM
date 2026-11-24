@@ -27,7 +27,7 @@ import {
   CLAUDE_CALL_TIMEOUT_MS, ClaudeRunError, claudeCodeConfig, claudeCodeReady, normaliseUrl,
 } from '../research/providers.js';
 import { readWebsite, type PageRead } from '../research/websiteReader.js';
-import { ImportError, isLocked } from './batches.js';
+import { ImportError, isLocked, refuseWhileFilesReading } from './batches.js';
 import { importClaude, type ImportClaude, type ImportDeps } from './claude.js';
 import { looksLikeEmail, looksLikeWebsite } from './columns.js';
 import { matchCountry } from './countries.js';
@@ -407,7 +407,9 @@ async function claudeCapReached(tx: Tx | typeof prisma): Promise<boolean> {
  * - `batch_locked` from Importing on;
  * - `files_reading` while a file of the batch is still being read (its rows would miss the run);
  * - `research_stopped` after a cap stop with rows already researched: Resume continues the run (a new Start would
- *   research those rows, and spend Claude, again).
+ *   research those rows, and spend Claude, again);
+ * - `research_done` from Waiting for review once rows were researched (the run finished; only a batch where nothing
+ *   was researched yet starts from there).
  */
 export async function startBatchResearch(batchId: number, deps: ImportDeps = {}): Promise<{ total: number }> {
   const c = await importClaude(deps);
@@ -417,12 +419,11 @@ export async function startBatchResearch(batchId: number, deps: ImportDeps = {})
     if (!batch) throw new NotFoundError();
     if (isLocked(batch.status)) throw new ImportError('batch_locked', 409);
     if (batch.status === 'Researching') return { total: batch.research_total };
-    if (await tx.importFile.count({ where: { batchId, status: 'Reading', deletedAt: null } }) > 0) {
-      throw new ImportError('files_reading', 409);
-    }
-    if (batch.research_stop_reason === 'cap' && await tx.importRow.count({ where: { batchId, researchedAt: { not: null } } }) > 0) {
-      throw new ImportError('research_stopped', 409);
-    }
+    await refuseWhileFilesReading(tx, batchId);
+    const researched = await tx.importRow.count({ where: { batchId, researchedAt: { not: null } } });
+    if (batch.research_stop_reason === 'cap' && researched > 0) throw new ImportError('research_stopped', 409);
+    // A finished run is not started again (it would clear its results and research, and spend Claude, again).
+    if (batch.status === 'Waiting for review' && researched > 0) throw new ImportError('research_done', 409);
     await tx.$executeRaw`UPDATE import_rows SET research_status = NULL WHERE batch_id = ${batchId} AND research_status IS NOT NULL`;
     const total = await tx.$executeRaw`
       UPDATE import_rows SET research_status = 'waiting', research = '{}'::jsonb, research_note = NULL, researched_at = NULL
