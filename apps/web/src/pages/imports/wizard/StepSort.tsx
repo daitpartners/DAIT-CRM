@@ -163,17 +163,16 @@ function ColumnQuestionNote({ question: q, onDone }: { question: OpenQuestion; o
   const header = q.header;
   function confirm() {
     setError(null);
-    answer.mutate(
-      { fileId: q.fileId, body: { sheet: q.sheet, col: q.col, field } },
-      {
-        onSuccess: () =>
-          onDone(
-            field === 'skip'
-              ? t('Column "{column}" in {file} is now skipped.', { column: header, file: q.fileName })
-              : t('Column "{column}" in {file} is now the {field}.', { column: header, file: q.fileName, field: fieldOptionLabel(t, field) }),
-          ),
-        onError: (e) => setError(importErrorText(t, e instanceof ApiError ? e.code : '')),
-      },
+    // The promise, not mutate's callbacks: the refreshed rows close this question (unmounting the note) before
+    // mutate's own onSuccess would run, and a callback of an unmounted observer never fires.
+    answer.mutateAsync({ fileId: q.fileId, body: { sheet: q.sheet, col: q.col, field } }).then(
+      () =>
+        onDone(
+          field === 'skip'
+            ? t('Column "{column}" in {file} is now skipped.', { column: header, file: q.fileName })
+            : t('Column "{column}" in {file} is now the {field}.', { column: header, file: q.fileName, field: fieldOptionLabel(t, field) }),
+        ),
+      (e: unknown) => setError(importErrorText(t, e instanceof ApiError ? e.code : '')),
     );
   }
   const selectId = `imp-map-${q.fileId}-${q.col}`;
