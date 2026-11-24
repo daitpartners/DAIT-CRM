@@ -7,7 +7,8 @@ import {
 import { Pager } from '../../../components/Pager';
 import { ScrollBox } from '../../../components/Table';
 import { Tile } from '../../../components/Tile';
-import { useLang, useT } from '../../../i18n/useT';
+import { useToast } from '../../../components/Toast';
+import { useLang, useT, type TFn } from '../../../i18n/useT';
 import { FIELD_OPTIONS, NODE, fieldOptionLabel, importErrorText, rowStatusBadge, withNodes } from '../labels';
 
 type Props = { batchId: number; batchStatus: string; onBack: () => void; onNext: () => void };
@@ -26,11 +27,16 @@ export function StepSort({ batchId, batchStatus, onBack, onNext }: Props) {
   const start = useStartResearch();
   const tiles = data?.tiles;
   const items = data?.items ?? [];
-  const ticked = items.filter((r) => r.include).length;
+  const toast = useToast();
+  const refused = (e: unknown) => toast(importErrorText(t, e instanceof ApiError ? e.code : ''), 'warn');
+  // The header tick reads the whole filter (every page): all, none or some of its rows ticked.
+  const total = data?.total ?? 0;
+  const included = data?.included ?? 0;
+  const allTicked = total > 0 && included === total;
   const headRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    if (headRef.current) headRef.current.indeterminate = ticked > 0 && ticked < items.length;
-  }, [ticked, items.length]);
+    if (headRef.current) headRef.current.indeterminate = included > 0 && included < total;
+  }, [included, total]);
 
   function research() {
     setError(null);
@@ -54,7 +60,7 @@ export function StepSort({ batchId, batchStatus, onBack, onNext }: Props) {
       </p>
       <div className="tiles t5">
         <Tile label={t('Rows found')} value={count(tiles?.rows)} meta={tiles?.files === 1 ? t('from 1 file') : t('from {n} files', { n: count(tiles?.files) })} />
-        <Tile label={t('Ready')} value={count(tiles?.ready)} meta={t('company + country + a way to contact')} metaClass="ok" />
+        <Tile label={t('Ready')} value={count(tiles?.ready)} meta={t('company + country + email')} metaClass="ok" />
         <Tile label={t('Missing details')} value={count(tiles?.missing)} meta={t('go to AI research')} metaClass="warn" />
         <Tile label={t('Already in CRM')} value={count(tiles?.already)} meta={t('matched by website or name')} />
         <Tile label={t('Not a lead')} value={count(tiles?.notLead)} meta={t('headers, totals, blank lines')} />
@@ -96,9 +102,10 @@ export function StepSort({ batchId, batchStatus, onBack, onNext }: Props) {
                   <input
                     ref={headRef}
                     type="checkbox"
-                    aria-label={t('Include all rows')}
-                    checked={items.length > 0 && ticked === items.length}
-                    onChange={() => includeAll.mutate({ filter, include: ticked !== items.length })}
+                    aria-label={t('Include all {n} rows in this view', { n: total })}
+                    checked={allTicked}
+                    disabled={total === 0}
+                    onChange={() => includeAll.mutate({ filter, include: !allTicked }, { onError: refused })}
                   />
                 </th>
                 {IMPORT_TABLE_FIELDS.map((f) => (
@@ -112,7 +119,7 @@ export function StepSort({ batchId, batchStatus, onBack, onNext }: Props) {
             </thead>
             <tbody>
               {items.map((r) => (
-                <SortRow key={r.id} row={r} onTick={(include) => updateRow.mutate({ id: r.id, body: { include } })} />
+                <SortRow key={r.id} row={r} onTick={(include) => updateRow.mutate({ id: r.id, body: { include } }, { onError: refused })} />
               ))}
             </tbody>
           </table>
@@ -198,6 +205,13 @@ function ColumnQuestionNote({ question: q, onDone }: { question: OpenQuestion; o
   );
 }
 
+/** "Expo xlsx · row 14", "GITEX pdf · p.7", "Madrid docx · card 3", "notes txt · line 2", in the reader's language. */
+export function originText(t: TFn, o: ImportRowView['origin']): string {
+  const where =
+    o.kind === 'page' ? t('p.{n}', { n: o.n }) : o.kind === 'card' ? t('card {n}', { n: o.n }) : o.kind === 'line' ? t('line {n}', { n: o.n }) : t('row {n}', { n: o.n });
+  return `${o.word} ${o.ext} · ${where}`;
+}
+
 function SortRow({ row: r, onTick }: { row: ImportRowView; onTick: (include: boolean) => void }) {
   const t = useT();
   const lang = useLang();
@@ -211,7 +225,7 @@ function SortRow({ row: r, onTick }: { row: ImportRowView; onTick: (include: boo
       {IMPORT_TABLE_FIELDS.map((f) => (
         <EditableCell key={f} rowId={r.id} field={f} value={r.fields[f] ?? ''} strong={f === 'companyName' && !notLead} blank={notLead} />
       ))}
-      <td className="muted">{r.from}</td>
+      <td className="muted">{originText(t, r.origin)}</td>
       <td>
         <span className={`badge ${rowStatusBadge(r.status)}`}>{status}</span>
       </td>
@@ -223,12 +237,17 @@ function SortRow({ row: r, onTick }: { row: ImportRowView; onTick: (include: boo
  * A cell edited in place: plain text only (a paste drops formatting), Enter saves, Escape puts the value back, leaving
  * the cell saves a change. An empty cell shows "missing"; a "Not a lead" row's values are dimmed and its empty cells stay blank.
  */
-export function EditableCell({ rowId, field, value, strong, blank }: { rowId: number; field: ImportField; value: string; strong?: boolean; blank?: boolean }) {
+export function EditableCell({ rowId, field, value: saved, strong, blank }: { rowId: number; field: ImportField; value: string; strong?: boolean; blank?: boolean }) {
   const t = useT();
+  const toast = useToast();
   const update = useUpdateRow();
   const ref = useRef<HTMLTableCellElement>(null);
   // Re-mounts the cell's content after an edit or Escape, so React's DOM matches the value again.
   const [version, setVersion] = useState(0);
+  // What was just typed, shown until the saved value changes (no flicker back to the old value while saving).
+  const [draft, setDraft] = useState<string | null>(null);
+  useEffect(() => setDraft(null), [saved]);
+  const value = draft ?? saved;
   const cancelled = useRef(false);
 
   function onFocus() {
@@ -248,7 +267,20 @@ export function EditableCell({ rowId, field, value, strong, blank }: { rowId: nu
     const el = ref.current;
     if (!el) return;
     const next = (el.textContent ?? '').trim();
-    if (!cancelled.current && next !== value) update.mutate({ id: rowId, body: { field, value: next.slice(0, 500) } });
+    if (!cancelled.current && next !== value) {
+      setDraft(next.slice(0, 500));
+      update.mutate(
+        { id: rowId, body: { field, value: next.slice(0, 500) } },
+        {
+          // Refused (e.g. the import has started): the old value comes back and the reason is shown.
+          onError: (e) => {
+            setDraft(null);
+            setVersion((v) => v + 1);
+            toast(importErrorText(t, e instanceof ApiError ? e.code : ''), 'warn');
+          },
+        },
+      );
+    }
     cancelled.current = false;
     setVersion((v) => v + 1);
   }

@@ -126,8 +126,15 @@ export const FIELD_OPTIONS: readonly (ImportField | 'skip')[] = [
   'companyName', 'contactName', 'designation', 'industry', 'city', 'country', 'website', 'email', 'phone', 'notes', 'skip',
 ];
 
-/** A research value's source label: the one label research writes itself translates; a page address stays as it is. */
-export const sourceLabelText = (t: TFn, label: string) => (label === 'website search' ? t('website search') : label);
+/**
+ * A research value's source label: the labels research writes itself ("website search", "AI analysis · <page>")
+ * translate; a page address stays as it is.
+ */
+export function sourceLabelText(t: TFn, label: string): string {
+  if (label === 'website search') return t('website search');
+  const ai = /^AI analysis · (.+)$/.exec(label);
+  return ai ? t('AI analysis · {source}', { source: ai[1]! }) : label;
+}
 
 /** Import API refusals in plain words. */
 export function importErrorText(t: TFn, code: string): string {

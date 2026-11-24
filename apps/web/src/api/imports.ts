@@ -61,6 +61,8 @@ export type ImportRowView = {
   matched: { id: number; number: string } | null;
   from: string;
   fileName: string;
+  /** Where the row came from, as parts (worded on screen: "Expo xlsx · row 14"). */
+  origin: { word: string; ext: string; kind: string; n: number };
   research?: Record<string, ResearchValue>;
   researchStatus?: string;
   researchNote?: ResearchNotePart[];
@@ -68,7 +70,8 @@ export type ImportRowView = {
 
 export type BatchTiles = { rows: number; files: number; ready: number; missing: number; already: number; notLead: number };
 export type OpenQuestion = ColumnQuestion & { fileId: number; fileName: string };
-export type RowsPage = { items: ImportRowView[]; total: number; tiles: BatchTiles; question: OpenQuestion | null };
+/** `total` = rows in the filter, `included` = how many of them are ticked (every page): the header tick reads both. */
+export type RowsPage = { items: ImportRowView[]; total: number; included: number; tiles: BatchTiles; question: OpenQuestion | null };
 
 export type ResearchPage = {
   status: string;
@@ -174,18 +177,64 @@ function useRefreshRows() {
   return () => qc.invalidateQueries({ queryKey: importKeys.all });
 }
 
+type RowsSnapshot = [readonly unknown[], RowsPage | undefined][];
+
+/**
+ * Changes the cached step-2 pages at once (an edit or tick shows before the server answers); returns what they were,
+ * so a refused change is rolled back.
+ */
+async function patchRowPages(qc: ReturnType<typeof useQueryClient>, change: (page: RowsPage) => RowsPage): Promise<RowsSnapshot> {
+  const key = [...base, 'rows'];
+  await qc.cancelQueries({ queryKey: key });
+  const before = qc.getQueriesData<RowsPage>({ queryKey: key });
+  qc.setQueriesData<RowsPage>({ queryKey: key }, (page) => (page ? change(page) : page));
+  return before;
+}
+const rollBack = (qc: ReturnType<typeof useQueryClient>, before: RowsSnapshot | undefined) =>
+  before?.forEach(([key, data]) => qc.setQueryData(key, data));
+
+/** One cell or tick: shown at once, rolled back when the server refuses it (the caller shows why). */
 export function useUpdateRow() {
+  const qc = useQueryClient();
   const refresh = useRefreshRows();
   return useMutation({
     mutationFn: ({ id, body }: { id: number; body: ImportRowUpdate }) => api<ImportRowView>(`/api/imports/rows/${id}`, { method: 'PATCH', body }),
+    onMutate: ({ id, body }) =>
+      patchRowPages(qc, (page) => {
+        const row = page.items.find((r) => r.id === id);
+        if (!row) return page;
+        const tick = body.include !== undefined && body.include !== row.include ? (body.include ? 1 : -1) : 0;
+        const fields = { ...row.fields };
+        if (body.field) {
+          if (body.value) fields[body.field] = body.value;
+          else delete fields[body.field];
+        }
+        return {
+          ...page,
+          included: page.included + tick,
+          items: page.items.map((r) => (r.id === id ? { ...r, fields, include: body.include ?? r.include } : r)),
+        };
+      }),
+    onError: (_e, _v, before) => rollBack(qc, before),
     onSettled: refresh,
   });
 }
 
+/** The header tick: every row of the filter (all pages), shown at once on the page in view, rolled back if refused. */
 export function useIncludeAll(batchId: number) {
+  const qc = useQueryClient();
   const refresh = useRefreshRows();
   return useMutation({
     mutationFn: (body: ImportIncludeAll) => api<{ changed: number }>(`/api/imports/batches/${batchId}/include`, { method: 'POST', body }),
+    onMutate: async (body) => {
+      const key = [...base, 'rows', batchId, body.filter];
+      await qc.cancelQueries({ queryKey: key });
+      const before = qc.getQueriesData<RowsPage>({ queryKey: key });
+      qc.setQueriesData<RowsPage>({ queryKey: key }, (page) =>
+        page ? { ...page, included: body.include ? page.total : 0, items: page.items.map((r) => ({ ...r, include: body.include })) } : page);
+      return before;
+    },
+    onError: (_e, _v, before) => rollBack(qc, before),
     onSettled: refresh,
   });
 }

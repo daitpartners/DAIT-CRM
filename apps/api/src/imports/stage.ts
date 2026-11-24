@@ -433,6 +433,8 @@ export async function answerColumn(fileId: number, body: ImportColumnAnswer): Pr
 export type RowView = {
   id: number; fields: RowFields; status: string; include: boolean; problems: RowProblem[];
   matched: CompanyRef | null; from: string; fileName: string;
+  /** `from` as parts, so the screen words it in the reader's language ("row 14", "p.7", "card 3", "line 2"). */
+  origin: RowOrigin;
   research?: Record<string, ResearchValue>; researchStatus?: string;
   /** Rendered with `importResearchNoteText` (shared). */
   researchNote?: ResearchNotePart[];
@@ -447,10 +449,18 @@ const ORIGIN_LABEL: Record<string, (n: number) => string> = {
   row: (n) => `row ${n}`, page: (n) => `p.${n}`, card: (n) => `card ${n}`, line: (n) => `line ${n}`,
 };
 
+/** Where a row came from: the first word of the file name, its type, and the row / page / card / line in it. */
+export type RowOrigin = { word: string; ext: string; kind: string; n: number };
+
+export function rowOrigin(fileName: string, ext: string, originKind: string, originN: number): RowOrigin {
+  const word = fileName.replace(/\.[^.]*$/, '').split(/[^\p{L}\p{N}]+/u).find((w) => w !== '') ?? fileName;
+  return { word, ext, kind: ORIGIN_LABEL[originKind] ? originKind : 'row', n: originN };
+}
+
 /** "Expo xlsx · row 14": the first word of the file name, its type, and where in it the row was. */
 export function fromLabel(fileName: string, ext: string, originKind: string, originN: number): string {
-  const word = fileName.replace(/\.[^.]*$/, '').split(/[^\p{L}\p{N}]+/u).find((w) => w !== '') ?? fileName;
-  return `${word} ${ext} · ${(ORIGIN_LABEL[originKind] ?? ORIGIN_LABEL.row!)(originN)}`;
+  const o = rowOrigin(fileName, ext, originKind, originN);
+  return `${o.word} ${o.ext} · ${ORIGIN_LABEL[o.kind]!(o.n)}`;
 }
 
 export const rowSelect = {
@@ -466,6 +476,7 @@ export function rowView(r: Prisma.ImportRowGetPayload<{ select: typeof rowSelect
     id: r.id, fields: r.fields as RowFields, status: r.status, include: r.include, problems: r.problems as RowProblem[],
     matched: r.matchedCompany ? { id: r.matchedCompany.id, number: r.matchedCompany.number } : null,
     from: fromLabel(r.file.name, r.file.ext, r.originKind, r.originN), fileName: r.file.name,
+    origin: rowOrigin(r.file.name, r.file.ext, r.originKind, r.originN),
     ...(research && Object.keys(research).length > 0 ? { research } : {}),
     ...(r.researchStatus ? { researchStatus: r.researchStatus } : {}),
     ...(Array.isArray(r.researchNote) ? { researchNote: r.researchNote as unknown as ResearchNotePart[] } : {}),
@@ -546,7 +557,7 @@ export async function batchTiles(batchId: number): Promise<BatchTiles> {
 
 /** The step-2 table: a page of rows (100 at most), the tiles and the first open column question. */
 export async function listRows(batchId: number, q: ImportRowsQuery): Promise<{
-  items: RowView[]; total: number; tiles: BatchTiles; question: (ColumnQuestion & { fileId: number; fileName: string }) | null;
+  items: RowView[]; total: number; included: number; tiles: BatchTiles; question: (ColumnQuestion & { fileId: number; fileName: string }) | null;
 }> {
   const batch = await prisma.importBatch.findUnique({ where: { id: batchId }, select: { id: true } });
   if (!batch) throw new NotFoundError();
@@ -561,8 +572,9 @@ export async function listRows(batchId: number, q: ImportRowsQuery): Promise<{
     where.id = { in: hits.map((h) => h.id) };
   }
   const order = { orderBy: [{ position: 'asc' }, { id: 'asc' }], ...pageArgs(q) } satisfies Prisma.ImportRowFindManyArgs;
-  const [total, items, tiles, files] = await Promise.all([
+  const [total, included, items, tiles, files] = await Promise.all([
     prisma.importRow.count({ where }),
+    prisma.importRow.count({ where: { ...where, include: true } }),
     q.filter in FILTER_OUTCOME
       ? prisma.importRow.findMany({ where, select: outcomeSelect, ...order }).then((rows) => rows.map(outcomeRowView))
       : prisma.importRow.findMany({ where, select: rowSelect, ...order }).then((rows) => rows.map(rowView)),
@@ -573,7 +585,7 @@ export async function listRows(batchId: number, q: ImportRowsQuery): Promise<{
   const question = withQuestion
     ? { ...(withQuestion.questions as ColumnQuestion[])[0]!, fileId: withQuestion.id, fileName: withQuestion.name }
     : null;
-  return { items, total, tiles, question };
+  return { items, total, included, tiles, question };
 }
 
 /** Step 1 → step 2: refused while a file is still being read (409 `files_reading`) or when nothing was staged (400 `no_rows`). */

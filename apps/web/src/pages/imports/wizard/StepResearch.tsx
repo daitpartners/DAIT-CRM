@@ -116,10 +116,14 @@ export function StepResearch({ batchId, onBack, onNext }: Props) {
         </div>
       </div>
       {!v.claude.on ? <div className="note info">{t('Claude Code is off: only the website reader runs.')}</div> : null}
+      {/* One note per cap problem: stopped at the cap (and whether Resume can work yet), or paused with the cap reached. */}
       {v.stopReason === 'cap' ? (
-        <div className="note warn">{t("Claude's monthly run cap is reached. Research stopped; the remaining rows stay Missing details.")}</div>
-      ) : null}
-      {canResume && capReached ? (
+        <div className="note warn">
+          {capReached
+            ? t("Claude's monthly run cap is reached. Research stopped; the remaining rows stay Missing details. Raise the cap in Settings or switch Claude off to resume.")
+            : t("Claude's monthly run cap is reached. Research stopped; the remaining rows stay Missing details.")}
+        </div>
+      ) : canResume && capReached ? (
         <div className="note warn">{t("Claude's monthly run cap is reached. Raise the cap in Settings or switch Claude off to resume.")}</div>
       ) : null}
       {error ? (

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent } from 'react';
+import { useEffect, useId, useRef, useState, type DragEvent } from 'react';
 import { IMPORT_EXTENSIONS, IMPORT_MAX_FILE_BYTES, IMPORT_MAX_FILES, type LeadType, type OutreachLanguage } from '@dait-crm/shared';
 import { ApiError } from '../../../api/client';
 import { useBatchFiles, useCreateBatch, useImportOptions, useUploadFile, type AllocationLine } from '../../../api/imports';
@@ -6,7 +6,10 @@ import { useLang, useT, type TFn } from '../../../i18n/useT';
 import { fileBadge, fileLogo, fileMetaText, importErrorText } from '../labels';
 
 /** The step-1 alert: the missing choices (worded from what is still missing), or a message; `flash` replays the flash. */
-export type Step1Alert = { kind: 'choices'; flash: number } | { kind: 'text'; text: string; flash: number };
+export type Step1Alert =
+  | { kind: 'choices'; flash: number }
+  | { kind: 'noFile'; flash: number }
+  | { kind: 'text'; text: string; flash: number };
 
 type Props = {
   batchId: number | null;
@@ -65,10 +68,17 @@ export function StepUpload({ batchId, language, leadType, alert, busy, onChoose,
   const [problems, setProblems] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Set at once (state lags a render): a second drop while the first is uploading never makes a second batch.
+  const busyRef = useRef(false);
+  const langErrId = useId();
+  const typeErrId = useId();
   const alertRef = useRef<HTMLDivElement>(null);
   const missing = missingChoices(language, leadType);
   const showChoices = alert?.kind === 'choices' && missing.length > 0;
-  const alertText = alert?.kind === 'text' ? alert.text : showChoices ? choicesAlertText(t, missing) : null;
+  const alertText =
+    alert?.kind === 'text' ? alert.text
+    : alert?.kind === 'noFile' ? t('Add at least one file the CRM can read.')
+    : showChoices ? choicesAlertText(t, missing) : null;
 
   // The app's error styles flash once each time the alert is raised (as the mockup).
   useEffect(() => {
@@ -82,7 +92,7 @@ export function StepUpload({ batchId, language, leadType, alert, busy, onChoose,
 
   async function addFiles(picked: File[]) {
     if (inputRef.current) inputRef.current.value = '';
-    if (picked.length === 0) return;
+    if (picked.length === 0 || busyRef.current) return;
     if (!language || !leadType) {
       onRefused();
       return;
@@ -90,6 +100,7 @@ export function StepUpload({ batchId, language, leadType, alert, busy, onChoose,
     const { ok, problems: refused } = refuseFiles(t, picked, files?.items.length ?? 0);
     setProblems(refused);
     if (ok.length === 0) return;
+    busyRef.current = true;
     setUploading(true);
     try {
       let id = batchId;
@@ -110,12 +121,14 @@ export function StepUpload({ batchId, language, leadType, alert, busy, onChoose,
     } catch (e) {
       setProblems((p) => [...p, importErrorText(t, e instanceof ApiError ? e.code : '')]);
     } finally {
+      busyRef.current = false;
       setUploading(false);
     }
   }
 
   function onDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
+    if (uploading) return;
     void addFiles([...e.dataTransfer.files]);
   }
 
@@ -139,22 +152,30 @@ export function StepUpload({ batchId, language, leadType, alert, busy, onChoose,
             {t('Every lead in this import gets this language. It decides who they are allocated to and which templates are used.')}{' '}
             <b>{t('Choose one; nothing is pre-selected.')}</b>
           </p>
-          <fieldset className="radio-group">
+          <fieldset
+            className="radio-group"
+            aria-invalid={showChoices && !language ? true : undefined}
+            aria-describedby={showChoices && !language ? langErrId : undefined}
+          >
             <legend className="sr">{t('Outreach language')}</legend>
             <div className="grid2">
               {radio('imp-lang', 'en' as OutreachLanguage, language, t('English leads'), rules('en'), (v) => onChoose({ language: v }))}
               {radio('imp-lang', 'es' as OutreachLanguage, language, t('Spanish leads (Español)'), rules('es'), (v) => onChoose({ language: v }))}
             </div>
-            {showChoices && !language ? <div className="err-msg">{t('Choose English or Spanish.')}</div> : null}
+            {showChoices && !language ? <div id={langErrId} className="err-msg">{t('Choose English or Spanish.')}</div> : null}
           </fieldset>
           <h3>{t('Import as')}</h3>
-          <fieldset className="radio-group">
+          <fieldset
+            className="radio-group"
+            aria-invalid={showChoices && !leadType ? true : undefined}
+            aria-describedby={showChoices && !leadType ? typeErrId : undefined}
+          >
             <legend className="sr">{t('Import as')}</legend>
             <div className="grid2">
               {radio('imp-type', 'Prospect' as LeadType, leadType, t('Prospects'), t('Researched companies, not yet contacted'), (v) => onChoose({ leadType: v }))}
               {radio('imp-type', 'Lead' as LeadType, leadType, t('Leads'), t('Already showed interest'), (v) => onChoose({ leadType: v }))}
             </div>
-            {showChoices && !leadType ? <div className="err-msg">{t('Choose Prospects or Leads.')}</div> : null}
+            {showChoices && !leadType ? <div id={typeErrId} className="err-msg">{t('Choose Prospects or Leads.')}</div> : null}
           </fieldset>
         </div>
         <div className="card">

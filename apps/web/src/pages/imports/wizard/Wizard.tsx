@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Navigate, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import type { LeadType, OutreachLanguage } from '@dait-crm/shared';
 import { ApiError } from '../../../api/client';
 import { useBatch, useBatchFiles, useSortBatch, useUpdateBatch } from '../../../api/imports';
@@ -37,7 +37,7 @@ export function Wizard() {
   const rawBatch = Number(params.get('batch'));
   const batchId = Number.isInteger(rawBatch) && rawBatch > 0 ? rawBatch : null;
   const rawStep = Number(params.get('step'));
-  const { data: batch } = useBatch(batchId);
+  const { data: batch, error: batchError } = useBatch(batchId);
   const { data: files } = useBatchFiles(batchId);
   const sort = useSortBatch();
   const update = useUpdateBatch(batchId);
@@ -52,6 +52,24 @@ export function Wizard() {
     setLeadType(batch.leadType);
   }, [batch?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // "Add at least one file the CRM can read." goes once a file is read.
+  const readFiles = (files?.items ?? []).filter((f) => f.status === 'Read').length;
+  useEffect(() => {
+    if (readFiles > 0) setAlert((a) => (a?.kind === 'noFile' ? null : a));
+  }, [readFiles]);
+
+  if (batchId !== null && batchError) {
+    const gone = batchError instanceof ApiError && batchError.status === 404;
+    return (
+      <section className="card" role="alert">
+        <h2>{gone ? t('Import not found') : t('Something went wrong. Try again.')}</h2>
+        {gone ? <p className="muted-text">{t('This import does not exist or was deleted.')}</p> : null}
+        <p>
+          <Link to="/leads/import">{t('Start a new import')}</Link>
+        </p>
+      </section>
+    );
+  }
   if (batchId !== null && !batch && !params.get('step')) return null;
   const fromStatus = batch ? stepForStatus(batch.status) : 1;
   if (batchId !== null && batch && fromStatus === null && !params.get('step')) {
@@ -81,7 +99,7 @@ export function Wizard() {
   function sortAndGo() {
     if (batchId === null || !(files?.items ?? []).some((f) => f.status === 'Read')) {
       setStep(1);
-      setAlert({ kind: 'text', text: t('Add at least one file the CRM can read.'), flash: Date.now() });
+      setAlert({ kind: 'noFile', flash: Date.now() });
       return;
     }
     sort.mutate(batchId, {

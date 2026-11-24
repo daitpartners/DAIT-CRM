@@ -325,12 +325,21 @@ describe('step-2 API', () => {
     const body = res.json();
     expect(body.total).toBe(9);
     expect(body.tiles).toEqual({ rows: 9, files: 1, ready: 2, missing: 2, already: 0, notLead: 5 });
-    expect(body.items[0]).toMatchObject({ status: 'Ready', include: true, from: 'Expo xlsx · row 4', fileName: 'Expo-Dubai-visitors.xlsx', matched: null });
+    expect(body.items[0]).toMatchObject({
+      status: 'Ready', include: true, from: 'Expo xlsx · row 4', fileName: 'Expo-Dubai-visitors.xlsx', matched: null,
+      origin: { word: 'Expo', ext: 'xlsx', kind: 'row', n: 4 },
+    });
+    // The ticked rows of the filter (the header tick), across every page.
+    expect(body.included).toBe(await prisma.importRow.count({ where: { batchId: batch.id, include: true } }));
     expect(body.question).toEqual({
       sheet: 'Visitors', col: 0, header: 'Firma', guess: 'companyName', fileId: file.id, fileName: 'Expo-Dubai-visitors.xlsx',
       samples: ['Al Noor Logistics LLC', 'Brightline Dental Clinics', 'Northgate Retail Group'],
     });
+    const page2 = await json('GET', `/api/imports/batches/${batch.id}/rows?pageSize=2&page=2`, cookie);
+    expect(page2.json()).toMatchObject({ total: 9, included: body.included });
+    expect(page2.json().items).toHaveLength(2);
     const missing = await json('GET', `/api/imports/batches/${batch.id}/rows?filter=missing`, cookie);
+    expect(missing.json()).toMatchObject({ total: 2, included: 2 });
     expect(missing.json().items.map((r: { fields: RowFields }) => r.fields.companyName)).toEqual(['Brightline Dental Clinics', 'Northgate Retail Group']);
     const search = await json('GET', `/api/imports/batches/${batch.id}/rows?q=kestrel`, cookie);
     expect(search.json().total).toBe(1);
@@ -386,6 +395,13 @@ describe('step-2 API', () => {
     const rows = await rowsOf(file.id);
     expect(rows.filter((r) => r.include).map((r) => r.status)).toEqual(['Ready', 'Ready']);
     expect(rows.filter((r) => r.status === 'Missing details').every((r) => !r.include && r.includeTouched)).toBe(true);
+    // The header tick reads the whole filter: none ticked in Missing details now, some in All.
+    const view = await json('GET', `/api/imports/batches/${batch.id}/rows?filter=missing&pageSize=1`, cookie);
+    expect(view.json()).toMatchObject({ total: 2, included: 0 });
+    const all = await json('POST', `/api/imports/batches/${batch.id}/include`, cookie, { filter: 'all', include: true });
+    expect(all.statusCode).toBe(200);
+    const every = await json('GET', `/api/imports/batches/${batch.id}/rows?pageSize=1`, cookie);
+    expect(every.json()).toMatchObject({ total: 9, included: 9 });
   });
 
   it('editing the email of a Missing details row makes it Ready; a touched tick is kept', async () => {

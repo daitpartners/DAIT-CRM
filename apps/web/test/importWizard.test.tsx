@@ -99,6 +99,11 @@ describe('step 1: no default language or import type', () => {
     expect(screen.getByRole('alert')).toHaveClass('note', 'danger');
     expect(screen.getByText('Choose English or Spanish.')).toHaveClass('err-msg');
     expect(screen.getByText('Choose Prospects or Leads.')).toHaveClass('err-msg');
+    // Each message is tied to its group.
+    const lang = screen.getByRole('group', { name: 'Outreach language' });
+    expect(lang).toHaveAttribute('aria-invalid', 'true');
+    expect(lang).toHaveAttribute('aria-describedby', screen.getByText('Choose English or Spanish.').id);
+    expect(screen.getByRole('group', { name: 'Import as' })).toHaveAttribute('aria-describedby', screen.getByText('Choose Prospects or Leads.').id);
   });
 
   it('a later step pill is refused the same way; choosing English leaves only the import type in the alert', async () => {
@@ -157,6 +162,35 @@ describe('step 1: no default language or import type', () => {
     expect(calls(fetchFn, 'POST', '/api/imports/batches')).toHaveLength(0);
   });
 
+  it('a second drop while the first upload is running makes no second batch', async () => {
+    let release: () => void = () => undefined;
+    const fetchFn = stubFetch((url, init) => {
+      if (url === '/api/imports/batches' && init?.method === 'POST') {
+        return new Promise<Response>((done) => { release = () => done(Response.json({ id: 7, number: 'IMPORT-2026-11-24', status: 'Uploading' }, { status: 201 })); }) as unknown as Response;
+      }
+      if (url.startsWith('/api/imports/batches/7/files?')) return Response.json({ id: 3, name: 'a.csv', ext: 'csv', size: 10, status: 'Reading' }, { status: 201 });
+      if (url === '/api/imports/batches/7') return Response.json(batch('Uploading'));
+      return undefined;
+    });
+    renderPage();
+    await userEvent.click(screen.getByRole('radio', { name: /English leads/ }));
+    await userEvent.click(screen.getByRole('radio', { name: /Prospects/ }));
+    const zone = document.querySelector('.file-pick')!;
+    fireEvent.drop(zone, { dataTransfer: { files: [fileOf('a.csv')] } });
+    fireEvent.drop(zone, { dataTransfer: { files: [fileOf('b.csv')] } });
+    await waitFor(() => expect(calls(fetchFn, 'POST', '/api/imports/batches')).toHaveLength(1));
+    release();
+    await waitFor(() => expect(calls(fetchFn, 'POST', /^\/api\/imports\/batches\/7\/files\?/)).toHaveLength(1));
+    expect(calls(fetchFn, 'POST', '/api/imports/batches')).toHaveLength(1);
+  });
+
+  it('an unknown batch shows "Import not found" with a way back', async () => {
+    stubFetch((url) => (url === '/api/imports/batches/999' ? Response.json({ error: 'not_found' }, { status: 404 }) : undefined));
+    renderPage('/leads/import?batch=999');
+    expect(await screen.findByText('Import not found')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Start a new import' })).toHaveAttribute('href', '/leads/import');
+  });
+
   it('lists files with their read status: a scan cannot be read yet, a failed file says why', async () => {
     stubFetch((url) => {
       if (url === '/api/imports/batches/7') return Response.json(batch('Uploading'));
@@ -188,7 +222,8 @@ describe('step 1: no default language or import type', () => {
 });
 
 const row = (id: number, fields: Record<string, string>, status = 'Missing details', extra = {}) => ({
-  id, fields, status, include: true, problems: [], matched: null, from: 'Expo xlsx · row 14', fileName: 'Expo.xlsx', ...extra,
+  id, fields, status, include: true, problems: [], matched: null, from: 'Expo xlsx · row 14', fileName: 'Expo.xlsx',
+  origin: { word: 'Expo', ext: 'xlsx', kind: 'row', n: 14 }, ...extra,
 });
 const rowsPage: RowsPage = {
   items: [
@@ -196,6 +231,7 @@ const rowsPage: RowsPage = {
     row(12, { companyName: 'Meridian Textiles Ltd' }, 'Already in CRM', { matched: { id: 9, number: 'CO-1042' }, include: false }),
   ],
   total: 2,
+  included: 1,
   tiles: { rows: 2, files: 1, ready: 1, missing: 0, already: 1, notLead: 0 },
   question: { sheet: 'Sheet1', col: 0, header: 'Firma', guess: 'companyName', samples: ['Al Noor Logistics LLC', 'Meridian Textiles Ltd'], fileId: 3, fileName: 'Expo.xlsx' },
 };
@@ -249,6 +285,73 @@ describe('step 2: sorting', () => {
     fireEvent.blur(email);
     expect(calls(fetchFn, 'PATCH', '/api/imports/rows/11')).toHaveLength(1);
     await waitFor(() => expect(within(table).getByText('Al Noor Logistics LLC').closest('tr')!.querySelectorAll('td')[7]).toHaveTextContent('omar.h@alnoorlogistics.ae'));
+  });
+});
+
+describe('step 2: the header tick reads the whole filter; refused changes come back with the reason', () => {
+  const page = (over: Partial<RowsPage>): RowsPage => ({ ...rowsPage, question: null, ...over });
+  const renderRows = (view: RowsPage, patch?: Response) => {
+    const fetchFn = stubFetch((url, init) => {
+      if (url === '/api/imports/batches/7') return Response.json(batch('Sorting'));
+      if (url.startsWith('/api/imports/batches/7/rows?')) return Response.json(view);
+      if (url === '/api/imports/batches/7/include' && init?.method === 'POST') return Response.json({ changed: 1 });
+      if (url.startsWith('/api/imports/rows/') && init?.method === 'PATCH') return patch ?? Response.json(view.items[0]);
+      return undefined;
+    });
+    renderPage('/leads/import?batch=7&step=2');
+    return fetchFn;
+  };
+
+  it('some rows of the filter ticked (on any page): mixed; a click ticks every row of the filter', async () => {
+    // Every row on this page is ticked, but 168 of the 468 are not: the header is mixed, not checked.
+    const fetchFn = renderRows(page({
+      items: [row(11, { companyName: 'Al Noor Logistics LLC' }, 'Ready')], total: 468, included: 300,
+    }));
+    const head = await screen.findByRole('checkbox', { name: 'Include all 468 rows in this view' });
+    await waitFor(() => expect((head as HTMLInputElement).indeterminate).toBe(true));
+    expect(head).not.toBeChecked();
+    await userEvent.click(head);
+    await waitFor(() => expect(calls(fetchFn, 'POST', '/api/imports/batches/7/include')).toHaveLength(1));
+    expect(bodyOf(fetchFn, 'POST', '/api/imports/batches/7/include')).toEqual({ filter: 'all', include: true });
+  });
+
+  it('every row of the filter ticked: checked; a click leaves them all out', async () => {
+    const fetchFn = renderRows(page({ items: [row(11, { companyName: 'A' }, 'Ready')], total: 468, included: 468 }));
+    const head = await screen.findByRole('checkbox', { name: 'Include all 468 rows in this view' });
+    await waitFor(() => expect(head).toBeChecked());
+    expect((head as HTMLInputElement).indeterminate).toBe(false);
+    await userEvent.click(head);
+    await waitFor(() => expect(bodyOf(fetchFn, 'POST', '/api/imports/batches/7/include')).toEqual({ filter: 'all', include: false }));
+  });
+
+  it('the From column is worded on screen', async () => {
+    renderRows(page({ items: [row(11, { companyName: 'A' }, 'Ready', { origin: { word: 'GITEX', ext: 'pdf', kind: 'page', n: 7 } })] }));
+    expect(await screen.findByText('GITEX pdf · p.7')).toHaveClass('muted');
+  });
+
+  it('a refused edit (the import has started) shows the reason and puts the old value back', async () => {
+    renderRows(page({}), Response.json({ error: 'batch_locked' }, { status: 409 }));
+    const table = await screen.findByRole('table');
+    const cells = (await within(table).findByText('Al Noor Logistics LLC')).closest('tr')!.querySelectorAll('td');
+    const email = cells[7]!;
+    fireEvent.focus(email);
+    email.textContent = 'new@x.com';
+    fireEvent.blur(email);
+    // Shown at once while saving.
+    expect(within(table).getByText('Al Noor Logistics LLC').closest('tr')!.querySelectorAll('td')[7]).toHaveTextContent('new@x.com');
+    expect(await screen.findByText('This import has already started and can no longer be changed.')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(table).getByText('Al Noor Logistics LLC').closest('tr')!.querySelectorAll('td')[7]).toHaveTextContent('omar.h@alnoorlogistics.ae'));
+  });
+
+  it('a refused tick is rolled back with the reason', async () => {
+    renderRows(page({}), Response.json({ error: 'batch_locked' }, { status: 409 }));
+    const table = await screen.findByRole('table');
+    const tick = within((await within(table).findByText('Al Noor Logistics LLC')).closest('tr')!).getByRole('checkbox');
+    expect(tick).toBeChecked();
+    await userEvent.click(tick);
+    expect(await screen.findByText('This import has already started and can no longer be changed.')).toBeInTheDocument();
+    await waitFor(() => expect(within(within(table).getByText('Al Noor Logistics LLC').closest('tr')!).getByRole('checkbox')).toBeChecked());
   });
 });
 
@@ -311,7 +414,11 @@ describe('step 3: AI research', () => {
   it('a cap stop: Stopped, the cap note, and Resume disabled while the cap is still reached', async () => {
     renderResearch(research({ status: 'Waiting for review', stopReason: 'cap', claude: { on: true, runsThisMonth: 300, cap: 300 } }));
     expect(await screen.findByText('Stopped')).toHaveClass('b-warn');
-    expect(screen.getByText("Claude's monthly run cap is reached. Research stopped; the remaining rows stay Missing details.")).toHaveClass('note', 'warn');
+    // One note for the one problem: stopped at the cap, and what to do before Resume works.
+    expect(
+      screen.getByText("Claude's monthly run cap is reached. Research stopped; the remaining rows stay Missing details. Raise the cap in Settings or switch Claude off to resume."),
+    ).toHaveClass('note', 'warn');
+    expect(document.querySelectorAll('.note.warn')).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'Resume' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull();
     expect(screen.queryByText(/daily/i)).toBeNull();
@@ -328,10 +435,15 @@ const review = (over: Partial<ReviewView> = {}): ReviewView => ({
 });
 
 describe('step 4: review and import', () => {
-  const renderReview = (view: ReviewView, me: Me = manager) => {
+  const renderReview = (view: ReviewView, me: Me = manager, extra: Handler = () => undefined) => {
     const fetchFn = stubFetch((url, init) => {
+      const more = extra(url, init);
+      if (more) return more;
       if (url === '/api/imports/batches/7') return Response.json(batch('Waiting for review'));
-      if (url.startsWith('/api/imports/batches/7/review?')) return Response.json(view);
+      // As the server: rows left out are no longer counted as imports.
+      if (url.startsWith('/api/imports/batches/7/review?')) {
+        return Response.json(url.includes('noContactRows=leave') ? { ...view, willImport: view.willImport - view.noContactRows } : view);
+      }
       if (url === '/api/imports/batches/7/import' && init?.method === 'POST') return Response.json({ id: 7, status: 'Importing' }, { status: 202 });
       return undefined;
     });
@@ -339,7 +451,7 @@ describe('step 4: review and import', () => {
     return fetchFn;
   };
 
-  it('both boxes start unticked and neither choice is made; Import without a choice is refused on screen', async () => {
+  it('both boxes start unticked and neither choice is made; Import stays off (undecided rows not counted) until chosen', async () => {
     const fetchFn = renderReview(review());
     expect(await screen.findByRole('checkbox', { name: 'Accept research values with confidence 80% or higher' })).not.toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Send each assignee one notification for the batch' })).not.toBeChecked();
@@ -349,12 +461,21 @@ describe('step 4: review and import', () => {
     expect(screen.getByText('39 already in CRM · 7 not leads · 10 unticked')).toBeInTheDocument();
     expect(screen.getByText('English market (US and Canada) → Deepak, Lakshita')).toBeInTheDocument();
     expect(screen.getByText('Import · IMPORT-2026-11-24')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Import 412 prospects' }));
-    expect(screen.getByText('Choose Import them or Leave them out.')).toHaveClass('err-msg');
+    // 412 includes the 14 rows with no email or phone: until the choice they are not counted, and Import is off.
+    const off = screen.getByRole('button', { name: 'Import 398 prospects' });
+    expect(off).toBeDisabled();
+    const hint = screen.getByText('Choose Import them or Leave them out to continue.');
+    expect(hint).toHaveAttribute('role', 'status');
+    expect(off).toHaveAttribute('aria-describedby', hint.id);
+    expect(screen.getByRole('radiogroup', { name: 'Rows with no email or phone' })).toHaveAttribute('aria-describedby', hint.id);
+    await userEvent.click(off);
     expect(calls(fetchFn, 'POST', '/api/imports/batches/7/import')).toHaveLength(0);
 
+    await userEvent.click(screen.getByRole('radio', { name: 'Import them' }));
+    expect(await screen.findByRole('button', { name: 'Import 412 prospects' })).toBeEnabled();
+    expect(screen.queryByText('Choose Import them or Leave them out to continue.')).toBeNull();
     await userEvent.click(screen.getByRole('radio', { name: 'Leave them out' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Import 412 prospects' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Import 398 prospects' }));
     await waitFor(() => expect(calls(fetchFn, 'POST', '/api/imports/batches/7/import')).toHaveLength(1));
     expect(bodyOf(fetchFn, 'POST', '/api/imports/batches/7/import')).toEqual({ acceptHigh: false, noContactRows: 'leave', notify: false });
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/leads/import/manager?batch=7'));
@@ -367,9 +488,38 @@ describe('step 4: review and import', () => {
     expect(screen.queryByRole('link', { name: 'Add these countries' })).toBeNull();
   });
 
-  it('an Administrator sees "Add these countries"', async () => {
-    renderReview(review(), admin);
-    expect(await screen.findByRole('link', { name: 'Add these countries' })).toBeInTheDocument();
+  it('an Administrator corrects the names in a dialog, they are added as countries, then the rows are matched again', async () => {
+    const fetchFn = renderReview(review(), admin, (url, init) => {
+      if (url === '/api/lookups' && init?.method === 'POST') return Response.json({ id: 99 }, { status: 201 });
+      if (url === '/api/imports/batches/7/rematch' && init?.method === 'POST') return Response.json({ tiles: {} });
+      if (url === '/api/lookups') return Response.json({ groups: {} });
+      return undefined;
+    });
+    await userEvent.click(await screen.findByRole('link', { name: 'Add these countries' }));
+    const dialog = screen.getByRole('dialog', { name: 'Add these countries' });
+    expect(within(dialog).getByLabelText('Chile (2 rows)')).toHaveValue('Chile');
+    const mexico = within(dialog).getByLabelText('Mexico (1 row)');
+    await userEvent.clear(mexico);
+    await userEvent.type(mexico, 'México');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add countries' }));
+    await waitFor(() => expect(calls(fetchFn, 'POST', '/api/imports/batches/7/rematch')).toHaveLength(1));
+    expect(calls(fetchFn, 'POST', '/api/lookups').map(([, init]) => JSON.parse(String(init!.body)))).toEqual([
+      { group: 'country', value: 'Chile', label: 'Chile' },
+      { group: 'country', value: 'México', label: 'México' },
+    ]);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('a failed re-match after adding countries is shown', async () => {
+    renderReview(review(), admin, (url, init) => {
+      if (url === '/api/lookups' && init?.method === 'POST') return Response.json({ id: 99 }, { status: 201 });
+      if (url === '/api/imports/batches/7/rematch') return Response.json({ error: 'batch_locked' }, { status: 409 });
+      if (url === '/api/lookups') return Response.json({ groups: {} });
+      return undefined;
+    });
+    await userEvent.click(await screen.findByRole('link', { name: 'Add these countries' }));
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Add countries' }));
+    expect(await screen.findByText('This import has already started and can no longer be changed.')).toHaveClass('note', 'danger');
   });
 
   it('a country only from research is a plain line with no extra choice; the download carries the choices', async () => {

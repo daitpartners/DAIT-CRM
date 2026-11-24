@@ -18,7 +18,7 @@ function fakeImports(page: Page) {
   const files: { id: number; name: string; ext: string; size: number; status: string; meta: unknown; error: null }[] = [];
   const row = (id: number, fields: Record<string, string>, rowStatus: string, extra: Record<string, unknown> = {}) => ({
     id, fields, status: rowStatus, include: rowStatus !== 'Already in CRM' && rowStatus !== 'Not a lead', problems: [], matched: null,
-    from: `Expo csv · row ${id - 100}`, fileName: 'Expo.csv', ...extra,
+    from: `Expo csv · row ${id - 100}`, fileName: 'Expo.csv', origin: { word: 'Expo', ext: 'csv', kind: 'row', n: id - 100 }, ...extra,
   });
   const rows = () => [
     row(101, { companyName: 'Al Noor Logistics LLC', website: 'alnoorlogistics.ae', country: 'United Arab Emirates', city: 'Dubai', contactName: 'Omar Haddad', email: 'omar.h@alnoorlogistics.ae' }, 'Ready'),
@@ -64,7 +64,7 @@ function fakeImports(page: Page) {
     }
     if (path === '/api/imports/batches/41/rows') {
       return json(route, {
-        items: rows(), total: 3, tiles: { rows: 3, files: 1, ready: 1, missing: 1, already: 1, notLead: 0 },
+        items: rows(), total: 3, included: rows().filter((r) => r.include).length, tiles: { rows: 3, files: 1, ready: 1, missing: 1, already: 1, notLead: 0 },
         question: questionOpen
           ? { sheet: 'Expo.csv', col: 0, header: 'Firma', guess: 'companyName', samples: ['Al Noor Logistics LLC', 'Northgate Retail Group'], fileId: 5, fileName: 'Expo.csv' }
           : null,
@@ -96,8 +96,10 @@ function fakeImports(page: Page) {
       });
     }
     if (path === '/api/imports/batches/41/review') {
+      // As the server: the row with no email or phone is no longer counted once it is left out.
+      const leave = url.searchParams.get('noContactRows') === 'leave';
       return json(route, {
-        willImport: 2, newCompanies: 2, existingCompanies: 0, skipped: { total: 1, alreadyInCrm: 1, notLead: 0, unticked: 0, other: 0 },
+        willImport: leave ? 1 : 2, newCompanies: leave ? 1 : 2, existingCompanies: 0, skipped: { total: 1, alreadyInCrm: 1, notLead: 0, unticked: 0, other: 0 },
         noContactRows: 1, researchOnlyCountry: 0, unknownCountries: [],
         leadType: 'Prospect', language: 'en', source: 'Import · IMPORT-2026-11-24',
         allocation: [{ name: 'English market (US and Canada)', people: ['Deepak', 'Lakshita'] }],
@@ -148,6 +150,9 @@ test('import wizard: no defaults on step 1, upload, sort, research, review and I
   await page.getByRole('button', { name: 'Confirm' }).click();
   await expect(page.locator('.note.ok')).toHaveText('Column "Firma" in Expo.csv is now the Company name.');
   await expect(page.getByText('Already in CRM · CO-1042')).toHaveClass(/b-info/);
+  await expect(page.getByText('Expo csv · row 2')).toBeVisible();
+  // Two of the three rows are ticked: the header tick is mixed.
+  await expect.poll(() => page.getByRole('checkbox', { name: 'Include all 3 rows in this view' }).evaluate((el) => (el as HTMLInputElement).indeterminate)).toBe(true);
   const city = page.locator('tbody tr').nth(1).locator('td').nth(4);
   await city.click();
   await page.keyboard.type('Columbus');
@@ -168,11 +173,13 @@ test('import wizard: no defaults on step 1, upload, sort, research, review and I
   await expect(page.getByRole('checkbox', { name: 'Send each assignee one notification for the batch' })).not.toBeChecked();
   await expect(page.getByRole('radio', { name: 'Import them' })).not.toBeChecked();
   await expect(page.getByRole('radio', { name: 'Leave them out' })).not.toBeChecked();
-  await page.getByRole('button', { name: 'Import 2 prospects' }).click();
-  await expect(page.locator('.err-msg')).toHaveText('Choose Import them or Leave them out.');
-  expect(fake.sent.some((s) => s.path === '/api/imports/batches/41/import')).toBe(false);
+  // Import stays off until the choice is made; the undecided row is not counted.
+  await expect(page.getByRole('button', { name: 'Import 1 prospect' })).toBeDisabled();
+  await expect(page.getByText('Choose Import them or Leave them out to continue.')).toBeVisible();
+  await page.getByRole('radio', { name: 'Import them' }).check();
+  await expect(page.getByRole('button', { name: 'Import 2 prospects' })).toBeEnabled();
   await page.getByRole('radio', { name: 'Leave them out' }).check();
-  await page.getByRole('button', { name: 'Import 2 prospects' }).click();
+  await page.getByRole('button', { name: 'Import 1 prospect' }).click();
   await expect(page).toHaveURL(/\/leads\/import\/manager\?batch=41$/);
   expect(fake.sent.find((s) => s.path === '/api/imports/batches/41/import')!.body).toEqual({ acceptHigh: false, noContactRows: 'leave', notify: false });
 });

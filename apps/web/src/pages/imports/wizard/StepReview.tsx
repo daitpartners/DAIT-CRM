@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { OutreachLanguage } from '@dait-crm/shared';
@@ -6,6 +6,7 @@ import { ApiError, api } from '../../../api/client';
 import { rowsToFixUrl, useRematch, useReview, useStartImport, type NoContactChoice, type ReviewView } from '../../../api/imports';
 import { keys } from '../../../api/queries';
 import { useCurrentUser } from '../../../api/useCurrentUser';
+import { Modal } from '../../../components/Modal';
 import { Tile } from '../../../components/Tile';
 import { useT, type TFn } from '../../../i18n/useT';
 import { OUTREACH_LABEL } from '../../../lib/outreach';
@@ -41,8 +42,9 @@ export function StepReview({ batchId, onBack }: Props) {
   const [acceptHigh, setAcceptHigh] = useState(false);
   const [notify, setNotify] = useState(false);
   const [choice, setChoice] = useState<NoContactChoice>(null);
-  const [needChoice, setNeedChoice] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [addingCountries, setAddingCountries] = useState(false);
+  const hintId = useId();
   const { data: r } = useReview(batchId, acceptHigh, choice);
   const start = useStartImport(batchId);
   const rematch = useRematch(batchId);
@@ -58,10 +60,10 @@ export function StepReview({ batchId, onBack }: Props) {
       }
     },
     onSuccess: () => {
+      setAddingCountries(false);
       void qc.invalidateQueries({ queryKey: keys.lookups });
-      rematch.mutate();
+      rematch.mutate(undefined, { onError: (e) => setError(importErrorText(t, e instanceof ApiError ? e.code : '')) });
     },
-    onError: (e) => setError(importErrorText(t, e instanceof ApiError ? e.code : '')),
   });
 
   if (!r) return null;
@@ -71,22 +73,18 @@ export function StepReview({ batchId, onBack }: Props) {
   const unknownCount = r.unknownCountries.reduce((n, c) => n + c.count, 0);
   const unknownList = r.unknownCountries.map((c) => `${c.value} ×${c.count}`).join(', ');
   const nothingNeeded = r.noContactRows === 0 && r.researchOnlyCountry === 0 && unknownCount === 0;
+  // Rows with no email or phone wait for Import them / Leave them out: Import stays off, and they are not counted yet.
+  const undecided = r.noContactRows > 0 && choice === null;
+  const importCount = undecided ? Math.max(0, r.willImport - r.noContactRows) : r.willImport;
 
   function doImport() {
     setError(null);
-    if (r!.noContactRows > 0 && choice === null) {
-      setNeedChoice(true);
-      return;
-    }
+    if (undecided) return;
     start.mutate(
       { acceptHigh, noContactRows: r!.noContactRows > 0 ? choice : null, notify },
       {
         onSuccess: () => navigate(`/leads/import/manager?batch=${batchId}`),
-        onError: (e) => {
-          const code = e instanceof ApiError ? e.code : '';
-          if (code === 'choice_required') setNeedChoice(true);
-          else setError(importErrorText(t, code));
-        },
+        onError: (e) => setError(importErrorText(t, e instanceof ApiError ? e.code : '')),
       },
     );
   }
@@ -95,7 +93,7 @@ export function StepReview({ batchId, onBack }: Props) {
     <section className="wiz" aria-label={t('Step 4 of 4: Review and import')}>
       <p className="muted-text">{t('Step 4 of 4 · Approve and save')}</p>
       <div className="tiles">
-        <Tile label={t('Will be imported')} value={r.willImport} meta={t('as {type} · {language}', { type: typeText, language: langText })} />
+        <Tile label={t('Will be imported')} value={importCount} meta={t('as {type} · {language}', { type: typeText, language: langText })} />
         <Tile label={t('New companies')} value={r.newCompanies} />
         <Tile label={t('Added to existing companies')} value={r.existingCompanies} />
         <Tile label={t('Skipped')} value={r.skipped.total} meta={skippedMeta(t, r.skipped) || undefined} />
@@ -140,17 +138,22 @@ export function StepReview({ batchId, onBack }: Props) {
                   ? t('1 row has no email or phone after research. Import it anyway (it waits in research) or leave it out.')
                   : t('{n} rows have no email or phone after research. Import them anyway (they wait in research) or leave them out.', { n: r.noContactRows })}
               </p>
-              <div className="actions-row" role="radiogroup" aria-label={t('Rows with no email or phone')}>
+              <div
+                className="actions-row"
+                role="radiogroup"
+                aria-label={t('Rows with no email or phone')}
+                aria-describedby={undecided ? hintId : undefined}
+              >
                 <label className="mradio">
-                  <input type="radio" name="imp-nocontact" checked={choice === 'import'} onChange={() => { setChoice('import'); setNeedChoice(false); }} />{' '}
-                  {t('Import them')}
+                  <input type="radio" name="imp-nocontact" checked={choice === 'import'} onChange={() => setChoice('import')} /> {t('Import them')}
                 </label>
                 <label className="mradio">
-                  <input type="radio" name="imp-nocontact" checked={choice === 'leave'} onChange={() => { setChoice('leave'); setNeedChoice(false); }} />{' '}
-                  {t('Leave them out')}
+                  <input type="radio" name="imp-nocontact" checked={choice === 'leave'} onChange={() => setChoice('leave')} /> {t('Leave them out')}
                 </label>
               </div>
-              {needChoice && choice === null ? <div className="err-msg">{t('Choose Import them or Leave them out.')}</div> : null}
+              <div id={hintId} className="muted-text" role="status" aria-live="polite">
+                {undecided ? t('Choose Import them or Leave them out to continue.') : null}
+              </div>
             </>
           ) : null}
           {r.researchOnlyCountry > 0 ? (
@@ -173,7 +176,8 @@ export function StepReview({ batchId, onBack }: Props) {
                       href="#"
                       onClick={(e) => {
                         e.preventDefault();
-                        if (!addCountries.isPending && !rematch.isPending) addCountries.mutate(r.unknownCountries.map((c) => c.value));
+                        setError(null);
+                        setAddingCountries(true);
                       }}
                     >
                       {t('Add these countries')}
@@ -201,10 +205,79 @@ export function StepReview({ batchId, onBack }: Props) {
           {t('Download rows to fix (Excel)')}
         </a>
         <span className="grow" />
-        <button type="button" className="btn primary" disabled={r.willImport === 0 || start.isPending} onClick={doImport}>
-          {importButtonText(t, r.willImport, r.leadType)}
+        <button
+          type="button"
+          className="btn primary"
+          disabled={importCount === 0 || undecided || start.isPending}
+          aria-describedby={undecided ? hintId : undefined}
+          onClick={doImport}
+        >
+          {importButtonText(t, importCount, r.leadType)}
         </button>
       </div>
+      {addingCountries ? (
+        <AddCountriesModal
+          countries={r.unknownCountries}
+          busy={addCountries.isPending || rematch.isPending}
+          error={addCountries.error ? importErrorText(t, addCountries.error instanceof ApiError ? addCountries.error.code : '') : null}
+          onClose={() => setAddingCountries(false)}
+          onSave={(names) => addCountries.mutate(names)}
+        />
+      ) : null}
     </section>
+  );
+}
+
+/**
+ * "Add these countries" (Administrators): each unknown country with its name ready to correct before it is saved as a
+ * country in the CRM's lists; then the rows are matched again.
+ */
+function AddCountriesModal({ countries, busy, error, onClose, onSave }: {
+  countries: { value: string; count: number }[];
+  busy: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSave: (names: string[]) => void;
+}) {
+  const t = useT();
+  const [names, setNames] = useState(() => countries.map((c) => c.value.trim().slice(0, 100)));
+  const ok = names.every((n) => n.trim() !== '');
+  return (
+    <Modal
+      title={t('Add these countries')}
+      onClose={onClose}
+      actions={
+        <>
+          <button type="button" className="btn" onClick={onClose}>
+            {t('Cancel')}
+          </button>
+          <span className="grow" />
+          <button type="button" className="btn primary" disabled={!ok || busy} onClick={() => onSave([...new Set(names.map((n) => n.trim()))])}>
+            {t('Add countries')}
+          </button>
+        </>
+      }
+    >
+      <p className="muted-text">{t('Each name is added to the country list in Settings. Correct a name before saving if the file spells it oddly.')}</p>
+      {countries.map((c, i) => (
+        <div key={c.value}>
+          <label className="lbl" htmlFor={`imp-country-${i}`}>
+            {c.count === 1 ? t('{value} (1 row)', { value: c.value }) : t('{value} ({n} rows)', { value: c.value, n: c.count })}
+          </label>
+          <input
+            id={`imp-country-${i}`}
+            className="in"
+            maxLength={100}
+            value={names[i]}
+            onChange={(e) => setNames((xs) => xs.map((x, j) => (j === i ? e.target.value : x)))}
+          />
+        </div>
+      ))}
+      {error ? (
+        <div className="note danger" role="alert">
+          {error}
+        </div>
+      ) : null}
+    </Modal>
   );
 }

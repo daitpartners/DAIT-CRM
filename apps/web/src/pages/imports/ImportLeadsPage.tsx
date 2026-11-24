@@ -2,7 +2,6 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useBatches } from '../../api/imports';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { AccessDenied } from '../../components/AccessDenied';
-import { PlaceholderCard } from '../../components/PlaceholderCard';
 import { Tabs } from '../../components/Tabs';
 import { Topbar } from '../../components/Topbar';
 import { useT } from '../../i18n/useT';
@@ -62,7 +61,14 @@ function ImportLeadsView({ view }: { view: View }) {
           { id: 'manager', label: t('Data manager'), count: batches?.count },
         ]}
       >
-        {manager ? <PlaceholderCard title={t('Data manager')} release="4.1" /> : <Wizard />}
+        {manager ? (
+          <section className="card">
+            <h2>{t('Data manager')}</h2>
+            <p className="muted-text">{t('The Data manager opens here.')}</p>
+          </section>
+        ) : (
+          <Wizard />
+        )}
       </Tabs>
     </>
   );
