@@ -15,7 +15,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Company, Contact, ImportBatch, ImportRow, Prisma, User } from '@prisma/client';
 import {
-  IMPORT_LEAD_SOURCE, importColumnLabel, importEngineText, normalisePhone, researchFieldLabel, roleLabel,
+  IMPORT_LEAD_SOURCE, importColumnLabel, importEngineText, isUpdateErrorCode, normalisePhone, researchFieldLabel, roleLabel,
   type ImportCommit, type ImportFailure, type ImportField, type LeadType, type ResearchEngine, type ResearchValue, type ReviewSummary, type RowFields,
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
@@ -24,6 +24,7 @@ import { audit } from '../audit.js';
 import { rowMessage } from '../leads/csv.js';
 import { auditCreatedLead, companyDataFromLead, createLeadWithCompany } from '../leads/service.js';
 import { notifyUser } from '../leads/notify.js';
+import { activeUser } from '../leads/visibility.js';
 import { applySuggestion, isLocked as isFieldLocked } from '../research/service.js';
 import type { AuthUser } from '../plugins/auth.js';
 import { NotFoundError } from '../validate.js';
@@ -32,6 +33,7 @@ import { companyKeyOf, findExistingCompanies } from './companies.js';
 import { matchCountry } from './countries.js';
 import { acceptable, effectiveFields, planBatch, researchOf, summarisePlan } from './plan.js';
 import { knownCountries } from './stage.js';
+import { applyUpdate, previewUpdates } from './updates.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -46,7 +48,7 @@ const GENERIC_LOCAL_PARTS = new Set([
 /** Leading titles dropped from a person's name. */
 const HONORIFICS = new Set(['dr', 'mr', 'mrs', 'ms', 'sr', 'sra', 'srta', 'm', 'mme', 'mlle', 'prof']);
 
-const planSelect = { id: true, fields: true, research: true, status: true, include: true, matchedCompanyId: true } as const;
+const planSelect = { id: true, fields: true, research: true, status: true, include: true, matchedCompanyId: true, problems: true } as const;
 /** What the import job reads of each row (never `raw`, the original cells, which can be large). */
 const commitSelect = { ...planSelect, leadId: true, outcome: true } as const;
 /** The row columns `importRow` reads. */
@@ -106,16 +108,26 @@ const authUserOf = (u: User): AuthUser => ({
  * the skipped rows (the screen's totals then never include rows whose fate is still open).
  */
 export async function reviewBatch(
-  batchId: number, opts: { acceptHigh: boolean; noContactRows: 'import' | 'leave' | null },
+  batchId: number, opts: { acceptHigh: boolean; noContactRows: 'import' | 'leave' | null }, user: AuthUser | null = null,
 ): Promise<{ batch: ImportBatch; summary: ReviewSummary }> {
   const batch = await prisma.importBatch.findUnique({ where: { id: batchId } });
   if (!batch) throw new NotFoundError();
   const rows = await prisma.importRow.findMany({ where: { batchId }, select: planSelect, orderBy: [{ position: 'asc' }, { id: 'asc' }] });
-  const plans = planBatch(rows, { ...opts, knownCountries: await knownCountries() });
-  if (opts.noContactRows !== null) return { batch, summary: summarisePlan(plans) };
+  const known = await knownCountries();
+  const plans = planBatch(rows, { ...opts, knownCountries: known });
   const waiting = (p: (typeof plans)[number]) => p.action === 'import' && p.noContact;
-  const summary = summarisePlan(plans.filter((p) => !waiting(p)));
-  return { batch, summary: { ...summary, noContactRows: plans.filter(waiting).length } };
+  const summary = opts.noContactRows !== null
+    ? summarisePlan(plans)
+    : { ...summarisePlan(plans.filter((p) => !waiting(p))), noContactRows: plans.filter(waiting).length };
+  // Update rows: the empty fields they fill and the values that differ, against the CRM as it is now.
+  const updating = plans.map((p, i) => (p.action === 'update' ? i : -1)).filter((i) => i >= 0);
+  if (updating.length > 0) {
+    const viewer = user ?? (batch.createdById ? await activeUser(prisma, batch.createdById) : null);
+    const previews = await previewUpdates(prisma, viewer, updating.map((i) => rows[i]!.fields as RowFields), known);
+    summary.updates.fields = previews.reduce((n, p) => n + (p?.fields ?? 0), 0);
+    summary.updates.conflicts = previews.reduce((n, p) => n + (p?.conflicts.length ?? 0), 0);
+  }
+  return { batch, summary };
 }
 
 /**
@@ -136,7 +148,7 @@ export async function startImport(user: AuthUser, batchId: number, body: ImportC
     const rows = await tx.importRow.findMany({ where: { batchId }, select: planSelect, orderBy: [{ position: 'asc' }, { id: 'asc' }] });
     const summary = summarisePlan(planBatch(rows, { acceptHigh: body.acceptHigh, noContactRows: body.noContactRows, knownCountries: known }));
     if (body.noContactRows === null && summary.noContactRows > 0) throw new ImportError('choice_required', 400);
-    if (summary.willImport === 0) throw new ImportError('nothing_to_import', 400);
+    if (summary.willImport + summary.updates.rows === 0) throw new ImportError('nothing_to_import', 400);
     const options: ImportCommit = { acceptHigh: body.acceptHigh, noContactRows: body.noContactRows, notify: body.notify };
     await tx.importBatch.update({
       where: { id: batchId },
@@ -307,16 +319,21 @@ async function commitUnderLease(batchId: number, run: string, deps: CommitDeps):
     skipped.set(p.reason!, [...(skipped.get(p.reason!) ?? []), p.rowId]);
   }
   for (const [code, ids] of skipped) {
-    await prisma.importRow.updateMany({ where: { id: { in: ids }, outcome: null }, data: { outcome: 'Skipped', outcomeCode: code } });
+    // A Lead ID / Company ID that is unknown, not visible or mismatched is an error, never a new lead.
+    const data = isUpdateErrorCode(code) ? { outcome: 'Error', outcomeCode: code, error: code } : { outcome: 'Skipped', outcomeCode: code };
+    await prisma.importRow.updateMany({ where: { id: { in: ids }, outcome: null }, data });
   }
 
   let attempted = 0;
   for (const [i, plan] of plans.entries()) {
     const row = rows[i]!;
-    if (plan.action !== 'import' || row.leadId !== null || row.outcome !== null) continue;
+    if (plan.action === 'skip' || row.leadId !== null || row.outcome !== null) continue;
     await renewLease(batchId, run);
     try {
-      await prisma.$transaction((tx) => importRow(tx, row, batch, ctx), { timeout: 60_000, maxWait: 30_000 });
+      await prisma.$transaction(
+        async (tx) => { if (plan.action === 'update') await updateRow(tx, row, batch, ctx); else await importRow(tx, row, batch, ctx); },
+        { timeout: 60_000, maxWait: 30_000 },
+      );
     } catch (e) {
       const message = rowMessage(e);
       if (message === null) console.error(`import ${batch.number}: row ${row.id} failed`, e);
@@ -343,12 +360,13 @@ async function finishBatch(batchId: number, notify: boolean): Promise<void> {
     });
     const errorCount = await tx.importRow.count({ where: { batchId, outcome: 'Error' } });
     const skippedCount = await tx.importRow.count({ where: { batchId, outcome: 'Skipped' } });
+    const updatedCount = await tx.importRow.count({ where: { batchId, outcome: 'Updated' } });
     const created = new Set(imported.filter((r) => r.companyCreated && r.companyId !== null).map((r) => r.companyId!));
     const existingCompanyCount = imported.filter((r) => !r.companyCreated && r.companyId !== null && !created.has(r.companyId)).length;
     await tx.importBatch.update({
       where: { id: batchId },
       data: {
-        status: imported.length === 0 && errorCount > 0 ? 'Failed' : 'Imported',
+        status: imported.length + updatedCount === 0 && errorCount > 0 ? 'Failed' : 'Imported',
         importedCount: imported.length, newCompanyCount: created.size, existingCompanyCount, skippedCount, errorCount,
         importedAt: new Date(), importError: null, commitRun: null, commitHeartbeatAt: null,
       },
@@ -367,6 +385,31 @@ async function finishBatch(batchId: number, notify: boolean): Promise<void> {
 }
 
 export type RowResult = { leadId: number; companyId: number; contactId: number | null; companyCreated: boolean; contactCreated: boolean };
+
+/**
+ * Applies one update row inside `tx` (updates.ts: fills the blanks of the lead, its company and contact; values that
+ * differ are kept as conflicts, never written). The row is locked first: a row recorded meanwhile is left as it is. An
+ * id that is no longer usable (not found, not visible to the importer, mismatched) makes the row an Error.
+ */
+export async function updateRow(
+  tx: Tx, row: CommitRow, batch: ImportBatch, ctx: { user: AuthUser; knownCountries: readonly string[] },
+): Promise<void> {
+  const [current] = await tx.$queryRaw<{ lead_id: number | null; outcome: string | null }[]>`
+    SELECT lead_id, outcome FROM import_rows WHERE id = ${row.id} FOR UPDATE`;
+  if (!current || current.lead_id !== null || current.outcome !== null) return;
+  const result = await applyUpdate(tx, (row.fields ?? {}) as RowFields, batch.number, ctx);
+  if (!result.ok) {
+    await tx.importRow.update({ where: { id: row.id }, data: { outcome: 'Error', outcomeCode: result.code, error: result.code } });
+    return;
+  }
+  await tx.importRow.update({
+    where: { id: row.id },
+    data: {
+      leadId: result.leadId, companyId: result.companyId, contactId: result.contactId, companyCreated: false, contactCreated: false,
+      changes: result.changes as unknown as Prisma.InputJsonValue, outcome: 'Updated', outcomeCode: null, error: null, importedAt: new Date(),
+    },
+  });
+}
 
 /** The active `industry` lookup value equal to `value` (ignoring case), in its own spelling; null when none. */
 async function industryValue(tx: Tx, value: string | null): Promise<string | null> {

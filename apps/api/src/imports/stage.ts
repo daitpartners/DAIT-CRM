@@ -6,7 +6,7 @@
  */
 import { Prisma } from '@prisma/client';
 import {
-  IMPORT_MAX_ROWS, domainOf, pageArgs,
+  IMPORT_MAX_ROWS, domainOf, isUpdateErrorCode, pageArgs, type RowChanges,
   type ColumnQuestion, type FileMeta, type ImportColumnAnswer, type ImportField, type ImportIncludeAll,
   type ImportRowUpdate, type ImportRowsQuery, type ResearchNotePart, type ResearchValue, type RowFields, type RowFilter, type RowProblem,
   type Lang, type RowStatus,
@@ -19,7 +19,9 @@ import { findExistingCompanies, type CompanyRef, type Db } from './companies.js'
 import { unguardCell } from './cells.js';
 import { matchCountry, squashCountry } from './countries.js';
 import { audit } from '../audit.js';
+import { activeUser } from '../leads/visibility.js';
 import type { TableExtract } from './read/index.js';
+import { resolveTargets, targetProblem, type UpdateTarget } from './updates.js';
 
 /** Longest value a staged cell keeps (the row edit's limit). */
 const MAX_VALUE = 500;
@@ -107,20 +109,28 @@ function withCountry(fields: RowFields, known: readonly string[]): RowFields {
   return country ? { ...fields, country } : { ...fields };
 }
 
-/** The tick a row gets until a person changes it: Already in CRM and Not a lead start unticked. */
-export const defaultInclude = (status: RowStatus): boolean => status === 'Ready' || status === 'Missing details';
+/**
+ * The tick a row gets until a person changes it: Already in CRM and Not a lead start unticked, an update row ticked
+ * (it fills blanks; research never runs on it), a row whose Lead ID / Company ID is not usable unticked.
+ */
+export const defaultInclude = (status: RowStatus, problems: readonly RowProblem[] = []): boolean =>
+  (status === 'Ready' || status === 'Missing details' || status === 'Update') && !problems.some((p) => isUpdateErrorCode(p.code));
 
 /**
- * A row's status and problems, on its own values only. Not a lead → Already in CRM → Ready (company + a country,
- * known or not + a valid email) → Missing details. The country comes back as the CRM's spelling when it matches one.
+ * A row's status and problems, on its own values only. Not a lead → Update (a Lead ID / Company ID the uploader can see;
+ * one that is unknown, not visible or mismatched is a red problem, never a new lead) → Already in CRM → Ready (company +
+ * a country, known or not + a valid email) → Missing details. The country comes back as the CRM's spelling when it
+ * matches one.
  */
 export function evaluateRow(
   fields: RowFields,
-  ctx: { knownCountries: readonly string[]; match: CompanyRef | null; notALead: boolean },
+  ctx: { knownCountries: readonly string[]; match: CompanyRef | null; notALead: boolean; update?: UpdateTarget | null },
 ): { status: RowStatus; problems: RowProblem[]; fields: RowFields } {
   const out = withCountry(fields, ctx.knownCountries);
   const country = has(out.country) ? matchCountry(out.country, ctx.knownCountries) : null;
   if (ctx.notALead) return { status: 'Not a lead', problems: [{ code: 'not_a_lead', level: 'info' }], fields: out };
+  if (ctx.update?.kind === 'update') return { status: 'Update', problems: [], fields: out };
+  if (ctx.update?.kind === 'error') return { status: 'Missing details', problems: [targetProblem(ctx.update)], fields: out };
   if (ctx.match) return { status: 'Already in CRM', problems: [{ code: 'already_in_crm', level: 'info', value: ctx.match.number }], fields: out };
   const problems: RowProblem[] = [];
   if (!has(out.companyName)) problems.push({ code: 'company_missing', field: 'companyName', level: 'missing' });
@@ -304,14 +314,19 @@ export async function refreshBatch(batchId: number, rowIds?: number[]): Promise<
     const known = await knownCountries();
     const notLead = rows.map((r) => isNotALead(r.fields as RowFields, r.raw as string[], headersOf.get(r.fileId)?.[r.sheet ?? ''] ?? null));
     const lookup = rows.map((r) => withCountry(r.fields as RowFields, known));
-    const toMatch = rows.map((_, i) => i).filter((i) => !notLead[i]);
+    // Update rows (Lead ID / Company ID), as the batch's creator sees the CRM (the import checks again as the importer).
+    const batch = await prisma.importBatch.findUnique({ where: { id: batchId }, select: { createdById: true } });
+    const creator = batch?.createdById ? await activeUser(prisma, batch.createdById) : null;
+    const targets = await resolveTargets(prisma, creator, rows.map((r) => r.fields as RowFields));
+    const toMatch = rows.map((_, i) => i).filter((i) => !notLead[i] && targets[i] === null);
     const found = await findExistingCompanies(prisma, toMatch.map((i) => lookup[i]!));
     const matchOf = new Map(toMatch.map((i, k) => [i, found[k] ?? null]));
     const updates: RowUpdate[] = [];
     rows.forEach((r, i) => {
-      const match = matchOf.get(i) ?? null;
-      const e = evaluateRow(r.fields as RowFields, { knownCountries: known, match, notALead: notLead[i]! });
-      const include = r.includeTouched ? r.include : defaultInclude(e.status);
+      const target = notLead[i] ? null : targets[i] ?? null;
+      const match = target?.kind === 'update' ? { id: target.companyId, number: target.companyNumber } : matchOf.get(i) ?? null;
+      const e = evaluateRow(r.fields as RowFields, { knownCountries: known, match, notALead: notLead[i]!, update: target });
+      const include = r.includeTouched ? r.include : defaultInclude(e.status, e.problems);
       const next: RowUpdate = {
         id: r.id, status: e.status, include, problems: e.problems, fields: e.fields, prev: r.fields as RowFields, matched: match?.id ?? null,
       };
@@ -445,6 +460,8 @@ export type RowView = {
   company?: { id: number; number: string; created: boolean } | null;
   error?: string | null;
   outcomeCode?: string | null;
+  /** An updated row: what it filled and the values it did not apply. */
+  changes?: RowChanges;
 };
 
 /** Where in its file a row was, in each language (the downloads are written in the downloader's). */
@@ -523,12 +540,14 @@ export async function updateRow(rowId: number, body: ImportRowUpdate): Promise<R
   return rowView(await prisma.importRow.findUniqueOrThrow({ where: { id: rowId }, select: rowSelect }));
 }
 
-const FILTER_STATUS: Record<RowFilter, RowStatus | null> = { all: null, missing: 'Missing details', already: 'Already in CRM', notlead: 'Not a lead' };
-const FILTER_OUTCOME: Record<string, string> = { imported: 'Imported', skipped: 'Skipped', errors: 'Error' };
+const FILTER_STATUS: Record<RowFilter, RowStatus | null> = {
+  all: null, missing: 'Missing details', already: 'Already in CRM', notlead: 'Not a lead', update: 'Update',
+};
+const FILTER_OUTCOME: Record<string, string> = { imported: 'Imported', updated: 'Updated', skipped: 'Skipped', errors: 'Error' };
 
 /** The batch detail's row columns (imported / skipped / errors filters). */
 const outcomeSelect = {
-  ...rowSelect, error: true, outcomeCode: true, companyCreated: true,
+  ...rowSelect, error: true, outcomeCode: true, companyCreated: true, changes: true,
   lead: { select: { id: true, number: true } },
   company: { select: { id: true, number: true } },
 } satisfies Prisma.ImportRowSelect;
@@ -539,6 +558,7 @@ function outcomeRowView(r: Prisma.ImportRowGetPayload<{ select: typeof outcomeSe
     lead: r.lead ? { id: r.lead.id, number: r.lead.number } : null,
     company: r.company ? { id: r.company.id, number: r.company.number, created: r.companyCreated } : null,
     error: r.error, outcomeCode: r.outcomeCode,
+    ...(r.changes ? { changes: r.changes as unknown as RowChanges } : {}),
   };
 }
 
@@ -552,7 +572,7 @@ export async function includeAll(batchId: number, body: ImportIncludeAll): Promi
   return { changed: count };
 }
 
-export type BatchTiles = { rows: number; files: number; ready: number; missing: number; already: number; notLead: number };
+export type BatchTiles = { rows: number; files: number; ready: number; missing: number; already: number; notLead: number; update: number };
 
 export async function batchTiles(batchId: number): Promise<BatchTiles> {
   const [byStatus, files] = await Promise.all([
@@ -562,7 +582,7 @@ export async function batchTiles(batchId: number): Promise<BatchTiles> {
   const n = (s: RowStatus) => byStatus.find((g) => g.status === s)?._count._all ?? 0;
   return {
     rows: byStatus.reduce((t, g) => t + g._count._all, 0), files: files.length,
-    ready: n('Ready'), missing: n('Missing details'), already: n('Already in CRM'), notLead: n('Not a lead'),
+    ready: n('Ready'), missing: n('Missing details'), already: n('Already in CRM'), notLead: n('Not a lead'), update: n('Update'),
   };
 }
 

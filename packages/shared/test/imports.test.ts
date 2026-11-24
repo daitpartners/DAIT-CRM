@@ -3,6 +3,7 @@ import {
   BATCH_NUMBER_RE, IMPORT_FILE_ERRORS, IMPORT_FIELDS, IMPORT_NO_CLAUDE, importNoClaudeText, IMPORT_TABLE_FIELDS, PROBLEM_CODES, importColumnLabel, importFileErrorText, importSource, IMPORT_FAILURES, importFailureText, problemText,
   importActivityText, importEngineText, importResearchNoteText, RESEARCH_CLAUDE_FAILURES, UNDO_REASONS, undoReasonText, importContinueHintText,
   ROW_STATUSES, ROW_OUTCOMES, importRowStatusText, IMPORT_ROW_ERRORS, importRowErrorText,
+  EXPORT_CONTEXT_COLUMNS, IMPORT_ID_FIELDS, LEADS_EXPORT_MAX, UPDATE_ERROR_CODES, isUpdateErrorCode,
   type ImportActivity, type ResearchNotePart, type RowProblem,
 } from '../src/imports';
 import {
@@ -12,7 +13,9 @@ import {
 import type { Lang } from '../src/i18n';
 
 const LANGS: Lang[] = ['en', 'es', 'fr'];
-const LABEL_KEYS = [...IMPORT_FIELDS, 'from', 'whatToFix', 'status', 'lead', 'company'] as const;
+const LABEL_KEYS = [
+  ...IMPORT_FIELDS, ...IMPORT_ID_FIELDS, ...EXPORT_CONTEXT_COLUMNS, 'from', 'whatToFix', 'status', 'lead', 'company', 'leadPage',
+] as const;
 
 describe('import constants', () => {
   test('the step-2 columns are the first nine fields', () => {
@@ -45,6 +48,24 @@ describe('problemText', () => {
       expect(problemText(p, 'es'), code).not.toBe(problemText(p, 'en'));
       expect(problemText(p, 'fr'), code).not.toBe(problemText(p, 'en'));
     }
+  });
+
+  test('an update conflict names the field, both values and the lead page, in en / es / fr', () => {
+    const p: RowProblem = { code: 'update_conflict', field: 'email', level: 'questionable', crm: 'ana@sol.es', value: 'info@sol.es' };
+    expect(problemText(p, 'en')).toBe('Email: CRM has ana@sol.es, file has info@sol.es — update on the lead page if correct');
+    expect(problemText(p, 'es')).toBe('Correo electrónico: el CRM tiene ana@sol.es, el archivo tiene info@sol.es — actualízalo en la página del lead si es correcto');
+    expect(problemText(p, 'fr')).toBe('E-mail : le CRM a ana@sol.es, le fichier a info@sol.es — mettez à jour sur la page du lead si c’est correct');
+    // A value holding a placeholder is never read as one.
+    expect(problemText({ ...p, value: '{crm}' }, 'en')).toBe('Email: CRM has ana@sol.es, file has {crm} — update on the lead page if correct');
+  });
+
+  test('update id errors', () => {
+    expect(problemText({ code: 'lead_not_found', level: 'missing', value: 'LD-9999' }, 'en')).toBe('Lead LD-9999 not found or not yours');
+    expect(problemText({ code: 'company_mismatch', level: 'missing', value: 'CO-0002', crm: 'CO-0001' }, 'en'))
+      .toBe('Company ID CO-0002 does not match the lead (its company is CO-0001)');
+    expect(UPDATE_ERROR_CODES.every((c) => isUpdateErrorCode(c))).toBe(true);
+    expect(isUpdateErrorCode('unticked')).toBe(false);
+    expect(LEADS_EXPORT_MAX).toBe(20000);
   });
 });
 
@@ -149,6 +170,11 @@ describe('importColumnLabel', () => {
       expect(importColumnLabel('whatToFix', lang)).not.toBe('What to fix');
       expect(importColumnLabel('from', lang)).not.toBe('From');
     }
+  });
+
+  test('the record id and context labels', () => {
+    expect(['en', 'es', 'fr'].map((l) => importColumnLabel('leadId', l as Lang))).toEqual(['Lead ID', 'ID del lead', 'ID du lead']);
+    expect(['en', 'es', 'fr'].map((l) => importColumnLabel('companyId', l as Lang))).toEqual(['Company ID', 'ID de empresa', 'ID de l’entreprise']);
   });
 
   test('the fixed es / fr labels', () => {

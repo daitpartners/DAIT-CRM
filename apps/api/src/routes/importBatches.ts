@@ -227,7 +227,7 @@ export const importBatchRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Params: { id: string } }>('/imports/batches/:id/review', canImport, async (request) => {
     const id = idOf(request.params.id);
     const q = parseQuery(ReviewQuery, request.query);
-    const { batch, summary } = await reviewBatch(id, { acceptHigh: q.acceptHigh === '1', noContactRows: q.noContactRows ?? null });
+    const { batch, summary } = await reviewBatch(id, { acceptHigh: q.acceptHigh === '1', noContactRows: q.noContactRows ?? null }, request.user!);
     return {
       ...summary, leadType: batch.leadType, language: batch.language, source: importSource(batch.number),
       allocation: await languageRules(batch.language),
@@ -264,7 +264,7 @@ export const importBatchRoutes: FastifyPluginAsync = async (app) => {
     const q = parseQuery(FixQuery, request.query);
     const batch = await prisma.importBatch.findUnique({ where: { id }, select: { number: true } });
     if (!batch) throw new NotFoundError();
-    const buf = await rowsToFixWorkbook(id, langOf(request.user!.language), { acceptHigh: q.acceptHigh === '1', noContactRows: q.noContactRows ?? null });
+    const buf = await rowsToFixWorkbook(id, langOf(request.user!.language), { acceptHigh: q.acceptHigh === '1', noContactRows: q.noContactRows ?? null }, request.user!);
     return download(reply, XLSX_TYPE, `${batch.number}-rows-to-fix.xlsx`).send(buf);
   });
 

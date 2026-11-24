@@ -30,7 +30,7 @@ export const ImportRowUpdate = z.object({
 export type ImportRowUpdate = z.infer<typeof ImportRowUpdate>;
 
 /** The step-2 / step-3 row filters ("Include all" applies to the rows the filter shows). */
-export const ROW_FILTERS = ['all', 'missing', 'already', 'notlead'] as const;
+export const ROW_FILTERS = ['all', 'missing', 'already', 'notlead', 'update'] as const;
 export type RowFilter = (typeof ROW_FILTERS)[number];
 
 /** `POST /imports/batches/:id/include`. */
@@ -67,6 +67,6 @@ export type ImportBatchListQuery = z.infer<typeof ImportBatchListQuery>;
 /** `GET /imports/batches/:id/rows`: 100 rows a page; imported / skipped / errors are the batch detail's filters. */
 export const ImportRowsQuery = PagingQuery.extend({
   pageSize: z.coerce.number().int().min(1).max(100).default(100),
-  filter: z.enum([...ROW_FILTERS, 'imported', 'skipped', 'errors']).default('all'),
+  filter: z.enum([...ROW_FILTERS, 'imported', 'updated', 'skipped', 'errors']).default('all'),
 });
 export type ImportRowsQuery = z.infer<typeof ImportRowsQuery>;

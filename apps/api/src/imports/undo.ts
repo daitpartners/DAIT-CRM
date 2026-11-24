@@ -23,6 +23,7 @@ import type { AuthUser } from '../plugins/auth.js';
 import { verificationStatus } from '../research/service.js';
 import { NotFoundError } from '../validate.js';
 import { ImportError } from './batches.js';
+import { filledRecordIds, planFilledUndo, revertFilled, updatedRows, type FilledUndo } from './updates.js';
 
 type Db = Prisma.TransactionClient;
 type Stamps = { lead?: string; company?: string; contact?: string | null };
@@ -47,6 +48,8 @@ type Plan = {
   companyIds: number[];
   /** Companies already in the CRM, untouched since, whose import writes go back. */
   revert: number[];
+  /** Blanks the batch's update rows filled that go back to empty (and contacts they created, untouched). */
+  filled: FilledUndo;
 };
 
 /** The batch's rows that imported something (a stamp is written with the row's links). */
@@ -218,6 +221,7 @@ async function planUndo(db: Db, batch: Pick<ImportBatch, 'id' | 'number'>): Prom
       .map((co): Keep => ({ kind: 'company', id: co.id, label: `${co.number} · ${co.name}`, reason: keptCompany.get(co.id)! })),
     ...keepExisting,
   ];
+  const filled = await planFilledUndo(db, batch.id);
   const removeLeads = leads.filter((l) => !keptLead.has(l.id));
   const contactIds = contacts.filter((c) => !keptContact.has(c.id)).map((c) => c.id);
   const companyIds = companies.filter((co) => !keptCompany.has(co.id)).map((co) => co.id);
@@ -226,8 +230,9 @@ async function planUndo(db: Db, batch: Pick<ImportBatch, 'id' | 'number'>): Prom
       remove: { leads: removeLeads.map((l) => ({ id: l.id, number: l.number })), contacts: contactIds.length, companies: companyIds.length },
       keep,
       reverted,
+      ...(filled.preview.revert + filled.preview.keep > 0 ? { filled: filled.preview } : {}),
     },
-    leadIds: removeLeads.map((l) => l.id), contactIds, companyIds, revert,
+    leadIds: removeLeads.map((l) => l.id), contactIds, companyIds, revert, filled,
   };
 }
 
@@ -341,7 +346,7 @@ async function canUndoNow(db: Db, batch: Pick<ImportBatch, 'id' | 'status'>): Pr
   const alive = await db.job.count({
     where: { type: 'import_commit', status: { in: ['queued', 'running'] }, payload: { path: ['batchId'], equals: batch.id } },
   });
-  return alive === 0 && (await importedRows(db, batch.id)).length > 0;
+  return alive === 0 && ((await importedRows(db, batch.id)).length > 0 || (await updatedRows(db, batch.id)).length > 0);
 }
 
 /** Whether the Data manager offers Undo for this batch (the right is checked by the route). */
@@ -395,9 +400,12 @@ async function undoInTransaction(user: AuthUser, batchId: number): Promise<UndoP
     const rows = await importedRows(tx, batchId);
     const ids = (pick: (r: (typeof rows)[number]) => number | null) =>
       [...new Set(rows.map(pick).filter((id): id is number => id !== null))].sort((a, b) => a - b);
-    const companyIds = ids((r) => r.companyId);
-    const contactIds = ids((r) => (r.contactCreated ? r.contactId : null));
-    const leadIds = ids((r) => r.leadId);
+    // With the records the batch's update rows filled.
+    const touched = await filledRecordIds(tx, batchId);
+    const merge = (a: number[], b: number[]) => [...new Set([...a, ...b])].sort((x, y) => x - y);
+    const companyIds = merge(ids((r) => r.companyId), touched.companies);
+    const contactIds = merge(ids((r) => (r.contactCreated ? r.contactId : null)), touched.contacts);
+    const leadIds = merge(ids((r) => r.leadId), touched.leads);
     if (companyIds.length > 0) await tx.$queryRaw`SELECT id FROM companies WHERE id = ANY(${companyIds}::int[]) ORDER BY id FOR UPDATE`;
     if (contactIds.length > 0) await tx.$queryRaw`SELECT id FROM contacts WHERE id = ANY(${contactIds}::int[]) ORDER BY id FOR UPDATE`;
     if (leadIds.length > 0) await tx.$queryRaw`SELECT id FROM leads WHERE id = ANY(${leadIds}::int[]) ORDER BY id FOR UPDATE`;
@@ -418,6 +426,7 @@ async function undoInTransaction(user: AuthUser, batchId: number): Promise<UndoP
     }));
     await tx.auditLog.createMany({ data: [...audit('lead', leads), ...audit('contact', contacts), ...audit('company', companies)] });
     for (const id of plan.revert) await revertCompany(tx, user, id, batch.number);
+    await revertFilled(tx, user, batch.number, plan.filled);
 
     await tx.importBatch.update({
       where: { id: batchId },

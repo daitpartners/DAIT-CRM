@@ -23,6 +23,8 @@ import {
   syncFollowUpTask,
 } from '../leads/service.js';
 import { dateOnly, todayIn } from '../leads/dates.js';
+import { attachmentHeader } from '../imports/exports.js';
+import { leadsWorkbook } from '../imports/leadsExport.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -203,6 +205,30 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
       tiles: { newThisWeek, newThisWeekFromWebsite: newFromWebsite, followUpsDueToday: dueToday, overdue: overdueTasks, unassigned, unassignedProspects },
       counts: { all, leads, prospects, mine, overdue, unassigned },
     };
+  });
+
+  /**
+   * "Download all leads" (Administrators and Managers, `import_leads`): every lead the user can see matching the list's
+   * current tab, filters and search (archived only when the list shows them), in the list's order, as .xlsx; 400
+   * `too_many_rows` (with the count) past LEADS_EXPORT_MAX.
+   */
+  app.get('/leads/export.xlsx', { preHandler: [requireRight('import_leads')] }, async (request, reply) => {
+    const query = parseQuery(LeadListQuery, request.query);
+    const user = request.user!;
+    if (query.archived === '1' && !can(user.role, 'view_all_leads')) return reply.code(403).send({ error: 'forbidden' });
+    const today = todayIn(user.timezone);
+    const where: Prisma.LeadWhereInput = {
+      AND: [leadWhere(user, { includeArchived: query.archived === '1' }), tabWhere(query.tab, user, today), ...filterWhere(query)],
+    };
+    const lang = (['en', 'es', 'fr'] as const).find((l) => l === user.language) ?? 'en';
+    const result = await leadsWorkbook(where, orderBy(query.sort, query.sort ? query.dir : 'desc'), lang);
+    if ('tooMany' in result) return reply.code(400).send({ error: 'too_many_rows', total: result.tooMany });
+    return reply
+      .header('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .header('content-disposition', attachmentHeader(`leads-${today}.xlsx`))
+      .header('x-content-type-options', 'nosniff')
+      .header('cache-control', 'private, no-store')
+      .send(result.buffer);
   });
 
   app.post('/leads', { preHandler: [requireRight('manage_leads')] }, async (request, reply) => {

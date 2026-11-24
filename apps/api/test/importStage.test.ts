@@ -324,7 +324,7 @@ describe('step-2 API', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.total).toBe(9);
-    expect(body.tiles).toEqual({ rows: 9, files: 1, ready: 2, missing: 2, already: 0, notLead: 5 });
+    expect(body.tiles).toEqual({ rows: 9, files: 1, ready: 2, missing: 2, already: 0, notLead: 5, update: 0 });
     expect(body.items[0]).toMatchObject({
       status: 'Ready', include: true, from: 'Expo xlsx · row 4', fileName: 'Expo-Dubai-visitors.xlsx', matched: null,
       origin: { word: 'Expo', ext: 'xlsx', kind: 'row', n: 4 },

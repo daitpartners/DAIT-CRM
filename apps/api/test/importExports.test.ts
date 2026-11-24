@@ -76,7 +76,7 @@ async function sheetOf(buf: Buffer) {
   return ws!;
 }
 const fillOf = (cell: ExcelJS.Cell) => (cell.fill as ExcelJS.FillPattern | undefined)?.fgColor?.argb;
-const COLS = [...IMPORT_TABLE_FIELDS, 'from', 'whatToFix'] as const;
+const COLS = [...IMPORT_TABLE_FIELDS, 'from', 'whatToFix', 'leadId', 'companyId', 'leadPage'] as const;
 const col = (key: (typeof COLS)[number]) => COLS.indexOf(key) + 1;
 
 const fixBatch = () => batchWith([
@@ -268,7 +268,7 @@ describe('rows to fix', () => {
     const columns = header.map((_, c) => data.map((r) => r[c] ?? ''));
     const { map, questions } = classifyColumns(header, columns, known);
     expect(questions).toEqual([]);
-    expect(map).toEqual([...IMPORT_TABLE_FIELDS, 'ignore', 'ignore']);
+    expect(map).toEqual([...IMPORT_TABLE_FIELDS, 'ignore', 'ignore', 'leadId', 'companyId', 'ignore']);
 
     // Staged into a new batch: the same values come back as the rows' fields.
     const next = await prisma.importBatch.create({

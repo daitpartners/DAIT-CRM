@@ -6,10 +6,13 @@
  */
 import ExcelJS from 'exceljs';
 import {
-  IMPORT_TABLE_FIELDS, importColumnLabel, importRowStatusText, problemText,
-  type ImportColumnKey, type ImportCommit, type ImportField, type Lang, type ProblemCode, type RowFields, type RowProblem,
+  IMPORT_TABLE_FIELDS, importColumnLabel, importRowStatusText, isUpdateErrorCode, problemText,
+  type ImportColumnKey, type ImportCommit, type ImportField, type Lang, type ProblemCode, type RowChanges, type RowFields, type RowProblem,
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
+import { activeUser } from '../leads/visibility.js';
+import type { AuthUser } from '../plugins/auth.js';
+import { conflictProblems, previewUpdates } from './updates.js';
 import { NotFoundError } from '../validate.js';
 import { safeCell, safeCsvCell } from './cells.js';
 import { effectiveFields, planBatch } from './plan.js';
@@ -18,7 +21,8 @@ import { evaluateRow, fromLabel, knownCountries, originText, rowOrigin, type Row
 export { safeCell, safeCsvCell } from './cells.js';
 
 /** `from` in English; `origin` as parts, worded in the downloader's language in the workbook. */
-export type FixRow = { fields: RowFields; from: string; origin: RowOrigin; problems: RowProblem[] };
+/** `leadId`: the lead an update row points at (the workbook links its page). */
+export type FixRow = { fields: RowFields; from: string; origin: RowOrigin; problems: RowProblem[]; leadId?: number | null };
 export type FixOptions = { acceptHigh: boolean; noContactRows: 'import' | 'leave' | null };
 
 /** Batch statuses from which a row's outcome (Imported, Skipped, Error) decides it, rather than the plan. */
@@ -30,8 +34,8 @@ const AFTER_IMPORT = new Set(['Importing', 'Imported', 'Undone', 'Failed']);
  * choices): rows Skipped or Error, plus imported rows still Missing details. Problems are the row's problems on its
  * effective values, plus why it was left out (once per code).
  */
-export async function fixRows(batchId: number, opts?: FixOptions): Promise<FixRow[]> {
-  const batch = await prisma.importBatch.findUnique({ where: { id: batchId }, select: { status: true, options: true } });
+export async function fixRows(batchId: number, opts?: FixOptions, user: AuthUser | null = null): Promise<FixRow[]> {
+  const batch = await prisma.importBatch.findUnique({ where: { id: batchId }, select: { status: true, options: true, createdById: true } });
   if (!batch) throw new NotFoundError();
   const after = AFTER_IMPORT.has(batch.status);
   const saved = (batch.options ?? {}) as Partial<ImportCommit>;
@@ -44,17 +48,56 @@ export async function fixRows(batchId: number, opts?: FixOptions): Promise<FixRo
     orderBy: [{ position: 'asc' }, { id: 'asc' }],
     select: {
       id: true, fields: true, research: true, status: true, include: true, matchedCompanyId: true, originKind: true, originN: true,
-      outcome: true, outcomeCode: true, error: true,
+      outcome: true, outcomeCode: true, error: true, problems: true, changes: true, leadId: true,
       matchedCompany: { select: { id: true, number: true } },
       file: { select: { name: true, ext: true } },
     },
   });
   const plans = after ? [] : planBatch(rows, { ...choice, knownCountries: known });
+  // Update rows before the import: their conflicts against the CRM as it is now.
+  const updating = after ? [] : plans.map((p, i) => (p.action === 'update' ? i : -1)).filter((i) => i >= 0);
+  const previewOf = new Map<number, Awaited<ReturnType<typeof previewUpdates>>[number]>();
+  if (updating.length > 0) {
+    const viewer = user ?? (batch.createdById ? await activeUser(prisma, batch.createdById) : null);
+    const previews = await previewUpdates(prisma, viewer, updating.map((i) => rows[i]!.fields as RowFields), known);
+    updating.forEach((i, k) => previewOf.set(rows[i]!.id, previews[k] ?? null));
+  }
   const out: FixRow[] = [];
   rows.forEach((row, i) => {
     const { fields } = effectiveFields(row, choice.acceptHigh);
     // Header, total and blank lines are never leads: they are not in the file.
     if (row.status === 'Not a lead') return;
+    const push = (problems: RowProblem[], leadId?: number | null) => {
+      const origin = rowOrigin(row.file.name, row.file.ext, row.originKind, row.originN);
+      out.push({ fields: (row.fields ?? {}) as RowFields, from: originText(origin), origin, problems, leadId: leadId ?? null });
+    };
+    // Update rows (Lead ID / Company ID): an id error, or the values that differ from the CRM (amber, not applied).
+    const stored = Array.isArray(row.problems) ? (row.problems as RowProblem[]) : [];
+    const idProblem = stored.find((p) => isUpdateErrorCode(p?.code));
+    if (row.status === 'Update' || idProblem || isUpdateErrorCode(row.outcomeCode)) {
+      if (after) {
+        if (row.outcome === 'Updated') {
+          const changes = row.changes as unknown as RowChanges | null;
+          if (changes?.conflicts?.length) push(conflictProblems(changes.conflicts), row.leadId);
+        } else if (row.outcome === 'Error') {
+          const f = (row.fields ?? {}) as RowFields;
+          push([idProblem ?? (isUpdateErrorCode(row.outcomeCode)
+            ? { code: row.outcomeCode, level: 'missing', value: f.leadId ?? f.companyId ?? '' }
+            : { code: 'import_error', level: 'info', value: row.error ?? '' })]);
+        } else if (row.outcome === 'Skipped') {
+          push([{ code: (row.outcomeCode ?? 'unticked') as ProblemCode, level: 'info' }]);
+        }
+        return;
+      }
+      const plan = plans[i]!;
+      if (idProblem) push([idProblem]);
+      else if (plan.action === 'skip') push([{ code: (plan.reason ?? 'unticked') as ProblemCode, level: 'info' }]);
+      else {
+        const preview = previewOf.get(row.id);
+        if (preview?.conflicts.length) push(conflictProblems(preview.conflicts), preview.leadId);
+      }
+      return;
+    }
     const match = row.status === 'Already in CRM' && row.matchedCompany ? row.matchedCompany : null;
     const ev = evaluateRow(fields, { knownCountries: known, match, notALead: row.status === 'Not a lead' });
     const problems = [...ev.problems];
@@ -90,13 +133,17 @@ export async function fixRows(batchId: number, opts?: FixOptions): Promise<FixRo
   return out;
 }
 
-/** "What to fix": each problem once (contact_missing is stored for both Email and Phone), in plain words. */
+/**
+ * "What to fix": each problem once (contact_missing is stored for both Email and Phone), in plain words; an update
+ * conflict once per field.
+ */
 export function whatToFix(problems: readonly RowProblem[], lang: Lang): string {
   const seen = new Set<string>();
   const texts: string[] = [];
   for (const p of problems) {
-    if (seen.has(p.code)) continue;
-    seen.add(p.code);
+    const key = p.code === 'update_conflict' || p.code === 'industry_unknown' ? `${p.code}:${p.field ?? ''}` : p.code;
+    if (seen.has(key)) continue;
+    seen.add(key);
     texts.push(problemText(p, lang));
   }
   return texts.join('; ');
@@ -105,7 +152,14 @@ export function whatToFix(problems: readonly RowProblem[], lang: Lang): string {
 const FILL = { base: 'FFF5F1FC', header: 'FFEFE6FD', missing: 'FFFDE8E8', questionable: 'FFFFF1E0' } as const;
 const FONT = { missing: 'FFA32020', questionable: 'FF8A4B00' } as const;
 const fill = (argb: string): ExcelJS.Fill => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
-const FIX_COLUMNS: readonly ImportColumnKey[] = [...IMPORT_TABLE_FIELDS, 'from', 'whatToFix'];
+/** The table fields, From and What to fix, then the record ids (an update row comes back as one) and the lead page. */
+const FIX_COLUMNS: readonly ImportColumnKey[] = [...IMPORT_TABLE_FIELDS, 'from', 'whatToFix', 'leadId', 'companyId', 'leadPage'];
+
+/** The CRM's own page of a lead (PUBLIC_URL; a relative path when it is not set). */
+export function leadPageUrl(leadId: number): string {
+  const base = (process.env.PUBLIC_URL ?? '').replace(/\/+$/, '');
+  return `${base}/leads/${leadId}`;
+}
 
 /** Per field, how its cell is coloured: missing (red) wins over questionable (amber). */
 function cellLevels(problems: readonly RowProblem[]): Map<ImportField, 'missing' | 'questionable'> {
@@ -121,11 +175,11 @@ function cellLevels(problems: readonly RowProblem[]): Map<ImportField, 'missing'
  * The "Rows to fix" workbook in the downloader's language: one sheet, a bold frozen header, every data cell lightly
  * filled, the problem cells red (missing) or amber (questionable), "From" and "What to fix" last. Values are strings.
  */
-export async function rowsToFixWorkbook(batchId: number, lang: Lang, opts?: FixOptions): Promise<Buffer> {
-  const rows = await fixRows(batchId, opts);
+export async function rowsToFixWorkbook(batchId: number, lang: Lang, opts?: FixOptions, user: AuthUser | null = null): Promise<Buffer> {
+  const rows = await fixRows(batchId, opts, user);
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Rows to fix', { views: [{ state: 'frozen', ySplit: 1 }] });
-  ws.columns = FIX_COLUMNS.map((key) => ({ width: key === 'whatToFix' ? 48 : key === 'from' ? 24 : 22 }));
+  ws.columns = FIX_COLUMNS.map((key) => ({ width: key === 'whatToFix' ? 48 : key === 'from' ? 24 : key === 'leadPage' ? 36 : 22 }));
   const header = ws.getRow(1);
   FIX_COLUMNS.forEach((key, c) => {
     const cell = header.getCell(c + 1);
@@ -138,7 +192,14 @@ export async function rowsToFixWorkbook(batchId: number, lang: Lang, opts?: FixO
     const levels = cellLevels(r.problems);
     FIX_COLUMNS.forEach((key, c) => {
       const cell = row.getCell(c + 1);
-      const raw = key === 'from' ? originText(r.origin, lang) : key === 'whatToFix' ? whatToFix(r.problems, lang) : r.fields[key as ImportField] ?? '';
+      if (key === 'leadPage') {
+        // The CRM's own page (never a value from the file), so it is a real link.
+        cell.value = r.leadId ? { text: leadPageUrl(r.leadId), hyperlink: leadPageUrl(r.leadId) } : '';
+        cell.fill = fill(FILL.base);
+        return;
+      }
+      const raw = key === 'from' ? originText(r.origin, lang) : key === 'whatToFix' ? whatToFix(r.problems, lang)
+        : r.fields[key as ImportField | 'leadId' | 'companyId'] ?? '';
       cell.value = safeCell(raw);
       const level = levels.get(key as ImportField);
       cell.fill = fill(level ? FILL[level] : FILL.base);

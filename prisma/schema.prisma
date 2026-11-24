@@ -1112,6 +1112,8 @@ model ImportRow {
   contactCreated   Boolean   @default(false) @map("contact_created")
   /// Set at import: what Undo checks before removing what this row created.
   stamps           Json?
+  /// RowChanges (shared): what an update row (Lead ID / Company ID) filled and the conflicts it left (not applied).
+  changes          Json?
   importedAt       DateTime? @map("imported_at")
 
   batch          ImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)

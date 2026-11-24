@@ -5,17 +5,19 @@
  */
 import type { ImportRow } from '@prisma/client';
 import {
-  ACCEPT_CONFIDENCE, IMPORT_FIELDS,
-  type ImportField, type ProblemCode, type ResearchValue, type ReviewSummary, type RowFields,
+  ACCEPT_CONFIDENCE, IMPORT_FIELDS, isUpdateErrorCode,
+  type ImportField, type ProblemCode, type ResearchValue, type ReviewSummary, type RowFields, type RowProblem,
 } from '@dait-crm/shared';
 import { companyKeyOf } from './companies.js';
 import { matchCountry } from './countries.js';
 
-export type PlanRow = Pick<ImportRow, 'id' | 'fields' | 'research' | 'status' | 'include' | 'matchedCompanyId'>;
+/** `problems`: the staged row's problems (an update row's id error is read from them). */
+export type PlanRow = Pick<ImportRow, 'id' | 'fields' | 'research' | 'status' | 'include' | 'matchedCompanyId'> & { problems?: ImportRow['problems'] };
 
 export type RowPlan = {
   rowId: number;
-  action: 'import' | 'skip';
+  /** `update`: a Lead ID / Company ID row that fills that record's blanks (never a new lead). */
+  action: 'import' | 'update' | 'skip';
   reason: ProblemCode | null;
   companyKey: string | null;
   existingCompanyId: number | null;
@@ -79,6 +81,12 @@ export function planBatch(rows: readonly PlanRow[], opts: PlanOptions): RowPlan[
     };
     const skip = (reason: ProblemCode): RowPlan => ({ ...plan, reason });
     if (row.status === 'Not a lead') return skip('not_a_lead');
+    // A Lead ID / Company ID that is unknown, not visible or mismatched: an error at import, ticked or not.
+    const idError = (Array.isArray(row.problems) ? (row.problems as RowProblem[]) : []).find((p) => isUpdateErrorCode(p?.code));
+    if (idError) return { ...skip(idError.code), noContact: false };
+    if (row.status === 'Update') {
+      return { ...plan, noContact: false, existingCompanyId: row.matchedCompanyId, ...(row.include ? { action: 'update' } : { reason: 'unticked' }) };
+    }
     if (!row.include) return skip(row.status === 'Already in CRM' ? 'already_in_crm' : 'unticked');
     if (!has(fields.companyName)) return skip('company_missing');
     if (!has(fields.country)) {
@@ -92,10 +100,14 @@ export function planBatch(rows: readonly PlanRow[], opts: PlanOptions): RowPlan[
   });
 }
 
-/** The step-4 totals of a plan. */
+/**
+ * The step-4 totals of a plan. An update row's id error is counted in `updates.errors` (it is an error at import, not a
+ * skipped row); `updates.fields` / `conflicts` need the CRM's records and are filled in by the caller.
+ */
 export function summarisePlan(plans: readonly RowPlan[]): ReviewSummary {
   const imports = plans.filter((p) => p.action === 'import');
-  const skips = plans.filter((p) => p.action === 'skip');
+  const errors = plans.filter((p) => p.action === 'skip' && isUpdateErrorCode(p.reason));
+  const skips = plans.filter((p) => p.action === 'skip' && !isUpdateErrorCode(p.reason));
   const count = (code: ProblemCode) => skips.filter((p) => p.reason === code).length;
   // An imported row always has a company name, so a key.
   const newKeys = new Set(imports.filter((p) => p.existingCompanyId === null).map((p) => p.companyKey ?? `row:${p.rowId}`));
@@ -119,5 +131,6 @@ export function summarisePlan(plans: readonly RowPlan[]): ReviewSummary {
     noContactRows: plans.filter((p) => p.noContact && (p.action === 'import' || p.reason === 'no_contact_left_out')).length,
     researchOnlyCountry: skips.filter((p) => p.researchOnlyCountry).length,
     unknownCountries: [...unknown.values()].sort((a, b) => b.count - a.count || a.value.localeCompare(b.value)),
+    updates: { rows: plans.filter((p) => p.action === 'update').length, fields: 0, conflicts: 0, errors: errors.length },
   };
 }

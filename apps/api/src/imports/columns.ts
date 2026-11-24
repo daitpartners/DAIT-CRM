@@ -3,10 +3,14 @@
  * French, what the values look like, where the header row is, and which columns to ask about. There are no mapping
  * dropdowns: a column the CRM is unsure of gets its guess at once and one question.
  */
-import { IMPORT_FIELDS, importColumnLabel, type ColumnQuestion, type ImportColumnKey, type ImportField } from '@dait-crm/shared';
+import {
+  EXPORT_CONTEXT_COLUMNS, IMPORT_FIELDS, IMPORT_ID_FIELDS, importColumnLabel,
+  type ColumnQuestion, type ImportColumnKey, type ImportField, type ImportIdField,
+} from '@dait-crm/shared';
 import { matchCountry } from './countries.js';
 
-export type ColumnTarget = ImportField | 'firstName' | 'lastName' | 'ignore';
+/** `leadId` / `companyId`: the record ids of a "Download all leads" file (an update row). */
+export type ColumnTarget = ImportField | ImportIdField | 'firstName' | 'lastName' | 'ignore';
 export type HeaderMatch = { target: ColumnTarget; strength: 'strong' | 'weak' };
 
 /** Lower case, accents removed, everything but letters and digits removed ("Correo electrónico" → "correoelectronico"). */
@@ -46,6 +50,8 @@ const STRONG: Record<ColumnTarget, string[]> = {
   ],
   industry: ['industry', 'sector', 'industria', 'secteur', 'secteurdactivite'],
   notes: ['notes', 'note', 'comments', 'comment', 'comentarios', 'remarques', 'remarks', 'notas', 'observaciones'],
+  leadId: ['leadid', 'leadnumber', 'idlead', 'iddellead', 'iddulead', 'numerodelead', 'numerodulead'],
+  companyId: ['companyid', 'idempresa', 'iddeempresa', 'iddelaempresa', 'iddelentreprise', 'identreprise', 'idsociete'],
   ignore: ['whattofix', 'from', 'status'],
 };
 
@@ -58,10 +64,13 @@ const HEADER_WORDS: ReadonlyMap<string, HeaderMatch> = (() => {
     const key = squash(word);
     if (key && !map.has(key)) map.set(key, { target, strength: 'strong' });
   };
-  // The rows-to-fix file's own headers come first, so a re-import is always recognised.
+  // The rows-to-fix and "Download all leads" files' own headers come first, so a re-import is always recognised; their
+  // read-only columns (Status, Assigned to, Language, Lead type, Source, Lead page) are ignored.
   for (const lang of LANGS) {
     for (const field of IMPORT_FIELDS) add(importColumnLabel(field, lang), field);
-    for (const key of ['whatToFix', 'from', 'status'] satisfies ImportColumnKey[]) add(importColumnLabel(key, lang), 'ignore');
+    for (const id of IMPORT_ID_FIELDS) add(importColumnLabel(id, lang), id);
+    const ignored: ImportColumnKey[] = ['whatToFix', 'from', ...EXPORT_CONTEXT_COLUMNS, 'leadPage'];
+    for (const key of ignored) add(importColumnLabel(key, lang), 'ignore');
   }
   for (const [target, words] of Object.entries(STRONG) as [ColumnTarget, string[]][]) for (const w of words) add(w, target);
   for (const [word, target] of Object.entries(WEAK)) if (!map.has(word)) map.set(word, { target, strength: 'weak' });
@@ -174,7 +183,7 @@ export function classifyColumns(
       taken.add(target);
     }
     map.push(target);
-    if (ask && target !== null && target !== 'ignore' && target !== 'firstName' && target !== 'lastName') {
+    if (ask && target !== null && target !== 'ignore' && target !== 'firstName' && target !== 'lastName' && target !== 'leadId' && target !== 'companyId') {
       const samples = values.map((v) => v.trim()).filter((v) => v !== '').slice(0, SAMPLES);
       questions.push({ col, header, guess: target, samples });
     }

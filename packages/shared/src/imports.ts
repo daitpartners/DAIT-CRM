@@ -18,6 +18,14 @@ export const IMPORT_FIELDS = [
   'companyName', 'website', 'country', 'city', 'contactName', 'designation', 'email', 'phone', 'industry', 'notes',
 ] as const;
 export type ImportField = (typeof IMPORT_FIELDS)[number];
+/**
+ * The two record ids a "Download all leads" file carries (Lead ID LD-n, Company ID CO-n): a row with one the uploader can
+ * see updates that lead / company (fills its blanks) instead of creating a new lead. Kept in the row's fields.
+ */
+export const IMPORT_ID_FIELDS = ['leadId', 'companyId'] as const;
+export type ImportIdField = (typeof IMPORT_ID_FIELDS)[number];
+/** "Download all leads": at most this many leads in one file (narrow the filter for more). */
+export const LEADS_EXPORT_MAX = 20000;
 /** The step-2 table columns, in the mockup's order (every field but notes). */
 export const IMPORT_TABLE_FIELDS = IMPORT_FIELDS.slice(0, 9) as readonly Exclude<ImportField, 'notes'>[];
 
@@ -27,8 +35,11 @@ export const BATCH_STATUSES = [
 ] as const;
 export type BatchStatus = (typeof BATCH_STATUSES)[number];
 
-/** `ImportRow.status`, decided on the row's own fields ("Ready" = company + country + email). */
-export const ROW_STATUSES = ['Ready', 'Missing details', 'Already in CRM', 'Not a lead'] as const;
+/**
+ * `ImportRow.status`, decided on the row's own fields ("Ready" = company + country + email). "Update" = the row carries a
+ * Lead ID / Company ID the uploader can see: it fills that record's blanks instead of creating a lead.
+ */
+export const ROW_STATUSES = ['Ready', 'Missing details', 'Already in CRM', 'Not a lead', 'Update'] as const;
 export type RowStatus = (typeof ROW_STATUSES)[number];
 
 /** `ImportFile.status`; "Scan" = an image-only PDF (not read: no OCR). */
@@ -39,17 +50,38 @@ export type FileStatus = (typeof FILE_STATUSES)[number];
 export const RESEARCH_ROW_STATUSES = ['waiting', 'running', 'everything', 'some', 'nothing', 'failed'] as const;
 export type ResearchRowStatus = (typeof RESEARCH_ROW_STATUSES)[number];
 
-export type RowFields = Partial<Record<ImportField, string>>;
+export type RowFields = Partial<Record<ImportField | ImportIdField, string>>;
 /** A value research found for one field: never without the page it came from and how sure it is (0–100). */
 export type ResearchValue = { value: string; sourceUrl: string; sourceLabel: string; confidence: number };
 
 export const PROBLEM_CODES = [
   'company_missing', 'country_missing', 'email_missing', 'contact_missing', 'country_unknown', 'email_invalid',
   'website_invalid', 'not_a_lead', 'unticked', 'already_in_crm', 'no_contact_left_out', 'import_error',
+  'lead_not_found', 'company_not_found', 'company_mismatch', 'update_conflict', 'industry_unknown',
 ] as const;
 export type ProblemCode = (typeof PROBLEM_CODES)[number];
-/** `level`: missing = red cell (required), questionable = amber cell (unknown or doubtful value), info = no cell colour. */
-export type RowProblem = { code: ProblemCode; field?: ImportField; level: 'missing' | 'questionable' | 'info'; value?: string };
+/** An update row's id problems: the row is an error at import, never a new lead. */
+export const UPDATE_ERROR_CODES = ['lead_not_found', 'company_not_found', 'company_mismatch'] as const;
+export type UpdateErrorCode = (typeof UPDATE_ERROR_CODES)[number];
+export const isUpdateErrorCode = (code: string | null | undefined): code is UpdateErrorCode =>
+  (UPDATE_ERROR_CODES as readonly string[]).includes(code ?? '');
+/**
+ * `level`: missing = red cell (required), questionable = amber cell (unknown or doubtful value), info = no cell colour.
+ * `crm` = what the CRM holds (an update row's conflict: "CRM has {crm}, file has {value}").
+ */
+export type RowProblem = {
+  code: ProblemCode; field?: ImportField; level: 'missing' | 'questionable' | 'info'; value?: string; crm?: string;
+};
+
+/**
+ * An update row's value that was not applied: the CRM already holds another value (or the field is verified), so the
+ * owner checks it and changes it on the lead page. `unknown` = an industry that is not on the CRM's list.
+ */
+export type UpdateConflict = { field: ImportField; crm: string; file: string; unknown?: boolean };
+/** One blank an update row filled (Undo puts it back while it still holds this value). */
+export type UpdateFill = { entity: 'lead' | 'company' | 'contact'; id: number; field: string; value: string | number };
+/** `ImportRow.changes`: what an update row did at import (a contact it created, with its stamp, for Undo). */
+export type RowChanges = { filled: UpdateFill[]; conflicts: UpdateConflict[]; createdContact?: { id: number; stamp: string } | null };
 
 /**
  * `ImportFile.meta`: what the file list says about a read file; `noClaude` = (part) read without Claude: switched off,
@@ -80,6 +112,11 @@ const PROBLEM_TEXT: Record<Lang, Record<ProblemCode, string>> = {
     already_in_crm: 'Already in the CRM as {value}',
     no_contact_left_out: 'Left out: no email or phone',
     import_error: 'Could not import: {value}',
+    lead_not_found: 'Lead {value} not found or not yours',
+    company_not_found: 'Company {value} not found or not yours',
+    company_mismatch: 'Company ID {value} does not match the lead (its company is {crm})',
+    update_conflict: '{field}: CRM has {crm}, file has {value} — update on the lead page if correct',
+    industry_unknown: 'Industry not in the CRM list: {value} — update on the lead page if correct',
   },
   es: {
     company_missing: 'Añade el nombre de la empresa',
@@ -94,6 +131,11 @@ const PROBLEM_TEXT: Record<Lang, Record<ProblemCode, string>> = {
     already_in_crm: 'Ya está en el CRM como {value}',
     no_contact_left_out: 'Excluida: sin correo ni teléfono',
     import_error: 'No se pudo importar: {value}',
+    lead_not_found: 'Lead {value} no encontrado o no es tuyo',
+    company_not_found: 'Empresa {value} no encontrada o no es tuya',
+    company_mismatch: 'El ID de empresa {value} no coincide con el lead (su empresa es {crm})',
+    update_conflict: '{field}: el CRM tiene {crm}, el archivo tiene {value} — actualízalo en la página del lead si es correcto',
+    industry_unknown: 'Sector que no está en la lista del CRM: {value} — actualízalo en la página del lead si es correcto',
   },
   fr: {
     company_missing: 'Ajoutez le nom de l’entreprise',
@@ -108,32 +150,52 @@ const PROBLEM_TEXT: Record<Lang, Record<ProblemCode, string>> = {
     already_in_crm: 'Déjà dans le CRM sous {value}',
     no_contact_left_out: 'Exclue : ni e-mail ni téléphone',
     import_error: 'Import impossible : {value}',
+    lead_not_found: 'Lead {value} introuvable ou pas le vôtre',
+    company_not_found: 'Entreprise {value} introuvable ou pas la vôtre',
+    company_mismatch: 'L’ID d’entreprise {value} ne correspond pas au lead (son entreprise est {crm})',
+    update_conflict: '{field} : le CRM a {crm}, le fichier a {value} — mettez à jour sur la page du lead si c’est correct',
+    industry_unknown: 'Secteur absent de la liste du CRM : {value} — mettez à jour sur la page du lead si c’est correct',
   },
 };
 
 /** A row problem in plain words ("What to fix"), in `lang`. */
 export function problemText(p: RowProblem, lang: Lang): string {
-  const text = (PROBLEM_TEXT[lang] ?? PROBLEM_TEXT.en)[p.code];
-  return text.replace('{value}', p.value ?? '');
+  const text = (PROBLEM_TEXT[lang] ?? PROBLEM_TEXT.en)[p.code] ?? p.code;
+  // Replaced in one pass, so a value containing "{crm}" is never read as a placeholder.
+  return text.replace(/\{(value|crm|field)\}/g, (_, k: string) =>
+    k === 'value' ? p.value ?? '' : k === 'crm' ? p.crm ?? '' : p.field ? importColumnLabel(p.field, lang) : '');
 }
 
-export type ImportColumnKey = ImportField | 'from' | 'whatToFix' | 'status' | 'lead' | 'company';
+/**
+ * Column keys of the import tables and downloads. `leadId` / `companyId` (record ids), then the "Download all leads"
+ * read-only context columns (ignored on upload) and the rows-to-fix lead page link.
+ */
+export type ImportColumnKey = ImportField | ImportIdField | 'from' | 'whatToFix' | 'status' | 'lead' | 'company'
+  | 'assignedTo' | 'language' | 'leadType' | 'source' | 'leadPage';
+/** "Download all leads" read-only columns: shown for context, ignored when the file comes back. */
+export const EXPORT_CONTEXT_COLUMNS = ['status', 'assignedTo', 'language', 'leadType', 'source'] as const satisfies readonly ImportColumnKey[];
 
 const COLUMN_LABELS: Record<Lang, Record<ImportColumnKey, string>> = {
   en: {
     companyName: 'Company', website: 'Website', country: 'Country', city: 'City', contactName: 'Contact',
     designation: 'Designation', email: 'Email', phone: 'Phone', industry: 'Industry', notes: 'Notes',
     from: 'From', whatToFix: 'What to fix', status: 'Status', lead: 'Lead', company: 'Company number',
+    leadId: 'Lead ID', companyId: 'Company ID', assignedTo: 'Assigned to', language: 'Language', leadType: 'Lead type',
+    source: 'Source', leadPage: 'Lead page',
   },
   es: {
     companyName: 'Empresa', website: 'Sitio web', country: 'País', city: 'Ciudad', contactName: 'Contacto',
     designation: 'Cargo', email: 'Correo electrónico', phone: 'Teléfono', industry: 'Sector', notes: 'Notas',
     from: 'Origen', whatToFix: 'Qué corregir', status: 'Estado', lead: 'Lead', company: 'Número de empresa',
+    leadId: 'ID del lead', companyId: 'ID de empresa', assignedTo: 'Asignado a', language: 'Idioma', leadType: 'Tipo de lead',
+    source: 'Fuente', leadPage: 'Página del lead',
   },
   fr: {
     companyName: 'Entreprise', website: 'Site web', country: 'Pays', city: 'Ville', contactName: 'Contact',
     designation: 'Fonction', email: 'E-mail', phone: 'Téléphone', industry: 'Secteur', notes: 'Notes',
     from: 'Origine', whatToFix: 'À corriger', status: 'Statut', lead: 'Lead', company: 'Numéro d’entreprise',
+    leadId: 'ID du lead', companyId: 'ID de l’entreprise', assignedTo: 'Assigné à', language: 'Langue', leadType: 'Type de lead',
+    source: 'Source', leadPage: 'Page du lead',
   },
 };
 
@@ -156,6 +218,11 @@ export type ReviewSummary = {
   noContactRows: number;
   researchOnlyCountry: number;
   unknownCountries: { value: string; count: number }[];
+  /**
+   * Update rows (Lead ID / Company ID): `rows` that will fill `fields` empty fields, `conflicts` values that differ from
+   * the CRM (not changed: listed in the rows-to-fix download), `errors` rows whose id is unknown, not visible or mismatched.
+   */
+  updates: { rows: number; fields: number; conflicts: number; errors: number };
 };
 
 /**
@@ -456,6 +523,8 @@ export type UndoPreview = {
   remove: { leads: { id: number; number: string }[]; contacts: number; companies: number };
   keep: { kind: 'lead' | 'contact' | 'company'; id: number; label: string; reason: UndoReason }[];
   reverted?: { id: number; label: string }[];
+  /** Update rows: blanks the batch filled that go back to empty (`revert`), and those changed since (`keep`). */
+  filled?: { revert: number; keep: number };
 };
 
 const UNDO_REASON_TEXT: Record<Lang, Record<UndoReason, string>> = {
@@ -498,21 +567,21 @@ export function importContinueHintText(lang: Lang): string {
 }
 
 /** What a staged row became at import (`ImportRow.outcome`). */
-export const ROW_OUTCOMES = ['Imported', 'Skipped', 'Error'] as const;
+export const ROW_OUTCOMES = ['Imported', 'Updated', 'Skipped', 'Error'] as const;
 export type RowOutcome = (typeof ROW_OUTCOMES)[number];
 
 const ROW_STATUS_TEXT: Record<Lang, Record<RowStatus | RowOutcome, string>> = {
   en: {
     Ready: 'Ready', 'Missing details': 'Missing details', 'Already in CRM': 'Already in CRM', 'Not a lead': 'Not a lead',
-    Imported: 'Imported', Skipped: 'Skipped', Error: 'Error',
+    Update: 'Update', Imported: 'Imported', Updated: 'Updated', Skipped: 'Skipped', Error: 'Error',
   },
   es: {
     Ready: 'Lista', 'Missing details': 'Faltan datos', 'Already in CRM': 'Ya está en el CRM', 'Not a lead': 'No es un lead',
-    Imported: 'Importada', Skipped: 'Omitida', Error: 'Error',
+    Update: 'Actualización', Imported: 'Importada', Updated: 'Actualizada', Skipped: 'Omitida', Error: 'Error',
   },
   fr: {
     Ready: 'Prête', 'Missing details': 'Informations manquantes', 'Already in CRM': 'Déjà dans le CRM', 'Not a lead': 'Pas un lead',
-    Imported: 'Importée', Skipped: 'Ignorée', Error: 'Erreur',
+    Update: 'À mettre à jour', Imported: 'Importée', Updated: 'Mise à jour', Skipped: 'Ignorée', Error: 'Erreur',
   },
 };
 
@@ -528,7 +597,7 @@ export function importRowStatusText(status: string, lang: Lang): string {
  */
 export const IMPORT_ROW_ERRORS = [
   'invalid_status', 'unknown_user', 'cannot_assign_hidden', 'forbidden', 'Not found', 'Domain already belongs to another company',
-  'Unexpected error importing this row',
+  'Unexpected error importing this row', 'lead_not_found', 'company_not_found', 'company_mismatch',
 ] as const;
 export type ImportRowError = (typeof IMPORT_ROW_ERRORS)[number];
 
@@ -538,18 +607,24 @@ const ROW_ERROR_TEXT: Record<Lang, Record<ImportRowError, string>> = {
     cannot_assign_hidden: 'The lead cannot be assigned to that person', forbidden: 'The importer does not have access',
     'Not found': 'A record it needs was not found', 'Domain already belongs to another company': 'The website domain already belongs to another company',
     'Unexpected error importing this row': 'Unexpected error importing this row',
+    lead_not_found: 'The Lead ID is not in the CRM or not yours', company_not_found: 'The Company ID is not in the CRM or not yours',
+    company_mismatch: 'The Company ID does not match the lead',
   },
   es: {
     invalid_status: 'El estado del lead no está disponible', unknown_user: 'La persona asignada no es un usuario activo',
     cannot_assign_hidden: 'El lead no se puede asignar a esa persona', forbidden: 'Quien importa no tiene acceso',
     'Not found': 'No se encontró un registro necesario', 'Domain already belongs to another company': 'El dominio del sitio web ya pertenece a otra empresa',
     'Unexpected error importing this row': 'Error inesperado al importar esta fila',
+    lead_not_found: 'El ID del lead no está en el CRM o no es tuyo', company_not_found: 'El ID de empresa no está en el CRM o no es tuyo',
+    company_mismatch: 'El ID de empresa no coincide con el lead',
   },
   fr: {
     invalid_status: 'Le statut du lead n’est pas disponible', unknown_user: 'La personne assignée n’est pas un utilisateur actif',
     cannot_assign_hidden: 'Le lead ne peut pas être attribué à cette personne', forbidden: 'La personne qui importe n’a pas accès',
     'Not found': 'Un enregistrement nécessaire est introuvable', 'Domain already belongs to another company': 'Ce domaine appartient déjà à une autre entreprise',
     'Unexpected error importing this row': 'Erreur inattendue lors de l’import de cette ligne',
+    lead_not_found: 'L’ID du lead n’est pas dans le CRM ou pas le vôtre', company_not_found: 'L’ID d’entreprise n’est pas dans le CRM ou pas le vôtre',
+    company_mismatch: 'L’ID d’entreprise ne correspond pas au lead',
   },
 };
 

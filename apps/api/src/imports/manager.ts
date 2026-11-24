@@ -20,6 +20,8 @@ export type BatchRow = {
   id: number; number: string; createdAt: Date; by: string | null; language: string;
   files: { first: string; more: number }; rowCount: number;
   importedCount: number | null; newCompanyCount: number | null; skippedCount: number | null;
+  /** Rows that updated a lead / company already in the CRM (Lead ID / Company ID); null before the batch imported. */
+  updatedCount: number | null;
   research: { done: number; total: number } | 'done' | null;
   status: string; undoneAt: Date | null;
 };
@@ -81,13 +83,18 @@ export async function listBatches(q: ImportBatchListQuery, timezone = 'Europe/Lo
     }),
     dmTiles(timezone),
   ]);
+  const updated = batches.length === 0 ? [] : await prisma.importRow.groupBy({
+    by: ['batchId'], where: { batchId: { in: batches.map((b) => b.id) }, outcome: 'Updated' }, _count: { _all: true },
+  });
+  const updatedOf = new Map(updated.map((g) => [g.batchId, g._count._all]));
   const items = batches.map((b): BatchRow => {
     const imported = IMPORTED.has(b.status) && b.importedAt !== null;
     return {
       id: b.id, number: b.number, createdAt: b.createdAt, by: b.createdBy?.name ?? null, language: b.language,
       files: { first: b.files[0]?.name ?? '', more: Math.max(0, b._count.files - 1) }, rowCount: b.rowCount,
       importedCount: imported ? b.importedCount : null, newCompanyCount: imported ? b.newCompanyCount : null,
-      skippedCount: imported ? b.skippedCount : null, research: researchOf(b), status: b.status, undoneAt: b.undoneAt,
+      skippedCount: imported ? b.skippedCount : null, updatedCount: imported ? updatedOf.get(b.id) ?? 0 : null,
+      research: researchOf(b), status: b.status, undoneAt: b.undoneAt,
     };
   });
   return { items, total, count, tiles };
@@ -108,6 +115,10 @@ export async function batchDetail(id: number) {
   if (!b) throw new NotFoundError();
   const byOutcome = await prisma.importRow.groupBy({ by: ['outcome'], where: { batchId: id }, _count: { _all: true } });
   const n = (o: string) => byOutcome.find((g) => g.outcome === o)?._count._all ?? 0;
+  // The values update rows did not apply (they differ from the CRM): listed in the rows-to-fix download.
+  const [{ conflicts }] = await prisma.$queryRaw<{ conflicts: number }[]>`
+    SELECT COALESCE(SUM(jsonb_array_length(changes->'conflicts')), 0)::int AS conflicts
+    FROM import_rows WHERE batch_id = ${id} AND outcome = 'Updated' AND jsonb_typeof(changes->'conflicts') = 'array'`;
   return {
     id: b.id, number: b.number, status: b.status, language: b.language, leadType: b.leadType, createdAt: b.createdAt,
     by: b.createdBy?.name ?? null, importedAt: b.importedAt, importedBy: b.importedBy?.name ?? null,
@@ -116,7 +127,7 @@ export async function batchDetail(id: number) {
     existingCompanyCount: b.existingCompanyCount, skippedCount: b.skippedCount, errorCount: b.errorCount,
     research: researchOf(b), researchEngine: b.researchEngine, importError: b.importError,
     options: b.options as Partial<ImportCommit>,
-    counts: { imported: n('Imported'), skipped: n('Skipped'), errors: n('Error') },
+    counts: { imported: n('Imported'), updated: n('Updated'), skipped: n('Skipped'), errors: n('Error'), conflicts: conflicts ?? 0 },
     files: b.files.map(({ meta, ...f }) => ({ ...f, rows: (meta as { rows?: number } | null)?.rows ?? null })),
     canUndo: await canUndo(b),
   };
