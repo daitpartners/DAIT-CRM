@@ -1842,7 +1842,6 @@
   "Claude's monthly run cap is reached. Research stopped; the remaining rows stay Missing details. Raise the cap in Settings or switch Claude off to resume.": "Le plafond mensuel d’utilisations de Claude est atteint. La recherche s’est arrêtée ; les lignes restantes restent en Informations manquantes. Relevez le plafond dans Paramètres ou désactivez Claude pour reprendre.",
   "Choose Import them or Leave them out to continue.": "Choisissez Les importer ou Les exclure pour continuer.",
   "Add countries": "Ajouter les pays",
-  "Each name is added to the country list in Settings. Correct a name before saving if the file spells it oddly.": "Chaque nom est ajouté à la liste des pays dans Paramètres. Corrigez un nom avant d’enregistrer si le fichier l’orthographie bizarrement.",
   "{value} (1 row)": "{value} (1 ligne)",
   "{value} ({n} rows)": "{value} ({n} lignes)",
   "company + country + email": "entreprise + pays + e-mail",
@@ -1853,5 +1852,6 @@
   "row {n}": "ligne {n}",
   "Import not found": "Import introuvable",
   "This import does not exist or was deleted.": "Cet import n’existe pas ou a été supprimé.",
-  "Start a new import": "Commencer un nouvel import"
+  "Start a new import": "Commencer un nouvel import",
+  "Each name is added to the country list in Settings (a country that is switched off is switched back on). If you correct a spelling, this import's rows with the file's spelling use your name.": "Chaque nom est ajouté à la liste des pays dans Paramètres (un pays désactivé est réactivé). Si vous corrigez l’orthographe, les lignes de cet import qui ont l’orthographe du fichier prennent votre nom."
 }

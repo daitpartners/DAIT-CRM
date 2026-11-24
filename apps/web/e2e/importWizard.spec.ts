@@ -96,8 +96,8 @@ function fakeImports(page: Page) {
       });
     }
     if (path === '/api/imports/batches/41/review') {
-      // As the server: the row with no email or phone is no longer counted once it is left out.
-      const leave = url.searchParams.get('noContactRows') === 'leave';
+      // As the server: the row with no email or phone is counted only with "Import them" (not undecided, not left out).
+      const leave = url.searchParams.get('noContactRows') !== 'import';
       return json(route, {
         willImport: leave ? 1 : 2, newCompanies: leave ? 1 : 2, existingCompanies: 0, skipped: { total: 1, alreadyInCrm: 1, notLead: 0, unticked: 0, other: 0 },
         noContactRows: 1, researchOnlyCountry: 0, unknownCountries: [],

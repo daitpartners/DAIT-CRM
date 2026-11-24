@@ -119,8 +119,13 @@ describe('import · review and start', () => {
       leadType: 'Prospect', language: 'es', source: `Import · ${batch.number}`,
       allocation: [{ name: 'Spanish market (Español)', people: ['Carlos', 'Seba'] }],
     });
-    // Without a choice the no-contact row is counted as importable.
-    expect((await get(`/api/imports/batches/${batch.id}/review`)).json()).toMatchObject({ willImport: 2, noContactRows: 1 });
+    // Without a choice the no-contact row waits for it: in no total (imports, companies, skipped), only in noContactRows.
+    expect((await get(`/api/imports/batches/${batch.id}/review`)).json()).toMatchObject({
+      willImport: 1, newCompanies: 1, existingCompanies: 0, skipped: { total: 2, alreadyInCrm: 1, other: 1 }, noContactRows: 1,
+    });
+    expect((await get(`/api/imports/batches/${batch.id}/review?noContactRows=import`)).json()).toMatchObject({
+      willImport: 2, newCompanies: 2, skipped: { total: 2 }, noContactRows: 1,
+    });
 
     const refused = await post(`/api/imports/batches/${batch.id}/import`, choose({ noContactRows: null }));
     expect(refused.statusCode).toBe(400);

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { OutreachLanguage } from '@dait-crm/shared';
 import { ApiError, api } from '../../../api/client';
-import { rowsToFixUrl, useRematch, useReview, useStartImport, type NoContactChoice, type ReviewView } from '../../../api/imports';
+import { importKeys, rowsToFixUrl, useReview, useStartImport, type NoContactChoice, type ReviewView } from '../../../api/imports';
 import { keys } from '../../../api/queries';
 import { useCurrentUser } from '../../../api/useCurrentUser';
 import { Modal } from '../../../components/Modal';
@@ -47,23 +47,12 @@ export function StepReview({ batchId, onBack }: Props) {
   const hintId = useId();
   const { data: r } = useReview(batchId, acceptHigh, choice);
   const start = useStartImport(batchId);
-  const rematch = useRematch(batchId);
+  // Added (or switched back on) on the server, the file's spelling mapped for this batch's rows, then matched again.
   const addCountries = useMutation({
-    mutationFn: async (values: string[]) => {
-      for (const value of values) {
-        try {
-          await api('/api/lookups', { method: 'POST', body: { group: 'country', value, label: value } });
-        } catch (e) {
-          // Added meanwhile by someone else: the rematch below still finds it.
-          if (!(e instanceof ApiError && e.code === 'duplicate_value')) throw e;
-        }
-      }
-    },
-    onSuccess: () => {
-      setAddingCountries(false);
-      void qc.invalidateQueries({ queryKey: keys.lookups });
-      rematch.mutate(undefined, { onError: (e) => setError(importErrorText(t, e instanceof ApiError ? e.code : '')) });
-    },
+    mutationFn: (countries: { from: string; to: string }[]) =>
+      api<{ countries: string[] }>(`/api/imports/batches/${batchId}/countries`, { method: 'POST', body: { countries } }),
+    onSuccess: () => setAddingCountries(false),
+    onSettled: () => Promise.all([qc.invalidateQueries({ queryKey: keys.lookups }), qc.invalidateQueries({ queryKey: importKeys.all })]),
   });
 
   if (!r) return null;
@@ -73,9 +62,10 @@ export function StepReview({ batchId, onBack }: Props) {
   const unknownCount = r.unknownCountries.reduce((n, c) => n + c.count, 0);
   const unknownList = r.unknownCountries.map((c) => `${c.value} ×${c.count}`).join(', ');
   const nothingNeeded = r.noContactRows === 0 && r.researchOnlyCountry === 0 && unknownCount === 0;
-  // Rows with no email or phone wait for Import them / Leave them out: Import stays off, and they are not counted yet.
+  // Rows with no email or phone wait for Import them / Leave them out: Import stays off (the server leaves them out of
+  // every total until the choice is made).
   const undecided = r.noContactRows > 0 && choice === null;
-  const importCount = undecided ? Math.max(0, r.willImport - r.noContactRows) : r.willImport;
+  const importCount = r.willImport;
 
   function doImport() {
     setError(null);
@@ -177,6 +167,7 @@ export function StepReview({ batchId, onBack }: Props) {
                       onClick={(e) => {
                         e.preventDefault();
                         setError(null);
+                        addCountries.reset();
                         setAddingCountries(true);
                       }}
                     >
@@ -218,10 +209,10 @@ export function StepReview({ batchId, onBack }: Props) {
       {addingCountries ? (
         <AddCountriesModal
           countries={r.unknownCountries}
-          busy={addCountries.isPending || rematch.isPending}
+          busy={addCountries.isPending}
           error={addCountries.error ? importErrorText(t, addCountries.error instanceof ApiError ? addCountries.error.code : '') : null}
           onClose={() => setAddingCountries(false)}
-          onSave={(names) => addCountries.mutate(names)}
+          onSave={(items) => addCountries.mutate(items)}
         />
       ) : null}
     </section>
@@ -237,7 +228,8 @@ function AddCountriesModal({ countries, busy, error, onClose, onSave }: {
   busy: boolean;
   error: string | null;
   onClose: () => void;
-  onSave: (names: string[]) => void;
+  /** Each unknown country: the file's spelling and the name to save. */
+  onSave: (items: { from: string; to: string }[]) => void;
 }) {
   const t = useT();
   const [names, setNames] = useState(() => countries.map((c) => c.value.trim().slice(0, 100)));
@@ -252,13 +244,13 @@ function AddCountriesModal({ countries, busy, error, onClose, onSave }: {
             {t('Cancel')}
           </button>
           <span className="grow" />
-          <button type="button" className="btn primary" disabled={!ok || busy} onClick={() => onSave([...new Set(names.map((n) => n.trim()))])}>
+          <button type="button" className="btn primary" disabled={!ok || busy} onClick={() => onSave(countries.map((c, i) => ({ from: c.value, to: names[i]!.trim() })))}>
             {t('Add countries')}
           </button>
         </>
       }
     >
-      <p className="muted-text">{t('Each name is added to the country list in Settings. Correct a name before saving if the file spells it oddly.')}</p>
+      <p className="muted-text">{t('Each name is added to the country list in Settings (a country that is switched off is switched back on). If you correct a spelling, this import\'s rows with the file\'s spelling use your name.')}</p>
       {countries.map((c, i) => (
         <div key={c.value}>
           <label className="lbl" htmlFor={`imp-country-${i}`}>

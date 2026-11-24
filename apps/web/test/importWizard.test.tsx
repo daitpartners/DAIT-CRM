@@ -440,9 +440,9 @@ describe('step 4: review and import', () => {
       const more = extra(url, init);
       if (more) return more;
       if (url === '/api/imports/batches/7') return Response.json(batch('Waiting for review'));
-      // As the server: rows left out are no longer counted as imports.
+      // As the server: rows with no email or phone count as imports only with "Import them" (undecided or left out: not).
       if (url.startsWith('/api/imports/batches/7/review?')) {
-        return Response.json(url.includes('noContactRows=leave') ? { ...view, willImport: view.willImport - view.noContactRows } : view);
+        return Response.json(url.includes('noContactRows=import') ? view : { ...view, willImport: view.willImport - view.noContactRows });
       }
       if (url === '/api/imports/batches/7/import' && init?.method === 'POST') return Response.json({ id: 7, status: 'Importing' }, { status: 202 });
       return undefined;
@@ -488,10 +488,9 @@ describe('step 4: review and import', () => {
     expect(screen.queryByRole('link', { name: 'Add these countries' })).toBeNull();
   });
 
-  it('an Administrator corrects the names in a dialog, they are added as countries, then the rows are matched again', async () => {
+  it('an Administrator corrects the names in a dialog; the server adds them, maps the file spelling and matches again', async () => {
     const fetchFn = renderReview(review(), admin, (url, init) => {
-      if (url === '/api/lookups' && init?.method === 'POST') return Response.json({ id: 99 }, { status: 201 });
-      if (url === '/api/imports/batches/7/rematch' && init?.method === 'POST') return Response.json({ tiles: {} });
+      if (url === '/api/imports/batches/7/countries' && init?.method === 'POST') return Response.json({ countries: ['Chile', 'México'], tiles: {} });
       if (url === '/api/lookups') return Response.json({ groups: {} });
       return undefined;
     });
@@ -502,24 +501,25 @@ describe('step 4: review and import', () => {
     await userEvent.clear(mexico);
     await userEvent.type(mexico, 'México');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Add countries' }));
-    await waitFor(() => expect(calls(fetchFn, 'POST', '/api/imports/batches/7/rematch')).toHaveLength(1));
-    expect(calls(fetchFn, 'POST', '/api/lookups').map(([, init]) => JSON.parse(String(init!.body)))).toEqual([
-      { group: 'country', value: 'Chile', label: 'Chile' },
-      { group: 'country', value: 'México', label: 'México' },
-    ]);
+    await waitFor(() => expect(calls(fetchFn, 'POST', '/api/imports/batches/7/countries')).toHaveLength(1));
+    expect(bodyOf(fetchFn, 'POST', '/api/imports/batches/7/countries')).toEqual({
+      countries: [{ from: 'Chile', to: 'Chile' }, { from: 'Mexico', to: 'México' }],
+    });
+    expect(calls(fetchFn, 'POST', '/api/lookups')).toHaveLength(0);
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
-  it('a failed re-match after adding countries is shown', async () => {
-    renderReview(review(), admin, (url, init) => {
-      if (url === '/api/lookups' && init?.method === 'POST') return Response.json({ id: 99 }, { status: 201 });
-      if (url === '/api/imports/batches/7/rematch') return Response.json({ error: 'batch_locked' }, { status: 409 });
-      if (url === '/api/lookups') return Response.json({ groups: {} });
+  it('a refused "Add these countries" is shown in the dialog, and the error is gone when it is opened again', async () => {
+    renderReview(review(), admin, (url) => {
+      if (url === '/api/imports/batches/7/countries') return Response.json({ error: 'batch_locked' }, { status: 409 });
       return undefined;
     });
     await userEvent.click(await screen.findByRole('link', { name: 'Add these countries' }));
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Add countries' }));
-    expect(await screen.findByText('This import has already started and can no longer be changed.')).toHaveClass('note', 'danger');
+    expect(await within(screen.getByRole('dialog')).findByText('This import has already started and can no longer be changed.')).toHaveClass('note', 'danger');
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    await userEvent.click(screen.getByRole('link', { name: 'Add these countries' }));
+    expect(within(screen.getByRole('dialog')).queryByText('This import has already started and can no longer be changed.')).toBeNull();
   });
 
   it('a country only from research is a plain line with no extra choice; the download carries the choices', async () => {

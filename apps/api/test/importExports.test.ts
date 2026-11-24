@@ -227,6 +227,10 @@ describe('rows to fix', () => {
     ]);
     const ws = await sheetOf(await rowsToFixWorkbook(batch.id, 'es'));
     expect(ws.getRow(3).getCell(col('whatToFix')).value).toBe('No se pudo importar: invalid_status');
+    // From is worded in the downloader's language too.
+    expect(ws.getRow(3).getCell(col('from')).value).toMatch(/^\S+ \S+ · fila \d+$/);
+    const fr = await sheetOf(await rowsToFixWorkbook(batch.id, 'fr'));
+    expect(fr.getRow(3).getCell(col('from')).value).toMatch(/^\S+ \S+ · ligne \d+$/);
   });
 
   it.each(['es', 'fr'] as Lang[])('round trip (%s): the rows-to-fix file reads and stages cleanly; What to fix / From ignored', async (lang) => {
@@ -294,8 +298,8 @@ describe('rows CSV', () => {
     const es = (await rowsCsv(batch.id, 'es')).slice(1).split('\r\n');
     expect(es[0]).toContain('Empresa,Sitio web,País');
     expect(es[1]).toContain(',Importada,');
-    expect(es[2]).toContain(',Faltan datos,');
-    expect((await rowsCsv(batch.id, 'fr')).split('\r\n')[2]).toContain(',Informations manquantes,');
+    expect(es[2]).toContain(',Expo xlsx · fila 3,Faltan datos,');
+    expect((await rowsCsv(batch.id, 'fr')).split('\r\n')[2]).toContain(',Expo xlsx · ligne 3,Informations manquantes,');
   });
 
   it('downloads need import_leads', async () => {

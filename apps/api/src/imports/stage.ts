@@ -9,7 +9,7 @@ import {
   IMPORT_MAX_ROWS, domainOf, pageArgs,
   type ColumnQuestion, type FileMeta, type ImportColumnAnswer, type ImportField, type ImportIncludeAll,
   type ImportRowUpdate, type ImportRowsQuery, type ResearchNotePart, type ResearchValue, type RowFields, type RowFilter, type RowProblem,
-  type RowStatus,
+  type Lang, type RowStatus,
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { NotFoundError } from '../validate.js';
@@ -17,7 +17,8 @@ import { ImportError, isLocked } from './batches.js';
 import { classifyColumns, columnName, findHeaderRow, looksLikeEmail, looksLikeWebsite, squash, type ColumnTarget } from './columns.js';
 import { findExistingCompanies, type CompanyRef, type Db } from './companies.js';
 import { unguardCell } from './cells.js';
-import { matchCountry } from './countries.js';
+import { matchCountry, squashCountry } from './countries.js';
+import { audit } from '../audit.js';
 import type { TableExtract } from './read/index.js';
 
 /** Longest value a staged cell keeps (the row edit's limit). */
@@ -445,9 +446,13 @@ export type RowView = {
   outcomeCode?: string | null;
 };
 
-const ORIGIN_LABEL: Record<string, (n: number) => string> = {
-  row: (n) => `row ${n}`, page: (n) => `p.${n}`, card: (n) => `card ${n}`, line: (n) => `line ${n}`,
+/** Where in its file a row was, in each language (the downloads are written in the downloader's). */
+const ORIGIN_LABELS: Record<Lang, Record<string, (n: number) => string>> = {
+  en: { row: (n) => `row ${n}`, page: (n) => `p.${n}`, card: (n) => `card ${n}`, line: (n) => `line ${n}` },
+  es: { row: (n) => `fila ${n}`, page: (n) => `p.${n}`, card: (n) => `tarjeta ${n}`, line: (n) => `línea ${n}` },
+  fr: { row: (n) => `ligne ${n}`, page: (n) => `p.${n}`, card: (n) => `carte ${n}`, line: (n) => `ligne ${n}` },
 };
+const ORIGIN_LABEL = ORIGIN_LABELS.en;
 
 /** Where a row came from: the first word of the file name, its type, and the row / page / card / line in it. */
 export type RowOrigin = { word: string; ext: string; kind: string; n: number };
@@ -457,10 +462,15 @@ export function rowOrigin(fileName: string, ext: string, originKind: string, ori
   return { word, ext, kind: ORIGIN_LABEL[originKind] ? originKind : 'row', n: originN };
 }
 
-/** "Expo xlsx · row 14": the first word of the file name, its type, and where in it the row was. */
-export function fromLabel(fileName: string, ext: string, originKind: string, originN: number): string {
-  const o = rowOrigin(fileName, ext, originKind, originN);
-  return `${o.word} ${o.ext} · ${ORIGIN_LABEL[o.kind]!(o.n)}`;
+/** A row's origin in words: "Expo xlsx · row 14" (en), "Expo xlsx · fila 14" (es), "Expo xlsx · ligne 14" (fr). */
+export function originText(o: RowOrigin, lang: Lang = 'en'): string {
+  const labels = ORIGIN_LABELS[lang] ?? ORIGIN_LABELS.en;
+  return `${o.word} ${o.ext} · ${(labels[o.kind] ?? labels.row!)(o.n)}`;
+}
+
+/** "Expo xlsx · row 14": the first word of the file name, its type, and where in it the row was (in `lang`). */
+export function fromLabel(fileName: string, ext: string, originKind: string, originN: number, lang: Lang = 'en'): string {
+  return originText(rowOrigin(fileName, ext, originKind, originN), lang);
 }
 
 export const rowSelect = {
@@ -599,6 +609,56 @@ export async function sortBatch(batchId: number) {
     if (batch.status === 'Uploading') return tx.importBatch.update({ where: { id: batchId }, data: { status: 'Sorting' } });
     return tx.importBatch.findUniqueOrThrow({ where: { id: batchId } });
   });
+}
+
+/**
+ * "Add these countries" (Administrators): each unknown country as the Administrator spelled it (`to`), for the spelling
+ * the batch's rows use (`from`). A country already on the list (any case) is reused, and switched back on when it was
+ * switched off; otherwise it is added. When the Administrator corrected the spelling, the batch's rows with the file's
+ * spelling get the country's own value (kept on re-sorts, as an edit), so they match. Then the batch is matched again.
+ * Under the batch lock (409 `batch_locked` once Importing).
+ */
+export async function addBatchCountries(
+  userId: number, batchId: number, items: readonly { from: string; to: string }[],
+): Promise<{ tiles: BatchTiles; countries: string[] }> {
+  const countries = await underBatchLock(batchId, async (tx) => {
+    const added: string[] = [];
+    const seen = new Set<string>();
+    for (const item of items) {
+      const to = item.to.trim();
+      if (seen.has(to.toLowerCase())) {
+        added.push(added.find((v) => v.toLowerCase() === to.toLowerCase())!);
+      } else {
+        seen.add(to.toLowerCase());
+        let row = await tx.lookupValue.findFirst({ where: { group: 'country', value: { equals: to, mode: 'insensitive' } } });
+        if (!row) {
+          const max = await tx.lookupValue.aggregate({ where: { group: 'country' }, _max: { sortOrder: true } });
+          row = await tx.lookupValue.create({ data: { group: 'country', value: to, label: to, sortOrder: (max._max.sortOrder ?? -1) + 1 } });
+          await audit(tx, { entityType: 'lookup_value', entityId: row.id, action: 'create', userId, after: row });
+        } else if (!row.isActive) {
+          const before = row;
+          row = await tx.lookupValue.update({ where: { id: row.id }, data: { isActive: true } });
+          await audit(tx, { entityType: 'lookup_value', entityId: row.id, action: 'update', userId, before, after: row });
+        }
+        added.push(row.value);
+      }
+      const value = added[added.length - 1]!;
+      const fromKey = squashCountry(item.from);
+      if (!fromKey || fromKey === squashCountry(value)) continue;
+      // The file's spelling → the country's value, for this batch's rows (the file is never changed).
+      const rows = await tx.importRow.findMany({ where: { batchId, outcome: null }, select: { id: true, fields: true } });
+      const ids = rows.filter((r) => squashCountry((r.fields as RowFields).country ?? '') === fromKey).map((r) => r.id);
+      if (ids.length === 0) continue;
+      await tx.$executeRaw`
+        UPDATE import_rows SET
+          fields = fields || jsonb_build_object('country', ${value}::text),
+          edited = CASE WHEN edited ? 'country' THEN edited ELSE edited || '"country"'::jsonb END
+        WHERE id = ANY(${ids}::int[])`;
+    }
+    return added;
+  });
+  await refreshBatch(batchId);
+  return { tiles: await batchTiles(batchId), countries };
 }
 
 /** Re-runs country and company matching for the whole batch (after countries were added, or companies created). */

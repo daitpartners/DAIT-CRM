@@ -96,15 +96,22 @@ const authUserOf = (u: User): AuthUser => ({
   id: u.id, email: u.email, name: u.name, role: roleLabel(u.role), language: u.language, timezone: u.timezone, dateFormat: u.dateFormat,
 });
 
-/** The step-4 totals for these choices (the review screen). */
+/**
+ * The step-4 totals for these choices (the review screen). With no Import them / Leave them out choice yet, rows with no
+ * email or phone are waiting for it: they are counted in `noContactRows` only, not in the imports, the companies or
+ * the skipped rows (the screen's totals then never include rows whose fate is still open).
+ */
 export async function reviewBatch(
   batchId: number, opts: { acceptHigh: boolean; noContactRows: 'import' | 'leave' | null },
 ): Promise<{ batch: ImportBatch; summary: ReviewSummary }> {
   const batch = await prisma.importBatch.findUnique({ where: { id: batchId } });
   if (!batch) throw new NotFoundError();
   const rows = await prisma.importRow.findMany({ where: { batchId }, select: planSelect, orderBy: [{ position: 'asc' }, { id: 'asc' }] });
-  const summary = summarisePlan(planBatch(rows, { ...opts, knownCountries: await knownCountries() }));
-  return { batch, summary };
+  const plans = planBatch(rows, { ...opts, knownCountries: await knownCountries() });
+  if (opts.noContactRows !== null) return { batch, summary: summarisePlan(plans) };
+  const waiting = (p: (typeof plans)[number]) => p.action === 'import' && p.noContact;
+  const summary = summarisePlan(plans.filter((p) => !waiting(p)));
+  return { batch, summary: { ...summary, noContactRows: plans.filter(waiting).length } };
 }
 
 /**

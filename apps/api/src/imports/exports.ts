@@ -13,11 +13,12 @@ import { prisma } from '../db.js';
 import { NotFoundError } from '../validate.js';
 import { safeCell, safeCsvCell } from './cells.js';
 import { effectiveFields, planBatch } from './plan.js';
-import { evaluateRow, fromLabel, knownCountries } from './stage.js';
+import { evaluateRow, fromLabel, knownCountries, originText, rowOrigin, type RowOrigin } from './stage.js';
 
 export { safeCell, safeCsvCell } from './cells.js';
 
-export type FixRow = { fields: RowFields; from: string; problems: RowProblem[] };
+/** `from` in English; `origin` as parts, worded in the downloader's language in the workbook. */
+export type FixRow = { fields: RowFields; from: string; origin: RowOrigin; problems: RowProblem[] };
 export type FixOptions = { acceptHigh: boolean; noContactRows: 'import' | 'leave' | null };
 
 /** Batch statuses from which a row's outcome (Imported, Skipped, Error) decides it, rather than the plan. */
@@ -79,7 +80,10 @@ export async function fixRows(batchId: number, opts?: FixOptions): Promise<FixRo
     } else if (row.outcome === 'Imported') {
       include = ev.status === 'Missing details';
     }
-    if (include) out.push({ fields, from: fromLabel(row.file.name, row.file.ext, row.originKind, row.originN), problems });
+    if (include) {
+      const origin = rowOrigin(row.file.name, row.file.ext, row.originKind, row.originN);
+      out.push({ fields, from: originText(origin), origin, problems });
+    }
   });
   return out;
 }
@@ -132,7 +136,7 @@ export async function rowsToFixWorkbook(batchId: number, lang: Lang, opts?: FixO
     const levels = cellLevels(r.problems);
     FIX_COLUMNS.forEach((key, c) => {
       const cell = row.getCell(c + 1);
-      const raw = key === 'from' ? r.from : key === 'whatToFix' ? whatToFix(r.problems, lang) : r.fields[key as ImportField] ?? '';
+      const raw = key === 'from' ? originText(r.origin, lang) : key === 'whatToFix' ? whatToFix(r.problems, lang) : r.fields[key as ImportField] ?? '';
       cell.value = safeCell(raw);
       const level = levels.get(key as ImportField);
       cell.fill = fill(level ? FILL[level] : FILL.base);
@@ -169,7 +173,7 @@ export async function rowsCsv(batchId: number, lang: Lang): Promise<string> {
     const fields = (r.fields ?? {}) as RowFields;
     lines.push([
       ...IMPORT_TABLE_FIELDS.map((f) => fields[f] ?? ''),
-      fromLabel(r.file.name, r.file.ext, r.originKind, r.originN),
+      fromLabel(r.file.name, r.file.ext, r.originKind, r.originN, lang),
       importRowStatusText(r.outcome ?? r.status, lang),
       r.lead?.number ?? '',
       r.company?.number ?? r.matchedCompany?.number ?? '',

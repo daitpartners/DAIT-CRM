@@ -8,7 +8,7 @@ import { prisma } from '../db.js';
 import { NotFoundError, parseBody, parseQuery } from '../validate.js';
 import { requireRight } from '../plugins/auth.js';
 import { ImportError, addFile, createBatch, listFiles, updateBatch } from '../imports/batches.js';
-import { answerColumn, includeAll, listRows, rematchBatch, sortBatch, updateRow } from '../imports/stage.js';
+import { addBatchCountries, answerColumn, includeAll, listRows, rematchBatch, sortBatch, updateRow } from '../imports/stage.js';
 import { loadEnrichmentSettings, monthTotals } from '../research/service.js';
 import { claudeCodeConfig, claudeCodeReady } from '../research/providers.js';
 import { pauseResearch, researchView, resumeResearch, startBatchResearch } from '../imports/research.js';
@@ -24,6 +24,10 @@ const idOf = (raw: string) => {
 };
 
 const FileQuery = z.object({ name: z.string().trim().min(1).max(255) });
+/** "Add these countries": each unknown country as the file spells it and as the Administrator names it. */
+const AddCountries = z.object({
+  countries: z.array(z.object({ from: z.string().trim().max(200), to: z.string().trim().min(1).max(100) })).min(1).max(50),
+});
 const ResearchQuery = z.object({ page: z.coerce.number().int().min(1).default(1) });
 const ReviewQuery = z.object({
   acceptHigh: z.enum(['0', '1']).default('0'),
@@ -185,6 +189,17 @@ export const importBatchRoutes: FastifyPluginAsync = async (app) => {
     const id = idOf(request.params.id);
     return guard(reply, async () => ({ tiles: await rematchBatch(id) }));
   });
+
+  /** Step 4 "Add these countries" (Administrators: import_leads and manage_lookups): add or switch on, map, re-match. */
+  app.post<{ Params: { id: string } }>(
+    '/imports/batches/:id/countries',
+    { preHandler: [requireRight('import_leads'), requireRight('manage_lookups')] },
+    async (request, reply) => {
+      const id = idOf(request.params.id);
+      const body = parseBody(AddCountries, request.body);
+      return guard(reply, () => addBatchCountries(request.user!.id, id, body.countries));
+    },
+  );
 
   /** Step 3: research the ticked rows with missing details, one at a time on the research lane. */
   app.post<{ Params: { id: string } }>('/imports/batches/:id/research', canImport, async (request, reply) => {

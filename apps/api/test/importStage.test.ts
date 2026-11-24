@@ -448,6 +448,43 @@ describe('step-2 API', () => {
     expect(rows[1]).toMatchObject({ status: 'Already in CRM', matchedCompanyId: company.id, include: false });
   });
 
+  it('"Add these countries": a corrected spelling maps the batch\'s rows, an inactive country is switched back on, case-insensitive', async () => {
+    const { cookie } = await as('ADMINISTRATOR');
+    const batch = await newBatch('Sorting');
+    const file = await newFile(batch.id, 'leads.csv');
+    await stageTable(file.id, table({ leads: [SIMPLE,
+      ['Andes Foods', 'chile', '', 'ventas@andesfoods.cl', ''],
+      ['Azteca SA', 'Mexiko', '', 'hola@azteca.mx', ''],
+      ['Norte SA', 'MEXIKO', '', 'hola@norte.mx', ''],
+    ] }));
+    const off = await prisma.lookupValue.create({ data: { group: 'country', value: 'Chile', label: 'Chile', sortOrder: 99, isActive: false } });
+    expect((await rowsOf(file.id)).map((r) => r.status)).toEqual(['Ready', 'Ready', 'Ready']);
+    expect((await rowsOf(file.id)).every((r) => problemsOf(r).some((p) => p.code === 'country_unknown'))).toBe(true);
+
+    const res = await json('POST', `/api/imports/batches/${batch.id}/countries`, cookie, {
+      countries: [{ from: 'chile', to: 'CHILE' }, { from: 'Mexiko', to: 'Mexico' }],
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().countries).toEqual(['Chile', 'Mexico']);
+    // The existing (switched off) Chile is reused and switched on, not duplicated; Mexico is added once.
+    expect(await prisma.lookupValue.findUniqueOrThrow({ where: { id: off.id } })).toMatchObject({ isActive: true, value: 'Chile' });
+    expect(await prisma.lookupValue.count({ where: { group: 'country', value: { in: ['Chile', 'CHILE', 'chile'], mode: 'insensitive' } } })).toBe(1);
+    expect(await prisma.lookupValue.count({ where: { group: 'country', value: 'Mexico' } })).toBe(1);
+    const rows = await rowsOf(file.id);
+    // Both spellings of the corrected country now read "Mexico" (an edit, kept on re-sorts) and match.
+    expect(rows.map((r) => fieldsOf(r).country)).toEqual(['Chile', 'Mexico', 'Mexico']);
+    expect(rows[1]!.edited).toEqual(['country']);
+    expect(rows.every((r) => problemsOf(r).length === 0)).toBe(true);
+    expect(await prisma.auditLog.count({ where: { entityType: 'lookup_value' } })).toBe(2);
+  });
+
+  it('"Add these countries" needs manage_lookups (a Manager → 403)', async () => {
+    const { cookie } = await as('MANAGER');
+    const batch = await newBatch('Sorting');
+    const res = await json('POST', `/api/imports/batches/${batch.id}/countries`, cookie, { countries: [{ from: 'X', to: 'Y' }] });
+    expect(res.statusCode).toBe(403);
+  });
+
   it('edits are refused from Importing on', async () => {
     const { cookie, batch, file, rows } = await staged();
     await prisma.importBatch.update({ where: { id: batch.id }, data: { status: 'Importing' } });
