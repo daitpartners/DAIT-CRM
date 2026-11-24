@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
-  ActivityType, CallOutcome, CompanyMatchHow, CsvField, CsvMapping, CsvSuggestedMapping, LEAD_SORTS, LEAD_TABS, LeadBulk, LeadCreate, LeadType, LeadUpdate,
+  ActivityType, CallOutcome, LEAD_SORTS, LEAD_TABS, LeadBulk, LeadCreate, LeadType, LeadUpdate,
   Priority,
 } from '@dait-crm/shared';
 import { ApiError, api } from './client';
@@ -336,44 +336,5 @@ export function useLeadNote() {
         qc.invalidateQueries({ queryKey: keys.leadsAll }),
       ]),
     onError: useRefreshWhenOutOfDate(),
-  });
-}
-
-/* ------------------------------------------------------------------ CSV import */
-
-export type CsvPreviewResult = {
-  headers: string[];
-  sample: string[][];
-  rowCount: number;
-  suggestedMapping: CsvSuggestedMapping;
-};
-
-export type CsvImportResult = {
-  batch: string;
-  created: number;
-  linked: number;
-  review: {
-    row: number;
-    leadId: number;
-    companyName: string;
-    candidates: { id: number; number: string; name: string; how: CompanyMatchHow }[];
-  }[];
-  errors: { row: number; message: string }[];
-};
-
-export type { CsvField, CsvMapping };
-
-export function useCsvPreview() {
-  return useMutation({
-    mutationFn: (csv: string) => api<CsvPreviewResult>('/api/imports/leads/preview', { method: 'POST', body: { csv } }),
-  });
-}
-
-export function useCsvImport() {
-  const refresh = useInvalidateAfterLeadWrite();
-  return useMutation({
-    mutationFn: (body: { csv: string; mapping: CsvMapping; leadSource?: string; assignedToId?: number | null }) =>
-      api<CsvImportResult>('/api/imports/leads', { method: 'POST', body }),
-    onSuccess: refresh,
   });
 }

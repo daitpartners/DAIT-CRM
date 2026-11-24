@@ -25,7 +25,6 @@ import { useFormatDate } from '../../hooks/useFormatDate';
 import { usePageClamp, useUrlListState } from '../../hooks/useUrlListState';
 import { errorText, leadStatusText, leadTypeText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
-import { CsvImportModal } from './CsvImportModal';
 import { LeadsBulkBar } from './LeadsBulkBar';
 import { useMailboxes } from '../../api/mailboxes';
 
@@ -101,7 +100,6 @@ export function LeadsList() {
   const { data: users } = useUsers();
   const bulk = useBulkLeads();
   const claim = useClaimLead();
-  const [importing, setImporting] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const { data: mailboxes } = useMailboxes();
   const mailboxConnected = mailboxes?.mine?.status === 'connected';
@@ -249,16 +247,16 @@ export function LeadsList() {
           <span className="sr">{t('Search leads')}</span>
           <input type="search" value={search.text} onChange={(e) => search.setText(e.target.value)} placeholder={t('Search company, contact, email…')} />
         </label>
+        {me.can('import_leads') ? (
+          <Link className="btn" to="/leads/import">
+            {t('Import leads')}
+          </Link>
+        ) : null}
         {canManage ? (
-          <>
-            <button type="button" className="btn" onClick={() => setImporting(true)}>
-              {t('Import CSV')}
-            </button>
-            <button type="button" className="btn primary" onClick={() => navigate('/leads/new')}>
-              {Icons.plus}
-              {t('New lead')}
-            </button>
-          </>
+          <button type="button" className="btn primary" onClick={() => navigate('/leads/new')}>
+            {Icons.plus}
+            {t('New lead')}
+          </button>
         ) : null}
       </Topbar>
       <div className="page">
@@ -529,7 +527,6 @@ export function LeadsList() {
           </Tabs>
         </section>
       </div>
-      {importing ? <CsvImportModal onClose={() => setImporting(false)} /> : null}
       {assigning ? (
         <BulkAssignModal
           pending={assigning}

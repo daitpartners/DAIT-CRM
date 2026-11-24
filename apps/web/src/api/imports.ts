@@ -1,0 +1,250 @@
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type {
+  ColumnQuestion, FileMeta, ImportActivity, ImportBatchCreate, ImportBatchUpdate, ImportColumnAnswer, ImportCommit,
+  ImportIncludeAll, ImportRowUpdate, LeadType, ResearchEngine, ResearchNotePart, ResearchValue, ReviewSummary, RowFields,
+  RowFilter, RowProblem,
+} from '@dait-crm/shared';
+import { api, apiUpload } from './client';
+
+/* Import leads (steps 1–4) and the Data manager's tab count. */
+
+const base = ['imports'] as const;
+export const importKeys = {
+  /** Prefix of every import query: invalidate it after a write that changes a batch. */
+  all: base,
+  options: [...base, 'options'] as const,
+  batches: (query: BatchListQuery) => [...base, 'batches', query] as const,
+  batch: (id: number) => [...base, 'batch', id] as const,
+  files: (id: number) => [...base, 'files', id] as const,
+  rows: (id: number, filter: RowFilter, page: number) => [...base, 'rows', id, filter, page] as const,
+  research: (id: number, page: number) => [...base, 'research', id, page] as const,
+  review: (id: number, acceptHigh: boolean, noContactRows: NoContactChoice) => [...base, 'review', id, acceptHigh, noContactRows] as const,
+};
+
+/** `GET /api/imports/options`: the language rules (with first names), Claude's state and the upload limits. */
+export type ImportOptions = {
+  languages: { value: string; rules: AllocationLine[] }[];
+  claude: { on: boolean; runsThisMonth: number; cap: number; webSearch: boolean };
+  limits: { maxFiles: number; maxBytes: number; maxRows: number };
+};
+export type AllocationLine = { name: string; people: string[] };
+
+export type BatchHead = { id: number; number: string; status: string; language?: string; leadType?: string };
+
+/** `GET /api/imports/batches/:id` (the parts the wizard uses; Task 9 reads the rest). */
+export type BatchDetail = {
+  id: number;
+  number: string;
+  status: string;
+  language: string;
+  leadType: LeadType;
+  createdAt: string;
+  rowCount: number;
+};
+
+export type ImportFileRow = {
+  id: number;
+  name: string;
+  ext: string;
+  size: number;
+  status: string;
+  meta: FileMeta | null;
+  error: string | null;
+};
+
+export type ImportRowView = {
+  id: number;
+  fields: RowFields;
+  status: string;
+  include: boolean;
+  problems: RowProblem[];
+  matched: { id: number; number: string } | null;
+  from: string;
+  fileName: string;
+  research?: Record<string, ResearchValue>;
+  researchStatus?: string;
+  researchNote?: ResearchNotePart[];
+};
+
+export type BatchTiles = { rows: number; files: number; ready: number; missing: number; already: number; notLead: number };
+export type OpenQuestion = ColumnQuestion & { fileId: number; fileName: string };
+export type RowsPage = { items: ImportRowView[]; total: number; tiles: BatchTiles; question: OpenQuestion | null };
+
+export type ResearchPage = {
+  status: string;
+  paused: boolean;
+  stopReason: 'cap' | null;
+  total: number;
+  done: number;
+  etaMinutes: number | null;
+  tiles: { everything: number; some: number; nothing: number };
+  claude: { on: boolean; runsThisMonth: number; cap: number };
+  engine: ResearchEngine | null;
+  items: ImportRowView[];
+  activity: ImportActivity[];
+};
+
+export type NoContactChoice = 'import' | 'leave' | null;
+export type ReviewView = ReviewSummary & { leadType: LeadType; language: string; source: string; allocation: AllocationLine[] };
+
+export type BatchListQuery = { page?: number; pageSize: number; language?: string; status?: string; q?: string };
+export type BatchList = { items: unknown[]; total: number; count: number };
+
+/** Rows a page of the step-2 and step-3 tables. */
+export const IMPORT_PAGE_SIZE = 100;
+
+const qs = (q: Record<string, string | number | undefined>) =>
+  new URLSearchParams(Object.entries(q).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)])).toString();
+
+export function useImportOptions() {
+  return useQuery({ queryKey: importKeys.options, queryFn: () => api<ImportOptions>('/api/imports/options') });
+}
+
+/** The Data manager list; with `{ pageSize: 1 }` only its `count` (every batch) is used, for the tab. */
+export function useBatches(query: BatchListQuery) {
+  return useQuery({
+    queryKey: importKeys.batches(query),
+    queryFn: () => api<BatchList>(`/api/imports/batches?${qs(query)}`),
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useBatch(id: number | null) {
+  return useQuery({
+    queryKey: importKeys.batch(id ?? 0),
+    queryFn: () => api<BatchDetail>(`/api/imports/batches/${id}`),
+    enabled: id !== null,
+  });
+}
+
+export function useCreateBatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ImportBatchCreate) => api<BatchHead>('/api/imports/batches', { method: 'POST', body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [...base, 'batches'] }),
+  });
+}
+
+export function useUpdateBatch(id: number | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ImportBatchUpdate) => api<BatchHead>(`/api/imports/batches/${id}`, { method: 'PATCH', body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: importKeys.all }),
+  });
+}
+
+export function useUploadFile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ batchId, file }: { batchId: number; file: File }) =>
+      apiUpload<ImportFileRow>(`/api/imports/batches/${batchId}/files?${qs({ name: file.name })}`, file),
+    onSettled: (_d, _e, v) => qc.invalidateQueries({ queryKey: importKeys.files(v.batchId) }),
+  });
+}
+
+/** The batch's files; polls every 2 s while any is still being read. */
+export function useBatchFiles(batchId: number | null) {
+  return useQuery({
+    queryKey: importKeys.files(batchId ?? 0),
+    queryFn: () => api<{ items: ImportFileRow[] }>(`/api/imports/batches/${batchId}/files`),
+    enabled: batchId !== null,
+    refetchInterval: (q) => (q.state.data?.items.some((f) => f.status === 'Reading') ? 2000 : false),
+  });
+}
+
+export function useSortBatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (batchId: number) => api<BatchHead>(`/api/imports/batches/${batchId}/sort`, { method: 'POST' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: importKeys.all }),
+  });
+}
+
+export function useBatchRows(batchId: number, filter: RowFilter, page: number) {
+  return useQuery({
+    queryKey: importKeys.rows(batchId, filter, page),
+    queryFn: () => api<RowsPage>(`/api/imports/batches/${batchId}/rows?${qs({ filter, page, pageSize: IMPORT_PAGE_SIZE })}`),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** Step-2 writes refresh the rows, tiles and question (and step 4's totals). */
+function useRefreshRows() {
+  const qc = useQueryClient();
+  return () => qc.invalidateQueries({ queryKey: importKeys.all });
+}
+
+export function useUpdateRow() {
+  const refresh = useRefreshRows();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: ImportRowUpdate }) => api<ImportRowView>(`/api/imports/rows/${id}`, { method: 'PATCH', body }),
+    onSettled: refresh,
+  });
+}
+
+export function useIncludeAll(batchId: number) {
+  const refresh = useRefreshRows();
+  return useMutation({
+    mutationFn: (body: ImportIncludeAll) => api<{ changed: number }>(`/api/imports/batches/${batchId}/include`, { method: 'POST', body }),
+    onSettled: refresh,
+  });
+}
+
+export function useAnswerColumn() {
+  const refresh = useRefreshRows();
+  return useMutation({
+    mutationFn: ({ fileId, body }: { fileId: number; body: ImportColumnAnswer }) =>
+      api<{ done: string }>(`/api/imports/files/${fileId}/columns`, { method: 'POST', body }),
+    onSettled: refresh,
+  });
+}
+
+export function useRematch(batchId: number) {
+  const refresh = useRefreshRows();
+  return useMutation({
+    mutationFn: () => api<{ tiles: BatchTiles }>(`/api/imports/batches/${batchId}/rematch`, { method: 'POST' }),
+    onSettled: refresh,
+  });
+}
+
+function useResearchAction(path: string) {
+  const refresh = useRefreshRows();
+  return useMutation({
+    mutationFn: (batchId: number) => api<unknown>(`/api/imports/batches/${batchId}/research${path}`, { method: 'POST' }),
+    onSettled: refresh,
+  });
+}
+export const useStartResearch = () => useResearchAction('');
+export const usePauseResearch = () => useResearchAction('/pause');
+export const useResumeResearch = () => useResearchAction('/resume');
+
+/** Step 3; polls every 3 s while the batch is Researching. */
+export function useResearch(batchId: number, page: number) {
+  return useQuery({
+    queryKey: importKeys.research(batchId, page),
+    queryFn: () => api<ResearchPage>(`/api/imports/batches/${batchId}/research?${qs({ page })}`),
+    placeholderData: keepPreviousData,
+    refetchInterval: (q) => (q.state.data?.status === 'Researching' ? 3000 : false),
+  });
+}
+
+export function useReview(batchId: number, acceptHigh: boolean, noContactRows: NoContactChoice) {
+  return useQuery({
+    queryKey: importKeys.review(batchId, acceptHigh, noContactRows),
+    queryFn: () =>
+      api<ReviewView>(`/api/imports/batches/${batchId}/review?${qs({ acceptHigh: acceptHigh ? '1' : '0', noContactRows: noContactRows ?? undefined })}`),
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useStartImport(batchId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ImportCommit) => api<{ id: number; status: string }>(`/api/imports/batches/${batchId}/import`, { method: 'POST', body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: importKeys.all }),
+  });
+}
+
+/** "Download rows to fix (Excel)" with the current step-4 choices. */
+export const rowsToFixUrl = (batchId: number, acceptHigh: boolean, noContactRows: NoContactChoice) =>
+  `/api/imports/batches/${batchId}/rows-to-fix.xlsx?${qs({ acceptHigh: acceptHigh ? '1' : '0', noContactRows: noContactRows ?? undefined })}`;

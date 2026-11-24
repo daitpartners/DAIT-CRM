@@ -1,6 +1,6 @@
 import { useContext, useId, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { safeUrl } from '@dait-crm/shared';
+import { IMPORT_LEAD_SOURCE, importSource, safeUrl } from '@dait-crm/shared';
 import type { LeadFull } from '../../api/leads';
 import { useLookupText } from '../../api/queries';
 import { Icons } from '../../components/Icons';
@@ -57,6 +57,11 @@ export function completeness(p: Contact): number {
  * banner passed in as `children`, about) and their experience on the right. Without a contact: the company name, a
  * note and the facts grid. "Focus on email" folds the profile and opens the composer on the Email tab.
  */
+/** The lead source: "Import · IMPORT-2026-11-24" for a lead an import made, else the lookup's label. */
+export function leadSourceText(lead: Pick<LeadFull, 'leadSource' | 'importBatch'>, lookup: (group: 'lead_source', v: string) => string | null): string | null {
+  return lead.leadSource === IMPORT_LEAD_SOURCE && lead.importBatch ? importSource(lead.importBatch) : lookup('lead_source', lead.leadSource);
+}
+
 export function ProfileCard({ lead, children }: { lead: LeadFull; children?: ReactNode }) {
   const t = useT();
   const lookup = useLookupText(useLang());
@@ -74,7 +79,7 @@ export function ProfileCard({ lead, children }: { lead: LeadFull; children?: Rea
 
   const facts = (
     <dl className="l2facts">
-      <Fact label={t('Lead source')}>{lookup('lead_source', lead.leadSource)}</Fact>
+      <Fact label={t('Lead source')}>{leadSourceText(lead, lookup)}</Fact>
       <Fact label={t('Lead status')}>
         <StatusBadge status={lead.status} />
       </Fact>

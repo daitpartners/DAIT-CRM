@@ -955,3 +955,9 @@ select.in.pj-locked:disabled{opacity:1;color:var(--text);-webkit-text-fill-color
 .note.ai.lead-ai{font-size:12.5px}
 .lead-ai .tag-ai{margin-left:4px}
 .lead-ai > div{margin-top:4px}
+
+/* Import leads (mockup 2026-11-24; layout only, no new colours, fonts or shadows): hidden import panes stay hidden although
+   .wiz/.page are flex; five tiles share one row on wide screens; the wizard steps are clickable. */
+.wiz[hidden],.page[hidden]{display:none!important}
+@media (min-width:900px){.tiles.t5{grid-template-columns:repeat(5,minmax(0,1fr))}}
+.wsteps li[data-step]{cursor:pointer}

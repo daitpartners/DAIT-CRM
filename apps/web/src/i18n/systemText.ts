@@ -26,6 +26,15 @@ const NOTIFICATION: Rule[] = [
   [/^Mailer finished · (.+)$/, (t, m) => t('Mailer finished · {name}', { name: m[1]! })],
   [/^Mailer queued · (.+)$/, (t, m) => t('Mailer queued · {name}', { name: m[1]! })],
   [/^Task assigned to you · (.+)$/, (t, m) => t('Task assigned to you · {title}', { title: m[1]! })],
+  // Import leads: one notification per assignee for a batch.
+  [
+    /^Import (\S+) · (\d+) (leads?|prospects?) assigned to you$/,
+    (t, m) => {
+      const vars = { number: m[1]!, n: m[2]! };
+      if (m[3]!.startsWith('lead')) return m[2] === '1' ? t('Import {number} · 1 lead assigned to you', vars) : t('Import {number} · {n} leads assigned to you', vars);
+      return m[2] === '1' ? t('Import {number} · 1 prospect assigned to you', vars) : t('Import {number} · {n} prospects assigned to you', vars);
+    },
+  ],
 ];
 
 /** Titles of the tasks the server creates (a user's own title is never one of these exact shapes' words). */
@@ -62,12 +71,15 @@ const TIMELINE: Rule[] = [
   [/^Quotation rejected · (\S+)$/, (t, m) => t('Quotation rejected · {number}', { number: m[1]! })],
   [/^Company (\S+) created$/, (t, m) => t('Company {number} created', { number: m[1]! })],
   [/^Linked to company (\S+)$/, (t, m) => t('Linked to company {number}', { number: m[1]! })],
+  [/^Research found \(not verified\)$/, (t) => t('Research found (not verified)')],
+  [/^Accepted from research$/, (t) => t('Accepted from research')],
 ];
 
 /** AI research history: trigger, engine and the whole-line results. */
 const RESEARCH: Rule[] = [
   [/^New lead (\S+)$/, (t, m) => t('New lead {number}', { number: m[1]! })],
   [/^Manual · (.+)$/, (t, m) => t('Manual · {name}', { name: m[1]! })],
+  [/^Import (IMPORT-\S+)$/, (t, m) => t('Import {number}', { number: m[1]! })],
   [/^Website reader$/, (t) => t('Website reader')],
   [/^Website reader \+ Claude Code (.+)$/, (t, m) => t('Website reader + Claude Code {model}', { model: m[1]! })],
   [/^No website on file$/, (t) => t('No website on file')],
@@ -162,3 +174,31 @@ export const researchText = (t: TFn, text: string): string => apply(RESEARCH, t,
 
 /** An AI research run's result: a known whole line, else its "N suggestions" part (provider notes as stored). */
 export const researchResult = (t: TFn, text: string): string => apply(RESEARCH, t, text) ?? parts(SUGGESTIONS, t, text);
+
+/** The labels an import writes on its research timeline lines ("Email: a@b.com · https://… · 90%"). */
+const RESEARCH_LINE_LABEL: Record<string, (t: TFn) => string> = {
+  Website: (t) => t('Website'),
+  Country: (t) => t('Country'),
+  City: (t) => t('City'),
+  Contact: (t) => t('Contact'),
+  Designation: (t) => t('Designation'),
+  Email: (t) => t('Email'),
+  Phone: (t) => t('Phone'),
+};
+const RESEARCH_LINE = /^(Website|Country|City|Contact|Designation|Email|Phone): (.*) · (\S+) · (\d+)%$/;
+const RESEARCH_BODY_TITLE = /^(Research found \(not verified\)|Accepted from research)$/;
+
+/**
+ * A timeline entry's body: an import's "Research found (not verified)" and "Accepted from research" lines get their
+ * label in the reader's language (value, source and confidence as stored); any other body is shown as stored.
+ */
+export function timelineBody(t: TFn, title: string, body: string): string {
+  if (!RESEARCH_BODY_TITLE.test(title)) return body;
+  return body
+    .split('\n')
+    .map((line) => {
+      const m = RESEARCH_LINE.exec(line);
+      return m ? `${RESEARCH_LINE_LABEL[m[1]!]!(t)}: ${m[2]} · ${m[3]} · ${m[4]}%` : line;
+    })
+    .join('\n');
+}

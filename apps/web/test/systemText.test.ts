@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { t as translate } from '@dait-crm/shared';
-import { notificationDetail, notificationText, researchResult, researchText, taskTitle, timelineTitle } from '../src/i18n/systemText';
+import { notificationDetail, notificationText, researchResult, researchText, taskTitle, timelineBody, timelineTitle } from '../src/i18n/systemText';
 import type { TFn } from '../src/i18n/useT';
 import es from '../src/locales/es.json';
 import fr from '../src/locales/fr.json';
@@ -50,6 +50,21 @@ describe('stored system texts in the reader language (review #04)', () => {
     // Only the last part of a project's detail is the server's "from LD-…" (review N-3).
     expect(notificationDetail(tEs, 'Project created · Web', 'from Monday Ltd · from LD-1010')).toBe('from Monday Ltd · de LD-1010');
     expect(notificationDetail(tEs, 'Project created · Web', 'from Acme')).toBe('from Acme');
+  });
+
+  it('Import leads: the batch notification (singular and plural), research trigger and research timeline entries', () => {
+    expect(notificationText(tEs, 'Import IMPORT-2026-11-24 · 12 leads assigned to you')).toBe('Importación IMPORT-2026-11-24 · 12 leads asignados a usted');
+    expect(notificationText(tEs, 'Import IMPORT-2026-11-24-2 · 1 lead assigned to you')).toBe('Importación IMPORT-2026-11-24-2 · 1 lead asignado a usted');
+    expect(notificationText(tFr, 'Import IMPORT-2026-11-24 · 3 prospects assigned to you')).toBe('Import IMPORT-2026-11-24 · 3 prospects qui vous sont attribués');
+    expect(notificationText(tFr, 'Import IMPORT-2026-11-24 · 1 prospect assigned to you')).toBe('Import IMPORT-2026-11-24 · 1 prospect qui vous est attribué');
+    expect(researchText(tEs, 'Import IMPORT-2026-11-24')).toBe('Importación IMPORT-2026-11-24');
+    expect(timelineTitle(tEs, 'Research found (not verified)', 'ai')).toBe('Encontrado por la investigación (sin verificar)');
+    expect(timelineTitle(tFr, 'Accepted from research', 'ai')).toBe('Accepté depuis la recherche');
+    const body = 'Email: info@x.com · https://x.com/contact · 90%\nDesignation: CEO · https://x.com/team · 85%';
+    expect(timelineBody(tEs, 'Research found (not verified)', body)).toBe('Correo electrónico: info@x.com · https://x.com/contact · 90%\nCargo: CEO · https://x.com/team · 85%');
+    expect(timelineBody(tFr, 'Accepted from research', 'Country: Spain · https://x.es · 90%')).toBe('Pays: Spain · https://x.es · 90%');
+    // Any other body (typed by a user) is shown as stored.
+    expect(timelineBody(tEs, 'Call · Connected', 'Email: a · b · 1%')).toBe('Email: a · b · 1%');
   });
 
   it('English is shown as stored', () => {

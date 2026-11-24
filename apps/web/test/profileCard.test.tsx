@@ -57,6 +57,17 @@ describe('ProfileCard', () => {
     expect(within(xp).getByText('2016 – 2021')).toBeInTheDocument();
   });
 
+  it('a lead an import made shows its source as "Import · <batch number>"', () => {
+    const lead = { ...makeLead(), leadSource: 'Import', importBatch: 'IMPORT-2026-11-24-2' };
+    render(
+      <Wrap qc={makeClient()}>
+        <ProfileCard lead={lead} />
+      </Wrap>,
+    );
+    const source = within(screen.getByRole('region', { name: 'Profile' })).getByText('Lead source', { selector: 'dt' }).nextElementSibling;
+    expect(source).toHaveTextContent('Import · IMPORT-2026-11-24-2');
+  });
+
   it('without a contact shows the company name and a note, and still the facts grid', () => {
     render(
       <Wrap qc={makeClient()}>

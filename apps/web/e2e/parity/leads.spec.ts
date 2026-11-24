@@ -15,11 +15,11 @@ test('leads list: prototype topbar, tiles, tabs, filters, columns and pager', as
   await page.goto('/leads');
   await expect(page.getByRole('heading', { name: 'Leads', level: 1 })).toBeVisible();
   await expect(page.locator('.topbar .sub')).toHaveText('Inbound leads and researched prospects, one module');
-  // Search, Import CSV and New lead sit in the topbar, in that order.
+  // Search, Import leads (import_leads) and New lead sit in the topbar, in that order.
   const topbar = page.locator('.topbar');
   await expect(topbar.getByRole('searchbox', { name: 'Search leads' })).toHaveAttribute('placeholder', 'Search company, contact, email…');
   const actions = await topbar.locator('.search, .btn').evaluateAll((els) => els.map((el) => (el.textContent ?? '').trim()));
-  expect(actions).toEqual(['Search leads', 'Import CSV', 'New lead']);
+  expect(actions).toEqual(['Search leads', 'Import leads', 'New lead']);
 
   expect(await page.locator('.tiles .tile .l').allTextContents()).toEqual(TILES);
   // Review #08: what is waiting (prospects / leads), not the prototype's fixed demo sentence.
