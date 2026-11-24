@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import {
   BATCH_NUMBER_RE, IMPORT_FILE_ERRORS, IMPORT_FIELDS, IMPORT_NO_CLAUDE, importNoClaudeText, IMPORT_TABLE_FIELDS, PROBLEM_CODES, importColumnLabel, importFileErrorText, importSource, IMPORT_FAILURES, importFailureText, problemText,
   importActivityText, importEngineText, importResearchNoteText, RESEARCH_CLAUDE_FAILURES, UNDO_REASONS, undoReasonText, importContinueHintText,
-  ROW_STATUSES, ROW_OUTCOMES, importRowStatusText,
+  ROW_STATUSES, ROW_OUTCOMES, importRowStatusText, IMPORT_ROW_ERRORS, importRowErrorText,
   type ImportActivity, type ResearchNotePart, type RowProblem,
 } from '../src/imports';
 import {
@@ -83,6 +83,18 @@ describe('undoReasonText / importContinueHintText', () => {
     expect(importContinueHintText('en')).toContain('Continue');
     expect(importContinueHintText('es')).toContain('Continuar');
     expect(importContinueHintText('fr')).toContain('Reprendre');
+  });
+});
+
+describe('importRowErrorText', () => {
+  test('every stored row error code reads in en, es and fr, each different; any other stored text is shown as it is', () => {
+    for (const lang of LANGS) expect(new Set(IMPORT_ROW_ERRORS.map((c) => importRowErrorText(c, lang))).size).toBe(IMPORT_ROW_ERRORS.length);
+    expect(importRowErrorText('invalid_status', 'en')).toBe('The lead status is not available');
+    expect(importRowErrorText('invalid_status', 'es')).not.toBe(importRowErrorText('invalid_status', 'en'));
+    expect(importRowErrorText('Domain already belongs to another company', 'fr')).toBe('Ce domaine appartient déjà à une autre entreprise');
+    expect(importRowErrorText('Unexpected error importing this row', 'es')).toBe('Error inesperado al importar esta fila');
+    expect(importRowErrorText('contactId: Contact must be an active contact of the company', 'es')).toBe('contactId: Contact must be an active contact of the company');
+    expect(importRowErrorText(null, 'en')).toBe('');
   });
 });
 

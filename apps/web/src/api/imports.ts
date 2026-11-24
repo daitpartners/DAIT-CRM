@@ -2,7 +2,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import type {
   ColumnQuestion, FileMeta, ImportActivity, ImportBatchCreate, ImportBatchUpdate, ImportColumnAnswer, ImportCommit,
   ImportIncludeAll, ImportRowUpdate, LeadType, ResearchEngine, ResearchNotePart, ResearchValue, ReviewSummary, RowFields,
-  RowFilter, RowProblem,
+  RowFilter, RowProblem, UndoPreview,
 } from '@dait-crm/shared';
 import { api, apiUpload } from './client';
 
@@ -16,7 +16,8 @@ export const importKeys = {
   batches: (query: BatchListQuery) => [...base, 'batches', query] as const,
   batch: (id: number) => [...base, 'batch', id] as const,
   files: (id: number) => [...base, 'files', id] as const,
-  rows: (id: number, filter: RowFilter, page: number) => [...base, 'rows', id, filter, page] as const,
+  undo: (id: number) => [...base, 'undo', id] as const,
+  rows: (id: number, filter: RowsFilter, page: number) => [...base, 'rows', id, filter, page] as const,
   research: (id: number, page: number) => [...base, 'research', id, page] as const,
   review: (id: number, acceptHigh: boolean, noContactRows: NoContactChoice) => [...base, 'review', id, acceptHigh, noContactRows] as const,
 };
@@ -31,7 +32,7 @@ export type AllocationLine = { name: string; people: string[] };
 
 export type BatchHead = { id: number; number: string; status: string; language?: string; leadType?: string };
 
-/** `GET /api/imports/batches/:id` (the parts the wizard uses; Task 9 reads the rest). */
+/** `GET /api/imports/batches/:id`: the wizard reads the first fields; the Data manager's batch detail reads the rest. */
 export type BatchDetail = {
   id: number;
   number: string;
@@ -40,6 +41,37 @@ export type BatchDetail = {
   leadType: LeadType;
   createdAt: string;
   rowCount: number;
+  by?: string | null;
+  importedAt?: string | null;
+  importedBy?: string | null;
+  undoneAt?: string | null;
+  undoneBy?: string | null;
+  /** What Undo removed and kept (an Undone batch). */
+  undo?: UndoPreview | null;
+  importedCount?: number;
+  newCompanyCount?: number;
+  existingCompanyCount?: number;
+  skippedCount?: number;
+  errorCount?: number;
+  /** Why the import job gave up (a Failed batch): `importFailureText`. */
+  importError?: string | null;
+  counts?: { imported: number; skipped: number; errors: number };
+  files?: BatchFile[];
+  /** The batch can be undone now (the screen also needs the user's `undo_imports`). */
+  canUndo?: boolean;
+};
+
+/** An original file in the batch detail: `deletedAt` once the 90-day retention removed it. */
+export type BatchFile = {
+  id: number;
+  name: string;
+  ext: string;
+  size: number;
+  status: string;
+  error: string | null;
+  createdAt: string;
+  deletedAt: string | null;
+  rows: number | null;
 };
 
 export type ImportFileRow = {
@@ -63,6 +95,11 @@ export type ImportRowView = {
   fileName: string;
   /** Where the row came from, as parts (worded on screen: "Expo xlsx · row 14"). */
   origin: { word: string; ext: string; kind: string; n: number };
+  /** Batch detail tabs only (imported / skipped / errors): what the row became. */
+  lead?: { id: number; number: string } | null;
+  company?: { id: number; number: string; created: boolean } | null;
+  error?: string | null;
+  outcomeCode?: string | null;
   research?: Record<string, ResearchValue>;
   researchStatus?: string;
   researchNote?: ResearchNotePart[];
@@ -90,8 +127,37 @@ export type ResearchPage = {
 export type NoContactChoice = 'import' | 'leave' | null;
 export type ReviewView = ReviewSummary & { leadType: LeadType; language: string; source: string; allocation: AllocationLine[] };
 
+/** The step-2 filters, and the batch detail's tabs (what each row became at import). */
+export type RowsFilter = RowFilter | 'imported' | 'skipped' | 'errors';
+
 export type BatchListQuery = { page?: number; pageSize: number; language?: string; status?: string; q?: string };
-export type BatchList = { items: unknown[]; total: number; count: number };
+/** A Data manager table row; the counts are null before the batch imported. */
+export type BatchListItem = {
+  id: number;
+  number: string;
+  createdAt: string;
+  by: string | null;
+  language: string;
+  files: { first: string; more: number };
+  rowCount: number;
+  importedCount: number | null;
+  newCompanyCount: number | null;
+  skippedCount: number | null;
+  /** null = nothing researched, 'done', or how far research is. */
+  research: { done: number; total: number } | 'done' | null;
+  status: string;
+  undoneAt: string | null;
+};
+/** The Data manager tiles ("this month" = the viewer's calendar month, worked out by the API). */
+export type BatchListTiles = {
+  importedThisMonth: number;
+  importedBatchesThisMonth: number;
+  waitingForReview: number;
+  stillResearching: number;
+  duplicatesSkippedThisMonth: number;
+};
+/** `total` = batches matching the filters, `count` = every batch (the tab's count). */
+export type BatchList = { items: BatchListItem[]; total: number; count: number; tiles: BatchListTiles };
 
 /** Rows a page of the step-2 and step-3 tables. */
 export const IMPORT_PAGE_SIZE = 100;
@@ -103,22 +169,66 @@ export function useImportOptions() {
   return useQuery({ queryKey: importKeys.options, queryFn: () => api<ImportOptions>('/api/imports/options') });
 }
 
-/** The Data manager list; with `{ pageSize: 1 }` only its `count` (every batch) is used, for the tab. */
+/** Batches still moving on their own: the Data manager polls while one is shown. */
+const MOVING = new Set(['Researching', 'Importing']);
+
+/**
+ * The Data manager list (filters, search, tiles); with `{ pageSize: 1 }` only its `count` (every batch) is used, for
+ * the tab. Polls every 5 s while a listed batch is Researching or Importing.
+ */
 export function useBatches(query: BatchListQuery) {
   return useQuery({
     queryKey: importKeys.batches(query),
     queryFn: () => api<BatchList>(`/api/imports/batches?${qs(query)}`),
     placeholderData: keepPreviousData,
+    refetchInterval: (q) => (q.state.data?.items?.some((b) => MOVING.has(b.status)) ? 5000 : false),
   });
 }
 
-export function useBatch(id: number | null) {
+/** One batch; `poll` refreshes it every 3 s while it is Importing (the Data manager's detail). */
+export function useBatch(id: number | null, poll = false) {
   return useQuery({
     queryKey: importKeys.batch(id ?? 0),
     queryFn: () => api<BatchDetail>(`/api/imports/batches/${id}`),
     enabled: id !== null,
+    refetchInterval: (q) => (poll && q.state.data?.status === 'Importing' ? 3000 : false),
   });
 }
+
+/** Undo, listed first: what would be removed and kept (Administrators; asked again each time the dialog opens). */
+export function useUndoPreview(id: number) {
+  return useQuery({
+    queryKey: importKeys.undo(id),
+    queryFn: () => api<UndoPreview>(`/api/imports/batches/${id}/undo`),
+    gcTime: 0,
+    staleTime: 0,
+  });
+}
+
+/** Undo the batch; every import query and the lead, company and contact lists are refreshed after it. */
+export function useUndo(id: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api<UndoPreview>(`/api/imports/batches/${id}/undo`, { method: 'POST' }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: importKeys.all });
+      for (const key of [['leads'], ['companies'], ['contacts'], ['tasks']]) void qc.invalidateQueries({ queryKey: key });
+    },
+  });
+}
+
+/** "Continue import" on a Failed batch: imports the rows that are not in the CRM yet (202). */
+export function useContinueImport(id: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api<{ id: number; status: string }>(`/api/imports/batches/${id}/import/continue`, { method: 'POST' }),
+    onSettled: () => qc.invalidateQueries({ queryKey: importKeys.all }),
+  });
+}
+
+/** The batch detail's downloads (sent as attachments by the API). */
+export const rowsCsvUrl = (batchId: number) => `/api/imports/batches/${batchId}/rows.csv`;
+export const originalFileUrl = (fileId: number) => `/api/imports/files/${fileId}/original`;
 
 export function useCreateBatch() {
   const qc = useQueryClient();
@@ -163,7 +273,7 @@ export function useSortBatch() {
   });
 }
 
-export function useBatchRows(batchId: number, filter: RowFilter, page: number) {
+export function useBatchRows(batchId: number, filter: RowsFilter, page: number) {
   return useQuery({
     queryKey: importKeys.rows(batchId, filter, page),
     queryFn: () => api<RowsPage>(`/api/imports/batches/${batchId}/rows?${qs({ filter, page, pageSize: IMPORT_PAGE_SIZE })}`),

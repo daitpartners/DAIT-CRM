@@ -19,6 +19,50 @@ export function rowStatusBadge(status: string): string {
   }
 }
 
+/** A batch's status badge class (Data manager). */
+export function batchStatusBadge(status: string): string {
+  switch (status) {
+    case 'Researching':
+    case 'Importing':
+      return 'b-purple';
+    case 'Imported':
+      return 'b-ok';
+    case 'Waiting for review':
+      return 'b-warn';
+    case 'Failed':
+      return 'b-bad';
+    default:
+      return 'b-grey';
+  }
+}
+
+/** A batch's status in words (Data manager); an Undone batch reads with its day when given ("Undone 19 Nov"). */
+export function batchStatusText(t: TFn, status: string, undoneDay?: string): string {
+  switch (status) {
+    case 'Uploading':
+      return t('Uploading|import');
+    case 'Sorting':
+      return t('Sorting|import');
+    case 'Waiting for review':
+      return t('Waiting for review|import');
+    case 'Researching':
+      return t('Researching|import');
+    case 'Importing':
+      return t('Importing|import');
+    case 'Imported':
+      return t('Imported|import');
+    case 'Undone':
+      return undoneDay ? t('Undone {date}|import', { date: undoneDay }) : t('Undone|import');
+    case 'Failed':
+      return t('Failed|import');
+    default:
+      return status;
+  }
+}
+
+/** A batch not imported yet is still in the wizard (its "Open" goes back to its step). */
+export const IN_WIZARD = new Set(['Uploading', 'Sorting', 'Waiting for review', 'Researching']);
+
 /** A file's read status badge: class and words (step 1). */
 export function fileBadge(t: TFn, status: string): { cls: string; text: string } {
   switch (status) {
@@ -161,6 +205,12 @@ export function importErrorText(t: TFn, code: string): string {
       return t('There is nothing to import with these choices.');
     case 'import_running':
       return t('This import is already running.');
+    case 'cannot_continue':
+      return t('This import cannot be continued. Reload to see its status.');
+    case 'try_again':
+      return t('Someone was changing these records at the same moment. Nothing was undone. Try again.');
+    case 'file_deleted':
+      return t('Deleted after 90 days');
     case 'duplicate_value':
       return t('That value already exists in this list');
     case 'forbidden':

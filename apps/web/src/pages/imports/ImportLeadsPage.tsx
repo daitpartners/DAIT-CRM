@@ -5,6 +5,7 @@ import { AccessDenied } from '../../components/AccessDenied';
 import { Tabs } from '../../components/Tabs';
 import { Topbar } from '../../components/Topbar';
 import { useT } from '../../i18n/useT';
+import { DataManager } from './manager/DataManager';
 import { Wizard } from './wizard/Wizard';
 
 type View = 'wizard' | 'manager';
@@ -61,14 +62,7 @@ function ImportLeadsView({ view }: { view: View }) {
           { id: 'manager', label: t('Data manager'), count: batches?.count },
         ]}
       >
-        {manager ? (
-          <section className="card">
-            <h2>{t('Data manager')}</h2>
-            <p className="muted-text">{t('The Data manager opens here.')}</p>
-          </section>
-        ) : (
-          <Wizard />
-        )}
+        {manager ? <DataManager /> : <Wizard />}
       </Tabs>
     </>
   );

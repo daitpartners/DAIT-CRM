@@ -517,3 +517,41 @@ export function importRowStatusText(status: string, lang: Lang): string {
   const t = ROW_STATUS_TEXT[lang] ?? ROW_STATUS_TEXT.en;
   return (t as Record<string, string>)[status] ?? status;
 }
+
+/**
+ * What `import_rows.error` holds when a row could not be imported: a rule code (`invalid_status` …) or one of the
+ * import's fixed English messages. Any other stored text (a field check, "contactId: …") is shown as it is.
+ */
+export const IMPORT_ROW_ERRORS = [
+  'invalid_status', 'unknown_user', 'cannot_assign_hidden', 'forbidden', 'Not found', 'Domain already belongs to another company',
+  'Unexpected error importing this row',
+] as const;
+export type ImportRowError = (typeof IMPORT_ROW_ERRORS)[number];
+
+const ROW_ERROR_TEXT: Record<Lang, Record<ImportRowError, string>> = {
+  en: {
+    invalid_status: 'The lead status is not available', unknown_user: 'The assignee is not an active user',
+    cannot_assign_hidden: 'The lead cannot be assigned to that person', forbidden: 'The importer does not have access',
+    'Not found': 'A record it needs was not found', 'Domain already belongs to another company': 'The website domain already belongs to another company',
+    'Unexpected error importing this row': 'Unexpected error importing this row',
+  },
+  es: {
+    invalid_status: 'El estado del lead no está disponible', unknown_user: 'La persona asignada no es un usuario activo',
+    cannot_assign_hidden: 'El lead no se puede asignar a esa persona', forbidden: 'Quien importa no tiene acceso',
+    'Not found': 'No se encontró un registro necesario', 'Domain already belongs to another company': 'El dominio del sitio web ya pertenece a otra empresa',
+    'Unexpected error importing this row': 'Error inesperado al importar esta fila',
+  },
+  fr: {
+    invalid_status: 'Le statut du lead n’est pas disponible', unknown_user: 'La personne assignée n’est pas un utilisateur actif',
+    cannot_assign_hidden: 'Le lead ne peut pas être attribué à cette personne', forbidden: 'La personne qui importe n’a pas accès',
+    'Not found': 'Un enregistrement nécessaire est introuvable', 'Domain already belongs to another company': 'Ce domaine appartient déjà à une autre entreprise',
+    'Unexpected error importing this row': 'Erreur inattendue lors de l’import de cette ligne',
+  },
+};
+
+/** Why a row could not be imported, in `lang`: a known code or message is translated, any other text shown as it is. */
+export function importRowErrorText(error: string | null | undefined, lang: Lang): string {
+  if (!error) return '';
+  const t = ROW_ERROR_TEXT[lang] ?? ROW_ERROR_TEXT.en;
+  return (IMPORT_ROW_ERRORS as readonly string[]).includes(error) ? t[error as ImportRowError] : error;
+}
