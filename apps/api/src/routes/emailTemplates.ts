@@ -6,7 +6,7 @@ import { audit } from '../audit.js';
 import { requireRight, requireUser } from '../plugins/auth.js';
 import { isNotFound, StaleError } from '../prismaErrors.js';
 import { NotFoundError, parseBody } from '../validate.js';
-import { TEMPLATE_HTML_MAX, perUser, sanitizeFormatted, templateHtml } from '../mail/formatted.js';
+import { FORMATTED_BODY_LIMIT, TEMPLATE_HTML_MAX, perUser, sanitizeFormatted, templateHtml } from '../mail/formatted.js';
 import { checkUploads, removeFiles, removeFolder, saveFile, readStoredFile, type CheckedFile } from '../mail/files.js';
 
 type WithCreator = EmailTemplate & { createdBy: { id: number; name: string } | null; attachments: EmailTemplateAttachment[] };
@@ -100,7 +100,7 @@ export const emailTemplateRoutes: FastifyPluginAsync = async (app) => {
   // An uploaded .oft is read in the browser; its HTML comes back sanitised before the editor shows it (it is sanitised
   // again when the template is saved), keeping the cid: pictures of the inline files read with it. null: nothing
   // usable (the template stays plain text).
-  app.post('/email-templates/sanitize', { ...manage, bodyLimit: TEMPLATE_BODY_LIMIT, config: perUser(20) }, async (request) => {
+  app.post('/email-templates/sanitize', { ...manage, bodyLimit: FORMATTED_BODY_LIMIT, config: perUser(20) }, async (request) => {
     const { html, cids } = parseBody(TemplateHtmlCheck, request.body);
     const r = await sanitizeFormatted(html, TEMPLATE_HTML_MAX, cids);
     return r.kind === 'html' ? { html: r.html, text: r.text } : { html: null, text: r.kind === 'fallback' ? r.text : '' };
