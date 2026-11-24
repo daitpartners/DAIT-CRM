@@ -8,7 +8,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { IMPORT_TABLE_FIELDS, importColumnLabel, type Lang, type ResearchValue, type RowFields } from '@dait-crm/shared';
 import { prisma } from '../src/db';
 import { buildApp } from '../src/app';
-import { fixRows, rowsCsv, rowsToFixWorkbook, safeCell } from '../src/imports/exports';
+import { fixRows, rowsCsv, rowsToFixWorkbook, safeCell, safeCsvCell } from '../src/imports/exports';
+import { unguardCell } from '../src/imports/cells';
 import { readSpreadsheet } from '../src/imports/read/index';
 import { classifyColumns, findHeaderRow } from '../src/imports/columns';
 import { knownCountries, stageTable } from '../src/imports/stage';
@@ -102,6 +103,18 @@ describe('safeCell', () => {
     expect(safeCell('Hotel Sol')).toBe('Hotel Sol');
     expect(safeCell('')).toBe('');
   });
+
+  it('CSV: every formula start is guarded, phones and -( included; step 1 drops exactly that one apostrophe', () => {
+    expect(safeCsvCell('+971 4 555 0192')).toBe("'+971 4 555 0192");
+    expect(safeCsvCell('-(1)-(2)')).toBe("'-(1)-(2)");
+    expect(safeCsvCell('Hotel Sol')).toBe('Hotel Sol');
+    expect(unguardCell("'@Home Realty")).toBe('@Home Realty');
+    expect(unguardCell("'+Plus Ltd")).toBe('+Plus Ltd');
+    expect(unguardCell("'＝x")).toBe('＝x');
+    expect(unguardCell("''=x")).toBe("''=x");
+    expect(unguardCell("'Rourke's")).toBe("'Rourke's");
+    expect(unguardCell("O'Brien")).toBe("O'Brien");
+  });
 });
 
 describe('rows to fix', () => {
@@ -113,6 +126,17 @@ describe('rows to fix', () => {
     expect(rows[1]!.problems.map((p) => p.code)).toEqual(['country_unknown']);
     expect(rows[2]!.problems.map((p) => p.code)).toEqual(['contact_missing', 'contact_missing', 'no_contact_left_out']);
     expect(rows[3]!.problems.map((p) => p.code)).toEqual(['email_missing']);
+  });
+
+  it('blank and total Not a lead rows (no company, no contact value) stay out; one with a value stays in', async () => {
+    const batch = await batchWith([
+      { $status: 'Not a lead', $include: false },
+      { notes: 'Total: 45', $status: 'Not a lead', $include: false },
+      { companyName: 'Company', email: 'Email', $status: 'Not a lead', $include: false },
+      { companyName: 'Hotel Sol', country: 'Spain', email: 'ana@hotelsol.es' },
+    ]);
+    const rows = await fixRows(batch.id, { acceptHigh: false, noContactRows: 'import' });
+    expect(rows.map((r) => [r.fields.companyName, r.problems.map((p) => p.code)])).toEqual([['Company', ['not_a_lead']]]);
   });
 
   it('workbook: bold frozen header, light fill, red / amber problem cells, What to fix, injection prefix', async () => {
@@ -200,6 +224,12 @@ describe('rows to fix', () => {
 
   it.each(['es', 'fr'] as Lang[])('round trip (%s): the rows-to-fix file reads and stages cleanly; What to fix / From ignored', async (lang) => {
     const batch = await fixBatch();
+    await prisma.importRow.create({
+      data: {
+        batchId: batch.id, fileId: (await prisma.importFile.findFirstOrThrow({ where: { batchId: batch.id } })).id, position: 7,
+        originKind: 'row', originN: 8, fields: { companyName: '@Home Realty', city: '+Plus Ltd', country: 'Spain' }, status: 'Missing details', include: true,
+      },
+    });
     const buf = await rowsToFixWorkbook(batch.id, lang, { acceptHigh: false, noContactRows: 'import' });
     const read = await readSpreadsheet(buf, 'xlsx');
     expect(read.status).toBe('Read');
@@ -225,9 +255,12 @@ describe('rows to fix', () => {
     });
     await stageTable(file.id, extract);
     const staged = await prisma.importRow.findMany({ where: { fileId: file.id }, orderBy: { position: 'asc' } });
-    expect(staged.map((r) => (r.fields as RowFields).companyName)).toEqual(['No Country SL', 'Chile Co', 'Silent Co', 'Phone Only']);
+    // The workbook carries the guard ('@Home Realty); staging drops it again.
+    expect(rows[5]![0]).toBe("'@Home Realty");
+    expect(staged.map((r) => (r.fields as RowFields).companyName)).toEqual(['No Country SL', 'Chile Co', 'Silent Co', 'Phone Only', '@Home Realty']);
+    expect((staged[4]!.fields as RowFields).city).toBe('+Plus Ltd');
     expect((staged[3]!.fields as RowFields).phone).toBe('+971 4 555 0192');
-    expect(staged.map((r) => r.status)).toEqual(['Missing details', 'Ready', 'Missing details', 'Missing details']);
+    expect(staged.map((r) => r.status)).toEqual(['Missing details', 'Ready', 'Missing details', 'Missing details', 'Missing details']);
     expect((await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } })).questions).toEqual([]);
   });
 });
@@ -250,9 +283,12 @@ describe('rows CSV', () => {
     const lines = text.slice(1).split('\r\n');
     expect(lines[0]).toBe('Company,Website,Country,City,Contact,Designation,Email,Phone,Industry,From,Status,Lead,Company number');
     expect(lines[1]).toBe(`"Hotel ""Sol""",,Spain,,,,ana@hotelsol.es,,,Expo xlsx · row 2,Imported,,${company.number}`);
-    expect(lines[2]).toBe('"\'=HYPERLINK(""http://x"",""y"")",,Spain,\'@SUM(1),,,,+971 4 555 0192,,Expo xlsx · row 3,Missing details,,');
-    const csv = await rowsCsv(batch.id, 'es');
-    expect(csv.slice(1).split('\r\n')[0]).toContain('Empresa,Sitio web,País');
+    expect(lines[2]).toBe('"\'=HYPERLINK(""http://x"",""y"")",,Spain,\'@SUM(1),,,,\'+971 4 555 0192,,Expo xlsx · row 3,Missing details,,');
+    const es = (await rowsCsv(batch.id, 'es')).slice(1).split('\r\n');
+    expect(es[0]).toContain('Empresa,Sitio web,País');
+    expect(es[1]).toContain(',Importada,');
+    expect(es[2]).toContain(',Faltan datos,');
+    expect((await rowsCsv(batch.id, 'fr')).split('\r\n')[2]).toContain(',Informations manquantes,');
   });
 
   it('downloads need import_leads', async () => {

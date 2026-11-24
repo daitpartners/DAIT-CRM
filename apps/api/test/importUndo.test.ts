@@ -7,7 +7,9 @@ import { buildApp } from '../src/app';
 import type { AuthUser } from '../src/plugins/auth';
 import { importCommitHandler } from '../src/jobs/handlers/importCommit';
 import { runOnce } from '../src/jobs/runner';
-import { undoBatch, undoPreview } from '../src/imports/undo';
+import { isRetryable, undoBatch, undoPreview } from '../src/imports/undo';
+import { enqueue } from '../src/jobs/queue';
+import { makeLead } from './factory';
 import { fakeGraph, resetDb, seedLookups } from './helpers';
 import { makeCompany, makeContact, makeUser, signIn } from './factory';
 
@@ -246,5 +248,92 @@ describe('undo', () => {
     const res = await post(`/api/imports/batches/${fresh.id}/undo`);
     expect(res.statusCode).toBe(409);
     expect(res.json()).toEqual({ error: 'batch_locked' });
+  });
+  it('work on a new company keeps it, with its lead and contact: a manual research run, a person deciding the import\'s suggestion, a calendar event', async () => {
+    const batch = await batchWith([
+      { companyName: 'Research Co', website: 'https://research.test', country: 'Spain', email: 'a@research.test', contactName: 'Ana Ruiz' },
+      { companyName: 'Decided Co', country: 'Spain', email: 'b@decided.test', contactName: 'Bea Gil', $research: { city: found('Madrid', 60) } },
+      { companyName: 'Calendar Co', website: 'https://calendar.test', country: 'Spain', email: 'c@calendar.test' },
+      { companyName: 'Plain Co', website: 'https://plain.test', country: 'Spain', email: 'd@plain.test' },
+    ]);
+    const [research, decided, calendar, plainRow] = await importNow(batch.id);
+    // A person clicks Research on the company page (no updatedAt change, no lead activity).
+    await prisma.enrichmentRun.create({
+      data: { companyId: research!.companyId!, trigger: 'Manual · Deepak Admin', engine: 'Website reader', status: 'Completed', createdById: admin.id },
+    });
+    // A person rejects the import's own (pending, 60%) suggestion.
+    await prisma.enrichmentSuggestion.updateMany({
+      where: { companyId: decided!.companyId!, decision: 'pending' }, data: { decision: 'rejected', decidedById: admin.id, decidedAt: new Date(Date.now() + 1000) },
+    });
+    const account = await prisma.emailAccount.create({
+      data: { address: 'deepak@daitpartners.com', provider: 'microsoft', kind: 'personal', userId: admin.id, refreshTokenEnc: 'x', status: 'connected' },
+    });
+    await prisma.calendarEvent.create({
+      data: {
+        userId: admin.id, accountId: account.id, graphId: 'g1', subject: 'Visit', startsAt: new Date(), endsAt: new Date(), companyId: calendar!.companyId!,
+      },
+    });
+    const p = await undoPreview(batch.id);
+    const reasons = Object.fromEntries(p.keep.filter((k) => k.kind === 'company').map((k) => [k.id, k.reason]));
+    expect(reasons).toEqual({ [research!.companyId!]: 'notes', [decided!.companyId!]: 'edited', [calendar!.companyId!]: 'calendar' });
+    expect(p.keep.filter((k) => k.kind === 'lead').map((k) => [k.id, k.reason]))
+      .toEqual([[research!.leadId, 'other_leads'], [decided!.leadId, 'other_leads'], [calendar!.leadId, 'other_leads']]);
+    expect(p.remove).toMatchObject({ leads: [{ id: plainRow!.leadId }], companies: 1, contacts: 0 });
+    await undoBatch(authOf(admin), batch.id);
+    expect(await prisma.enrichmentRun.count({ where: { trigger: 'Manual · Deepak Admin' } })).toBe(1);
+    expect(await prisma.company.count({ where: { id: plainRow!.companyId! } })).toBe(0);
+  });
+
+  it('a company shared across two batches: undoing the first keeps it; undoing the second removes only its own lead and contact', async () => {
+    const b1 = await batchWith([{ companyName: 'Gulf Freight', website: 'https://gulffreight.ae', country: 'United Arab Emirates', email: 'ali@gulffreight.ae', contactName: 'Ali Khan' }]);
+    const [r1] = await importNow(b1.id);
+    const b2 = await batchWith([{
+      companyName: 'Gulf Freight', country: 'United Arab Emirates', email: 'mina@gulffreight.ae', contactName: 'Mina Rao', $status: 'Already in CRM', $matched: r1!.companyId!,
+    }]);
+    const [r2] = await importNow(b2.id);
+    expect(r2!.companyId).toBe(r1!.companyId);
+    const p1 = await undoPreview(b1.id);
+    expect(p1.remove).toEqual({ leads: [], contacts: 0, companies: 0 });
+    expect(sortKeep(p1)).toEqual([
+      ['company', r1!.companyId, 'other_leads'], ['contact', r1!.contactId, 'other_leads'], ['lead', r1!.leadId, 'other_leads'],
+    ].sort((a, b) => String(a).localeCompare(String(b))));
+    const r = await undoBatch(authOf(admin), b2.id);
+    expect(r.remove).toMatchObject({ leads: [{ id: r2!.leadId }], contacts: 1, companies: 0 });
+    expect(await prisma.company.count({ where: { id: r1!.companyId! } })).toBe(1);
+    expect(await prisma.lead.count({ where: { id: r1!.leadId! } })).toBe(1);
+  });
+
+  it('a batch contact later linked to a lead outside the batch stays, with its company and the batch lead', async () => {
+    const batch = await batchWith([{ companyName: 'Hotel Sol', website: 'https://hotelsol.es', country: 'Spain', email: 'ana@hotelsol.es', contactName: 'Ana García' }]);
+    const [row] = await importNow(batch.id);
+    const outside = await makeLead({ companyId: row!.companyId!, contactId: row!.contactId!, companyName: 'Hotel Sol', country: 'Spain' });
+    const p = await undoPreview(batch.id);
+    expect(p.remove).toEqual({ leads: [], contacts: 0, companies: 0 });
+    expect(p.keep.find((k) => k.kind === 'contact')).toMatchObject({ id: row!.contactId, reason: 'other_leads' });
+    expect(p.keep.find((k) => k.kind === 'company')).toMatchObject({ id: row!.companyId, reason: 'other_leads' });
+    await undoBatch(authOf(admin), batch.id);
+    expect(await prisma.lead.count({ where: { id: { in: [outside.id, row!.leadId!] } } })).toBe(2);
+  });
+
+  it('a Failed batch with an import job still queued cannot be undone (nor previewed); an Undone one cannot be previewed', async () => {
+    const batch = await batchWith([{ companyName: 'Hotel Sol', country: 'Spain', email: 'ana@hotelsol.es' }]);
+    await importNow(batch.id);
+    await prisma.importBatch.update({ where: { id: batch.id }, data: { status: 'Failed', importError: 'job_failed' } });
+    await prisma.$transaction((tx) => enqueue(tx, 'import_commit', { batchId: batch.id }, { maxAttempts: 3 }));
+    expect((await post(`/api/imports/batches/${batch.id}/undo`)).json()).toEqual({ error: 'batch_locked' });
+    expect((await get(`/api/imports/batches/${batch.id}/undo`)).statusCode).toBe(409);
+    await prisma.job.deleteMany({});
+    expect((await post(`/api/imports/batches/${batch.id}/undo`)).statusCode).toBe(200);
+    const again = await get(`/api/imports/batches/${batch.id}/undo`);
+    expect(again.statusCode).toBe(409);
+    expect(again.json()).toEqual({ error: 'batch_locked' });
+  });
+
+  it('a deadlock or serialization failure is retryable (409 try_again)', () => {
+    expect(isRetryable({ code: 'P2034' })).toBe(true);
+    expect(isRetryable({ code: 'P2010', meta: { code: '40P01' } })).toBe(true);
+    expect(isRetryable(new Error('Raw query failed. Code: `40P01`. Message: `deadlock detected`'))).toBe(true);
+    expect(isRetryable(new Error('unique constraint'))).toBe(false);
+    expect(isRetryable(null)).toBe(false);
   });
 });

@@ -6,26 +6,22 @@
  */
 import ExcelJS from 'exceljs';
 import {
-  IMPORT_TABLE_FIELDS, importColumnLabel, problemText,
+  IMPORT_TABLE_FIELDS, importColumnLabel, importRowStatusText, problemText,
   type ImportColumnKey, type ImportCommit, type ImportField, type Lang, type ProblemCode, type RowFields, type RowProblem,
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { NotFoundError } from '../validate.js';
+import { safeCell, safeCsvCell } from './cells.js';
 import { effectiveFields, planBatch } from './plan.js';
 import { evaluateRow, fromLabel, knownCountries } from './stage.js';
 
-/** A cell that would start a formula: = + - @, tab or CR, and their full-width forms (Excel reads those too). */
-const FORMULA_START = /^[=+\-@\t\r\uFF1D\uFF0B\uFF0D\uFF20]/;
-/** A phone number such as "+971 4 555 0192": written as it is (a string cell, so it cannot evaluate either). */
-const PHONE = /^\+?[\d\s().-]{7,}$/;
-
-/** A value made safe for a spreadsheet cell: a leading `'` when it would start a formula (a phone number excepted). */
-export function safeCell(v: string): string {
-  return FORMULA_START.test(v) && !PHONE.test(v) ? `'${v}` : v;
-}
+export { safeCell, safeCsvCell } from './cells.js';
 
 export type FixRow = { fields: RowFields; from: string; problems: RowProblem[] };
 export type FixOptions = { acceptHigh: boolean; noContactRows: 'import' | 'leave' | null };
+
+/** A Not a lead row is in the file only when one of these holds a value. */
+const NOT_A_LEAD_KEEP: readonly ImportField[] = ['companyName', 'contactName', 'email', 'phone'];
 
 /** Batch statuses from which a row's outcome (Imported, Skipped, Error) decides it, rather than the plan. */
 const AFTER_IMPORT = new Set(['Importing', 'Imported', 'Undone', 'Failed']);
@@ -59,6 +55,8 @@ export async function fixRows(batchId: number, opts?: FixOptions): Promise<FixRo
   const out: FixRow[] = [];
   rows.forEach((row, i) => {
     const { fields } = effectiveFields(row, choice.acceptHigh);
+    // A blank, total or header line with nothing to fix (no company, no contact value) stays out of the file.
+    if (row.status === 'Not a lead' && !NOT_A_LEAD_KEEP.some((f) => (fields[f] ?? '').trim() !== '')) return;
     const match = row.status === 'Already in CRM' && row.matchedCompany ? row.matchedCompany : null;
     const ev = evaluateRow(fields, { knownCountries: known, match, notALead: row.status === 'Not a lead' });
     const problems = [...ev.problems];
@@ -152,7 +150,7 @@ const csvField = (v: string) => (/[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}
 
 /**
  * Every row of the batch by position (UTF-8 with BOM, CRLF): the table fields, From, Status (the outcome once there is
- * one, else the row's status), Lead (LD-n) and Company number (CO-n, the linked or the matched company).
+ * one, else the row's status, in `lang`), Lead (LD-n) and Company number (CO-n, the linked or the matched company).
  */
 export async function rowsCsv(batchId: number, lang: Lang): Promise<string> {
   const batch = await prisma.importBatch.findUnique({ where: { id: batchId }, select: { id: true } });
@@ -175,12 +173,12 @@ export async function rowsCsv(batchId: number, lang: Lang): Promise<string> {
     lines.push([
       ...IMPORT_TABLE_FIELDS.map((f) => fields[f] ?? ''),
       fromLabel(r.file.name, r.file.ext, r.originKind, r.originN),
-      r.outcome ?? r.status,
+      importRowStatusText(r.outcome ?? r.status, lang),
       r.lead?.number ?? '',
       r.company?.number ?? r.matchedCompany?.number ?? '',
     ]);
   }
-  return `\uFEFF${lines.map((cells) => cells.map((c) => csvField(safeCell(c))).join(',')).join('\r\n')}\r\n`;
+  return `\uFEFF${lines.map((cells) => cells.map((c) => csvField(safeCsvCell(c))).join(',')).join('\r\n')}\r\n`;
 }
 
 /** Control characters and bidi controls (a name like "gpj.exe" shown reversed) never reach a download name. */

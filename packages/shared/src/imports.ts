@@ -492,3 +492,28 @@ const CONTINUE_HINT_TEXT: Record<Lang, string> = {
 export function importContinueHintText(lang: Lang): string {
   return CONTINUE_HINT_TEXT[lang] ?? CONTINUE_HINT_TEXT.en;
 }
+
+/** What a staged row became at import (`ImportRow.outcome`). */
+export const ROW_OUTCOMES = ['Imported', 'Skipped', 'Error'] as const;
+export type RowOutcome = (typeof ROW_OUTCOMES)[number];
+
+const ROW_STATUS_TEXT: Record<Lang, Record<RowStatus | RowOutcome, string>> = {
+  en: {
+    Ready: 'Ready', 'Missing details': 'Missing details', 'Already in CRM': 'Already in CRM', 'Not a lead': 'Not a lead',
+    Imported: 'Imported', Skipped: 'Skipped', Error: 'Error',
+  },
+  es: {
+    Ready: 'Lista', 'Missing details': 'Faltan datos', 'Already in CRM': 'Ya está en el CRM', 'Not a lead': 'No es un lead',
+    Imported: 'Importada', Skipped: 'Omitida', Error: 'Error',
+  },
+  fr: {
+    Ready: 'Prête', 'Missing details': 'Informations manquantes', 'Already in CRM': 'Déjà dans le CRM', 'Not a lead': 'Pas un lead',
+    Imported: 'Importée', Skipped: 'Ignorée', Error: 'Erreur',
+  },
+};
+
+/** A row's status or outcome in `lang` (an unknown value is returned as it is). */
+export function importRowStatusText(status: string, lang: Lang): string {
+  const t = ROW_STATUS_TEXT[lang] ?? ROW_STATUS_TEXT.en;
+  return (t as Record<string, string>)[status] ?? status;
+}

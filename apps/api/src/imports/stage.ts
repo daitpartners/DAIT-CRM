@@ -16,6 +16,7 @@ import { NotFoundError } from '../validate.js';
 import { ImportError, isLocked } from './batches.js';
 import { classifyColumns, columnName, findHeaderRow, looksLikeEmail, looksLikeWebsite, squash, type ColumnTarget } from './columns.js';
 import { findExistingCompanies, type CompanyRef, type Db } from './companies.js';
+import { unguardCell } from './cells.js';
 import { matchCountry } from './countries.js';
 import type { TableExtract } from './read/index.js';
 
@@ -159,7 +160,8 @@ export async function stageTable(fileId: number, extract: TableExtract): Promise
   for (const { name, rows: cellsRead } of extract.sheets) {
     // jsonb cannot hold U+0000 (a stray NUL in a CSV or an old .xls).
     const sheet = { name: name.replace(/\u0000/g, '').slice(0, 100) };
-    const rows = cellsRead.map((r) => r.map((c) => (c ?? '').replace(/\u0000/g, '').trim().slice(0, MAX_RAW_CELL)));
+    // A cell our own download guarded ("'@Home Realty") comes back without the guard's apostrophe.
+    const rows = cellsRead.map((r) => r.map((c) => unguardCell((c ?? '').replace(/\u0000/g, '').trim()).slice(0, MAX_RAW_CELL)));
     let end = rows.length;
     while (end > 0 && isBlankCells(rows[end - 1]!)) end -= 1;
     const h = findHeaderRow(rows.slice(0, end), known);

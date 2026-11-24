@@ -53,7 +53,9 @@ type Plan = {
 async function importedRows(db: Db, batchId: number) {
   const rows = await db.importRow.findMany({
     where: { batchId, OR: [{ leadId: { not: null } }, { companyId: { not: null } }, { contactId: { not: null } }] },
-    select: { id: true, leadId: true, companyId: true, contactId: true, companyCreated: true, contactCreated: true, stamps: true },
+    select: {
+      id: true, leadId: true, companyId: true, contactId: true, companyCreated: true, contactCreated: true, stamps: true, importedAt: true,
+    },
     orderBy: { id: 'asc' },
   });
   return rows.filter((r) => r.stamps !== null).map((r) => ({ ...r, stamps: r.stamps as Stamps }));
@@ -68,7 +70,12 @@ async function planUndo(db: Db, batch: Pick<ImportBatch, 'id' | 'number'>): Prom
   const companyStamp = new Map<number, string>();
   const createdCompanies = new Set<number>();
   const createdContacts = new Set<number>();
+  /** When the batch last wrote on each company (a suggestion decided later was decided by a person). */
+  const companyImportedAt = new Map<number, Date>();
   for (const r of rows) {
+    if (r.companyId !== null && r.importedAt && (companyImportedAt.get(r.companyId)?.getTime() ?? 0) < r.importedAt.getTime()) {
+      companyImportedAt.set(r.companyId, r.importedAt);
+    }
     if (r.leadId !== null) leadStamp.set(r.leadId, r.stamps.lead);
     if (r.contactCreated && r.contactId !== null && !contactStamp.has(r.contactId)) {
       contactStamp.set(r.contactId, r.stamps.contact);
@@ -106,8 +113,10 @@ async function planUndo(db: Db, batch: Pick<ImportBatch, 'id' | 'number'>): Prom
     orderBy: { id: 'asc' },
     select: {
       id: true, number: true, name: true, updatedAt: true, leads: { select: { id: true } }, contacts: { select: { id: true } },
-      enrichmentSuggestions: { where: { decision: { in: ['accepted', 'rejected'] }, run: { trigger: { not: trigger } } }, select: { id: true }, take: 1 },
-      _count: { select: { quotations: true, projects: true, emailMessages: true, locations: true } },
+      enrichmentSuggestions: {
+        where: { decision: { in: ['accepted', 'rejected'] }, run: { trigger: { not: trigger } } }, select: { id: true }, take: 1,
+      },
+      _count: { select: { quotations: true, projects: true, emailMessages: true, locations: true, calendarEvents: true } },
     },
   });
 
@@ -129,8 +138,12 @@ async function planUndo(db: Db, batch: Pick<ImportBatch, 'id' | 'number'>): Prom
   }
   for (const co of companies) {
     const n = co._count;
+    // Research someone started on the company (any run but this batch's own) is work on it.
+    const research = await db.enrichmentRun.count({ where: { companyId: co.id, trigger: { not: trigger } } }) > 0;
+    const decided = await decidedSince(db, co.id, companyImportedAt.get(co.id));
     const reason: UndoReason | null = n.quotations ? 'quotations' : n.projects ? 'projects' : n.emailMessages ? 'emails'
-      : n.locations || co.enrichmentSuggestions.length > 0 || iso(co.updatedAt) !== companyStamp.get(co.id) ? 'edited'
+      : n.calendarEvents ? 'calendar' : research ? 'notes'
+        : n.locations || decided || co.enrichmentSuggestions.length > 0 || iso(co.updatedAt) !== companyStamp.get(co.id) ? 'edited'
         : co.leads.some((l) => !batchLeads.has(l.id)) ? 'other_leads'
           : co.contacts.some((c) => !createdContacts.has(c.id)) ? 'other_contacts' : null;
     if (reason) keptCompany.set(co.id, reason);
@@ -170,7 +183,8 @@ async function planUndo(db: Db, batch: Pick<ImportBatch, 'id' | 'number'>): Prom
       || await importAuditCount(db, co.id, batch.number) > 0;
     if (!wrote) continue;
     const label = `${co.number} · ${co.name}`;
-    if (iso(co.updatedAt) === companyStamp.get(co.id)) {
+    const decided = await decidedSince(db, co.id, companyImportedAt.get(co.id));
+    if (!decided && iso(co.updatedAt) === companyStamp.get(co.id)) {
       revert.push(co.id);
       reverted.push({ id: co.id, label });
     } else {
@@ -197,6 +211,14 @@ async function planUndo(db: Db, batch: Pick<ImportBatch, 'id' | 'number'>): Prom
     },
     leadIds: removeLeads.map((l) => l.id), contactIds, companyIds, revert,
   };
+}
+
+/** A suggestion on the company decided (accepted or rejected) after the batch last wrote on it: a person's decision. */
+async function decidedSince(db: Db, companyId: number, importedAt: Date | undefined): Promise<boolean> {
+  if (!importedAt) return false;
+  return await db.enrichmentSuggestion.count({
+    where: { companyId, decision: { in: ['accepted', 'rejected'] }, decidedAt: { gt: importedAt } },
+  }) > 0;
 }
 
 type LeadForUndo = {
@@ -318,11 +340,22 @@ export async function canUndo(batch: Pick<ImportBatch, 'id' | 'status'>): Promis
   return canUndoNow(prisma, batch);
 }
 
-/** What Undo would remove and keep now. */
+/** What Undo would remove and keep now; 409 `batch_locked` for a batch that cannot be undone (an Undone one included). */
 export async function undoPreview(batchId: number): Promise<UndoPreview> {
-  const batch = await prisma.importBatch.findUnique({ where: { id: batchId }, select: { id: true, number: true } });
+  const batch = await prisma.importBatch.findUnique({ where: { id: batchId }, select: { id: true, number: true, status: true } });
   if (!batch) throw new NotFoundError();
+  if (!await canUndoNow(prisma, batch)) throw new ImportError('batch_locked', 409);
   return (await planUndo(prisma, batch)).preview;
+}
+
+/** A deadlock or serialization failure (Postgres 40P01 / 40001, Prisma P2034): nothing was changed, try again. */
+export function isRetryable(e: unknown): boolean {
+  const err = e as { code?: unknown; meta?: { code?: unknown }; message?: unknown } | null;
+  if (!err || typeof err !== 'object') return false;
+  if (err.code === 'P2034') return true;
+  const pg = err.meta?.code ?? err.code;
+  if (pg === '40P01' || pg === '40001') return true;
+  return typeof err.message === 'string' && /\b(40P01|40001)\b|deadlock detected|could not serialize/.test(err.message);
 }
 
 const plain = (v: unknown) => JSON.parse(JSON.stringify(v)) as Prisma.InputJsonValue;
@@ -331,9 +364,18 @@ const plain = (v: unknown) => JSON.parse(JSON.stringify(v)) as Prisma.InputJsonV
  * Undoes the batch in one transaction: 409 `batch_locked` unless it can be undone; the batch's records are locked and
  * the rules checked again; then activities → assignments → leads → contacts → companies are deleted (research rows go
  * with their company), each removal audited, the existing companies' import writes put back, and the batch is Undone
- * with what was removed and kept.
+ * with what was removed and kept. A deadlock with a concurrent edit (nothing changed) answers 409 `try_again`.
  */
 export async function undoBatch(user: AuthUser, batchId: number): Promise<UndoPreview> {
+  try {
+    return await undoInTransaction(user, batchId);
+  } catch (e) {
+    if (isRetryable(e)) throw new ImportError('try_again', 409);
+    throw e;
+  }
+}
+
+async function undoInTransaction(user: AuthUser, batchId: number): Promise<UndoPreview> {
   return prisma.$transaction(async (tx) => {
     const [locked] = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM import_batches WHERE id = ${batchId} FOR UPDATE`;
     if (!locked) throw new NotFoundError();

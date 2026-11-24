@@ -186,6 +186,22 @@ describe('original files and retention', () => {
     expect(await pruneImports(later)).toEqual({ files: 0, batches: 0 });
   });
 
+  it('a batch still in use keeps its originals, however old: Waiting for review touched recently, a 95-day-old file', async () => {
+    const { batch: live, files: [file] } = await batch({ status: 'Waiting for review' });
+    await prisma.importFile.update({ where: { id: file!.id }, data: { createdAt: new Date(Date.now() - 95 * DAY) } });
+    // A Failed batch whose import job is still queued keeps them too.
+    const { batch: failed, files: [failedFile] } = await batch({ status: 'Failed', createdAt: new Date(Date.now() - 95 * DAY) });
+    await prisma.job.create({ data: { type: 'import_commit', payload: { batchId: failed.id }, status: 'queued', runAt: new Date() } });
+    expect(await pruneImports()).toEqual({ files: 0, batches: 0 });
+    expect((await prisma.importFile.findUniqueOrThrow({ where: { id: file!.id } })).deletedAt).toBeNull();
+    expect((await prisma.importFile.findUniqueOrThrow({ where: { id: failedFile!.id } })).deletedAt).toBeNull();
+    expect(await prisma.importBatch.count({ where: { id: { in: [live.id, failed.id] } } })).toBe(2);
+    await stat(path.join(storageDir(), file!.storagePath));
+    // Once the Failed batch's job is gone, its 95-day-old original goes (it imported nothing, so the batch goes too).
+    await prisma.job.deleteMany({});
+    expect(await pruneImports()).toEqual({ files: 0, batches: 1 });
+  });
+
   it('retention keeps young files and batches', async () => {
     const { batch: b, files: [file] } = await batch({ status: 'Sorting', createdAt: new Date(Date.now() - 30 * DAY) });
     expect(await pruneImports()).toEqual({ files: 0, batches: 0 });

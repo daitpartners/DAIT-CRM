@@ -239,7 +239,7 @@ export const importBatchRoutes: FastifyPluginAsync = async (app) => {
   });
 
   /** Data manager: the batches (filters, search, tiles). */
-  app.get('/imports/batches', canImport, async (request) => listBatches(parseQuery(ImportBatchListQuery, request.query)));
+  app.get('/imports/batches', canImport, async (request) => listBatches(parseQuery(ImportBatchListQuery, request.query), request.user!.timezone));
 
   app.get<{ Params: { id: string } }>('/imports/batches/:id', canImport, async (request) => batchDetail(idOf(request.params.id)));
 
@@ -272,7 +272,10 @@ export const importBatchRoutes: FastifyPluginAsync = async (app) => {
   });
 
   /** Undo, listed first: what would be removed and what stays (and why). */
-  app.get<{ Params: { id: string } }>('/imports/batches/:id/undo', canUndo, async (request) => undoPreview(idOf(request.params.id)));
+  app.get<{ Params: { id: string } }>('/imports/batches/:id/undo', canUndo, async (request, reply) => {
+    const id = idOf(request.params.id);
+    return guard(reply, () => undoPreview(id));
+  });
 
   app.post<{ Params: { id: string } }>('/imports/batches/:id/undo', canUndo, async (request, reply) => {
     const id = idOf(request.params.id);

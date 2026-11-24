@@ -6,6 +6,8 @@
 import { Prisma } from '@prisma/client';
 import { IMPORT_RETENTION_DAYS, pageArgs, type ImportBatchListQuery, type ImportCommit } from '@dait-crm/shared';
 import { prisma } from '../db.js';
+import { todayIn } from '../leads/dates.js';
+import { startOfDayIn } from '../routes/dashboard.js';
 import { NotFoundError } from '../validate.js';
 import { ImportError } from './batches.js';
 import { importFileStream, removeBatchFiles, removeImportFile, storedFileExists } from './storage.js';
@@ -31,11 +33,11 @@ export type BatchTilesDm = {
   duplicatesSkippedThisMonth: number;
 };
 
-/** The first day of this month, 00:00 server time (Europe/London). */
-const monthStart = (now: Date) => new Date(now.getFullYear(), now.getMonth(), 1);
+/** The first day of this month, 00:00, in the viewer's time zone (UTC for an unknown one). */
+const monthStart = (timezone: string, now: Date) => startOfDayIn(`${todayIn(timezone, now).slice(0, 8)}01`, timezone);
 
-async function dmTiles(now = new Date()): Promise<BatchTilesDm> {
-  const since = monthStart(now);
+async function dmTiles(timezone: string, now = new Date()): Promise<BatchTilesDm> {
+  const since = monthStart(timezone, now);
   const importedWhere: Prisma.ImportBatchWhereInput = { importedAt: { gte: since }, status: { in: ['Imported', 'Failed'] } };
   const [sum, batches, waiting, researching, duplicates] = await Promise.all([
     prisma.importBatch.aggregate({ where: importedWhere, _sum: { importedCount: true } }),
@@ -55,9 +57,9 @@ const researchOf = (b: { researchTotal: number; researchDone: number }): BatchRo
 
 /**
  * The Data manager table, newest first: `total` = batches matching the filters (the pager), `count` = every batch (the
- * tab's count). `q` searches the batch number and the file names.
+ * tab's count). `q` searches the batch number and the file names. "This month" is the viewer's calendar month.
  */
-export async function listBatches(q: ImportBatchListQuery): Promise<{ items: BatchRow[]; total: number; count: number; tiles: BatchTilesDm }> {
+export async function listBatches(q: ImportBatchListQuery, timezone = 'Europe/London'): Promise<{ items: BatchRow[]; total: number; count: number; tiles: BatchTilesDm }> {
   const where: Prisma.ImportBatchWhereInput = {};
   if (q.language) where.language = q.language;
   if (q.status) where.status = q.status;
@@ -78,7 +80,7 @@ export async function listBatches(q: ImportBatchListQuery): Promise<{ items: Bat
         _count: { select: { files: true } },
       },
     }),
-    dmTiles(),
+    dmTiles(timezone),
   ]);
   const items = batches.map((b): BatchRow => {
     const imported = IMPORTED.has(b.status) && b.importedAt !== null;
@@ -129,34 +131,63 @@ export async function originalFile(fileId: number): Promise<{ name: string; size
   return { name: file.name, size: file.size, stream: importFileStream(file.storagePath) };
 }
 
+/** No `import_commit` job is queued or running for the batch. */
+const NO_JOB = Prisma.sql`NOT EXISTS (
+  SELECT 1 FROM jobs j WHERE j.type = 'import_commit' AND j.status IN ('queued', 'running') AND j.payload->>'batchId' = b.id::text)`;
+
+/** A batch never imported, idle since `before` (nothing changed on it, no file uploaded since). */
+const idleNeverImported = (before: Date) => Prisma.sql`
+  b.status IN ('Uploading', 'Sorting', 'Waiting for review', 'Researching', 'Failed')
+  AND b.imported_at IS NULL
+  AND b.updated_at < ${before}
+  AND ${NO_JOB}
+  AND NOT EXISTS (SELECT 1 FROM import_rows r WHERE r.batch_id = b.id AND (r.lead_id IS NOT NULL OR r.outcome = 'Imported'))
+  AND NOT EXISTS (SELECT 1 FROM import_files f WHERE f.batch_id = b.id AND f.created_at >= ${before})`;
+
+/** A batch whose originals may go: Imported or Undone (or Failed with no job left), untouched since `before`. */
+const doneSince = (before: Date) => Prisma.sql`
+  (b.status IN ('Imported', 'Undone') OR (b.status = 'Failed' AND ${NO_JOB}))
+  AND b.updated_at < ${before}`;
+
 /**
- * Retention (hourly, with the job cleanup): a batch never imported (not Imported or Undone, nothing imported, not
- * Importing) left untouched for 90 days is deleted with its files and rows; an original file older than 90 days is
- * removed from disk and marked deleted (the batch and its rows stay as the record).
+ * Retention (hourly, with the job cleanup), each batch re-checked under its row lock just before anything is deleted:
+ * - a batch never imported (not Imported or Undone, nothing imported, no import job) untouched for 90 days is deleted
+ *   with its rows, then its folder;
+ * - the originals of a batch that is done (Imported or Undone, or Failed with no job left) and untouched for 90 days are
+ *   removed from disk and marked deleted (the batch and its rows stay as the record). A batch still in use keeps them.
  */
 export async function pruneImports(now = new Date()): Promise<{ files: number; batches: number }> {
   const before = new Date(now.getTime() - IMPORT_RETENTION_DAYS * DAY_MS);
-  const idle = await prisma.$queryRaw<{ id: number }[]>`
-    SELECT b.id FROM import_batches b
-    WHERE b.status IN ('Uploading', 'Sorting', 'Waiting for review', 'Researching', 'Failed')
-      AND b.imported_at IS NULL
-      AND b.updated_at < ${before}
-      AND NOT EXISTS (SELECT 1 FROM import_rows r WHERE r.batch_id = b.id AND (r.lead_id IS NOT NULL OR r.outcome = 'Imported'))
-      AND NOT EXISTS (SELECT 1 FROM import_files f WHERE f.batch_id = b.id AND f.created_at >= ${before})`;
+  const idle = await prisma.$queryRaw<{ id: number }[]>`SELECT b.id FROM import_batches b WHERE ${idleNeverImported(before)}`;
   let batches = 0;
   for (const { id } of idle) {
+    const deleted = await prisma.$transaction(async (tx) => {
+      const [still] = await tx.$queryRaw<{ id: number }[]>`
+        SELECT b.id FROM import_batches b WHERE b.id = ${id} AND ${idleNeverImported(before)} FOR UPDATE OF b`;
+      if (!still) return false;
+      await tx.importBatch.delete({ where: { id } });
+      return true;
+    });
+    if (!deleted) continue;
+    batches += 1;
     await removeBatchFiles(id);
-    const { count } = await prisma.importBatch.deleteMany({ where: { id, updatedAt: { lt: before }, importedAt: null } });
-    batches += count;
   }
-  const old = await prisma.importFile.findMany({
-    where: { deletedAt: null, createdAt: { lt: before } }, select: { id: true, storagePath: true },
-  });
+  const done = await prisma.$queryRaw<{ id: number }[]>`
+    SELECT DISTINCT b.id FROM import_batches b JOIN import_files f ON f.batch_id = b.id
+    WHERE f.deleted_at IS NULL AND f.created_at < ${before} AND ${doneSince(before)}`;
   let files = 0;
-  for (const f of old) {
-    if (f.storagePath) await removeImportFile(f.storagePath);
-    const { count } = await prisma.importFile.updateMany({ where: { id: f.id, deletedAt: null }, data: { deletedAt: now } });
-    files += count;
+  for (const { id } of done) {
+    files += await prisma.$transaction(async (tx) => {
+      const [still] = await tx.$queryRaw<{ id: number }[]>`
+        SELECT b.id FROM import_batches b WHERE b.id = ${id} AND ${doneSince(before)} FOR UPDATE OF b`;
+      if (!still) return 0;
+      const old = await tx.importFile.findMany({
+        where: { batchId: id, deletedAt: null, createdAt: { lt: before } }, select: { id: true, storagePath: true },
+      });
+      for (const f of old) if (f.storagePath) await removeImportFile(f.storagePath);
+      const { count } = await tx.importFile.updateMany({ where: { id: { in: old.map((f) => f.id) } }, data: { deletedAt: now } });
+      return count;
+    });
   }
   return { files, batches };
 }

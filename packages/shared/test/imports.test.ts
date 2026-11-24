@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import {
   BATCH_NUMBER_RE, IMPORT_FILE_ERRORS, IMPORT_FIELDS, IMPORT_NO_CLAUDE, importNoClaudeText, IMPORT_TABLE_FIELDS, PROBLEM_CODES, importColumnLabel, importFileErrorText, importSource, IMPORT_FAILURES, importFailureText, problemText,
   importActivityText, importEngineText, importResearchNoteText, RESEARCH_CLAUDE_FAILURES, UNDO_REASONS, undoReasonText, importContinueHintText,
+  ROW_STATUSES, ROW_OUTCOMES, importRowStatusText,
   type ImportActivity, type ResearchNotePart, type RowProblem,
 } from '../src/imports';
 import {
@@ -82,6 +83,16 @@ describe('undoReasonText / importContinueHintText', () => {
     expect(importContinueHintText('en')).toContain('Continue');
     expect(importContinueHintText('es')).toContain('Continuar');
     expect(importContinueHintText('fr')).toContain('Reprendre');
+  });
+});
+
+describe('importRowStatusText', () => {
+  test('every row status and outcome reads in en, es and fr, each different; unknown values pass through', () => {
+    const all = [...ROW_STATUSES, ...ROW_OUTCOMES];
+    for (const lang of LANGS) expect(new Set(all.map((v) => importRowStatusText(v, lang))).size).toBe(all.length);
+    expect(importRowStatusText('Missing details', 'es')).toBe('Faltan datos');
+    expect(importRowStatusText('Imported', 'fr')).toBe('Importée');
+    expect(importRowStatusText('Whatever', 'es')).toBe('Whatever');
   });
 });
 
