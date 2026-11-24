@@ -2,7 +2,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import type {
   ColumnQuestion, FileMeta, ImportActivity, ImportBatchCreate, ImportBatchUpdate, ImportColumnAnswer, ImportCommit,
   ImportIncludeAll, ImportRowUpdate, LeadType, ResearchEngine, ResearchNotePart, ResearchValue, ReviewSummary, RowFields,
-  RowFilter, RowProblem, UndoPreview,
+  RowChanges, RowFilter, RowProblem, UndoPreview,
 } from '@dait-crm/shared';
 import { api, apiUpload } from './client';
 
@@ -55,7 +55,8 @@ export type BatchDetail = {
   errorCount?: number;
   /** Why the import job gave up (a Failed batch): `importFailureText`. */
   importError?: string | null;
-  counts?: { imported: number; skipped: number; errors: number };
+  /** `updated` = rows that filled blanks of a lead / company already in the CRM; `conflicts` = values they did not apply. */
+  counts?: { imported: number; updated?: number; skipped: number; errors: number; conflicts?: number };
   files?: BatchFile[];
   /** The batch can be undone now (the screen also needs the user's `undo_imports`). */
   canUndo?: boolean;
@@ -100,12 +101,14 @@ export type ImportRowView = {
   company?: { id: number; number: string; created: boolean } | null;
   error?: string | null;
   outcomeCode?: string | null;
+  /** An updated row: what it filled and the values it did not apply. */
+  changes?: RowChanges;
   research?: Record<string, ResearchValue>;
   researchStatus?: string;
   researchNote?: ResearchNotePart[];
 };
 
-export type BatchTiles = { rows: number; files: number; ready: number; missing: number; already: number; notLead: number };
+export type BatchTiles = { rows: number; files: number; ready: number; missing: number; already: number; notLead: number; update?: number };
 export type OpenQuestion = ColumnQuestion & { fileId: number; fileName: string };
 /** `total` = rows in the filter, `included` = how many of them are ticked (every page): the header tick reads both. */
 export type RowsPage = { items: ImportRowView[]; total: number; included: number; tiles: BatchTiles; question: OpenQuestion | null };
@@ -125,10 +128,13 @@ export type ResearchPage = {
 };
 
 export type NoContactChoice = 'import' | 'leave' | null;
-export type ReviewView = ReviewSummary & { leadType: LeadType; language: string; source: string; allocation: AllocationLine[] };
+/** `updates` is optional on screen (the totals read without it as "no update rows"). */
+export type ReviewView = Omit<ReviewSummary, 'updates'> & Partial<Pick<ReviewSummary, 'updates'>> & {
+  leadType: LeadType; language: string; source: string; allocation: AllocationLine[];
+};
 
 /** The step-2 filters, and the batch detail's tabs (what each row became at import). */
-export type RowsFilter = RowFilter | 'imported' | 'skipped' | 'errors';
+export type RowsFilter = RowFilter | 'imported' | 'updated' | 'skipped' | 'errors';
 
 export type BatchListQuery = { page?: number; pageSize: number; language?: string; status?: string; q?: string };
 /** A Data manager table row; the counts are null before the batch imported. */
@@ -143,6 +149,8 @@ export type BatchListItem = {
   importedCount: number | null;
   newCompanyCount: number | null;
   skippedCount: number | null;
+  /** Rows that updated a lead / company already in the CRM (null before the batch imported). */
+  updatedCount?: number | null;
   /** null = nothing researched, 'done', or how far research is. */
   research: { done: number; total: number } | 'done' | null;
   status: string;

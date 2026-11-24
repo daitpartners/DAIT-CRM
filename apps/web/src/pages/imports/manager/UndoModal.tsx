@@ -89,6 +89,16 @@ export function UndoModal({ batch, onClose }: { batch: { id: number; number: str
           ) : (
             <p className="muted-text">{t('Nobody has worked on these records yet, so nothing is kept.')}</p>
           )}
+          {p.filled && p.filled.revert + p.filled.keep > 0 ? (
+            <p>
+              {p.filled.revert === 1
+                ? t('1 empty field this import filled on existing leads goes back to empty.')
+                : t('{n} empty fields this import filled on existing leads go back to empty.', { n: p.filled.revert })}
+              {p.filled.keep > 0
+                ? ` ${p.filled.keep === 1 ? t('1 was changed since and stays.') : t('{n} were changed since and stay.', { n: p.filled.keep })}`
+                : null}
+            </p>
+          ) : null}
           {p.reverted?.length ? (
             <>
               <p>{t('Research values the import accepted go back on these companies that were already in the CRM:')}</p>

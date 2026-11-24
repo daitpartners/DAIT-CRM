@@ -20,6 +20,35 @@ export function importButtonText(t: TFn, n: number, leadType: string): string {
   return n === 1 ? t('Import 1 prospect') : t('Import {n} prospects', { n });
 }
 
+/** "Update 3 existing leads" when the batch only updates. */
+export function updateButtonText(t: TFn, n: number): string {
+  return n === 1 ? t('Update 1 existing lead') : t('Update {n} existing leads', { n });
+}
+
+/**
+ * Update rows (Lead ID / Company ID) in step 4: "3 rows will update 7 empty fields; 2 values differ (not changed — see
+ * Download rows to fix)", and the rows whose id cannot be used. Empty when there are none.
+ */
+export function updatesText(t: TFn, u: ReviewView['updates']): string[] {
+  if (!u) return [];
+  const out: string[] = [];
+  if (u.rows > 0) {
+    const rows = u.rows === 1
+      ? t('1 row will update {fields}', { fields: u.fields === 1 ? t('1 empty field') : t('{n} empty fields', { n: u.fields }) })
+      : t('{n} rows will update {fields}', { n: u.rows, fields: u.fields === 1 ? t('1 empty field') : t('{n} empty fields', { n: u.fields }) });
+    const differ = u.conflicts === 0 ? t('no values differ from the CRM')
+      : u.conflicts === 1 ? t('1 value differs (not changed — see Download rows to fix)')
+        : t('{n} values differ (not changed — see Download rows to fix)', { n: u.conflicts });
+    out.push(`${rows}; ${differ}.`);
+  }
+  if (u.errors > 0) {
+    out.push(u.errors === 1
+      ? t('1 row has a Lead ID or Company ID that is not in the CRM, not yours or does not match: it is not imported (see Download rows to fix).')
+      : t('{n} rows have a Lead ID or Company ID that is not in the CRM, not yours or does not match: they are not imported (see Download rows to fix).', { n: u.errors }));
+  }
+  return out;
+}
+
 /** "39 already in CRM · 7 not leads · 10 unticked" (parts that are 0 left out). */
 function skippedMeta(t: TFn, s: ReviewView['skipped']): string {
   const parts: string[] = [];
@@ -66,6 +95,8 @@ export function StepReview({ batchId, onBack }: Props) {
   // every total until the choice is made).
   const undecided = r.noContactRows > 0 && choice === null;
   const importCount = r.willImport;
+  const updateCount = r.updates?.rows ?? 0;
+  const updateLines = updatesText(t, r.updates);
 
   function doImport() {
     setError(null);
@@ -88,6 +119,13 @@ export function StepReview({ batchId, onBack }: Props) {
         <Tile label={t('Added to existing companies')} value={r.existingCompanies} />
         <Tile label={t('Skipped')} value={r.skipped.total} meta={skippedMeta(t, r.skipped) || undefined} />
       </div>
+      {updateLines.length > 0 ? (
+        <div className={(r.updates?.conflicts ?? 0) > 0 || (r.updates?.errors ?? 0) > 0 ? 'note warn' : 'note info'} role="status">
+          {updateLines.map((line) => (
+            <p key={line}>{line}</p>
+          ))}
+        </div>
+      ) : null}
       <div className="grid2">
         <div className="card">
           <h2>{t('Before you import')}</h2>
@@ -199,11 +237,11 @@ export function StepReview({ batchId, onBack }: Props) {
         <button
           type="button"
           className="btn primary"
-          disabled={importCount === 0 || undecided || start.isPending}
+          disabled={importCount + updateCount === 0 || undecided || start.isPending}
           aria-describedby={undecided ? hintId : undefined}
           onClick={doImport}
         >
-          {importButtonText(t, importCount, r.leadType)}
+          {importCount === 0 && updateCount > 0 ? updateButtonText(t, updateCount) : importButtonText(t, importCount, r.leadType)}
         </button>
       </div>
       {addingCountries ? (

@@ -475,6 +475,27 @@ describe('step 4: review and import', () => {
     return fetchFn;
   };
 
+  it('update rows (Lead ID / Company ID): how many empty fields they fill, the values that differ, and Update when nothing is new', async () => {
+    const fetchFn = renderReview(review({
+      willImport: 0, newCompanies: 0, existingCompanies: 0, noContactRows: 0, unknownCountries: [],
+      skipped: { total: 0, alreadyInCrm: 0, notLead: 0, unticked: 0, other: 0 }, updates: { rows: 3, fields: 7, conflicts: 2, errors: 1 },
+    }));
+    const note = await screen.findByText('3 rows will update 7 empty fields; 2 values differ (not changed — see Download rows to fix).');
+    expect(note.closest('.note')).toHaveClass('warn');
+    expect(screen.getByText('1 row has a Lead ID or Company ID that is not in the CRM, not yours or does not match: it is not imported (see Download rows to fix).')).toBeInTheDocument();
+    const button = screen.getByRole('button', { name: 'Update 3 existing leads' });
+    expect(button).toBeEnabled();
+    await userEvent.click(button);
+    await waitFor(() => expect(calls(fetchFn, 'POST', '/api/imports/batches/7/import')).toHaveLength(1));
+  });
+
+  it('update rows with nothing different: an info note, one field in the singular', async () => {
+    renderReview(review({ noContactRows: 0, updates: { rows: 1, fields: 1, conflicts: 0, errors: 0 } }));
+    const note = await screen.findByText('1 row will update 1 empty field; no values differ from the CRM.');
+    expect(note.closest('.note')).toHaveClass('info');
+    expect(screen.getByRole('button', { name: 'Import 412 prospects' })).toBeInTheDocument();
+  });
+
   it('both boxes start unticked and neither choice is made; Import stays off (undecided rows not counted) until chosen', async () => {
     const fetchFn = renderReview(review());
     expect(await screen.findByRole('checkbox', { name: 'Accept research values with confidence 80% or higher' })).not.toBeChecked();

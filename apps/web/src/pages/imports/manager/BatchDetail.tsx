@@ -21,7 +21,7 @@ import { RowStatusBadge } from '../RowStatusBadge';
 import { originText } from '../wizard/StepSort';
 import { UndoModal, undoCounts } from './UndoModal';
 
-type Tab = 'imported' | 'skipped' | 'errors' | 'files';
+type Tab = 'imported' | 'updated' | 'skipped' | 'errors' | 'files';
 
 /**
  * One batch (mockup "Batch IMPORT-…" card): Imported / Skipped / Errors / Original files, the downloads, "Open leads in
@@ -67,6 +67,7 @@ function ImportedDetail({ b }: { b: BatchDetail }) {
   const t = useT();
   const [tab, setTab] = useState<Tab>('imported');
   const counts = b.counts ?? { imported: 0, skipped: 0, errors: 0 };
+  const updated = counts.updated ?? 0;
   return (
     <Tabs
       label={t('Batch rows')}
@@ -74,6 +75,7 @@ function ImportedDetail({ b }: { b: BatchDetail }) {
       onChange={(next) => setTab(next as Tab)}
       tabs={[
         { id: 'imported', label: t('Imported|rows'), count: counts.imported },
+        ...(updated > 0 ? [{ id: 'updated', label: t('Updated|rows'), count: updated }] : []),
         { id: 'skipped', label: t('Skipped|rows'), count: counts.skipped },
         { id: 'errors', label: t('Errors'), count: counts.errors },
         { id: 'files', label: t('Original files') },
@@ -143,6 +145,14 @@ function BatchActions({ b }: { b: BatchDetail }) {
         </div>
       ) : null}
       {failed || b.status === 'Importing' ? <p className="muted-text">{importContinueHintText(lang)}</p> : null}
+      {b.counts?.updated ? (
+        <div className={b.counts.conflicts ? 'note warn' : 'note info'}>
+          {b.counts.updated === 1 ? t('1 row updated a lead already in the CRM (empty fields only).') : t('{n} rows updated leads already in the CRM (empty fields only).', { n: b.counts.updated })}{' '}
+          {b.counts.conflicts
+            ? t('Conflicts: {n} values differ from the CRM and were not changed (see Download rows to fix).', { n: b.counts.conflicts })
+            : t('Conflicts: none.')}
+        </div>
+      ) : null}
       {canUndo ? (
         <div className="note info">
           {t("Undo removes leads and companies this batch created that nobody has worked on yet (no emails, notes, tasks or quotations). Anything already worked on stays, and you're shown a list first.")}
@@ -164,6 +174,15 @@ function UndoneNote({ b, when }: { b: BatchDetail; when: string }) {
       {u && u.keep.length > 0 ? ` ${u.keep.length === 1 ? t('1 record was kept because someone worked on it.') : t('{n} records were kept because someone worked on them.', { n: u.keep.length })}` : null}
     </div>
   );
+}
+
+/** An updated row's values that were not applied ("Phone: CRM has …, file has …"), in plain words. */
+export function conflictsText(r: ImportRowView, lang: Lang): string {
+  return (r.changes?.conflicts ?? [])
+    .map((c) => problemText(c.unknown
+      ? { code: 'industry_unknown', field: c.field, level: 'questionable', value: c.file }
+      : { code: 'update_conflict', field: c.field, level: 'questionable', crm: c.crm, value: c.file }, lang))
+    .join('; ');
 }
 
 /** "What to fix" for a skipped row: its problems, then why it was left out (once per code), in plain words. */
@@ -192,7 +211,7 @@ function WebsiteCell({ value }: { value: string }) {
   );
 }
 
-const ROWS_FILTER = { imported: 'imported', skipped: 'skipped', errors: 'errors' } as const;
+const ROWS_FILTER = { imported: 'imported', updated: 'updated', skipped: 'skipped', errors: 'errors' } as const;
 
 function RowsTable({ batchId, tab, poll }: { batchId: number; tab: Exclude<Tab, 'files'>; poll: boolean }) {
   const t = useT();
@@ -203,6 +222,8 @@ function RowsTable({ batchId, tab, poll }: { batchId: number; tab: Exclude<Tab, 
   const extra =
     tab === 'imported'
       ? [importColumnLabel('lead', lang), importColumnLabel('company', lang)]
+      : tab === 'updated'
+        ? [importColumnLabel('lead', lang), importColumnLabel('company', lang), t('Not changed (differs from the CRM)')]
       : tab === 'skipped'
         ? [importColumnLabel('whatToFix', lang)]
         : [t('Why it was not imported')];
@@ -246,7 +267,29 @@ function RowsTable({ batchId, tab, poll }: { batchId: number; tab: Exclude<Tab, 
                   <td>
                     <RowStatusBadge row={r} />
                   </td>
-                  {tab === 'imported' ? (
+                  {tab === 'updated' ? (
+                    <>
+                      <td>
+                        {r.lead ? (
+                          <Link className="id-link" to={`/leads/${r.lead.id}`}>
+                            {r.lead.number}
+                          </Link>
+                        ) : (
+                          <span className="dim">—</span>
+                        )}
+                      </td>
+                      <td>
+                        {r.company ? (
+                          <Link className="id-link" to={`/companies/${r.company.id}`}>
+                            {r.company.number}
+                          </Link>
+                        ) : (
+                          <span className="dim">—</span>
+                        )}
+                      </td>
+                      <td>{conflictsText(r, lang) || <span className="dim">—</span>}</td>
+                    </>
+                  ) : tab === 'imported' ? (
                     <>
                       <td>
                         {r.lead ? (

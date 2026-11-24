@@ -55,8 +55,11 @@ export function companyNumberOf(v: string | undefined): string | null {
   return m ? `CO-${m[1]!.padStart(4, '0')}` : null;
 }
 
-/** A row that carries a Lead ID or Company ID (in any form): it is an update row, or an error, never a new lead. */
-export const isUpdateRow = (f: RowFields): boolean => has(f.leadId) || has(f.companyId);
+/**
+ * A row that carries a CRM Lead ID (LD-n) or Company ID (CO-n): it is an update row, or an error, never a new lead. A
+ * cell in another form (another system's "Company ID" such as 4567) is not one of the CRM's ids and is left out.
+ */
+export const isUpdateRow = (f: RowFields): boolean => leadNumberOf(f.leadId) !== null || companyNumberOf(f.companyId) !== null;
 
 export type UpdateTarget =
   | { kind: 'update'; leadId: number | null; leadNumber: string | null; companyId: number; companyNumber: string }
@@ -86,8 +89,8 @@ export async function resolveTargets(db: Db, user: AuthUser | null, list: readon
   const companyBy = new Map(companies.map((c) => [c.number, c]));
   return list.map((f): UpdateTarget | null => {
     if (!isUpdateRow(f)) return null;
-    const leadCell = clean(f.leadId);
-    const companyCell = clean(f.companyId);
+    const leadCell = leadNumberOf(f.leadId) ? clean(f.leadId) : null;
+    const companyCell = companyNumberOf(f.companyId) ? clean(f.companyId) : null;
     if (leadCell) {
       const lead = leadBy.get(leadNumberOf(leadCell) ?? '');
       if (!lead) return { kind: 'error', code: 'lead_not_found', value: leadCell };

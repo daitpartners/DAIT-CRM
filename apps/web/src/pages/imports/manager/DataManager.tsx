@@ -178,7 +178,10 @@ function BatchRow({ b, selected, onOpen }: { b: BatchListItem; selected: boolean
         {b.files.more > 0 ? <span className="cell-sub">{t('+ {n} more', { n: b.files.more })}</span> : null}
       </td>
       <td>{b.rowCount}</td>
-      <td>{num(b.importedCount)}</td>
+      <td>
+        {num(b.importedCount)}
+        {b.updatedCount ? <span className="cell-sub">{t('+ {n} updated', { n: b.updatedCount })}</span> : null}
+      </td>
       <td>{num(b.newCompanyCount)}</td>
       <td>{num(b.skippedCount)}</td>
       <td>{b.research === null ? dash : b.research === 'done' ? t('Done') : `${b.research.done} / ${b.research.total}`}</td>

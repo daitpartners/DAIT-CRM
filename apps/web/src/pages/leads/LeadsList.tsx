@@ -26,6 +26,7 @@ import { usePageClamp, useUrlListState } from '../../hooks/useUrlListState';
 import { errorText, leadStatusText, leadTypeText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
 import { LeadsBulkBar } from './LeadsBulkBar';
+import { DownloadLeadsButton } from './DownloadLeadsButton';
 import { useMailboxes } from '../../api/mailboxes';
 
 /** Rows per page offered by the pager (prototype SIZES); 50 by default. */
@@ -247,6 +248,7 @@ export function LeadsList() {
           <span className="sr">{t('Search leads')}</span>
           <input type="search" value={search.text} onChange={(e) => search.setText(e.target.value)} placeholder={t('Search company, contact, email…')} />
         </label>
+        <DownloadLeadsButton query={query} />
         {me.can('import_leads') ? (
           <Link className="btn" to="/leads/import">
             {t('Import leads')}

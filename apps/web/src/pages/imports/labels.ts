@@ -14,6 +14,8 @@ export function rowStatusBadge(status: string): string {
       return 'b-warn';
     case 'Already in CRM':
       return 'b-info';
+    case 'Update':
+      return 'b-purple';
     default:
       return 'b-grey';
   }

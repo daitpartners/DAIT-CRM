@@ -117,6 +117,15 @@ export function leadListPath(query: LeadListQuery): string {
   return `/api/leads?${params.toString()}`;
 }
 
+/**
+ * "Download all leads": the leads matching the list's current tab, filters and search, as .xlsx (no paging: every
+ * matching lead, at most LEADS_EXPORT_MAX).
+ */
+export function leadsExportPath(query: LeadListQuery): string {
+  const { page: _page, pageSize: _size, ...rest } = query;
+  return leadListPath(rest as LeadListQuery).replace('/api/leads?', '/api/leads/export.xlsx?');
+}
+
 export function useLeads(query: LeadListQuery, enabled = true) {
   return useQuery({
     queryKey: keys.leads(query),

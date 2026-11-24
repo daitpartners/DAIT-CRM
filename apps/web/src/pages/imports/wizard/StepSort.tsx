@@ -102,6 +102,7 @@ export function StepSort({ batchId, batchStatus, onBack, onNext }: Props) {
             <option value="missing">{t('Missing details ({n})', { n: count(tiles?.missing) })}</option>
             <option value="already">{t('Already in CRM ({n})', { n: count(tiles?.already) })}</option>
             <option value="notlead">{t('Not a lead ({n})', { n: count(tiles?.notLead) })}</option>
+            {tiles?.update ? <option value="update">{t('Update existing leads ({n})', { n: tiles.update })}</option> : null}
           </select>
         </div>
         <ScrollBox sticky={2}>
@@ -139,6 +140,13 @@ export function StepSort({ batchId, batchStatus, onBack, onNext }: Props) {
             ? t('1 row goes to research. Rows already in the CRM are skipped unless you tick them.')
             : t('{n} rows go to research. Rows already in the CRM are skipped unless you tick them.', { n: count(tiles?.missing) })}
         </div>
+        {tiles?.update ? (
+          <div className="foot">
+            {tiles.update === 1
+              ? t('1 row has a Lead ID or Company ID: it fills only the empty fields of that record, never changes a value and is not researched.')
+              : t('{n} rows have a Lead ID or Company ID: they fill only the empty fields of those records, never change a value and are not researched.', { n: tiles.update })}
+          </div>
+        ) : null}
         {data && data.total > IMPORT_PAGE_SIZE ? (
           <div className="foot">
             <Pager page={page} pageSize={IMPORT_PAGE_SIZE} total={data.total} onPage={setPage} />

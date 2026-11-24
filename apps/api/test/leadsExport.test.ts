@@ -42,7 +42,7 @@ const post = (url: string, payload: unknown, c = cookie) => app.inject({ method:
 
 async function sheetOf(buf: Buffer | string): Promise<ExcelJS.Worksheet> {
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(typeof buf === 'string' ? Buffer.from(buf, 'binary') : buf);
+  await wb.xlsx.load((typeof buf === 'string' ? Buffer.from(buf, 'binary') : buf) as unknown as ExcelJS.Buffer);
   return wb.worksheets[0]!;
 }
 const colOf = (key: (typeof EXPORT_COLUMNS)[number]) => EXPORT_COLUMNS.indexOf(key) + 1;
@@ -323,8 +323,10 @@ describe('Import leads · update rows', () => {
     expect(hidden).toEqual({ kind: 'error', code: 'lead_not_found', value: w.hidden.number });
     expect(companyOnly).toMatchObject({ kind: 'error', code: 'company_not_found' }); // a Sales Representative sees only theirs
     expect(unknownCo).toMatchObject({ kind: 'error', code: 'company_not_found' });
-    const [asAdmin] = await resolveTargets(prisma, authOf(admin), [{ companyId: w.a.number }]);
+    const [asAdmin, foreign] = await resolveTargets(prisma, authOf(admin), [{ companyId: w.a.number }, { leadId: '4567', companyId: 'ACME-9' }]);
     expect(asAdmin).toMatchObject({ kind: 'update', leadId: null, companyId: w.a.id });
+    // Another system's ids are not the CRM's: the row is an ordinary new row.
+    expect(foreign).toBeNull();
   });
 
   it('planUpdate: verified empty field skipped; same value ignored; lead website wins over the company\'s', async () => {
