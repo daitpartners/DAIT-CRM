@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
-import { IMPORT_TABLE_FIELDS, importColumnLabel, importRowStatusText, type ImportField, type RowFilter } from '@dait-crm/shared';
+import { IMPORT_TABLE_FIELDS, importColumnLabel, type ImportField, type RowFilter } from '@dait-crm/shared';
 import { ApiError } from '../../../api/client';
 import {
   IMPORT_PAGE_SIZE, useAnswerColumn, useBatchRows, useIncludeAll, useStartResearch, useUpdateRow, type ImportRowView, type OpenQuestion,
@@ -9,7 +9,8 @@ import { ScrollBox } from '../../../components/Table';
 import { Tile } from '../../../components/Tile';
 import { useToast } from '../../../components/Toast';
 import { useLang, useT, type TFn } from '../../../i18n/useT';
-import { FIELD_OPTIONS, NODE, fieldOptionLabel, importErrorText, rowStatusBadge, withNodes } from '../labels';
+import { FIELD_OPTIONS, NODE, fieldOptionLabel, importErrorText, withNodes } from '../labels';
+import { RowStatusBadge } from '../RowStatusBadge';
 
 type Props = { batchId: number; batchStatus: string; onBack: () => void; onNext: () => void };
 
@@ -214,9 +215,7 @@ export function originText(t: TFn, o: ImportRowView['origin']): string {
 
 function SortRow({ row: r, onTick }: { row: ImportRowView; onTick: (include: boolean) => void }) {
   const t = useT();
-  const lang = useLang();
   const notLead = r.status === 'Not a lead';
-  const status = r.status === 'Already in CRM' && r.matched ? `${importRowStatusText(r.status, lang)} · ${r.matched.number}` : importRowStatusText(r.status, lang);
   return (
     <tr>
       <td className="ck">
@@ -227,7 +226,7 @@ function SortRow({ row: r, onTick }: { row: ImportRowView; onTick: (include: boo
       ))}
       <td className="muted">{originText(t, r.origin)}</td>
       <td>
-        <span className={`badge ${rowStatusBadge(r.status)}`}>{status}</span>
+        <RowStatusBadge row={r} />
       </td>
     </tr>
   );

@@ -150,3 +150,6 @@ Small issues found in reviews and not fixed yet.
   with the keyboard — both as the prototype.
 - Check the first live Outlook sync: compare times and all-day events with Outlook for a couple of users.
 - Database tidy-up: the unused column `claude_monthly_cap_usd` can be dropped in a later migration.
+
+**Import leads (release 5):**
+- Row errors from field validation are stored as English text; store a code + field name to translate them.

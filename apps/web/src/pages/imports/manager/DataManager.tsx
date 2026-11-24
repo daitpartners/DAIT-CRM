@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { BATCH_STATUSES, OUTREACH_LANGUAGES, type OutreachLanguage } from '@dait-crm/shared';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useBatches, type BatchListItem } from '../../../api/imports';
-import { useCurrentUser } from '../../../api/useCurrentUser';
 import { Icons } from '../../../components/Icons';
 import { Pager } from '../../../components/Pager';
 import { ScrollBox } from '../../../components/Table';
@@ -15,7 +14,6 @@ import { IN_WIZARD, batchStatusBadge, batchStatusText } from '../labels';
 import { BatchDetailCard } from './BatchDetail';
 
 const PAGE_SIZE = 25;
-const LOCALES = { en: 'en-GB', es: 'es-ES', fr: 'fr-FR' } as const;
 
 /** Where a batch opens: the wizard (at its step) until it is imported, otherwise its detail here. */
 export const batchHref = (b: { id: number; status: string }) =>
@@ -161,13 +159,10 @@ export function DataManager() {
 
 function BatchRow({ b, selected, onOpen }: { b: BatchListItem; selected: boolean; onOpen: () => void }) {
   const t = useT();
-  const { dateTime } = useFormatDate();
-  const { language, timezone } = useCurrentUser();
+  const { dateTime, dayMonth } = useFormatDate();
   const dash = <span className="dim">—</span>;
   const num = (n: number | null) => (n === null ? dash : n);
-  const undoneDay = b.undoneAt
-    ? new Intl.DateTimeFormat(LOCALES[language] ?? 'en-GB', { timeZone: timezone, day: 'numeric', month: 'short' }).format(new Date(b.undoneAt))
-    : undefined;
+  const undoneDay = b.undoneAt ? dayMonth(b.undoneAt) : undefined;
   return (
     <tr className={selected ? 'sel' : undefined}>
       <td>

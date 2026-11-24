@@ -1,7 +1,8 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { undoReasonText } from '@dait-crm/shared';
 import { ApiError } from '../../../api/client';
-import { useUndo, useUndoPreview } from '../../../api/imports';
+import { importKeys, useUndo, useUndoPreview } from '../../../api/imports';
 import { Modal } from '../../../components/Modal';
 import { useToast } from '../../../components/Toast';
 import { useLang, useT, type TFn } from '../../../i18n/useT';
@@ -30,6 +31,7 @@ export function UndoModal({ batch, onClose }: { batch: { id: number; number: str
   const t = useT();
   const lang = useLang();
   const toast = useToast();
+  const qc = useQueryClient();
   const preview = useUndoPreview(batch.id);
   const undo = useUndo(batch.id);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +45,13 @@ export function UndoModal({ batch, onClose }: { batch: { id: number; number: str
         toast(t('Import undone'));
         onClose();
       },
-      onError: (e) => setError(undoErrorText(t, e instanceof ApiError ? e.code : '')),
+      onError: (e) => {
+        const code = e instanceof ApiError ? e.code : '';
+        setError(undoErrorText(t, code));
+        // A concurrent edit: show what Undo would do now. The batch moved on: refresh it (its Undo button goes).
+        if (code === 'try_again') void preview.refetch();
+        if (code === 'batch_locked') void qc.invalidateQueries({ queryKey: importKeys.batch(batch.id) });
+      },
     });
   }
 

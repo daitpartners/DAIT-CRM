@@ -105,6 +105,12 @@ function fakeImports(page: Page) {
         allocation: [{ name: 'English market (US and Canada)', people: ['Deepak', 'Lakshita'] }],
       });
     }
+    if (path === '/api/imports/batches/41/rows-to-fix.xlsx') {
+      return route.fulfill({
+        status: 200, body: 'xlsx',
+        headers: { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="IMPORT-2026-11-24-rows-to-fix.xlsx"' },
+      });
+    }
     if (path === '/api/imports/batches/41/import') {
       status = 'Importing';
       return json(route, { id: 41, status: 'Importing' }, 202);
@@ -179,6 +185,10 @@ test('import wizard: no defaults on step 1, upload, sort, research, review and I
   await page.getByRole('radio', { name: 'Import them' }).check();
   await expect(page.getByRole('button', { name: 'Import 2 prospects' })).toBeEnabled();
   await page.getByRole('radio', { name: 'Leave them out' }).check();
+  // Rows to fix downloads under the server's file name.
+  const fix = page.waitForEvent('download');
+  await page.getByRole('link', { name: 'Download rows to fix (Excel)' }).click();
+  expect((await fix).suggestedFilename()).toBe('IMPORT-2026-11-24-rows-to-fix.xlsx');
   await page.getByRole('button', { name: 'Import 1 prospect' }).click();
   await expect(page).toHaveURL(/\/leads\/import\/manager\?batch=41$/);
   expect(fake.sent.find((s) => s.path === '/api/imports/batches/41/import')!.body).toEqual({ acceptHigh: false, noContactRows: 'leave', notify: false });

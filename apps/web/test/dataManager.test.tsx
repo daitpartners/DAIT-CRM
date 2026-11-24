@@ -192,7 +192,7 @@ describe('Data manager list', () => {
     expect(tabs).toEqual(['Imported 231', 'Skipped 257', 'Errors 1', 'Original files']);
     expect(within(detailCard()).getByRole('link', { name: 'Open leads in Leads list' })).toHaveAttribute('href', '/leads?q=IMPORT-2026-11-22');
     expect(within(detailCard()).getByRole('link', { name: 'Download rows (CSV)' })).toHaveAttribute('href', '/api/imports/batches/8/rows.csv');
-    expect(within(detailCard()).getByRole('link', { name: 'Download rows to fix (Excel)' })).toHaveAttribute('href', '/api/imports/batches/8/rows-to-fix.xlsx');
+    expect(within(detailCard()).getByRole('link', { name: 'Download rows to fix (Excel)' })).toHaveAttribute('href', '/api/imports/batches/8/rows-to-fix.xlsx?acceptHigh=0');
   });
 });
 
@@ -222,9 +222,32 @@ describe('batch detail tabs', () => {
     await userEvent.click(within(card).getByRole('tab', { name: /Skipped/ }));
     expect(await within(card).findByRole('columnheader', { name: 'What to fix' })).toBeInTheDocument();
     expect(within(card).getByText('Add an email; Already in the CRM as CO-1042')).toBeInTheDocument();
+    // The step-2 Status column, through the same badge as step 2.
+    expect(within(card).getByRole('columnheader', { name: 'Status' })).toBeInTheDocument();
+    expect(within(card).getByText('Already in CRM · CO-1042')).toHaveClass('badge', 'b-info');
     await userEvent.click(within(card).getByRole('tab', { name: /Errors/ }));
     expect(await within(card).findByText('The lead status is not available')).toBeInTheDocument();
     expect(within(card).queryByText('invalid_status')).toBeNull();
+  });
+
+  it('each tab starts on page 1: page 3 of Imported, then Errors shows its row', async () => {
+    const fetchFn = stubFetch((url) => {
+      if (!url.startsWith('/api/imports/batches/8/rows?')) return undefined;
+      const q = new URLSearchParams(url.split('?')[1]);
+      if (q.get('filter') === 'imported') return Response.json({ items: [imported], total: 231, included: 0, tiles: {}, question: null });
+      // Errors has one row: only on page 1.
+      const items = q.get('page') === '1' ? [failedRow] : [];
+      return Response.json({ items, total: 1, included: 0, tiles: {}, question: null });
+    });
+    renderPage('/leads/import/manager?batch=8');
+    const card = await screen.findByRole('region', { name: 'Batch IMPORT-2026-11-22' });
+    await within(card).findByText('Showing 1–100 of 231');
+    await userEvent.click(within(card).getByRole('button', { name: 'Next' }));
+    await userEvent.click(within(card).getByRole('button', { name: 'Next' }));
+    expect(await within(card).findByText('Showing 201–231 of 231')).toBeInTheDocument();
+    await userEvent.click(within(card).getByRole('tab', { name: /Errors/ }));
+    expect(await within(card).findByText('The lead status is not available')).toBeInTheDocument();
+    expect(calls(fetchFn, 'GET', /\/rows\?.*filter=errors/).map(([u]) => new URLSearchParams(u.split('?')[1]).get('page'))).toEqual(['1']);
   });
 
   it('Original files: a download link through the API, or "Deleted after 90 days"; a 410 on download shows it too', async () => {
@@ -280,6 +303,8 @@ describe('Undo', () => {
     await waitFor(() => expect(calls(fetchFn, 'POST', '/api/imports/batches/8/undo')).toHaveLength(1));
     expect(await screen.findByText('Import undone')).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).toBeNull();
+    // The preview of a now Undone batch is not asked for again.
+    expect(calls(fetchFn, 'GET', '/api/imports/batches/8/undo')).toHaveLength(1);
   });
 
   it('Cancel and Escape close it without undoing', async () => {
@@ -295,19 +320,29 @@ describe('Undo', () => {
     expect(calls(fetchFn, 'POST', '/api/imports/batches/8/undo')).toHaveLength(0);
   });
 
-  it('a 409 try_again keeps the dialog open with the reason; batch_locked says it can no longer be undone', async () => {
+  it('a 409 try_again keeps the dialog open and asks for the preview again; batch_locked refreshes the batch (Undo goes)', async () => {
     let answer = 'try_again';
-    stubFetch((url, init) =>
-      url === '/api/imports/batches/8/undo' && init?.method === 'POST' ? Response.json({ error: answer }, { status: 409 }) : undefined);
+    let locked = false;
+    const fetchFn = stubFetch((url, init) => {
+      if (url === '/api/imports/batches/8/undo' && init?.method === 'POST') {
+        if (answer === 'batch_locked') locked = true;
+        return Response.json({ error: answer }, { status: 409 });
+      }
+      if (url === '/api/imports/batches/8') return Response.json(detail({ canUndo: !locked }));
+      return undefined;
+    });
     renderPage('/leads/import/manager?batch=8', admin);
     await userEvent.click(await screen.findByRole('button', { name: 'Undo this import…' }));
     const dialog = screen.getByRole('dialog');
     await within(dialog).findByText('Will be removed: 2 leads, 1 contact, 2 companies.');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Undo import' }));
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('Nothing was undone. Try again.');
+    await waitFor(() => expect(calls(fetchFn, 'GET', '/api/imports/batches/8/undo')).toHaveLength(2));
     answer = 'batch_locked';
     await userEvent.click(within(dialog).getByRole('button', { name: 'Undo import' }));
     await waitFor(() => expect(within(dialog).getByRole('alert')).toHaveTextContent('This import can no longer be undone.'));
+    // The batch is asked for again: it can no longer be undone, so its Undo button goes (the dialog stays, with the reason).
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Undo this import…' })).toBeNull());
   });
 
   it('a preview refused with batch_locked shows why and offers no Undo', async () => {

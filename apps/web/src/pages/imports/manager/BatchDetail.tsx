@@ -6,7 +6,7 @@ import {
 import { Link } from 'react-router-dom';
 import { ApiError } from '../../../api/client';
 import {
-  IMPORT_PAGE_SIZE, originalFileUrl, rowsCsvUrl, useBatch, useBatchRows, useContinueImport,
+  IMPORT_PAGE_SIZE, originalFileUrl, rowsCsvUrl, rowsToFixUrl, useBatch, useBatchRows, useContinueImport,
   type BatchDetail, type BatchFile, type ImportRowView,
 } from '../../../api/imports';
 import { useCurrentUser } from '../../../api/useCurrentUser';
@@ -17,6 +17,7 @@ import { useToast } from '../../../components/Toast';
 import { useFormatDate } from '../../../hooks/useFormatDate';
 import { useLang, useT } from '../../../i18n/useT';
 import { IN_WIZARD, fileBadge, importErrorText, sizeText } from '../labels';
+import { RowStatusBadge } from '../RowStatusBadge';
 import { originText } from '../wizard/StepSort';
 import { UndoModal, undoCounts } from './UndoModal';
 
@@ -79,7 +80,12 @@ function ImportedDetail({ b }: { b: BatchDetail }) {
       ]}
     >
       <BatchActions b={b} />
-      {tab === 'files' ? <FilesTable files={b.files ?? []} /> : <RowsTable batchId={b.id} tab={tab} />}
+      {tab === 'files' ? (
+        <FilesTable files={b.files ?? []} />
+      ) : (
+        // Keyed by tab: each tab starts on its own page 1.
+        <RowsTable key={tab} batchId={b.id} tab={tab} poll={b.status === 'Importing'} />
+      )}
     </Tabs>
   );
 }
@@ -119,7 +125,7 @@ function BatchActions({ b }: { b: BatchDetail }) {
         <a className="btn sm" href={rowsCsvUrl(b.id)}>
           {t('Download rows (CSV)')}
         </a>
-        <a className="btn sm" href={`/api/imports/batches/${b.id}/rows-to-fix.xlsx`}>
+        <a className="btn sm" href={rowsToFixUrl(b.id, false, null)}>
           {t('Download rows to fix (Excel)')}
         </a>
         <Link className="btn sm" to={`/leads?q=${encodeURIComponent(b.number)}`}>
@@ -188,11 +194,11 @@ function WebsiteCell({ value }: { value: string }) {
 
 const ROWS_FILTER = { imported: 'imported', skipped: 'skipped', errors: 'errors' } as const;
 
-function RowsTable({ batchId, tab }: { batchId: number; tab: Exclude<Tab, 'files'> }) {
+function RowsTable({ batchId, tab, poll }: { batchId: number; tab: Exclude<Tab, 'files'>; poll: boolean }) {
   const t = useT();
   const lang = useLang();
   const [page, setPage] = useState(1);
-  const { data, isPending } = useBatchRows(batchId, ROWS_FILTER[tab], page);
+  const { data, isPending } = useBatchRows(batchId, ROWS_FILTER[tab], page, poll);
   const items = data?.items ?? [];
   const extra =
     tab === 'imported'
@@ -200,7 +206,7 @@ function RowsTable({ batchId, tab }: { batchId: number; tab: Exclude<Tab, 'files
       : tab === 'skipped'
         ? [importColumnLabel('whatToFix', lang)]
         : [t('Why it was not imported')];
-  const columns = IMPORT_TABLE_FIELDS.length + 1 + extra.length;
+  const columns = IMPORT_TABLE_FIELDS.length + 2 + extra.length;
   return (
     <>
       <ScrollBox sticky={1}>
@@ -213,6 +219,7 @@ function RowsTable({ batchId, tab }: { batchId: number; tab: Exclude<Tab, 'files
                 </th>
               ))}
               <th scope="col">{importColumnLabel('from', lang)}</th>
+              <th scope="col">{importColumnLabel('status', lang)}</th>
               {extra.map((h) => (
                 <th key={h} scope="col">
                   {h}
@@ -236,6 +243,9 @@ function RowsTable({ batchId, tab }: { batchId: number; tab: Exclude<Tab, 'files
                     </td>
                   ))}
                   <td className="muted">{originText(t, r.origin)}</td>
+                  <td>
+                    <RowStatusBadge row={r} />
+                  </td>
                   {tab === 'imported' ? (
                     <>
                       <td>

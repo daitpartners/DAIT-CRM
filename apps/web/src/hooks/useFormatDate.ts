@@ -11,7 +11,8 @@ const ymdIn = (d: Date, timeZone: string) => new Intl.DateTimeFormat('en-CA', { 
  * user's time zone), `day` for a calendar date `YYYY-MM-DD` (shown as is, no time-zone shift), `dateTime` for a
  * timestamp with its time (24-hour), `relative` for a timestamp as "Today, 09:05" / "Yesterday, 17:00" / the
  * date and time (prototype `rel`), `short` for a timestamp as "18 Nov 11:14" (day, short month, time; no year, no
- * comma: the prototype's thread history).
+ * comma: the prototype's thread history), `dayMonth` for a timestamp as "19 Nov" (day and short month in the user's
+ * zone: the Data manager's "Undone 19 Nov").
  */
 export function useFormatDate() {
   const t = useT();
@@ -45,5 +46,13 @@ export function useFormatDate() {
     },
     [language, timezone],
   );
-  return { date, day, dateTime, relative, short };
+  const dayMonth = useCallback(
+    (iso: string) => {
+      const parts = new Intl.DateTimeFormat(language, { timeZone: timezone, day: 'numeric', month: 'short' }).formatToParts(new Date(iso));
+      const part = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+      return `${part('day')} ${part('month')}`;
+    },
+    [language, timezone],
+  );
+  return { date, day, dateTime, relative, short, dayMonth };
 }

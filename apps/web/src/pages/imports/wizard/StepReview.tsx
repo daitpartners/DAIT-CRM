@@ -192,7 +192,7 @@ export function StepReview({ batchId, onBack }: Props) {
         <button type="button" className="btn" onClick={onBack}>
           {t('← Back')}
         </button>
-        <a className="btn" href={rowsToFixUrl(batchId, acceptHigh, choice)} download>
+        <a className="btn" href={rowsToFixUrl(batchId, acceptHigh, choice)}>
           {t('Download rows to fix (Excel)')}
         </a>
         <span className="grow" />

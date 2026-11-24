@@ -211,6 +211,8 @@ export function useUndo(id: number) {
   return useMutation({
     mutationFn: () => api<UndoPreview>(`/api/imports/batches/${id}/undo`, { method: 'POST' }),
     onSuccess: () => {
+      // The preview is for a batch that is now Undone: dropped, never asked again (it would answer 409).
+      qc.removeQueries({ queryKey: importKeys.undo(id) });
       void qc.invalidateQueries({ queryKey: importKeys.all });
       for (const key of [['leads'], ['companies'], ['contacts'], ['tasks']]) void qc.invalidateQueries({ queryKey: key });
     },
@@ -273,11 +275,13 @@ export function useSortBatch() {
   });
 }
 
-export function useBatchRows(batchId: number, filter: RowsFilter, page: number) {
+/** One page of a batch's rows; `poll` refreshes it every 3 s (the Data manager while the batch is Importing). */
+export function useBatchRows(batchId: number, filter: RowsFilter, page: number, poll = false) {
   return useQuery({
     queryKey: importKeys.rows(batchId, filter, page),
     queryFn: () => api<RowsPage>(`/api/imports/batches/${batchId}/rows?${qs({ filter, page, pageSize: IMPORT_PAGE_SIZE })}`),
     placeholderData: keepPreviousData,
+    refetchInterval: poll ? 3000 : false,
   });
 }
 
