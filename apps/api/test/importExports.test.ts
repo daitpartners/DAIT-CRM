@@ -128,15 +128,22 @@ describe('rows to fix', () => {
     expect(rows[3]!.problems.map((p) => p.code)).toEqual(['email_missing']);
   });
 
-  it('blank and total Not a lead rows (no company, no contact value) stay out; one with a value stays in', async () => {
+  it('header, total and blank lines (Not a lead) never appear; unticked Already in CRM and other skipped rows do', async () => {
+    const crm = await makeCompany({ name: 'Old Co', country: 'Spain' });
     const batch = await batchWith([
       { $status: 'Not a lead', $include: false },
-      { notes: 'Total: 45', $status: 'Not a lead', $include: false },
+      { companyName: 'TOTAL VISITORS DAY 2', $status: 'Not a lead', $include: false },
       { companyName: 'Company', email: 'Email', $status: 'Not a lead', $include: false },
+      { companyName: 'Old Co', country: 'Spain', email: 'a@old.test', $status: 'Already in CRM', $include: false },
+      { companyName: 'Unticked Co', country: 'Spain', email: 'u@u.test', $include: false },
       { companyName: 'Hotel Sol', country: 'Spain', email: 'ana@hotelsol.es' },
     ]);
+    await prisma.importRow.updateMany({ where: { batchId: batch.id, status: 'Already in CRM' }, data: { matchedCompanyId: crm.id } });
     const rows = await fixRows(batch.id, { acceptHigh: false, noContactRows: 'import' });
-    expect(rows.map((r) => [r.fields.companyName, r.problems.map((p) => p.code)])).toEqual([['Company', ['not_a_lead']]]);
+    expect(rows.map((r) => [r.fields.companyName, r.problems.map((p) => p.code)])).toEqual([
+      ['Old Co', ['already_in_crm']], ['Unticked Co', ['unticked']],
+    ]);
+    expect(rows[0]!.problems[0]!.value).toBe(crm.number);
   });
 
   it('workbook: bold frozen header, light fill, red / amber problem cells, What to fix, injection prefix', async () => {

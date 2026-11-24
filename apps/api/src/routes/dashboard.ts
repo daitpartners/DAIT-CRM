@@ -5,7 +5,7 @@ import { prisma } from '../db.js';
 import { requireUser, type AuthUser } from '../plugins/auth.js';
 import { leadWhere } from '../leads/visibility.js';
 import { taskInclude, taskRow } from '../leads/serialize.js';
-import { dateOnly, todayIn } from '../leads/dates.js';
+import { dateOnly, startOfDayIn, todayIn } from '../leads/dates.js';
 import { quotationWhere } from '../quotations/visibility.js';
 import { quotationListInclude, quotationListItem } from '../quotations/service.js';
 import { taskWhere } from './tasks.js';
@@ -17,30 +17,6 @@ export const DASHBOARD_NOTIFICATIONS = 5;
 /** Pipeline bars: the first seven open statuses in lookup order. */
 export const PIPELINE_STATUSES = 7;
 const DAY_MS = 86_400_000;
-
-/**
- * The instant a calendar day (YYYY-MM-DD) starts in `timezone` (UTC for an unknown zone).
- * Two passes of "UTC midnight minus the zone's offset at that moment" settle DST edges.
- */
-export function startOfDayIn(day: string, timezone: string): Date {
-  const utc = new Date(`${day}T00:00:00Z`).getTime();
-  const offsetAt = (ms: number) => {
-    try {
-      const parts = Object.fromEntries(
-        new Intl.DateTimeFormat('en-US', {
-          timeZone: timezone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
-        }).formatToParts(new Date(ms)).map((p) => [p.type, p.value]),
-      );
-      const wall = Date.UTC(+parts.year!, +parts.month! - 1, +parts.day!, +parts.hour!, +parts.minute!, +parts.second!);
-      return wall - ms;
-    } catch {
-      return 0;
-    }
-  };
-  let guess = utc - offsetAt(utc);
-  guess = utc - offsetAt(guess);
-  return new Date(guess);
-}
 
 /**
  * The signed-in user's dashboard (prototype V.dashboard). Personal for every role, Administrator included:

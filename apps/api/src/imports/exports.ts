@@ -20,9 +20,6 @@ export { safeCell, safeCsvCell } from './cells.js';
 export type FixRow = { fields: RowFields; from: string; problems: RowProblem[] };
 export type FixOptions = { acceptHigh: boolean; noContactRows: 'import' | 'leave' | null };
 
-/** A Not a lead row is in the file only when one of these holds a value. */
-const NOT_A_LEAD_KEEP: readonly ImportField[] = ['companyName', 'contactName', 'email', 'phone'];
-
 /** Batch statuses from which a row's outcome (Imported, Skipped, Error) decides it, rather than the plan. */
 const AFTER_IMPORT = new Set(['Importing', 'Imported', 'Undone', 'Failed']);
 
@@ -55,8 +52,8 @@ export async function fixRows(batchId: number, opts?: FixOptions): Promise<FixRo
   const out: FixRow[] = [];
   rows.forEach((row, i) => {
     const { fields } = effectiveFields(row, choice.acceptHigh);
-    // A blank, total or header line with nothing to fix (no company, no contact value) stays out of the file.
-    if (row.status === 'Not a lead' && !NOT_A_LEAD_KEEP.some((f) => (fields[f] ?? '').trim() !== '')) return;
+    // Header, total and blank lines are never leads: they are not in the file.
+    if (row.status === 'Not a lead') return;
     const match = row.status === 'Already in CRM' && row.matchedCompany ? row.matchedCompany : null;
     const ev = evaluateRow(fields, { knownCountries: known, match, notALead: row.status === 'Not a lead' });
     const problems = [...ev.problems];

@@ -120,6 +120,23 @@ async function planUndo(db: Db, batch: Pick<ImportBatch, 'id' | 'number'>): Prom
     },
   });
 
+  // Two batched reads for every company the batch touched: research someone started (any run but this batch's own), and
+  // the latest decision on a suggestion (a decision after the batch last wrote on the company was a person's).
+  const touched = [...companyStamp.keys()];
+  const [runs, decisions] = touched.length === 0 ? [[], []] : await Promise.all([
+    db.enrichmentRun.groupBy({ by: ['companyId'], where: { companyId: { in: touched }, trigger: { not: trigger } } }),
+    db.enrichmentSuggestion.groupBy({
+      by: ['companyId'], where: { companyId: { in: touched }, decision: { in: ['accepted', 'rejected'] } }, _max: { decidedAt: true },
+    }),
+  ]);
+  const researched = new Set(runs.map((r) => r.companyId));
+  const lastDecision = new Map(decisions.map((d) => [d.companyId, d._max.decidedAt]));
+  const decidedAfter = (companyId: number): boolean => {
+    const at = lastDecision.get(companyId);
+    const importedAt = companyImportedAt.get(companyId);
+    return !!at && !!importedAt && at.getTime() > importedAt.getTime();
+  };
+
   const keptLead = new Map<number, UndoReason>();
   const keptContact = new Map<number, UndoReason>();
   const keptCompany = new Map<number, UndoReason>();
@@ -139,8 +156,8 @@ async function planUndo(db: Db, batch: Pick<ImportBatch, 'id' | 'number'>): Prom
   for (const co of companies) {
     const n = co._count;
     // Research someone started on the company (any run but this batch's own) is work on it.
-    const research = await db.enrichmentRun.count({ where: { companyId: co.id, trigger: { not: trigger } } }) > 0;
-    const decided = await decidedSince(db, co.id, companyImportedAt.get(co.id));
+    const research = researched.has(co.id);
+    const decided = decidedAfter(co.id);
     const reason: UndoReason | null = n.quotations ? 'quotations' : n.projects ? 'projects' : n.emailMessages ? 'emails'
       : n.calendarEvents ? 'calendar' : research ? 'notes'
         : n.locations || decided || co.enrichmentSuggestions.length > 0 || iso(co.updatedAt) !== companyStamp.get(co.id) ? 'edited'
@@ -183,7 +200,7 @@ async function planUndo(db: Db, batch: Pick<ImportBatch, 'id' | 'number'>): Prom
       || await importAuditCount(db, co.id, batch.number) > 0;
     if (!wrote) continue;
     const label = `${co.number} · ${co.name}`;
-    const decided = await decidedSince(db, co.id, companyImportedAt.get(co.id));
+    const decided = decidedAfter(co.id);
     if (!decided && iso(co.updatedAt) === companyStamp.get(co.id)) {
       revert.push(co.id);
       reverted.push({ id: co.id, label });
@@ -211,14 +228,6 @@ async function planUndo(db: Db, batch: Pick<ImportBatch, 'id' | 'number'>): Prom
     },
     leadIds: removeLeads.map((l) => l.id), contactIds, companyIds, revert,
   };
-}
-
-/** A suggestion on the company decided (accepted or rejected) after the batch last wrote on it: a person's decision. */
-async function decidedSince(db: Db, companyId: number, importedAt: Date | undefined): Promise<boolean> {
-  if (!importedAt) return false;
-  return await db.enrichmentSuggestion.count({
-    where: { companyId, decision: { in: ['accepted', 'rejected'] }, decidedAt: { gt: importedAt } },
-  }) > 0;
 }
 
 type LeadForUndo = {
