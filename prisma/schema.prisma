@@ -254,6 +254,8 @@ model EmailTemplate {
   language    String   @db.Char(2)
   subject     String   @db.VarChar(500)
   body        String   @default("")
+  /// The formatted (HTML) body, sanitised on upload (mail/html.ts); null for a plain-text template.
+  bodyHtml    String?  @map("body_html")
   /// 'manual' | 'oft'
   sourceType  String   @map("source_type")
   fileName    String?  @map("file_name") @db.VarChar(255)
@@ -915,6 +917,8 @@ model EmailCampaign {
   /// The template as queued, so later edits do not change the record.
   subject           String    @db.VarChar(500)
   body              String
+  /// The template's sanitised HTML as queued (null: a plain-text template).
+  bodyHtml          String?   @map("body_html")
   senderId          Int       @map("sender_id")
   accountId         Int?      @map("account_id")
   senderAddress     String    @map("sender_address")

@@ -288,3 +288,36 @@ describe('Mailer scheduling', () => {
     expect(await prisma.job.count({ where: { type: 'campaign_step' } })).toBe(1);
   });
 });
+
+describe('Mailer step: formatted templates (owner, 24 Nov 2026)', () => {
+  test('a formatted template goes out as HTML: merge fields HTML-escaped, opt-out line after it, sanitised again; text alongside', async () => {
+    at(WED_NOON_SANTIAGO);
+    const { c } = await campaign({ leads: 1 });
+    await prisma.lead.updateMany({ data: { companyName: 'Andino <b>&</b> Co' } });
+    // Stored HTML is sanitised on upload; a value that slipped in is caught again as it is sent.
+    await prisma.emailCampaign.update({
+      where: { id: c.id },
+      data: { bodyHtml: '<p>Hola <b>{first_name}</b> de <i>{company}</i>.</p><ul><li>{me}</li></ul><a href="javascript:x()">x</a>' },
+    });
+    const { sent, graph } = recording();
+    await campaignStepHandler(job(c.id), { graph });
+    expect(sent).toHaveLength(1);
+    const html = sent[0]!.html;
+    expect(html).toContain('<p>Hola <b>Ana0</b> de <i>Andino &lt;b&gt;&amp;&lt;/b&gt; Co</i>.</p>');
+    expect(html).toContain('<li>Sebastian Passalacqua</li>');
+    expect(html).not.toContain('javascript:');
+    expect(html).toContain('reply with "unsubscribe" and we will not contact you again.');
+    // The template's plain text is the text alternative, with the opt-out line.
+    expect(sent[0]!.text).toMatch(/^Hola Ana0 de Andino <b>&<\/b> Co\.\n.*unsubscribe/s);
+    const msg = await prisma.emailMessage.findFirstOrThrow({ where: { campaignId: c.id } });
+    expect(msg.bodyHtml).toBe(html);
+  });
+
+  test('a plain template (no HTML) is sent as before', async () => {
+    at(WED_NOON_SANTIAGO);
+    const { c } = await campaign({ leads: 1 });
+    const { sent, graph } = recording();
+    await campaignStepHandler(job(c.id), { graph });
+    expect(sent[0]!.html.startsWith('<div>Hola Ana0 de Andino.<br>')).toBe(true);
+  });
+});

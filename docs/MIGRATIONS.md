@@ -29,6 +29,7 @@ previous release keeps working against it. Release shas are the commits that wer
 | 19 | `20261206100000_email_body_html` | `email_messages.body_html` (nullable: the sanitised HTML body; older rows filled when first opened) | Email reader HTML (not yet released) |
 | 20 | `20261206100000_import_leads` | Tables `import_batches`, `import_files`, `import_rows` (Import leads + Data manager) | Import leads (not yet released) |
 | 21 | `20261207100000_company_name_normalise` | Function `normalise_company_name(text)` (the SQL twin of shared `normaliseCompanyName`: accents folded, es/fr legal forms removed); back-fills `companies.name_normalised` with it (derived key only; `updated_at` untouched) | Import leads (not yet released) |
+| 22 | `20261208100000_template_body_html` | `email_templates.body_html` and `email_campaigns.body_html` (nullable: a formatted template's sanitised HTML, and the copy a Mailer campaign keeps when queued; null = plain text as before) | Formatted templates (not yet released) |
 
 ## Known leftover
 

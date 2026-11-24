@@ -66,6 +66,17 @@ describe('Mailer campaigns (release 2C)', () => {
     expect(await prisma.notification.findFirst({ where: { userId: seba.id } })).toMatchObject({ text: 'Mailer queued · Chile · Nov', detail: '1 email · sending now', link: `/mailer/${c.id}` });
   });
 
+  it('a formatted template: the campaign keeps its HTML as queued (plain templates keep none)', async () => {
+    const { seba, good, tpl } = await setup();
+    const cookie = await signIn(app, seba);
+    const plain = await call('POST', '/api/mailer', cookie, create(tpl.id, [good.id]));
+    expect((await prisma.emailCampaign.findUniqueOrThrow({ where: { id: plain.json().id } })).bodyHtml).toBeNull();
+    await prisma.emailTemplate.update({ where: { id: tpl.id }, data: { bodyHtml: '<p>Hola <b>{first_name}</b></p>' } });
+    const res = await call('POST', '/api/mailer', cookie, create(tpl.id, [good.id]));
+    expect(res.statusCode).toBe(201);
+    expect((await prisma.emailCampaign.findUniqueOrThrow({ where: { id: res.json().id } })).bodyHtml).toBe('<p>Hola <b>{first_name}</b></p>');
+  });
+
   it('a later start is Scheduled; the rules are checked', async () => {
     const { seba, good, skip, tpl } = await setup();
     const cookie = await signIn(app, seba);

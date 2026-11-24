@@ -20,6 +20,7 @@ import { assertLeadVisible, canSeeLead, leadWhere } from '../leads/visibility.js
 import { assertCompanyVisible } from '../companies/visibility.js';
 import { matchMail } from '../mail/match.js';
 import { assertProjectFor, queueOutgoing } from '../mail/outgoing.js';
+import { FORMATTED_BODY_LIMIT, sanitizeFormatted } from '../mail/formatted.js';
 import { projectWhere } from '../projects/visibility.js';
 import { emailView } from './leadEmails.js';
 import { domainTaken, guard, lockLeads } from './leads.js';
@@ -237,10 +238,13 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
   const pre = { preHandler: [requireRight('use_email')] };
 
   // Compose (prototype V.compose): optionally on a lead or for a client; otherwise linked by matching.
-  app.post('/mail', pre, async (request, reply) => {
+  // A formatted message carries its HTML: a larger request, sanitised again here before the transaction.
+  const send = { ...pre, bodyLimit: FORMATTED_BODY_LIMIT };
+  app.post('/mail', send, async (request, reply) => {
     const body = parseBody(MailCompose, request.body);
     const user = request.user!;
     return guard(reply, async () => {
+      const formatted = await sanitizeFormatted(body.bodyHtml);
       const account = await myMailbox(user.id);
       if (!account) return reply.code(409).send({ error: 'no_mailbox' });
       const created = await prisma.$transaction(async (tx) => {
@@ -260,7 +264,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
         // The project's company must be the lead's, or without a lead the client chosen (not one matching guessed).
         if (body.projectId) await assertProjectFor(tx, user, body.projectId, lead ? lead.companyId : (body.companyId ?? null));
         return queueOutgoing(tx, user, account, {
-          lead, ...links, to: [body.to], cc: body.cc, subject: body.subject, body: body.body, projectId: body.projectId ?? null,
+          lead, ...links, to: [body.to], cc: body.cc, subject: body.subject, body: body.body, formatted, projectId: body.projectId ?? null,
         });
       });
       return reply.code(201).send(emailView(created));
@@ -268,10 +272,11 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // Reply (prototype Reply): to the sender of a received message, or the recipients of your own; same conversation.
-  app.post<{ Params: { id: string } }>('/mail/:id/reply', pre, async (request, reply) => {
+  app.post<{ Params: { id: string } }>('/mail/:id/reply', send, async (request, reply) => {
     const body = parseBody(MailReply, request.body);
     const user = request.user!;
     return guard(reply, async () => {
+      const formatted = await sanitizeFormatted(body.bodyHtml);
       const original = await ownMessage(prisma, user, request.params.id);
       if (original.status === 'draft') return reply.code(409).send({ error: 'draft' });
       const account = await myMailbox(user.id);
@@ -287,7 +292,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
           })
           : null;
         return queueOutgoing(tx, user, account, {
-          lead, companyId: original.companyId, contactId: original.contactId, to, cc: body.cc, subject, body: body.body,
+          lead, companyId: original.companyId, contactId: original.contactId, to, cc: body.cc, subject, body: body.body, formatted,
           replyToId: original.id, threadId: original.threadId, projectId: original.projectId,
         });
       });

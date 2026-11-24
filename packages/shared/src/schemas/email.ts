@@ -15,17 +15,31 @@ export const TEMPLATE_FILE_MAX_BYTES = 10 * 1024 * 1024;
 export const TEMPLATE_LANGUAGES = ['en', 'es', 'fr'] as const;
 export type TemplateLanguage = (typeof TEMPLATE_LANGUAGES)[number];
 
+/**
+ * Formatted (HTML) message bodies (templates read from an .oft, and the formatted message editor): the most characters
+ * of HTML a request may carry. The server sanitises them (the email reader's sanitiser) and reads at most this much,
+ * as for incoming mail.
+ */
+export const MESSAGE_HTML_MAX_CHARS = 1_000_000;
+/** A formatted body: null / absent for a plain-text message. */
+const bodyHtml = z.string().max(MESSAGE_HTML_MAX_CHARS).nullish();
+
 /** `POST /email-templates`: written in the CRM ('manual') or read from an uploaded Outlook file ('oft'). */
 export const EmailTemplateInput = z.object({
   name: z.string().trim().min(1).max(150),
   language: z.enum(TEMPLATE_LANGUAGES),
   subject: z.string().trim().min(1).max(500),
   body: z.string().max(20000).default(''),
+  /** The template's HTML (from an .oft, or written in the formatted editor); sanitised by the server. */
+  bodyHtml,
   sourceType: z.enum(['manual', 'oft']).default('manual'),
   fileName: z.string().trim().max(255).nullable().optional(),
   fileSize: z.number().int().min(0).max(TEMPLATE_FILE_MAX_BYTES).nullable().optional(),
 });
 export type EmailTemplateInput = z.infer<typeof EmailTemplateInput>;
+
+/** `POST /email-templates/sanitize`: an uploaded .oft's HTML, made safe before the template editor shows it. */
+export const TemplateHtmlCheck = z.object({ html: z.string().max(MESSAGE_HTML_MAX_CHARS) });
 
 /** `PATCH /email-templates/:id`: any subset, with the `updatedAt` the editor loaded. */
 export const EmailTemplateUpdate = EmailTemplateInput.omit({ sourceType: true, fileName: true, fileSize: true })
@@ -39,6 +53,8 @@ export const LeadEmailSend = z.object({
   cc: z.array(z.string().trim().toLowerCase().email()).max(20).default([]),
   subject: z.string().trim().min(1).max(500),
   body: z.string().trim().min(1).max(20000),
+  /** Formatted message: its HTML (sanitised again by the server); `body` is then its plain text. */
+  bodyHtml,
   /** Set the lead's next follow-up this many days from today (prototype "Set follow-up in"); null = leave it. */
   followUpDays: z.union([z.literal(2), z.literal(3), z.literal(7)]).nullish(),
   /** Release 3B: tag it with one of the lead's company's projects (a project the sender can see). */
@@ -57,6 +73,7 @@ export const MailCompose = z.object({
   cc: mailCc,
   subject: z.string().trim().min(1).max(500),
   body: mailBody,
+  bodyHtml,
   leadId: z.number().int().positive().nullish(),
   companyId: z.number().int().positive().nullish(),
   /** Release 3B: a project the sender can see, of the lead's company (or the client given without a lead). */
@@ -65,7 +82,7 @@ export const MailCompose = z.object({
 export type MailCompose = z.infer<typeof MailCompose>;
 
 /** `POST /mail/:id/reply` (release 2B-2): to the sender (or the original recipients of your own message). */
-export const MailReply = z.object({ cc: mailCc, body: mailBody });
+export const MailReply = z.object({ cc: mailCc, body: mailBody, bodyHtml });
 export type MailReply = z.infer<typeof MailReply>;
 
 /**

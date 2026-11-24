@@ -341,6 +341,7 @@ Indexes: unique (`user_id`, `graph_id`); (`user_id`, `thread_id`), (`user_id`, `
 | language | char(2) | en / es / fr |
 | subject | varchar(500) | merge fields `{first_name}`, `{company}`, `{me}`, `{lead_id}`, `{quote_no}` |
 | body | text | plain text, written in the CRM or read from an uploaded `.oft` / `.msg` |
+| body_html | text, nullable | formatted template: the HTML of the `.oft` (or written in the formatted editor), sanitised by the server on save; null = plain text |
 | source_type | text | manual / oft |
 | file_name, file_size | varchar(255), int | of the uploaded file; **the file itself is not kept** |
 | created_by | FK users, nullable | |
@@ -356,6 +357,7 @@ Indexes: unique (`user_id`, `graph_id`); (`user_id`, `thread_id`), (`user_id`, `
 | template_updated_at | timestamp | which version of the template was used |
 | language | varchar(5) | the template's language at queueing (for the opt-out line); default en |
 | subject, body | varchar(500), text | copy of the template as queued |
+| body_html | text, nullable | copy of the template's sanitised HTML as queued (formatted templates go out as HTML) |
 | sender_id | FK users | cascade delete |
 | account_id | FK email_accounts, nullable | |
 | sender_address | text | mailbox used |

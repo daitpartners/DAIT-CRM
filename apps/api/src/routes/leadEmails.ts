@@ -7,6 +7,7 @@ import { parseBody } from '../validate.js';
 import { assertLeadVisible } from '../leads/visibility.js';
 import { assertProjectFor, queueOutgoing } from '../mail/outgoing.js';
 import { guard, lockFresh } from './leads.js';
+import { FORMATTED_BODY_LIMIT, sanitizeFormatted } from '../mail/formatted.js';
 
 /** An email as its owner sees it (only ever returned to its owner). */
 export function emailView(m: EmailMessage) {
@@ -22,18 +23,21 @@ export function emailView(m: EmailMessage) {
  * it is; nobody else, administrators included, can list or read it.
  */
 export const leadEmailRoutes: FastifyPluginAsync = async (app) => {
-  app.post<{ Params: { id: string } }>('/leads/:id/emails', { preHandler: [requireRight('use_email')] }, async (request, reply) => {
+  app.post<{ Params: { id: string } }>('/leads/:id/emails', { preHandler: [requireRight('use_email')], bodyLimit: FORMATTED_BODY_LIMIT }, async (request, reply) => {
     const body = parseBody(LeadEmailSend, request.body);
     const user = request.user!;
     const id = Number(request.params.id);
     return guard(reply, async () => {
+      // A formatted message is sanitised again here, whatever the browser sent (before the transaction: the worker may
+      // take up to its time limit).
+      const formatted = await sanitizeFormatted(body.bodyHtml);
       const account = await prisma.emailAccount.findFirst({ where: { kind: 'personal', userId: user.id, status: 'connected' } });
       if (!account) return reply.code(409).send({ error: 'no_mailbox' });
       const created = await prisma.$transaction(async (tx) => {
         const { lead } = await lockFresh(tx, user, id, body.updatedAt);
         if (body.projectId) await assertProjectFor(tx, user, body.projectId, lead.companyId);
         return queueOutgoing(tx, user, account, {
-          lead, to: [body.to], cc: body.cc, subject: body.subject, body: body.body, followUpDays: body.followUpDays,
+          lead, to: [body.to], cc: body.cc, subject: body.subject, body: body.body, formatted, followUpDays: body.followUpDays,
           projectId: body.projectId ?? null,
         });
       });

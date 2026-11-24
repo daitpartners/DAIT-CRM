@@ -18,7 +18,10 @@ const { sendUserEmailHandler } = await import('../src/jobs/handlers/sendUserEmai
 
 const refuse = () => Promise.reject(new Error('not used in e2e'));
 const graph: GraphClient = {
-  sendMail: async () => undefined,
+  // Each message "sent" is printed as one `e2e-sent: {json}` line, so a spec can check what Graph was given.
+  sendMail: async (_account, msg) => {
+    console.log(`e2e-sent: ${JSON.stringify({ to: msg.to, subject: msg.subject, html: msg.html, text: msg.text })}`);
+  },
   deltaPage: refuse, attachmentNames: refuse, markRead: refuse, moveTo: refuse, reply: refuse, calendarDeltaPage: refuse, messageBody: refuse,
 };
 

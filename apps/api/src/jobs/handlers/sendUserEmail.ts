@@ -61,16 +61,18 @@ export async function sendUserEmailHandler(job: Job, ctx: JobContext): Promise<v
 
   // A reply goes through Graph reply on the original, so it stays in the conversation in Outlook too.
   const original = msg.replyToId ? await prisma.emailMessage.findUnique({ where: { id: msg.replyToId } }) : null;
+  // The HTML stored when it was queued: a formatted message's sanitised HTML, or its plain text as simple HTML.
+  const html = msg.bodyHtml || textToHtml(msg.bodyText);
   try {
     const cc = msg.ccAddresses as string[];
     if (original?.graphId && original.userId === msg.userId) {
-      await ctx.graph.reply(account, original.graphId, { to: msg.toAddresses as string[], ...(cc.length ? { cc } : {}), html: textToHtml(msg.bodyText) });
+      await ctx.graph.reply(account, original.graphId, { to: msg.toAddresses as string[], ...(cc.length ? { cc } : {}), html });
     } else {
       await ctx.graph.sendMail(account, {
         to: msg.toAddresses as string[],
         ...(cc.length ? { cc } : {}),
         subject: msg.subject,
-        html: textToHtml(msg.bodyText),
+        html,
         text: msg.bodyText,
         ...(attachments?.length ? { attachments } : {}),
       });

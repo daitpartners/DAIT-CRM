@@ -50,6 +50,45 @@ describe('email templates API', () => {
     expect(await prisma.auditLog.count({ where: { entityType: 'email_template' } })).toBe(4);
   });
 
+  it('formatted templates: the HTML is sanitised on create and on update; null makes the template plain', async () => {
+    const cookie = await signIn(app, await makeUser({ role: 'SALES_REPRESENTATIVE' }));
+    const xss = '<p onmouseover="alert(1)">Hi <b>{first_name}</b></p><script>alert(document.cookie)</script>'
+      + '<a href="javascript:alert(1)">x</a><a href="https://dait.example">site</a><img src="cid:image001.png"><iframe src="https://evil.example"></iframe>';
+    const created = await call('POST', '/api/email-templates', cookie, {
+      name: 'Formatted', language: 'en', subject: 'Hi', body: 'Hi {first_name}', bodyHtml: xss, sourceType: 'oft', fileName: 'f.oft', fileSize: 10,
+    });
+    expect(created.statusCode).toBe(201);
+    const t = created.json() as { id: number; updatedAt: string; bodyHtml: string };
+    expect(t.bodyHtml).toContain('<b>{first_name}</b>');
+    expect(t.bodyHtml).toContain('href="https://dait.example"');
+    for (const bad of ['onmouseover', '<script', 'javascript:', 'cid:', '<iframe', 'alert(']) expect(t.bodyHtml).not.toContain(bad);
+    expect((await prisma.emailTemplate.findUniqueOrThrow({ where: { id: t.id } })).bodyHtml).toBe(t.bodyHtml);
+    // The audit record says the template is formatted, without the HTML.
+    const log = await prisma.auditLog.findFirstOrThrow({ where: { entityType: 'email_template', action: 'create' } });
+    expect(JSON.stringify(log)).not.toContain('dait.example');
+    expect(log.after).toMatchObject({ name: 'Formatted', formatted: true });
+
+    const updated = await call('PATCH', `/api/email-templates/${t.id}`, cookie, { bodyHtml: '<p>New <i>copy</i><svg onload="alert(1)"></svg></p>', updatedAt: t.updatedAt });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json().bodyHtml).toBe('<p>New <i>copy</i></p>');
+    // A change without bodyHtml keeps it; null makes the template plain text.
+    const renamed = await call('PATCH', `/api/email-templates/${t.id}`, cookie, { name: 'Renamed', updatedAt: updated.json().updatedAt });
+    expect(renamed.json().bodyHtml).toBe('<p>New <i>copy</i></p>');
+    const plain = await call('PATCH', `/api/email-templates/${t.id}`, cookie, { bodyHtml: null, updatedAt: renamed.json().updatedAt });
+    expect(plain.json().bodyHtml).toBeNull();
+    // A manual template without HTML stays plain.
+    const manual = await call('POST', '/api/email-templates', cookie, { name: 'Plain', language: 'en', subject: 'Hi', body: 'Hi' });
+    expect(manual.json().bodyHtml).toBeNull();
+  });
+
+  it('sanitize: an uploaded .oft\'s HTML comes back safe before the editor shows it; needs manage_leads', async () => {
+    const cookie = await signIn(app, await makeUser({ role: 'SALES_REPRESENTATIVE' }));
+    const res = await call('POST', '/api/email-templates/sanitize', cookie, { html: '<html><body><p style="color:red">Hi <b>{first_name}</b></p><img src=x onerror=alert(1)><script>x()</script></body></html>' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ html: '<p style="color:red">Hi <b>{first_name}</b></p><img src="x" />', text: 'Hi {first_name}' });
+    expect((await call('POST', '/api/email-templates/sanitize', cookie, { html: '<script>x()</script>' })).json()).toEqual({ html: null, text: '' });
+  });
+
   it('validation: missing subject and an unknown language are refused; unknown id is 404', async () => {
     const cookie = await signIn(app, await makeUser({ role: 'SALES_REPRESENTATIVE' }));
     expect((await call('POST', '/api/email-templates', cookie, { name: 'X', language: 'de', subject: 'Hi' })).statusCode).toBe(400);

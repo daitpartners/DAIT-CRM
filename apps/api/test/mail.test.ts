@@ -181,6 +181,32 @@ describe('compose and reply (2B-2)', () => {
   });
 });
 
+describe('formatted compose and reply (24 Nov 2026)', () => {
+  it('compose and reply send formatted HTML (sanitised again on the server) with its plain text', async () => {
+    const { rep, box } = await setup();
+    const cookie = await signIn(app, rep);
+    const res = await call('POST', '/api/mail', cookie, {
+      to: 'ana@acme.com', cc: [], subject: 'Hello', body: 'Hi Ana', bodyHtml: '<p>Hi <b>Ana</b></p><p onclick="x()"><a href="javascript:x()">y</a></p>',
+    });
+    expect(res.statusCode).toBe(201);
+    const m = await prisma.emailMessage.findUniqueOrThrow({ where: { id: res.json().id } });
+    expect(m.bodyHtml).toBe('<p>Hi <b>Ana</b></p><p><a target="_blank" rel="noopener noreferrer">y</a></p>');
+    expect(m.bodyText).toBe('Hi Ana\n\ny');
+    const original = await synced(rep.id, box.id, { graphId: 'orig-2' });
+    await call('POST', `/api/mail/${original.id}/reply`, cookie, { cc: [], body: 'Thanks', bodyHtml: '<p><i>Thanks</i></p><script>x()</script>' });
+    const replies: string[] = [];
+    const sends: { html: string; text: string }[] = [];
+    const graph = fakeGraph({
+      async reply(_a: EmailAccount, _g, msg) { replies.push(msg.html); },
+      async sendMail(_a, msg) { sends.push({ html: msg.html, text: msg.text }); },
+    });
+    await runJobs(graph);
+    await runJobs(graph);
+    expect(sends).toEqual([{ html: m.bodyHtml, text: 'Hi Ana\n\ny' }]);
+    expect(replies).toEqual(['<p><i>Thanks</i></p>']);
+  });
+});
+
 describe('mail actions through Graph (2B-2)', () => {
   const action = (emailMessageId: number, a: string) => ({ id: 1, type: 'mail_action', payload: { emailMessageId, action: a }, attempts: 0, maxAttempts: 3 }) as unknown as Job;
 

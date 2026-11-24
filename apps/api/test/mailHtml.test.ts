@@ -259,3 +259,19 @@ describe('emailBodies', () => {
 test('textToHtml escapes and keeps line breaks', () => {
   expect(textToHtml('Hi <Ana> & "co"\nBye')).toBe('<div>Hi &lt;Ana&gt; &amp; &quot;co&quot;<br>Bye</div>');
 });
+
+describe('sanitizeEmailHtml: outgoing (formatted templates and messages, 24 Nov 2026)', () => {
+  test('links are limited to http, https and mailto; formatting stays', () => {
+    const out = sanitizeEmailHtml(
+      '<p><b>Hi</b> <a href="https://a.example">w</a> <a href="mailto:x@y.z">m</a> <a href="tel:+1">t</a> <a href="ftp://f">f</a></p>',
+      { outgoing: true },
+    );
+    expect(out).toContain('<b>Hi</b>');
+    expect(out).toContain('href="https://a.example"');
+    expect(out).toContain('href="mailto:x@y.z"');
+    expect(out).not.toContain('tel:');
+    expect(out).not.toContain('ftp:');
+    // Incoming mail keeps tel: links as before.
+    expect(sanitizeEmailHtml('<a href="tel:+1">t</a>')).toContain('href="tel:+1"');
+  });
+});

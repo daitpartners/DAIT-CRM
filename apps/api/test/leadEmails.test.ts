@@ -124,6 +124,38 @@ describe('sending email from a lead (release 2B-1)', () => {
     expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ status: 'sent', lastError: null });
   });
 
+  it('formatted message (owner, 24 Nov 2026): the HTML is sanitised again on send and goes to Graph as HTML, with its text', async () => {
+    const { rep, lead } = await setup();
+    await personal(rep.id, 'seba@daitpartners.com');
+    const html = '<p>Hola <b>Ana</b>:</p><ul><li>Uno</li></ul><p><a href="https://dait.example/x" onclick="steal()">Web</a>'
+      + ' <a href="javascript:alert(1)">bad</a> <a href="tel:+34600">call</a></p><img src=x onerror="alert(1)"><script>alert(1)</script>';
+    const res = await call('POST', `/api/leads/${lead.id}/emails`, await signIn(app, rep), body(lead.updatedAt, { body: 'Hola Ana: Uno Web', bodyHtml: html }));
+    expect(res.statusCode).toBe(201);
+    const msg = await prisma.emailMessage.findFirstOrThrow();
+    expect(msg.bodyHtml).toContain('<b>Ana</b>');
+    expect(msg.bodyHtml).toContain('<li>Uno</li>');
+    expect(msg.bodyHtml).toContain('href="https://dait.example/x"');
+    for (const bad of ['onclick', 'javascript:', 'tel:', 'onerror', '<script', 'alert(']) expect(msg.bodyHtml).not.toContain(bad);
+    // The plain text is derived on the server from the sanitised HTML.
+    expect(msg.bodyText).toBe('Hola Ana:\n\nUno\n\nWeb bad call');
+
+    const graph = recordingGraph();
+    expect(await run(graph)).toBe(true);
+    expect(graph.calls[0]!.msg.html).toBe(msg.bodyHtml);
+    expect(graph.calls[0]!.msg.text).toBe(msg.bodyText);
+  });
+
+  it('a plain message is unchanged: its text as simple HTML', async () => {
+    const { rep, lead } = await setup();
+    await personal(rep.id, 'seba@daitpartners.com');
+    await call('POST', `/api/leads/${lead.id}/emails`, await signIn(app, rep), body(lead.updatedAt, { bodyHtml: null }));
+    const msg = await prisma.emailMessage.findFirstOrThrow();
+    expect(msg).toMatchObject({ bodyText: 'Hola Ana:\n\nSaludos', bodyHtml: '<div>Hola Ana:<br><br>Saludos</div>' });
+    const graph = recordingGraph();
+    await run(graph);
+    expect(graph.calls[0]!.msg).toMatchObject({ html: '<div>Hola Ana:<br><br>Saludos</div>', text: 'Hola Ana:\n\nSaludos' });
+  });
+
   it('a temporary failure retries; the last failure marks the message failed', async () => {
     const { rep, lead } = await setup();
     await personal(rep.id, 'seba@daitpartners.com');

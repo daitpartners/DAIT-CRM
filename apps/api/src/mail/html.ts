@@ -75,6 +75,17 @@ const OPTIONS: sanitizeHtml.Options = {
   exclusiveFilter: (frame) => frame.tag === 'img' && !frame.attribs.src,
 };
 
+/**
+ * What the CRM sends (formatted templates and messages, owner 24 Nov 2026): the same rules, with links limited to
+ * http, https and mailto.
+ */
+const OUTGOING_OPTIONS: sanitizeHtml.Options = { ...OPTIONS, allowedSchemes: ['http', 'https', 'mailto'] };
+
+/** `outgoing`: HTML the CRM sends (OUTGOING_OPTIONS) rather than mail it received. */
+export interface SanitizeOptions {
+  outgoing?: boolean;
+}
+
 /** Elements open at once, at most: real email stays far below (Outlook tables nest a few dozen deep). */
 export const MAX_DEPTH = 256;
 /** Elements htmlparser2 closes as soon as it opens them: they get no end tag when written back. */
@@ -132,16 +143,17 @@ const STYLE_BLOCK = /<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi;
 /** Passes at most: one more than needed in practice, so a parser trick that survives the first pass is caught. */
 const MAX_PASSES = 3;
 
-const pass = (html: string) => sanitizeHtml(html, OPTIONS).replace(STYLE_BLOCK, (_m, css: string) => `<style>${safeCss(css)}</style>`);
+const pass = (html: string, options = OPTIONS) => sanitizeHtml(html, options).replace(STYLE_BLOCK, (_m, css: string) => `<style>${safeCss(css)}</style>`);
 
 /**
  * Sanitised email HTML: formatting kept; scripts, handlers, forms, frames, meta refresh and unsafe URLs / CSS removed.
  * The output is sanitised again until it no longer changes, so what is stored reads the same to any HTML parser.
  */
-export function sanitizeEmailHtml(html: string): string {
-  let out = pass(limitNesting(html));
+export function sanitizeEmailHtml(html: string, opts: SanitizeOptions = {}): string {
+  const options = opts.outgoing ? OUTGOING_OPTIONS : OPTIONS;
+  let out = pass(limitNesting(html), options);
   for (let i = 1; i < MAX_PASSES; i++) {
-    const next = pass(out);
+    const next = pass(out, options);
     if (next === out) break;
     out = next;
   }
@@ -305,7 +317,10 @@ export interface GraphBody {
  * `max` characters. Over-long HTML is cut and sanitised again, so the stored part is still well-formed. Past
  * `deadline` (a performance.now() time) while reading deep nesting it throws BodyTooComplexError.
  */
-export function emailBodies(body: GraphBody, max: number, opts: { deadline?: number } = {}): { bodyHtml: string | null; bodyText: string } {
+export function emailBodies(
+  body: GraphBody, max: number, opts: { deadline?: number } & SanitizeOptions = {},
+): { bodyHtml: string | null; bodyText: string } {
+  const how = { outgoing: opts.outgoing };
   if (body.contentType !== 'html') return { bodyHtml: null, bodyText: body.content.slice(0, max) };
   // An oversized body is cut before anything reads it: the stored HTML and text are then of its first RAW_MAX
   // characters (the cut is sanitised like the rest, so it stays well-formed).
@@ -314,11 +329,11 @@ export function emailBodies(body: GraphBody, max: number, opts: { deadline?: num
   const limited = limitNesting(raw, MAX_DEPTH, opts.deadline);
   // At most `max` characters of HTML are kept, and sanitising only ever shortens markup that has lost its comments
   // (limitNesting drops them): three times that is plenty, and sanitising a whole megabyte to keep 50,000 is not.
-  const full = sanitizeEmailHtml(limited.slice(0, max * HTML_WINDOW));
+  const full = sanitizeEmailHtml(limited.slice(0, max * HTML_WINDOW), how);
   let bodyHtml = full;
   // Closing the tags left open by the cut adds a little, so cut a little shorter each time until it fits.
   for (let cut = max; bodyHtml.length > max; cut -= Math.max(200, Math.ceil(max / 20))) {
-    bodyHtml = cut > 0 ? sanitizeEmailHtml(full.slice(0, cut)) : '';
+    bodyHtml = cut > 0 ? sanitizeEmailHtml(full.slice(0, cut), how) : '';
   }
   const bodyText = htmlToText(limited).slice(0, max);
   // Markup that swallows everything after it (an unclosed <iframe>) would leave an empty message: show its text plainly.

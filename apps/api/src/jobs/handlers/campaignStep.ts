@@ -1,5 +1,5 @@
 import type { Job } from '@prisma/client';
-import { MAILER_DAILY_LIMIT, fillTemplate, inWorkingHours, nextWorkingStart } from '@dait-crm/shared';
+import { MAILER_DAILY_LIMIT, fillTemplate, fillTemplateHtml, inWorkingHours, nextWorkingStart } from '@dait-crm/shared';
 import { prisma } from '../../db.js';
 import { errorMessage } from '../queue.js';
 import { isAuthFailure } from '../../graph/client.js';
@@ -9,6 +9,7 @@ import { notifyUser } from '../../leads/notify.js';
 import { sendBlock } from '../../mailer/rules.js';
 import { queueStep, startOfDayIn, startOfNextDayIn } from '../../mailer/schedule.js';
 import { textToHtml } from '../../mail/html.js';
+import { appendTextToHtml, sanitizeFormatted } from '../../mail/formatted.js';
 import type { JobContext } from '../runner.js';
 
 /** Nobody can be sent now (working hours): never look again sooner than this. */
@@ -92,8 +93,12 @@ export async function campaignStepHandler(job: Job, ctx: JobContext): Promise<vo
   const lead = await prisma.lead.findUniqueOrThrow({ where: { id: r.leadId! }, include: { contact: { select: { firstName: true } } } });
   const ctxFill = { firstName: lead.contact?.firstName || 'there', company: lead.companyName, me: user.name, leadNumber: lead.number };
   const subject = fillTemplate(c.subject, ctxFill).slice(0, 500);
-  const text = fillTemplate(c.body, ctxFill) + (c.unsubscribeLine ? (UNSUBSCRIBE[c.language] ?? UNSUBSCRIBE.en) : '');
-  const html = textToHtml(text);
+  const optOut = c.unsubscribeLine ? (UNSUBSCRIBE[c.language] ?? UNSUBSCRIBE.en) : '';
+  const text = fillTemplate(c.body, ctxFill) + optOut;
+  // A formatted template goes out as its HTML (merge fields HTML-escaped, the opt-out line after it), sanitised again
+  // as it is sent; a plain one, or HTML that cannot be read in time, as its text.
+  const formatted = c.bodyHtml ? await sanitizeFormatted(appendTextToHtml(fillTemplateHtml(c.bodyHtml, ctxFill), optOut)) : null;
+  const html = formatted?.html ?? textToHtml(text);
   try {
     await ctx.graph.sendMail(account, {
       to: [r.toAddress], ...(c.cc.length ? { cc: c.cc } : {}), ...(c.bcc.length ? { bcc: c.bcc } : {}), subject, html, text,
