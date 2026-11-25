@@ -253,7 +253,7 @@ describe('lead email form: Project picker (release 3B)', () => {
 describe('lead email form: formatted templates (24 Nov 2026)', () => {
   const FORMATTED = {
     id: 8, name: 'Proposal', language: 'en', subject: 'Proposal for {company}', body: 'Hi {first_name},\nThe proposal.',
-    bodyHtml: '<p>Hi <b>{first_name}</b>,</p><ul><li>For {company}</li></ul>', sourceType: 'oft', fileName: 'Proposal.oft', fileSize: 9000,
+    bodyHtml: '<p>Hi <b>{first_name}</b>,</p><ul><li>For {company}</li></ul>', sourceType: 'oft', fileName: 'Proposal.oft', fileSize: 9000, attachments: [],
     createdBy: null, createdAt: '', updatedAt: '',
   };
   const PLAIN = { ...FORMATTED, id: 9, name: 'Plain', bodyHtml: null, sourceType: 'manual', body: 'Hi {first_name}, plain.' };
@@ -298,6 +298,61 @@ describe('lead email form: formatted templates (24 Nov 2026)', () => {
     await u.type(screen.getByRole('textbox', { name: 'To' }), 'tom@meridian.in');
     await u.click(screen.getByRole('button', { name: 'Send email' }));
     await waitFor(() => expect(posts[1]).toMatchObject({ body: 'Hi Tom, plain.', bodyHtml: null }));
+  });
+  it('a template with pictures and a PDF: pictures shown in the editor (data:), sent as cid:; the PDF listed and removable', async () => {
+    const u = userEvent.setup();
+    const posts: Record<string, unknown>[] = [];
+    const WITH_FILES = {
+      ...FORMATTED, id: 10, name: 'Holiday', updatedAt: '2026-11-24T10:00:00.000Z',
+      bodyHtml: '<p>Hi {first_name}</p><img src="cid:logo.png" alt="Logo"><p>Bye</p>',
+      attachments: [
+        { id: 31, name: 'logo.png', contentType: 'image/png', size: 4, contentId: 'logo.png', inline: true },
+        { id: 32, name: 'Brochure.pdf', contentType: 'application/pdf', size: 997_316, contentId: null, inline: false },
+      ],
+    };
+    const fetched: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        posts.push(JSON.parse(String(init.body)));
+        return Response.json({ id: 1, fromAddress: 'arjun@daitpartners.com' }, { status: 201 });
+      }
+      if (url.startsWith('/api/email-templates/10/attachments/')) {
+        fetched.push(url);
+        return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), { headers: { 'Content-Type': 'image/png' } });
+      }
+      if (url.startsWith('/api/email-templates')) return Response.json({ items: [WITH_FILES] });
+      if (url === '/api/mailboxes') return Response.json({ mine: { id: 7, address: 'arjun@daitpartners.com', status: 'connected' } });
+      return Response.json({ items: [], total: 0, page: 1, pageSize: 100, isClient: false });
+    }));
+    const lead = { ...baseLead, contact: { ...makeLead().contact!, firstName: 'Tom', email: 'tom@meridian.in' } };
+    render(
+      <Wrap qc={setup()}>
+        <EmailForm lead={lead} />
+      </Wrap>,
+    );
+    const pick = screen.getByRole('combobox', { name: 'Template' });
+    await waitFor(() => expect(within(pick).getByRole('option', { name: 'Holiday · .oft' })).toBeTruthy());
+    await u.selectOptions(pick, '10');
+    // Only the inline picture is fetched (the PDF is never downloaded to compose).
+    await waitFor(() => {
+      const f = document.querySelector('iframe#em-body') as HTMLIFrameElement;
+      expect(f.contentDocument!.body.querySelector('img')!.getAttribute('src')).toBe('data:image/png;base64,iVBORw==');
+    });
+    expect(fetched).toEqual(['/api/email-templates/10/attachments/31']);
+    const files = screen.getByRole('list', { name: 'Attachments' });
+    expect(within(files).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Brochure.pdf · 974 KB×']);
+    await u.click(screen.getByRole('button', { name: 'Send email' }));
+    await waitFor(() => expect(posts[0]).toMatchObject({ templateId: 10, attachmentIds: [32] }));
+    expect(posts[0]!.bodyHtml).toBe('<p>Hi Tom</p><img src="cid:logo.png" alt="Logo"><p>Bye</p>');
+
+    // After sending the form is blank again; picked again, the PDF can be removed before sending.
+    await waitFor(() => expect(screen.queryByRole('list', { name: 'Attachments' })).toBeNull());
+    await u.selectOptions(pick, '10');
+    await u.click(await screen.findByRole('button', { name: 'Remove Brochure.pdf' }));
+    expect(screen.queryByRole('list', { name: 'Attachments' })).toBeNull();
+    await u.type(screen.getByRole('textbox', { name: 'To' }), 'tom@meridian.in');
+    await u.click(screen.getByRole('button', { name: 'Send email' }));
+    await waitFor(() => expect(posts[1]).toMatchObject({ templateId: 10, attachmentIds: [] }));
   });
 });
 

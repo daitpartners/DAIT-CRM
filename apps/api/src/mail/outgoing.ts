@@ -37,7 +37,7 @@ export interface Outgoing {
   threadId?: string | null;
   /** "Set follow-up in N days" (prototype): an open lead only. */
   followUpDays?: number | null;
-  /** Files sent with it (release 3A: the quotation PDF), kept on the queued job. */
+  /** Files sent with it (release 3A: the quotation PDF; template pictures and attachments), kept on the queued job. */
   attachments?: MailAttachment[];
   /**
    * Release 3A: a quotation sent by email. The message keeps the quotation's own contact and company, and the lead
@@ -75,7 +75,8 @@ export async function queueOutgoing(tx: Tx, user: AuthUser, account: EmailAccoun
       userId: user.id, accountId: account.id, leadId: lead?.id ?? null, ...links,
       folder: 'sent', status: 'queued', source: 'crm', fromAddress: account.address, toAddresses: o.to, ccAddresses: o.cc,
       subject: o.subject, bodyText: o.formatted ? o.formatted.text || o.body : o.body, bodyHtml: o.formatted?.html ?? textToHtml(o.body), replyToId: o.replyToId ?? null, threadId: o.threadId ?? null, projectId: o.projectId ?? null,
-      attachmentNames: (o.attachments ?? []).map((a) => a.name),
+      // Inline pictures are part of the body, not attachments the message lists.
+      attachmentNames: (o.attachments ?? []).filter((a) => !a.isInline).map((a) => a.name),
     },
   });
   const payload: SendUserEmailPayload = {

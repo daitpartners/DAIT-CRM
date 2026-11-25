@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseOft } from '../src/lib/oft';
+import { buildOft, makePng, syntheticTemplate } from './oftFixture';
 
 const sample = (): ArrayBuffer => {
   // Tests run from apps/web; jsdom gives import.meta.url an http scheme, so resolve from the working directory.
@@ -15,6 +16,37 @@ describe('parseOft (port of prototype/js/oft.js)', () => {
     expect(r.subject).toBe('Quotation {quote_no} from DAIT Partners');
     expect(r.body).toBe('Hi {first_name},\n\nPlease find attached quotation {quote_no} for {company}, valid for 30 days.\n\nBest regards,\n{me}');
     expect(r.html.length).toBeGreaterThan(0);
+  });
+
+  it('the sample template has no attachments', () => {
+    expect(parseOft(sample()).attachments).toEqual([]);
+  });
+
+  it('reads inline pictures (by content-id the HTML uses) and regular attachments; skips a hidden unused one', () => {
+    const { oft, logo, signature, pdf } = syntheticTemplate();
+    const r = parseOft(oft.buffer.slice(oft.byteOffset, oft.byteOffset + oft.byteLength) as ArrayBuffer);
+    expect(r.subject).toBe('Season’s greetings, {first_name}');
+    expect(r.body).toContain('Warm wishes to everyone at {company}');
+    expect(r.html).toContain('cid:test-logo.png');
+    expect(r.attachments.map(({ data, ...rest }) => ({ ...rest, size: data.length }))).toEqual([
+      { name: 'test-logo.png', contentType: 'image/png', contentId: 'test-logo.png', inline: true, size: logo.length },
+      { name: 'test-signature.png', contentType: 'image/png', contentId: 'test-signature.png', inline: true, size: signature.length },
+      { name: 'Season-brochure.pdf', contentType: 'application/pdf', contentId: null, inline: false, size: pdf.length },
+    ]);
+    // The bytes come back whole: the small pictures from the mini stream, the PDF (over 4 KB) from regular sectors.
+    expect(pdf.length).toBeGreaterThan(4096);
+    expect(Array.from(r.attachments[0]!.data)).toEqual(Array.from(logo));
+    expect(Array.from(r.attachments[2]!.data)).toEqual(Array.from(pdf));
+  });
+
+  it('a content-id in angle brackets, or one the HTML does not use (not hidden), makes a regular attachment', () => {
+    const png = makePng(2, 2, [0, 0, 0], [0, 0, 0]);
+    const oft = buildOft({
+      subject: 'S', body: 'B', html: '<img src="CID:Logo@01DB">',
+      files: [{ name: 'logo.png', mime: 'image/png', data: png, contentId: '<logo@01db>' }, { name: 'extra.png', mime: 'image/png', data: png, contentId: 'extra' }],
+    });
+    const r = parseOft(oft.buffer as ArrayBuffer);
+    expect(r.attachments.map((a) => [a.name, a.contentId, a.inline])).toEqual([['logo.png', 'logo@01db', true], ['extra.png', 'extra', false]]);
   });
 
   it('refuses a file that is not an Outlook template', () => {

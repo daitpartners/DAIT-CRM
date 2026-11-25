@@ -264,10 +264,34 @@ model EmailTemplate {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  createdBy User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  campaigns EmailCampaign[]
+  createdBy   User?                     @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  campaigns   EmailCampaign[]
+  attachments EmailTemplateAttachment[]
 
   @@map("email_templates")
+}
+
+/// A template's pictures and attachments (owner, 24 Nov 2026), read from its .oft: inline pictures the HTML shows as
+/// `cid:<content_id>`, and regular attachments. The file is on disk under STORAGE_DIR (storage_path, ids only).
+model EmailTemplateAttachment {
+  id          Int      @id @default(autoincrement())
+  templateId  Int      @map("template_id")
+  fileName    String   @map("file_name") @db.VarChar(255)
+  /// Worked out from the file's bytes (never what the upload said).
+  contentType String   @map("content_type") @db.VarChar(120)
+  size        Int
+  /// What the HTML's `cid:` refers to; null for a regular attachment.
+  contentId   String?  @map("content_id") @db.VarChar(200)
+  isInline    Boolean  @default(false) @map("is_inline")
+  /// Relative to STORAGE_DIR: templates/<template id>/<random id>.
+  storagePath String   @map("storage_path") @db.VarChar(255)
+  sha256      String   @db.Char(64)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  template EmailTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId])
+  @@map("email_template_attachments")
 }
 
 model Job {
@@ -919,6 +943,8 @@ model EmailCampaign {
   body              String
   /// The template's sanitised HTML as queued (null: a plain-text template).
   bodyHtml          String?   @map("body_html")
+  /// The template's pictures and attachments as queued: copies under STORAGE_DIR/campaigns/<id>/ (mailer/files.ts).
+  attachments       Json      @default("[]")
   senderId          Int       @map("sender_id")
   accountId         Int?      @map("account_id")
   senderAddress     String    @map("sender_address")

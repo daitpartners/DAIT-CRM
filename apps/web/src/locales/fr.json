@@ -1973,5 +1973,13 @@
   "Every lead matching the current filters, as Excel, to complete and upload again through Import leads": "Tous les leads correspondant aux filtres actuels, en Excel, à compléter puis à réimporter avec Importer des leads",
   "Download all leads": "Télécharger tous les leads",
   "Conflicts: 1 value was not applied (it differs from the CRM or cannot be used; see Download rows to fix).": "Conflits : 1 valeur n’a pas été appliquée (elle diffère du CRM ou n’est pas utilisable ; voir Télécharger les lignes à corriger).",
-  "Conflicts: {n} values were not applied (they differ from the CRM or cannot be used; see Download rows to fix).": "Conflits : {n} valeurs n’ont pas été appliquées (elles diffèrent du CRM ou ne sont pas utilisables ; voir Télécharger les lignes à corriger)."
+  "Conflicts: {n} values were not applied (they differ from the CRM or cannot be used; see Download rows to fix).": "Conflits : {n} valeurs n’ont pas été appliquées (elles diffèrent du CRM ou ne sont pas utilisables ; voir Télécharger les lignes à corriger).",
+  "Attachments": "Pièces jointes",
+  "The pictures and attachments are too large to send (2.5 MB at most together). Remove an attachment and try again.": "Les images et pièces jointes sont trop volumineuses pour être envoyées (2,5 Mo au maximum au total). Retirez une pièce jointe et réessayez.",
+  "One of the files is not a type the CRM can send (pictures, PDF, Word, Excel or PowerPoint).": "L’un des fichiers n’est pas d’un type que le CRM peut envoyer (images, PDF, Word, Excel ou PowerPoint).",
+  "One of the template’s files could not be read. Upload the .oft again.": "L’un des fichiers du modèle n’a pas pu être lu. Importez à nouveau le fichier .oft.",
+  "Left out (over the 2.5 MB limit for a template’s files): {names}": "Non repris (au-delà de la limite de 2,5 Mo pour les fichiers d’un modèle) : {names}",
+  "Left out (a file type the CRM does not send): {names}": "Non repris (type de fichier que le CRM n’envoie pas) : {names}",
+  "Files: {n}": "Fichiers : {n}",
+  "This template’s files have changed or are missing. Pick the template again (or upload the .oft again).": "Les fichiers de ce modèle ont changé ou sont introuvables. Choisissez de nouveau le modèle (ou importez à nouveau le fichier .oft)."
 }

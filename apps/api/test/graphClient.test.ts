@@ -101,6 +101,27 @@ describe('graph client', () => {
     ]);
   });
 
+  test('template pictures go as inline file attachments (isInline + contentId), regular attachments as before', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 202 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const acc = await account();
+    await createGraphClient(env).sendMail(acc, {
+      ...msg,
+      html: '<p>Hi</p><img src="cid:dait-logo.png">',
+      attachments: [
+        { name: 'dait-logo.png', contentType: 'image/png', contentBase64: 'iVBORw0=', isInline: true, contentId: 'dait-logo.png' },
+        { name: 'Brochure.pdf', contentType: 'application/pdf', contentBase64: 'JVBERi0=' },
+      ],
+    });
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const sent = JSON.parse(init.body as string).message;
+    expect(sent.body).toEqual({ contentType: 'HTML', content: '<p>Hi</p><img src="cid:dait-logo.png">' });
+    expect(sent.attachments).toEqual([
+      { '@odata.type': '#microsoft.graph.fileAttachment', name: 'dait-logo.png', contentType: 'image/png', contentBytes: 'iVBORw0=', isInline: true, contentId: 'dait-logo.png' },
+      { '@odata.type': '#microsoft.graph.fileAttachment', name: 'Brochure.pdf', contentType: 'application/pdf', contentBytes: 'JVBERi0=' },
+    ]);
+  });
+
   test('leaves the stored token alone when MSAL does not rotate it', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 202 })));
     msalState.rotated = undefined;

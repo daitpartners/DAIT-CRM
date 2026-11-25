@@ -6,7 +6,9 @@ import { ApiError } from '../../api/client';
 import { useCreateCampaign, useMailerCheck, type MailerCheckResult } from '../../api/mailer';
 import { MAILBOXES_KEY } from '../../api/mailboxes';
 import { useUsers } from '../../api/queries';
-import { useTemplates } from '../../api/templates';
+import { useTemplateImages, useTemplates } from '../../api/templates';
+import { AttachmentChips } from '../../components/AttachmentChips';
+import { showInlineImages } from '../../lib/templateFiles';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Icons } from '../../components/Icons';
 import { Modal } from '../../components/Modal';
@@ -134,6 +136,8 @@ export function MailerWizard({ leadIds, check, onClose, onQueued }: Props) {
     [templates, me.language],
   );
   const tpl = sorted.find((x) => x.id === st.templateId) ?? sorted[0] ?? null;
+  // A template's inline pictures, shown in the preview (data: URLs; the frame loads nothing from the CRM).
+  const images = useTemplateImages(tpl);
   useEffect(() => {
     if (!st.name && okRows.length) set({ name: t('Mailer · {date} · {n}', { date: fmtDate(new Date().toISOString()), n: okRows.length === 1 ? t('1 lead') : t('{n} leads', { n: okRows.length }) }) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -240,11 +244,12 @@ export function MailerWizard({ leadIds, check, onClose, onQueued }: Props) {
                     title={t('Message body')}
                     sandbox="allow-popups allow-popups-to-escape-sandbox"
                     referrerPolicy="no-referrer"
-                    srcDoc={mailFrameDoc(fillTemplateHtml(tpl.bodyHtml, sample))}
+                    srcDoc={mailFrameDoc(showInlineImages(fillTemplateHtml(tpl.bodyHtml, sample), images))}
                   />
                 ) : (
                   <pre>{fillTemplate(tpl.body, sample)}</pre>
                 )}
+                <AttachmentChips files={tpl.attachments.filter((a) => !a.inline).map((a) => ({ key: a.id, name: a.name, size: a.size }))} />
               </div>
             ) : !tpl ? (
               <div className="note warn">{t('No templates yet. Add one under Settings → Email templates.')}</div>

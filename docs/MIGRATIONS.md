@@ -30,6 +30,7 @@ previous release keeps working against it. Release shas are the commits that wer
 | 20 | `20261206100000_import_leads` | Tables `import_batches`, `import_files`, `import_rows` (Import leads + Data manager) | Import leads (not yet released) |
 | 21 | `20261207100000_company_name_normalise` | Function `normalise_company_name(text)` (the SQL twin of shared `normaliseCompanyName`: accents folded, es/fr legal forms removed); back-fills `companies.name_normalised` with it (derived key only; `updated_at` untouched) | Import leads (not yet released) |
 | 22 | `20261208100000_template_body_html` | `email_templates.body_html` and `email_campaigns.body_html` (nullable: a formatted template's sanitised HTML, and the copy a Mailer campaign keeps when queued; null = plain text as before) | Formatted templates (not yet released) |
+| 23 | `20261209100000_template_attachments` | Table `email_template_attachments` (a template's inline pictures and attachments read from its .oft: file name, type from the bytes, size, content-id, inline flag, sha256, storage path under STORAGE_DIR/templates/; cascade-deleted with the template) and `email_campaigns.attachments` (JSONB, default `[]`: the campaign's copies under STORAGE_DIR/campaigns/) | Template pictures and attachments (not yet released) |
 | 24 | `20261210100000_import_row_changes` | `import_rows.changes` (nullable jsonb: what an update row — Lead ID / Company ID from "Download all leads" — filled, for Undo, and the conflicts it did not apply) | Leads export (not yet released) |
 
 ## Known leftover

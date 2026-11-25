@@ -19,7 +19,8 @@ function app(env, kind, port) {
       NODE_ENV: 'production',
       ...(worker ? {} : { PORT: String(port), HOST: '127.0.0.1' }),
       WEB_DIST: `${cwd}/apps/web/dist`,
-      // Import leads uploads (imports/<batch>/<file>), kept across releases.
+      // Import leads uploads (imports/<batch>/<file>) and email template files (templates/<id>/, campaigns/<id>/),
+      // kept across releases.
       STORAGE_DIR: `${root}/${env}/shared/storage`,
       RELEASE: release(cwd),
     },

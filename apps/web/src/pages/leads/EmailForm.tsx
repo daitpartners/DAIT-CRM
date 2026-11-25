@@ -7,8 +7,9 @@ import { useMailboxes } from '../../api/mailboxes';
 import { useContacts } from '../../api/contacts';
 import { useCompanyProjects, type ProjectRow } from '../../api/projects';
 import { useUsers } from '../../api/queries';
-import { useTemplates } from '../../api/templates';
+import { useTemplateFiles, useTemplates } from '../../api/templates';
 import { useCurrentUser } from '../../api/useCurrentUser';
+import { AttachmentChips } from '../../components/AttachmentChips';
 import { Icons } from '../../components/Icons';
 import { MessageEditor, type MessageValue } from '../../components/MessageEditor';
 import { useToast } from '../../components/Toast';
@@ -109,22 +110,29 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
   );
   const [templateId, setTemplateId] = useState('');
   const intro = useMemo(() => ({ subject, body }), []);
+  // The template's pictures (shown in the message) and attachments (listed under it; the sender may remove them).
+  const files = useTemplateFiles();
 
   /**
    * Picking a template fills Subject and Message with the merge fields applied; "— blank —" restores the intro. A
-   * formatted template (an .oft with its HTML) fills the message formatted, its merge values HTML-escaped.
+   * formatted template (an .oft with its HTML) fills the message formatted, its merge values HTML-escaped, with its
+   * inline pictures; its attachments are listed under the message.
    */
-  function pickTemplate(id: string) {
+  async function pickTemplate(id: string) {
     setTemplateId(id);
     const tpl = templates?.find((x) => String(x.id) === id);
     if (!tpl) {
+      files.clear();
       setSubject(intro.subject);
       setBody(intro.body);
       return;
     }
     const ctx = { firstName: first, company, me: me.name, leadNumber: lead.number };
     setSubject(fillTemplate(tpl.subject, ctx));
-    setBody({ text: fillTemplate(tpl.body, ctx), html: tpl.bodyHtml ? fillTemplateHtml(tpl.bodyHtml, ctx) : null });
+    const html = await files.apply(tpl, tpl.bodyHtml ? fillTemplateHtml(tpl.bodyHtml, ctx) : null);
+    // Another template was picked while this one's pictures loaded.
+    if (html === undefined) return;
+    setBody({ text: fillTemplate(tpl.body, ctx), html });
   }
   const [days, setDays] = useState<number>(3);
   // Review #12: fields the user must fix are marked (red border, message, aria-invalid), not only named in a toast.
@@ -159,7 +167,7 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
         setBad({});
         send.mutate(
           {
-            to: to.trim(), cc, subject, body: body.text, bodyHtml: body.html, followUpDays: follow ? (days as 2 | 3 | 7) : null, projectId: projectId ?? null,
+            to: to.trim(), cc, subject, body: body.text, ...files.send(body.html), followUpDays: follow ? (days as 2 | 3 | 7) : null, projectId: projectId ?? null,
             updatedAt: lead.updatedAt,
           },
           {
@@ -171,6 +179,7 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
               projectAdded.current = [];
               applyProject(projects.find((p) => p.id === projectId), [], '');
               setTemplateId('');
+              files.clear();
               setSubject(intro.subject);
               setBody(intro.body);
             },
@@ -227,7 +236,7 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
           <label className="lbl" htmlFor="em-tpl">
             {t('Template')}
           </label>
-          <select id="em-tpl" className="in" disabled={disabled} value={templateId} onChange={(e) => pickTemplate(e.target.value)}>
+          <select id="em-tpl" className="in" disabled={disabled} value={templateId} onChange={(e) => void pickTemplate(e.target.value)}>
             <option value="">{t('— blank —')}</option>
             {(templates ?? []).map((x) => (
               <option key={x.id} value={String(x.id)}>
@@ -272,6 +281,7 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
               clearBad('body');
             }}
           />
+          <AttachmentChips files={files.attachments.map((a) => ({ key: a.id, name: a.name, size: a.size }))} disabled={disabled} onRemove={(id) => files.remove(Number(id))} />
           {errLine('body')}
         </div>
       </div>
