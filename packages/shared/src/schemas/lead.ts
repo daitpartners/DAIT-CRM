@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { LEAD_TYPES, PRIORITIES } from '../leads.js';
+import { LEAD_DELETE_MAX, LEAD_TYPES, PRIORITIES } from '../leads.js';
 import { OUTREACH_LANGUAGES } from '../outreach.js';
 import { isoDate, optionalEmail, optionalText, optionalUrl } from './common.js';
 import { PagingQuery } from './paging.js';
@@ -153,6 +153,24 @@ export const LeadBulk = z.object({
   note: z.string().trim().max(1000).optional(),
 });
 export type LeadBulk = z.infer<typeof LeadBulk>;
+
+const leadIdList = z.array(z.number().int().positive());
+
+/** `POST /leads/delete/preview`: the leads to delete (Administrators), at most LEAD_DELETE_MAX. */
+export const LeadDeletePreviewBody = z.object({ ids: leadIdList.min(1).max(LEAD_DELETE_MAX) });
+export type LeadDeletePreviewBody = z.infer<typeof LeadDeletePreviewBody>;
+
+/** `POST /leads/delete`: the same leads, the preview's plan, and the typed word "delete". */
+export const LeadDeleteConfirm = z.object({
+  ids: leadIdList.min(1).max(LEAD_DELETE_MAX),
+  plan: z.object({
+    leads: leadIdList.max(LEAD_DELETE_MAX),
+    companies: leadIdList.max(LEAD_DELETE_MAX),
+    contacts: leadIdList.max(50_000),
+  }),
+  confirm: z.literal('delete'),
+});
+export type LeadDeleteConfirm = z.infer<typeof LeadDeleteConfirm>;
 
 /** Body of archive / unarchive: only the optimistic-lock stamp. */
 export const UpdatedAtOnly = z.object({ updatedAt });

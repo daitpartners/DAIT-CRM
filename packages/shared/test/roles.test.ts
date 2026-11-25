@@ -19,3 +19,10 @@ test('import rights: Administrators and Managers import, only Administrators und
   expect(can('Manager', 'manage_users')).toBe(false);
   expect(can('Manager', 'manage_lookups')).toBe(false);
 });
+
+test('delete leads: Administrators only', () => {
+  expect(can('Administrator', 'delete_leads')).toBe(true);
+  expect(can('Manager', 'delete_leads')).toBe(false);
+  expect(can('Sales Representative', 'delete_leads')).toBe(false);
+  expect(can('Data Research User', 'delete_leads')).toBe(false);
+});

@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { Prisma, type Lead } from '@prisma/client';
 import {
-  CLOSED_STATUSES, CompanyActivityQuery, DuplicateCheck, LeadBulk, LeadCreate, LeadDoNotEmail, LeadListQuery, LeadStatusChange, LeadTransfer, LeadUnassign,
+  CLOSED_STATUSES, CompanyActivityQuery, DuplicateCheck, LeadBulk, LeadCreate, LeadDeleteConfirm, LeadDeletePreviewBody, LeadDoNotEmail, LeadListQuery, LeadStatusChange, LeadTransfer, LeadUnassign,
   LeadUpdate, LogCall, MeetingNote, ResearchNote, ResolveCompany, SwitchContact, UpdatedAtOnly, BATCH_NUMBER_RE, can, checkDomain, isClosedStatus, pageArgs,
   type CompanyCandidate,
 } from '@dait-crm/shared';
@@ -25,6 +25,7 @@ import {
 import { dateOnly, todayIn } from '../leads/dates.js';
 import { attachmentHeader } from '../imports/exports.js';
 import { leadsWorkbook } from '../imports/leadsExport.js';
+import { LeadDeleteError, deleteLeads, deletePreview } from '../leads/delete.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -282,6 +283,22 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
       });
       return { updated };
     });
+  });
+
+  // Delete leads (Administrators, `delete_leads`): the preview first, then confirm with its plan and the word "delete".
+  app.post('/leads/delete/preview', { preHandler: [requireRight('delete_leads')] }, async (request) => {
+    const body = parseBody(LeadDeletePreviewBody, request.body);
+    return deletePreview(body.ids);
+  });
+
+  app.post('/leads/delete', { preHandler: [requireRight('delete_leads')] }, async (request, reply) => {
+    const body = parseBody(LeadDeleteConfirm, request.body);
+    try {
+      return await deleteLeads(request.user!, body.ids, body.plan);
+    } catch (e) {
+      if (e instanceof LeadDeleteError) return reply.code(e.status).send({ error: e.code });
+      throw e;
+    }
   });
 
   app.get<{ Params: { id: string }; Querystring: { activitiesPage?: string } }>(

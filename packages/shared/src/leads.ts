@@ -34,3 +34,36 @@ export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 export function isClosedStatus(s: string | null | undefined): s is ClosedStatus {
   return (CLOSED_STATUSES as readonly string[]).includes(s ?? '');
 }
+
+/* ------------------------------------------------------------------ delete leads (Administrators, `delete_leads`) */
+
+/** At most this many leads are deleted at once (Leads list bulk bar). */
+export const LEAD_DELETE_MAX = 500;
+
+/**
+ * Why Delete keeps a record: a lead with a sent quotation or a project (archive it instead); a company that still has
+ * other leads, projects or quotations, or a contact another lead, a quotation or a project still uses; `changed`: it
+ * changed after the preview, so it is kept rather than removed unseen.
+ */
+export const LEAD_DELETE_REASONS = ['quotations', 'projects', 'other_leads', 'contact_in_use', 'changed'] as const;
+export type LeadDeleteReason = (typeof LEAD_DELETE_REASONS)[number];
+
+/** The records a preview offers to remove; sent back on confirm, which never removes anything outside it. */
+export type LeadDeletePlan = { leads: number[]; companies: number[]; contacts: number[] };
+
+/**
+ * What Delete removes and keeps (`POST /leads/delete/preview` lists it; `POST /leads/delete` does it and answers with
+ * what it actually did). Emails and calendar events are never counted or removed: they are only unlinked.
+ */
+export type LeadDeletePreview = {
+  remove: {
+    leads: { id: number; number: string; companyName: string }[];
+    companies: { id: number; number: string; name: string }[];
+    contacts: number;
+    /** Draft quotations of the leads (never sent), removed with them. */
+    draftQuotations: number;
+    tasks: number;
+  };
+  keep: { kind: 'lead' | 'company' | 'contact'; id: number; label: string; reason: LeadDeleteReason }[];
+  plan: LeadDeletePlan;
+};
