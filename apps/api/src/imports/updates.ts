@@ -218,7 +218,17 @@ export function planUpdate(
   const fileCompany = clean(f.companyName);
   const shownCompany = r.lead ? r.lead.companyName : r.company?.name ?? '';
   const companyDiffers = !!fileCompany && has(shownCompany) && !sameValue('companyName', shownCompany, fileCompany, known);
-  if (companyDiffers) report('companyName', fileCompany, 'differs', shownCompany.trim());
+  if (companyDiffers) {
+    // Another company (a sorted or shifted Excel row): nothing of the row is applied, no contact is created or linked;
+    // every value is reported as not applied (a Company ID row's lead fields are already reported above).
+    report('companyName', fileCompany, 'differs', shownCompany.trim());
+    for (const field of IMPORT_FIELDS) {
+      if (field === 'companyName' || (!r.lead && LEAD_ONLY_FIELDS.includes(field))) continue;
+      const file = clean(f[field]);
+      if (file) report(field, file, 'company');
+    }
+    return { fills: [], conflicts, contact: null };
+  }
 
   // The contact: the lead's own; else (a lead with a company, the file naming a person) one found on the company or a new one.
   let contact: UpdatePlan['contact'] = null;

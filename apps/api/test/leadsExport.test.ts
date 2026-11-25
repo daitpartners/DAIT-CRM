@@ -406,20 +406,62 @@ describe('update rows · review round', () => {
     expect(same.fills).toEqual([{ entity: 'contact', field: 'designation', value: 'CEO', source: 'designation' }]);
   });
 
-  it('I1: a shifted row (another company) fills none of the company\'s fields on the lead or the company', async () => {
+  it('R1: a row naming another company applies nothing at all and never creates or links a contact', async () => {
     const r = await records();
     const plan = planUpdate(
       { companyName: 'Other Corp SA', website: 'othercorp.com', city: 'Lima', country: 'Spain', industry: 'Retail', designation: 'Buyer' },
       r, { knownCountries: known, industries },
     );
-    expect(plan.fills).toEqual([{ entity: 'contact', field: 'designation', value: 'Buyer', source: 'designation' }]);
+    expect(plan.fills).toEqual([]);
     expect(plan.conflicts).toEqual([
       { field: 'companyName', crm: 'Acme Freight', file: 'Other Corp SA' },
       { field: 'website', crm: '', file: 'othercorp.com', reason: 'company' },
-      { field: 'country', crm: 'United Kingdom', file: 'Spain', reason: 'company' },
+      { field: 'country', crm: '', file: 'Spain', reason: 'company' },
       { field: 'city', crm: '', file: 'Lima', reason: 'company' },
+      { field: 'designation', crm: '', file: 'Buyer', reason: 'company' },
       { field: 'industry', crm: '', file: 'Retail', reason: 'company' },
     ]);
+    // Reviewer probe 1: a shifted row with no contact name: email, phone and note are not applied either.
+    const shifted = planUpdate(
+      { companyName: 'Other Corp SA', email: 'info@othercorp.com', phone: '+51 1 555 0100', notes: 'call back' },
+      r, { knownCountries: known, industries },
+    );
+    expect(shifted.fills).toEqual([]);
+    expect(shifted.conflicts.map((c) => [c.field, c.reason ?? 'differs'])).toEqual([
+      ['companyName', 'differs'], ['email', 'company'], ['phone', 'company'], ['notes', 'company'],
+    ]);
+    // Reviewer probe 2: the lead has no contact, the row names Maria at another company: no contact is created or linked.
+    const noContact = await records({ contact: false });
+    await makeContact({ companyId: noContact.company.id, firstName: 'Maria', lastName: 'Lopez' });
+    const maria = planUpdate(
+      { companyName: 'Other Corp SA', contactName: 'Maria Lopez', designation: 'CEO', phone: '+51 1 555 0100' },
+      noContact, { knownCountries: known, industries, found: null },
+    );
+    expect(maria.contact).toBeNull();
+    expect(maria.fills).toEqual([]);
+    expect(maria.conflicts.map((c) => [c.field, c.reason ?? 'differs'])).toEqual([
+      ['companyName', 'differs'], ['contactName', 'company'], ['designation', 'company'], ['phone', 'company'],
+    ]);
+  });
+
+  it('R2: What to fix lists every field not applied (Designation, Email and Phone of the Maria / John row)', async () => {
+    const r = await records();
+    const plan = planUpdate(
+      { contactName: 'Maria Lopez', phone: '+34 600 999 000', email: 'maria@x.es', designation: 'CEO' },
+      r, { knownCountries: known, industries },
+    );
+    const { whatToFix } = await import('../src/imports/exports');
+    const { conflictProblems } = await import('../src/imports/updates');
+    expect(whatToFix(conflictProblems(plan.conflicts), 'en').split('; ')).toEqual([
+      'Contact: CRM has John Smith, file has Maria Lopez — update on the lead page if correct',
+      'Designation: CEO not applied — the contact in the file is not the lead’s contact',
+      'Email: maria@x.es not applied — the contact in the file is not the lead’s contact',
+      'Phone: +34 600 999 000 not applied — the contact in the file is not the lead’s contact',
+    ]);
+    // "Add an email or phone" (stored for both cells) still reads once.
+    expect(whatToFix([
+      { code: 'contact_missing', field: 'email', level: 'missing' }, { code: 'contact_missing', field: 'phone', level: 'missing' },
+    ], 'en')).toBe('Add an email or phone');
   });
 
   it('I3: an invalid email / website and an unknown country are not applied; a known country in another spelling is the same', async () => {

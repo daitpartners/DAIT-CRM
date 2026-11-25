@@ -141,7 +141,8 @@ export function whatToFix(problems: readonly RowProblem[], lang: Lang): string {
   const seen = new Set<string>();
   const texts: string[] = [];
   for (const p of problems) {
-    const key = p.code === 'update_conflict' || p.code === 'industry_unknown' ? `${p.code}:${p.field ?? ''}` : p.code;
+    // Once per code and field (every field not applied is listed); "Add an email or phone" is stored for both, shown once.
+    const key = p.field && p.code !== 'contact_missing' ? `${p.code}:${p.field}` : p.code;
     if (seen.has(key)) continue;
     seen.add(key);
     texts.push(problemText(p, lang));
