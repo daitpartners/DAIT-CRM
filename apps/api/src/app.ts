@@ -131,10 +131,16 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(rateLimit, { global: false });
   app.decorate('graph', opts.graph ?? createGraphClient(env));
   registerAuth(app, { secureCookies });
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler((error, request, reply) => {
     if (error instanceof ValidationError) return reply.code(400).send({ error: 'validation', issues: error.issues });
     if (error instanceof NotFoundError) return reply.code(404).send({ error: 'not_found' });
     if (error instanceof FormattedBodyError || error instanceof AttachmentError) return reply.code(error.status).send({ error: error.code });
+    // A server error is logged in full and answered without its message (which can name server paths; review I4).
+    const status = (error as { statusCode?: number }).statusCode ?? 500;
+    if (status >= 500) {
+      request.log.error({ err: error }, 'request failed');
+      return reply.code(500).send({ error: 'server_error' });
+    }
     return reply.send(error);
   });
 

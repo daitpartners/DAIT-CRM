@@ -40,10 +40,11 @@ function plainBodyRule(required: boolean) {
 
 /**
  * Template pictures and attachments (owner, 24 Nov 2026): the files of an uploaded .oft — inline pictures the HTML
- * shows as `cid:` and regular attachments. Each at most this many bytes, and all of a template's together too (Graph
- * sendMail takes the attachments in the request itself).
+ * shows as `cid:` and regular attachments. Each at most this many bytes, and all of a template's together too: Graph
+ * sendMail takes the attachments in the request itself (at most 4 MB), and base64 makes them a third larger, so 2.5 MB
+ * leaves room for the HTML (security review I1; the exact request size is checked again when a message is queued).
  */
-export const TEMPLATE_ATTACHMENTS_MAX_BYTES = 3_000_000;
+export const TEMPLATE_ATTACHMENTS_MAX_BYTES = 2_500_000;
 /** Files a template may keep. */
 export const TEMPLATE_ATTACHMENTS_MAX_COUNT = 20;
 /** Base64 characters of one file at most (TEMPLATE_ATTACHMENTS_MAX_BYTES encoded). */

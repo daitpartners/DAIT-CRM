@@ -1,19 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { TEMPLATE_ATTACHMENTS_MAX_BYTES } from '@dait-crm/shared';
-import { restoreCids, showInlineImages, toBase64, uploadFiles, uploadImages } from '../src/lib/templateFiles';
+import { restoreCids, showInlineImages, sniffType, toBase64, uploadFiles, uploadImages } from '../src/lib/templateFiles';
 import { makePng, makePdf } from './oftFixture';
 
 describe('template pictures in the editor (24 Nov 2026)', () => {
-  const images = { 'logo.png': 'data:image/png;base64,AAAA', 'sig@01db': 'data:image/png;base64,BBBB' };
+  const images = {
+    'logo.png': { url: 'data:image/png;base64,AAAA', cid: 'logo.png' },
+    'image001.png@01db4f1e.6b7c5a40': { url: 'data:image/png;base64,BBBB', cid: 'image001.png@01DB4F1E.6B7C5A40' },
+  };
 
   it('cid: pictures show as data: URLs and go back to cid: for saving and sending', () => {
-    const html = '<style>p{margin:0}</style><p>Hi</p><img src="cid:logo.png" alt="DAIT"><img src="CID:Sig@01DB"><img src="cid:other.png">';
+    const html = '<style>p{margin:0}</style><p>Hi</p><img src="cid:logo.png" alt="DAIT"><img src="CID:image001.png@01db4f1e.6b7c5a40"><img src="cid:other.png">';
     const shown = showInlineImages(html, images);
     expect(shown).toContain('<style>p{margin:0}</style>');
     expect(shown).toContain('src="data:image/png;base64,AAAA"');
     expect(shown).toContain('src="data:image/png;base64,BBBB"');
     expect(shown).toContain('src="cid:other.png"');
-    expect(restoreCids(shown, images)).toBe('<style>p{margin:0}</style><p>Hi</p><img src="cid:logo.png" alt="DAIT"><img src="cid:sig@01db"><img src="cid:other.png">');
+    // Restored in the file's own case (Outlook-style ids have upper-case hex; review I2), whatever case the HTML had.
+    expect(restoreCids(shown, images)).toBe('<style>p{margin:0}</style><p>Hi</p><img src="cid:logo.png" alt="DAIT"><img src="cid:image001.png@01DB4F1E.6B7C5A40"><img src="cid:other.png">');
     // A picture pasted again elsewhere (same data: URL, no marker) still goes back to its cid:.
     expect(restoreCids('<p><img src="data:image/png;base64,AAAA"></p>', images)).toBe('<p><img src="cid:logo.png"></p>');
     // Nothing to map: unchanged.
@@ -40,7 +44,7 @@ describe('template pictures in the editor (24 Nov 2026)', () => {
     expect(r.keep[0]!.data).toBe(toBase64(png));
     expect(r.skipped).toEqual(['fake.png', 'run.exe']);
     expect(r.tooLarge).toBe(false);
-    expect(uploadImages(r.keep)).toEqual({ 'logo.png': `data:image/png;base64,${toBase64(png)}` });
+    expect(uploadImages(r.keep)).toEqual({ 'logo.png': { url: `data:image/png;base64,${toBase64(png)}`, cid: 'logo.png' } });
 
     const big = new Uint8Array(TEMPLATE_ATTACHMENTS_MAX_BYTES);
     big.set(pdf);
@@ -51,6 +55,20 @@ describe('template pictures in the editor (24 Nov 2026)', () => {
     expect(over.keep.map((f) => f.name)).toEqual(['logo.png']);
     expect(over.skipped).toEqual(['Huge.pdf']);
     expect(over.tooLarge).toBe(true);
+  });
+
+  it('the browser sniffs as the server does: a file the server would refuse is left out, not sent to fail (review M5)', () => {
+    const at = (bytes: number[] | string) => (typeof bytes === 'string' ? new TextEncoder().encode(bytes) : new Uint8Array(bytes));
+    expect(sniffType(at([0x89, 0x50, 0x4e, 0x47]), 'a.png')).toBeNull(); // only 4 of the 8 PNG signature bytes
+    expect(sniffType(at('GIF8xa'), 'a.gif')).toBeNull();
+    expect(sniffType(at('junk %PDF-1.4'), 'a.pdf')).toBeNull();
+    expect(sniffType(at('%PDF-1.4'), 'a.png')?.contentType).toBe('application/pdf');
+    expect(sniffType(at([0x50, 0x4b, 0x03, 0x04]), 'a.docx')?.contentType).toContain('wordprocessingml');
+    expect(sniffType(at([0x50, 0x4b, 0x03, 0x04]), 'a.zip')).toBeNull();
+    expect(sniffType(at('plain text'), 'Report.pdf')).toBeNull();
+    const r = uploadFiles([{ name: 'Report.pdf', contentType: 'application/pdf', contentId: null, inline: false, data: at('not a pdf') }]);
+    expect(r.keep).toEqual([]);
+    expect(r.skipped).toEqual(['Report.pdf']);
   });
 
   it('base64 of a large file matches Node’s', () => {

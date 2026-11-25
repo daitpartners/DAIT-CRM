@@ -10,7 +10,7 @@ import { sendBlock } from '../../mailer/rules.js';
 import { queueStep, startOfDayIn, startOfNextDayIn } from '../../mailer/schedule.js';
 import { textToHtml } from '../../mail/html.js';
 import { formattedMailerHtml } from '../../mail/formatted.js';
-import { filesToSend, type StoredFile } from '../../mail/files.js';
+import { filesToSend, removeFolder, type StoredFile } from '../../mail/files.js';
 import type { JobContext } from '../runner.js';
 
 /** Nobody can be sent now (working hours): never look again sooner than this. */
@@ -157,13 +157,16 @@ async function afterSend(campaignId: number, fromJobId: number): Promise<void> {
 }
 
 async function finishCampaign(campaignId: number): Promise<void> {
-  await prisma.$transaction(async (tx) => {
+  const completed = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM email_campaigns WHERE id = ${campaignId} FOR UPDATE`;
     const c = await tx.emailCampaign.findUniqueOrThrow({ where: { id: campaignId } });
-    if (c.status !== 'Sending' || (await tx.emailCampaignRecipient.count({ where: { campaignId, status: { in: ['Queued', 'Sending'] } } })) > 0) return;
+    if (c.status !== 'Sending' || (await tx.emailCampaignRecipient.count({ where: { campaignId, status: { in: ['Queued', 'Sending'] } } })) > 0) return false;
     await tx.emailCampaign.update({ where: { id: campaignId }, data: { status: 'Completed', completedAt: new Date(), waitReason: null, nextSendAt: null } });
     const count = (status: string) => tx.emailCampaignRecipient.count({ where: { campaignId, status } });
     const [sent, skipped, failed] = [await count('Sent'), await count('Skipped'), await count('Failed')];
     await notifyUser(tx, c.senderId, `Mailer finished · ${c.name}`, `${sent} sent · ${skipped} skipped · ${failed} failed`, `/mailer/${c.id}`);
+    return true;
   });
+  // Nothing more to send: the campaign's copies of the template's files go (M2; best effort).
+  if (completed) await removeFolder('campaigns', campaignId).catch(() => undefined);
 }

@@ -402,9 +402,11 @@ export function errorText(t: TFn, code: string, vars: Record<string, string | nu
     case 'html_too_complex':
       return t('The formatting is too complex to read. Simplify it, or remove the formatting.');
     case 'attachments_too_large':
-      return t('The pictures and attachments are too large to send (3 MB at most together). Remove an attachment and try again.');
+      return t('The pictures and attachments are too large to send (2.5 MB at most together). Remove an attachment and try again.');
     case 'attachment_type':
       return t('One of the files is not a type the CRM can send (pictures, PDF, Word, Excel or PowerPoint).');
+    case 'template_files_missing':
+      return t('This template’s files have changed or are missing. Pick the template again (or upload the .oft again).');
     case 'attachment_invalid':
       return t('One of the template’s files could not be read. Upload the .oft again.');
     case 'no_mailbox':

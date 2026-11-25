@@ -75,7 +75,7 @@ async function fetchInlineImages(tpl: Pick<EmailTemplate, 'id' | 'attachments'>)
   await Promise.all(tpl.attachments.filter((a) => a.inline && a.contentId).map(async (a) => {
     const res = await fetch(`/api/email-templates/${tpl.id}/attachments/${a.id}`, { credentials: 'include' });
     if (!res.ok) return;
-    out[a.contentId!.toLowerCase()] = `data:${a.contentType};base64,${toBase64(new Uint8Array(await res.arrayBuffer()))}`;
+    out[a.contentId!.toLowerCase()] = { url: `data:${a.contentType};base64,${toBase64(new Uint8Array(await res.arrayBuffer()))}`, cid: a.contentId! };
   }));
   return out;
 }

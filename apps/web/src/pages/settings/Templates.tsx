@@ -48,7 +48,7 @@ export function EmailTemplates() {
     const { keep, skipped, tooLarge } = uploadFiles(parsed.attachments);
     if (skipped.length) {
       const names = skipped.join(', ');
-      toast(tooLarge ? t('Left out (over the 3 MB limit for a template’s files): {names}', { names }) : t('Left out (a file type the CRM does not send): {names}', { names }), 'warn');
+      toast(tooLarge ? t('Left out (over the 2.5 MB limit for a template’s files): {names}', { names }) : t('Left out (a file type the CRM does not send): {names}', { names }), 'warn');
     }
     let files: UploadFile[] = keep;
     // The file's formatting (its HTML body) is sanitised by the server before the editor shows it, keeping the cid:

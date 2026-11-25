@@ -128,12 +128,16 @@ const run = (t: Transform | undefined, tagName: string, attribs: sanitizeHtml.At
 
 /**
  * A picture source outgoing HTML keeps given the message's inline pictures (template pictures and attachments, owner
- * 24 Nov 2026): outgoingImageUrl, or `cid:<id>` naming one of `cids` (lower-cased content-ids of the inline pictures
- * of that template / message). Any other cid: goes.
+ * 24 Nov 2026): outgoingImageUrl, or `cid:<id>` naming one of `cids` (lower-cased content-id → the stored one, of the
+ * inline pictures of that template / message), rewritten to the stored content-id. Any other cid: goes; null: drop.
  */
-function outgoingImageSrc(src: string, cids: ReadonlySet<string>): boolean {
+function outgoingImageSrc(src: string, cids: ReadonlyMap<string, string>): string | null {
   const cid = /^\s*cid:([^\s"']+)\s*$/i.exec(src);
-  return cid ? cids.has(cid[1]!.toLowerCase()) : outgoingImageUrl(src);
+  if (!cid) return outgoingImageUrl(src) ? src : null;
+  // Written back as the picture's own content-id, exact case: clients may match a cid case-sensitively (RFC 2392),
+  // and Graph gets the stored one (security review I2).
+  const canonical = cids.get(cid[1]!.toLowerCase());
+  return canonical ? `cid:${canonical}` : null;
 }
 
 /**
@@ -141,7 +145,7 @@ function outgoingImageSrc(src: string, cids: ReadonlySet<string>): boolean {
  * absolute http, https and mailto, and pictures (img src, CSS url()) to outgoingImageUrl — plus `cid:` pictures that
  * name one of the message's inline pictures (`cids`).
  */
-function outgoingOptions(cids: ReadonlySet<string>): sanitizeHtml.Options {
+function outgoingOptions(cids: ReadonlyMap<string, string>): sanitizeHtml.Options {
   return {
     ...OPTIONS,
     allowedSchemes: ['http', 'https', 'mailto'],
@@ -163,16 +167,18 @@ function outgoingOptions(cids: ReadonlySet<string>): sanitizeHtml.Options {
       },
       img: (tagName, attribs) => {
         const r = run(base.img, tagName, attribs);
-        if (r.attribs.src !== undefined && !outgoingImageSrc(r.attribs.src, cids)) {
+        if (r.attribs.src === undefined) return r;
+        const src = outgoingImageSrc(r.attribs.src, cids);
+        if (src === null) {
           const { src: _drop, ...rest } = r.attribs;
           return { tagName: r.tagName, attribs: rest };
         }
-        return r;
+        return { tagName: r.tagName, attribs: { ...r.attribs, src } };
       },
     },
   };
 }
-const OUTGOING_OPTIONS = outgoingOptions(new Set());
+const OUTGOING_OPTIONS = outgoingOptions(new Map());
 
 /**
  * `outgoing`: HTML the CRM sends (outgoingOptions) rather than mail it received; `cids`: with it, the content-ids of
@@ -256,7 +262,7 @@ const pass = (html: string, options = OPTIONS) => {
  * The output is sanitised again until it no longer changes, so what is stored reads the same to any HTML parser.
  */
 export function sanitizeEmailHtml(html: string, opts: SanitizeOptions = {}): string {
-  const cids = opts.cids?.length ? new Set(opts.cids.map((c) => c.toLowerCase())) : null;
+  const cids = opts.cids?.length ? new Map(opts.cids.map((c) => [c.toLowerCase(), c] as const)) : null;
   const options = !opts.outgoing ? OPTIONS : cids ? outgoingOptions(cids) : OUTGOING_OPTIONS;
   let out = pass(limitNesting(html), options);
   for (let i = 1; i < MAX_PASSES; i++) {

@@ -174,7 +174,7 @@ Small issues found in reviews and not fixed yet.
   "Formatted" badge.
 - **Pictures and attachments inside an .oft (branch `template-attachments`, not yet released):** the logos and other
   inline pictures (cid: images) and the attached files (PDF, Word, Excel, PowerPoint, pictures) are now kept with the
-  template, shown in the message and sent with it (lead Email tab, Compose, Mailer). At most 3 MB of files per
+  template, shown in the message and sent with it (lead Email tab, Compose, Mailer). At most 2.5 MB of files per
   template; a file over the limit or of another type is left out with a notice.
 - **Re-upload your existing .oft templates once more after that release** (e.g. "DAIT-Holiday-2026-Email_2"): templates
   uploaded before it have no pictures or attachments stored, so they send without the logos and the PDF. Delete the

@@ -1946,10 +1946,11 @@
   "The server is busy. Try again in a moment.": "El servidor está ocupado. Vuelva a intentarlo en un momento.",
   "The formatting is too complex to read. Simplify it, or remove the formatting.": "El formato es demasiado complejo para leerlo. Simplifíquelo o quite el formato.",
   "Attachments": "Adjuntos",
-  "The pictures and attachments are too large to send (3 MB at most together). Remove an attachment and try again.": "Las imágenes y los adjuntos son demasiado grandes para enviarlos (3 MB como máximo en total). Quite un adjunto e inténtelo de nuevo.",
+  "The pictures and attachments are too large to send (2.5 MB at most together). Remove an attachment and try again.": "Las imágenes y los adjuntos son demasiado grandes para enviarlos (2,5 MB como máximo en total). Quite un adjunto e inténtelo de nuevo.",
   "One of the files is not a type the CRM can send (pictures, PDF, Word, Excel or PowerPoint).": "Uno de los archivos no es de un tipo que el CRM pueda enviar (imágenes, PDF, Word, Excel o PowerPoint).",
   "One of the template’s files could not be read. Upload the .oft again.": "No se pudo leer uno de los archivos de la plantilla. Vuelva a subir el .oft.",
-  "Left out (over the 3 MB limit for a template’s files): {names}": "Se omitieron (superan el límite de 3 MB para los archivos de una plantilla): {names}",
+  "Left out (over the 2.5 MB limit for a template’s files): {names}": "Se omitieron (superan el límite de 2,5 MB para los archivos de una plantilla): {names}",
   "Left out (a file type the CRM does not send): {names}": "Se omitieron (un tipo de archivo que el CRM no envía): {names}",
-  "Files: {n}": "Archivos: {n}"
+  "Files: {n}": "Archivos: {n}",
+  "This template’s files have changed or are missing. Pick the template again (or upload the .oft again).": "No se pudieron encontrar los archivos de esta plantilla o han cambiado. Vuelva a elegir la plantilla (o vuelva a subir el .oft)."
 }

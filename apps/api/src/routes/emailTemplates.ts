@@ -37,8 +37,8 @@ function auditView(t: WithCreator) {
   return { ...rest, formatted: bodyHtml !== null, attachments: attachments.map((a) => ({ name: a.name, size: a.size, inline: a.inline })) };
 }
 
-/** Lower-cased content-ids of the inline pictures among `files`: the only `cid:` pictures the template's HTML keeps. */
-const inlineCids = (files: { contentId: string | null; isInline: boolean }[]) => files.filter((f) => f.isInline && f.contentId).map((f) => f.contentId!.toLowerCase());
+/** Content-ids of the inline pictures among `files` (as stored): the only `cid:` pictures the template's HTML keeps. */
+const inlineCids = (files: { contentId: string | null; isInline: boolean }[]) => files.filter((f) => f.isInline && f.contentId).map((f) => f.contentId!);
 
 /**
  * Writes a template's checked files to disk and lists them (inside the transaction that creates or replaces them).
@@ -121,13 +121,15 @@ export const emailTemplateRoutes: FastifyPluginAsync = async (app) => {
     const formatted = source === undefined ? undefined : await templateHtml(source, cids);
     const body = formatted === undefined ? rest : formatted ? { ...rest, body: formatted.text, bodyHtml: formatted.html } : { ...rest, bodyHtml: null };
     const written: string[] = [];
+    let saved: { updated: WithCreator; removed: string[] };
     try {
-      const { updated, removed } = await prisma.$transaction(async (tx) => {
+      saved = await prisma.$transaction(async (tx) => {
         const before = Number.isInteger(id) ? await tx.emailTemplate.findUnique({ where: { id }, include }) : null;
         if (!before) throw new NotFoundError();
         if (new Date(updatedAt).getTime() !== before.updatedAt.getTime()) throw new StaleError();
-        // Matching updatedAt in the where makes a concurrent write since `before` a P2025 (stale).
-        await tx.emailTemplate.update({ where: { id, updatedAt: before.updatedAt }, data: body });
+        // Matching updatedAt in the where makes a concurrent write since `before` a P2025 (stale). Replacing only the
+        // files moves updatedAt too, so a second editor's stale copy is refused (security review I3).
+        await tx.emailTemplate.update({ where: { id, updatedAt: before.updatedAt }, data: { ...body, ...(files ? { updatedAt: new Date() } : {}) } });
         if (files) {
           await tx.emailTemplateAttachment.deleteMany({ where: { templateId: id } });
           await storeFiles(tx, id, files, written);
@@ -136,14 +138,14 @@ export const emailTemplateRoutes: FastifyPluginAsync = async (app) => {
         await audit(tx, { entityType: 'email_template', entityId: id, action: 'update', userId: user.id, before: auditView(before), after: auditView(after) });
         return { updated: after, removed: files ? before.attachments.map((a) => a.storagePath) : [] };
       });
-      // The replaced files go once the change is saved.
-      await removeFiles(removed);
-      return templateView(updated);
     } catch (e) {
       await removeFiles(written);
       if (e instanceof StaleError || isNotFound(e)) return reply.code(409).send({ error: 'stale' });
       throw e;
     }
+    // The replaced files go once the change is saved; a failure here is logged and never undoes the saved change (M1).
+    await removeFiles(saved.removed).catch((err) => request.log.error({ err }, 'template files: old files not removed'));
+    return templateView(saved.updated);
   });
 
   app.delete<{ Params: { id: string } }>('/email-templates/:id', { preHandler: [requireRight('manage_leads')] }, async (request, reply) => {
@@ -155,8 +157,8 @@ export const emailTemplateRoutes: FastifyPluginAsync = async (app) => {
       await tx.emailTemplate.delete({ where: { id } });
       await audit(tx, { entityType: 'email_template', entityId: id, action: 'delete', userId: user.id, before: auditView(before) });
     });
-    // Its files go with it (a Mailer campaign keeps its own copies).
-    await removeFolder('templates', id);
+    // Its files go with it (a Mailer campaign keeps its own copies); a failure is logged, the delete stands (M1).
+    await removeFolder('templates', id).catch((err) => request.log.error({ err }, 'template files: folder not removed'));
     return reply.code(204).send();
   });
 

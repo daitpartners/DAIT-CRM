@@ -18,7 +18,7 @@ type Area = 'templates' | 'campaigns';
 
 /** A refused upload, answered as `{ error: code }` with `status` (app.ts error handler). */
 export class AttachmentError extends Error {
-  constructor(readonly code: 'attachments_too_large' | 'attachment_type' | 'attachment_invalid', readonly status: number) {
+  constructor(readonly code: 'attachments_too_large' | 'attachment_type' | 'attachment_invalid' | 'template_files_missing', readonly status: number) {
     super(code);
     this.name = 'AttachmentError';
   }
@@ -26,6 +26,30 @@ export class AttachmentError extends Error {
 
 /** Over a size cap: 413 `attachments_too_large`. */
 export const tooLarge = () => new AttachmentError('attachments_too_large', 413);
+
+/**
+ * A stored file gone from disk (the template was replaced or deleted meanwhile, or storage lost it): 409
+ * `template_files_missing`, never the error with its server path (security review I4).
+ */
+const missing = (err: unknown): never => {
+  if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') throw new AttachmentError('template_files_missing', 409);
+  throw err;
+};
+
+/**
+ * Largest Graph sendMail request the CRM builds: Graph refuses one over 4 MB, so the files (base64), the HTML (as JSON)
+ * and 16 KB for the rest stay under 3.9 MB (security review I1).
+ */
+export const GRAPH_REQUEST_MAX = 3_900_000;
+const REQUEST_OVERHEAD = 16 * 1024;
+
+/** Base64 characters of `bytes` bytes. */
+export const base64Length = (bytes: number) => Math.ceil(bytes / 3) * 4;
+
+/** 413 `attachments_too_large` when files of `base64Total` characters and `html` would make too large a Graph request. */
+export function checkRequestSize(base64Total: number, html: string | null | undefined): void {
+  if (base64Total + Buffer.byteLength(JSON.stringify(html ?? '')) + REQUEST_OVERHEAD > GRAPH_REQUEST_MAX) throw tooLarge();
+}
 
 /** What a file is, from its bytes: the type sent and stored, and the extensions its name may have. */
 type Kind = { contentType: string; exts: string[]; image: boolean };
@@ -66,9 +90,12 @@ export function sniff(data: Buffer, name: string): Kind | null {
  */
 export function cleanFileName(raw: string, kind: Kind): string {
   const last = raw.split(/[\\/]/).pop() ?? '';
+  // Control, format (bidi marks, zero-width: \p{Cf}) and line / paragraph separator characters go, with reserved ones.
   // eslint-disable-next-line no-control-regex
-  let name = last.replace(/[\u0000-\u001f\u007f<>:"|?*‪-‮⁦-⁩]/g, '').replace(/\s+/g, ' ').replace(/^[\s.]+/, '').trim();
+  let name = last.replace(/[\u0000-\u001f\u007f<>:"|?*\u2028\u2029]|\p{Cf}/gu, '').replace(/\s+/g, ' ').replace(/^[\s.]+/, '').trim();
   if (!kind.exts.includes(extOf(name))) name = `${name.replace(/\.+$/, '') || 'attachment'}.${kind.exts[0]}`;
+  // A Windows device name (CON.pdf, lpt1.docx) cannot be saved on the recipient's PC: prefixed.
+  if (/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\.|$)/i.test(name)) name = `_${name}`;
   if (name.length > 120) {
     const ext = `.${extOf(name)}`;
     name = name.slice(0, 120 - ext.length).trimEnd() + ext;
@@ -152,12 +179,12 @@ export async function copyFileTo(fromRel: string, area: Area, id: number): Promi
   const rel = `${folder(area, id)}/${randomUUID()}`;
   const full = resolveInside(area, rel);
   await mkdir(path.dirname(full), { recursive: true, mode: 0o700 });
-  await copyFile(resolveInside(areaOf(fromRel), fromRel), full);
+  await copyFile(resolveInside(areaOf(fromRel), fromRel), full).catch(missing);
   return rel;
 }
 
 export async function readStoredFile(rel: string): Promise<Buffer> {
-  return readFile(resolveInside(areaOf(rel), rel));
+  return readFile(resolveInside(areaOf(rel), rel)).catch(missing);
 }
 
 /** Removes stored files (nothing happens for one already gone). */
@@ -188,12 +215,15 @@ export function cidsShown(html: string | null | undefined): Set<string> {
 /**
  * The files to send with a message: the inline pictures its HTML shows (Graph `isInline` with their content-id) and
  * the regular attachments given, read from disk; all together within TEMPLATE_ATTACHMENTS_MAX_BYTES (413
- * `attachments_too_large`). An inline picture the HTML no longer shows (removed in the editor) is not sent.
+ * `attachments_too_large`, as is a Graph request over GRAPH_REQUEST_MAX). An inline picture the HTML no longer shows
+ * (removed in the editor) is not sent; a file gone from disk is 409 `template_files_missing`.
  */
 export async function filesToSend(stored: StoredFile[], html: string | null | undefined): Promise<MailAttachment[]> {
   const shown = cidsShown(html);
   const picked = stored.filter((f) => (f.isInline ? !!f.contentId && shown.has(f.contentId.toLowerCase()) : true));
   if (picked.reduce((n, f) => n + f.size, 0) > TEMPLATE_ATTACHMENTS_MAX_BYTES) throw tooLarge();
+  // The whole Graph request must fit (security review I1): checked before anything is read or queued.
+  if (picked.length) checkRequestSize(picked.reduce((n, f) => n + base64Length(f.size), 0), html);
   return Promise.all(picked.map(async (f) => ({
     name: f.fileName,
     contentType: f.contentType,

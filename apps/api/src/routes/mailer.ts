@@ -7,7 +7,8 @@ import { requireRight, type AuthUser } from '../plugins/auth.js';
 import { NotFoundError, parseBody } from '../validate.js';
 import { notifyUser } from '../leads/notify.js';
 import { checkRecipients } from '../mailer/rules.js';
-import { copyFileTo, removeFolder, type StoredFile } from '../mail/files.js';
+import { base64Length, checkRequestSize, copyFileTo, removeFolder, type StoredFile } from '../mail/files.js';
+import { textToHtml } from '../mail/html.js';
 import { guard } from './leads.js';
 
 type Tx = Prisma.TransactionClient;
@@ -142,6 +143,11 @@ export const mailerRoutes: FastifyPluginAsync = async (app) => {
       const rows = await checkRecipients(prisma, user, body.leadIds);
       const sendable = rows.filter((r) => !r.block).length;
       if (sendable === 0) return reply.code(409).send({ error: 'nothing_to_send' });
+      // Each email's Graph request must fit with all the template's files (413 attachments_too_large; review I1). The
+      // opt-out line and filled merge fields fit in the check's allowance.
+      if (template.attachments.length) {
+        checkRequestSize(template.attachments.reduce((n, a) => n + base64Length(a.size), 0), template.bodyHtml ?? textToHtml(template.body));
+      }
       const startAt = body.startAt && Date.parse(body.startAt) > Date.now() ? new Date(body.startAt) : null;
       let campaignId: number | null = null;
       const id = await prisma.$transaction(async (tx) => {
@@ -207,6 +213,8 @@ export const mailerRoutes: FastifyPluginAsync = async (app) => {
         return err;
       });
       if (error) return reply.code(409).send({ error });
+      // A cancelled campaign sends nothing more: its copies of the template's files go (M2).
+      if (name === 'cancel') await removeFolder('campaigns', found.id).catch((err) => request.log.error({ err }, 'campaign files not removed'));
       return view(user, found.id);
     }));
 
