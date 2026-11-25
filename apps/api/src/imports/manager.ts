@@ -151,7 +151,7 @@ const idleNeverImported = (before: Date) => Prisma.sql`
   AND b.imported_at IS NULL
   AND b.updated_at < ${before}
   AND ${NO_JOB}
-  AND NOT EXISTS (SELECT 1 FROM import_rows r WHERE r.batch_id = b.id AND (r.lead_id IS NOT NULL OR r.outcome = 'Imported'))
+  AND NOT EXISTS (SELECT 1 FROM import_rows r WHERE r.batch_id = b.id AND (r.lead_id IS NOT NULL OR r.outcome IN ('Imported', 'Updated')))
   AND NOT EXISTS (SELECT 1 FROM import_files f WHERE f.batch_id = b.id AND f.created_at >= ${before})`;
 
 /** A batch whose originals may go: Imported or Undone (or Failed with no job left), untouched since `before`. */

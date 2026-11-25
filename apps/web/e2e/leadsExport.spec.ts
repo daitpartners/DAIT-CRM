@@ -91,7 +91,7 @@ test('Download all leads, complete the blanks in Excel, upload them again throug
   const batch = (await (await page.request.get(`/api/imports/batches/${batchId}`)).json()) as { number: string };
   const detail = page.getByRole('region', { name: `Batch ${batch.number}` });
   await expect(detail.getByRole('tab', { name: /^Updated/ })).toHaveText('Updated 1', { timeout: 15_000 });
-  await expect(detail.getByText('Conflicts: 1 values differ from the CRM and were not changed', { exact: false })).toBeVisible();
+  await expect(detail.getByText('Conflicts: 1 value was not applied', { exact: false })).toBeVisible();
 
   // The blank is filled; the phone is NOT overwritten.
   const after = (await (await page.request.get(`/api/leads/${lead.id}`)).json()) as { website: string | null; phone: string | null };

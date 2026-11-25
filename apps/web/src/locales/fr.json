@@ -1948,7 +1948,6 @@
   "Updated|rows": "Mises à jour",
   "1 row updated a lead already in the CRM (empty fields only).": "1 ligne a mis à jour un lead déjà dans le CRM (champs vides uniquement).",
   "{n} rows updated leads already in the CRM (empty fields only).": "{n} lignes ont mis à jour des leads déjà dans le CRM (champs vides uniquement).",
-  "Conflicts: {n} values differ from the CRM and were not changed (see Download rows to fix).": "Conflits : {n} valeurs diffèrent du CRM et n’ont pas été modifiées (voir Télécharger les lignes à corriger).",
   "Conflicts: none.": "Conflits : aucun.",
   "Not changed (differs from the CRM)": "Non modifié (diffère du CRM)",
   "+ {n} updated": "+ {n} mises à jour",
@@ -1972,5 +1971,7 @@
   "{n} rows have a Lead ID or Company ID: they fill only the empty fields of those records, never change a value and are not researched.": "{n} lignes ont un ID de lead ou d’entreprise : elles remplissent uniquement les champs vides de ces enregistrements, ne modifient jamais une valeur et ne sont pas recherchées.",
   "{n} leads match: more than {max} cannot be downloaded at once. Narrow the filter and try again.": "{n} leads correspondent : impossible d’en télécharger plus de {max} à la fois. Affinez le filtre et réessayez.",
   "Every lead matching the current filters, as Excel, to complete and upload again through Import leads": "Tous les leads correspondant aux filtres actuels, en Excel, à compléter puis à réimporter avec Importer des leads",
-  "Download all leads": "Télécharger tous les leads"
+  "Download all leads": "Télécharger tous les leads",
+  "Conflicts: 1 value was not applied (it differs from the CRM or cannot be used; see Download rows to fix).": "Conflits : 1 valeur n’a pas été appliquée (elle diffère du CRM ou n’est pas utilisable ; voir Télécharger les lignes à corriger).",
+  "Conflicts: {n} values were not applied (they differ from the CRM or cannot be used; see Download rows to fix).": "Conflits : {n} valeurs n’ont pas été appliquées (elles diffèrent du CRM ou ne sont pas utilisables ; voir Télécharger les lignes à corriger)."
 }

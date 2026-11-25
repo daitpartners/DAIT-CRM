@@ -6,7 +6,7 @@
  */
 import { Prisma } from '@prisma/client';
 import {
-  IMPORT_MAX_ROWS, domainOf, isUpdateErrorCode, pageArgs, type RowChanges,
+  IMPORT_MAX_ROWS, UPDATE_ERROR_CODES, domainOf, isUpdateErrorCode, pageArgs, type RowChanges,
   type ColumnQuestion, type FileMeta, type ImportColumnAnswer, type ImportField, type ImportIncludeAll,
   type ImportRowUpdate, type ImportRowsQuery, type ResearchNotePart, type ResearchValue, type RowFields, type RowFilter, type RowProblem,
   type Lang, type RowStatus,
@@ -21,7 +21,7 @@ import { matchCountry, squashCountry } from './countries.js';
 import { audit } from '../audit.js';
 import { activeUser } from '../leads/visibility.js';
 import type { TableExtract } from './read/index.js';
-import { resolveTargets, targetProblem, type UpdateTarget } from './updates.js';
+import { invalidReason, resolveTargets, targetProblem, type UpdateTarget } from './updates.js';
 
 /** Longest value a staged cell keeps (the row edit's limit). */
 const MAX_VALUE = 500;
@@ -129,7 +129,17 @@ export function evaluateRow(
   const out = withCountry(fields, ctx.knownCountries);
   const country = has(out.country) ? matchCountry(out.country, ctx.knownCountries) : null;
   if (ctx.notALead) return { status: 'Not a lead', problems: [{ code: 'not_a_lead', level: 'info' }], fields: out };
-  if (ctx.update?.kind === 'update') return { status: 'Update', problems: [], fields: out };
+  if (ctx.update?.kind === 'update') {
+    // The same value checks as a new row (amber): such a value is not applied at import.
+    const problems: RowProblem[] = [];
+    for (const field of ['email', 'website', 'country'] as const) {
+      const v = has(fields[field]) ? fields[field]!.trim() : '';
+      const reason = v ? invalidReason(field, v, ctx.knownCountries) : null;
+      const code = field === 'country' ? 'country_unknown' : field === 'email' ? 'email_invalid' : 'website_invalid';
+      if (reason) problems.push({ code, field, level: 'questionable', value: v });
+    }
+    return { status: 'Update', problems, fields: out };
+  }
   if (ctx.update?.kind === 'error') return { status: 'Missing details', problems: [targetProblem(ctx.update)], fields: out };
   if (ctx.match) return { status: 'Already in CRM', problems: [{ code: 'already_in_crm', level: 'info', value: ctx.match.number }], fields: out };
   const problems: RowProblem[] = [];
@@ -324,7 +334,9 @@ export async function refreshBatch(batchId: number, rowIds?: number[]): Promise<
     const updates: RowUpdate[] = [];
     rows.forEach((r, i) => {
       const target = notLead[i] ? null : targets[i] ?? null;
-      const match = target?.kind === 'update' ? { id: target.companyId, number: target.companyNumber } : matchOf.get(i) ?? null;
+      const match = target?.kind === 'update'
+        ? (target.companyId !== null ? { id: target.companyId, number: target.companyNumber! } : null)
+        : matchOf.get(i) ?? null;
       const e = evaluateRow(r.fields as RowFields, { knownCountries: known, match, notALead: notLead[i]!, update: target });
       const include = r.includeTouched ? r.include : defaultInclude(e.status, e.problems);
       const next: RowUpdate = {
@@ -566,7 +578,11 @@ function outcomeRowView(r: Prisma.ImportRowGetPayload<{ select: typeof outcomeSe
 export async function includeAll(batchId: number, body: ImportIncludeAll): Promise<{ changed: number }> {
   const status = FILTER_STATUS[body.filter];
   const { count } = await underBatchLock(batchId, (tx) => tx.importRow.updateMany({
-    where: { batchId, outcome: null, include: !body.include, ...(status ? { status } : {}) },
+    where: {
+      batchId, outcome: null, include: !body.include, ...(status ? { status } : {}),
+      // "Include all" never ticks a row whose Lead ID / Company ID cannot be used (it is an error at import).
+      ...(body.include ? { AND: UPDATE_ERROR_CODES.map((code) => ({ NOT: { problems: { array_contains: [{ code }] } } })) } : {}),
+    },
     data: { include: body.include, includeTouched: true },
   }));
   return { changed: count };

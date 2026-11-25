@@ -57,11 +57,12 @@ export type ResearchValue = { value: string; sourceUrl: string; sourceLabel: str
 export const PROBLEM_CODES = [
   'company_missing', 'country_missing', 'email_missing', 'contact_missing', 'country_unknown', 'email_invalid',
   'website_invalid', 'not_a_lead', 'unticked', 'already_in_crm', 'no_contact_left_out', 'import_error',
-  'lead_not_found', 'company_not_found', 'company_mismatch', 'update_conflict', 'industry_unknown',
+  'lead_not_found', 'company_not_found', 'company_mismatch', 'lead_archived', 'update_conflict', 'industry_unknown',
+  'update_contact_differs', 'update_company_differs', 'update_ignored', 'update_verified', 'update_not_applied',
 ] as const;
 export type ProblemCode = (typeof PROBLEM_CODES)[number];
 /** An update row's id problems: the row is an error at import, never a new lead. */
-export const UPDATE_ERROR_CODES = ['lead_not_found', 'company_not_found', 'company_mismatch'] as const;
+export const UPDATE_ERROR_CODES = ['lead_not_found', 'company_not_found', 'company_mismatch', 'lead_archived'] as const;
 export type UpdateErrorCode = (typeof UPDATE_ERROR_CODES)[number];
 export const isUpdateErrorCode = (code: string | null | undefined): code is UpdateErrorCode =>
   (UPDATE_ERROR_CODES as readonly string[]).includes(code ?? '');
@@ -74,10 +75,36 @@ export type RowProblem = {
 };
 
 /**
- * An update row's value that was not applied: the CRM already holds another value (or the field is verified), so the
- * owner checks it and changes it on the lead page. `unknown` = an industry that is not on the CRM's list.
+ * Why an update row's value was not applied (the owner checks it and changes it on the lead page if correct):
+ * `differs` the CRM holds another value; `unknown` an industry not on the CRM's list; `contact` / `company` the row names
+ * another contact / company than the lead's (its contact / company fields are not applied); `invalid` an email or website
+ * that is not one; `country` a country the CRM does not know; `ignored` a Company ID row (company fields only);
+ * `verified` an empty field verified in the CRM; `not_applied` no record to put it on (inactive contact, no company).
  */
-export type UpdateConflict = { field: ImportField; crm: string; file: string; unknown?: boolean };
+export const CONFLICT_REASONS = ['differs', 'unknown', 'contact', 'company', 'invalid', 'country', 'ignored', 'verified', 'not_applied'] as const;
+export type ConflictReason = (typeof CONFLICT_REASONS)[number];
+/** An update row's value that was not applied; no `reason` = `differs`. */
+export type UpdateConflict = { field: ImportField; crm: string; file: string; reason?: ConflictReason };
+
+/** Longest value a conflict shows in "What to fix" (a long note is cut with "…"). */
+const CONFLICT_SHOWN = 120;
+const shown = (v: string) => (v.length > CONFLICT_SHOWN ? `${v.slice(0, CONFLICT_SHOWN)}…` : v);
+
+/** A not-applied value as a row problem (amber cell, "What to fix"). */
+export function conflictProblem(c: UpdateConflict): RowProblem {
+  const base = { field: c.field, level: 'questionable' as const, value: shown(c.file) };
+  switch (c.reason ?? 'differs') {
+    case 'unknown': return { ...base, code: 'industry_unknown' };
+    case 'contact': return { ...base, code: 'update_contact_differs' };
+    case 'company': return { ...base, code: 'update_company_differs' };
+    case 'invalid': return { ...base, code: c.field === 'website' ? 'website_invalid' : 'email_invalid' };
+    case 'country': return { ...base, code: 'country_unknown' };
+    case 'ignored': return { ...base, code: 'update_ignored' };
+    case 'verified': return { ...base, code: 'update_verified' };
+    case 'not_applied': return { ...base, code: 'update_not_applied' };
+    default: return { ...base, code: 'update_conflict', crm: shown(c.crm) };
+  }
+}
 /** One blank an update row filled (Undo puts it back while it still holds this value). */
 export type UpdateFill = { entity: 'lead' | 'company' | 'contact'; id: number; field: string; value: string | number };
 /** `ImportRow.changes`: what an update row did at import (a contact it created, with its stamp, for Undo). */
@@ -117,6 +144,12 @@ const PROBLEM_TEXT: Record<Lang, Record<ProblemCode, string>> = {
     company_mismatch: 'Company ID {value} does not match the lead (its company is {crm})',
     update_conflict: '{field}: CRM has {crm}, file has {value} — update on the lead page if correct',
     industry_unknown: 'Industry not in the CRM list: {value} — update on the lead page if correct',
+    lead_archived: 'Lead {value} is archived: unarchive it first',
+    update_contact_differs: '{field}: {value} not applied — the contact in the file is not the lead’s contact',
+    update_company_differs: '{field}: {value} not applied — the company in the file is not the lead’s company',
+    update_ignored: '{field}: {value} not applied — a Company ID row updates company fields only',
+    update_verified: '{field}: {value} not applied — the field is verified in the CRM',
+    update_not_applied: '{field}: {value} not applied — update on the lead page if correct',
   },
   es: {
     company_missing: 'Añade el nombre de la empresa',
@@ -136,6 +169,12 @@ const PROBLEM_TEXT: Record<Lang, Record<ProblemCode, string>> = {
     company_mismatch: 'El ID de empresa {value} no coincide con el lead (su empresa es {crm})',
     update_conflict: '{field}: el CRM tiene {crm}, el archivo tiene {value} — actualízalo en la página del lead si es correcto',
     industry_unknown: 'Sector que no está en la lista del CRM: {value} — actualízalo en la página del lead si es correcto',
+    lead_archived: 'El lead {value} está archivado: desarchívalo primero',
+    update_contact_differs: '{field}: {value} no aplicado — el contacto del archivo no es el contacto del lead',
+    update_company_differs: '{field}: {value} no aplicado — la empresa del archivo no es la empresa del lead',
+    update_ignored: '{field}: {value} no aplicado — una fila con ID de empresa solo actualiza campos de la empresa',
+    update_verified: '{field}: {value} no aplicado — el campo está verificado en el CRM',
+    update_not_applied: '{field}: {value} no aplicado — actualízalo en la página del lead si es correcto',
   },
   fr: {
     company_missing: 'Ajoutez le nom de l’entreprise',
@@ -155,6 +194,12 @@ const PROBLEM_TEXT: Record<Lang, Record<ProblemCode, string>> = {
     company_mismatch: 'L’ID d’entreprise {value} ne correspond pas au lead (son entreprise est {crm})',
     update_conflict: '{field} : le CRM a {crm}, le fichier a {value} — mettez à jour sur la page du lead si c’est correct',
     industry_unknown: 'Secteur absent de la liste du CRM : {value} — mettez à jour sur la page du lead si c’est correct',
+    lead_archived: 'Le lead {value} est archivé : désarchivez-le d’abord',
+    update_contact_differs: '{field} : {value} non appliqué — le contact du fichier n’est pas celui du lead',
+    update_company_differs: '{field} : {value} non appliqué — l’entreprise du fichier n’est pas celle du lead',
+    update_ignored: '{field} : {value} non appliqué — une ligne avec ID d’entreprise ne met à jour que l’entreprise',
+    update_verified: '{field} : {value} non appliqué — le champ est vérifié dans le CRM',
+    update_not_applied: '{field} : {value} non appliqué — mettez à jour sur la page du lead si c’est correct',
   },
 };
 
@@ -597,7 +642,7 @@ export function importRowStatusText(status: string, lang: Lang): string {
  */
 export const IMPORT_ROW_ERRORS = [
   'invalid_status', 'unknown_user', 'cannot_assign_hidden', 'forbidden', 'Not found', 'Domain already belongs to another company',
-  'Unexpected error importing this row', 'lead_not_found', 'company_not_found', 'company_mismatch',
+  'Unexpected error importing this row', 'lead_not_found', 'company_not_found', 'company_mismatch', 'lead_archived',
 ] as const;
 export type ImportRowError = (typeof IMPORT_ROW_ERRORS)[number];
 
@@ -608,7 +653,7 @@ const ROW_ERROR_TEXT: Record<Lang, Record<ImportRowError, string>> = {
     'Not found': 'A record it needs was not found', 'Domain already belongs to another company': 'The website domain already belongs to another company',
     'Unexpected error importing this row': 'Unexpected error importing this row',
     lead_not_found: 'The Lead ID is not in the CRM or not yours', company_not_found: 'The Company ID is not in the CRM or not yours',
-    company_mismatch: 'The Company ID does not match the lead',
+    company_mismatch: 'The Company ID does not match the lead', lead_archived: 'The lead is archived (unarchive it first)',
   },
   es: {
     invalid_status: 'El estado del lead no está disponible', unknown_user: 'La persona asignada no es un usuario activo',
@@ -616,7 +661,7 @@ const ROW_ERROR_TEXT: Record<Lang, Record<ImportRowError, string>> = {
     'Not found': 'No se encontró un registro necesario', 'Domain already belongs to another company': 'El dominio del sitio web ya pertenece a otra empresa',
     'Unexpected error importing this row': 'Error inesperado al importar esta fila',
     lead_not_found: 'El ID del lead no está en el CRM o no es tuyo', company_not_found: 'El ID de empresa no está en el CRM o no es tuyo',
-    company_mismatch: 'El ID de empresa no coincide con el lead',
+    company_mismatch: 'El ID de empresa no coincide con el lead', lead_archived: 'El lead está archivado (desarchívalo primero)',
   },
   fr: {
     invalid_status: 'Le statut du lead n’est pas disponible', unknown_user: 'La personne assignée n’est pas un utilisateur actif',
@@ -624,7 +669,7 @@ const ROW_ERROR_TEXT: Record<Lang, Record<ImportRowError, string>> = {
     'Not found': 'Un enregistrement nécessaire est introuvable', 'Domain already belongs to another company': 'Ce domaine appartient déjà à une autre entreprise',
     'Unexpected error importing this row': 'Erreur inattendue lors de l’import de cette ligne',
     lead_not_found: 'L’ID du lead n’est pas dans le CRM ou pas le vôtre', company_not_found: 'L’ID d’entreprise n’est pas dans le CRM ou pas le vôtre',
-    company_mismatch: 'L’ID d’entreprise ne correspond pas au lead',
+    company_mismatch: 'L’ID d’entreprise ne correspond pas au lead', lead_archived: 'Le lead est archivé (désarchivez-le d’abord)',
   },
 };
 

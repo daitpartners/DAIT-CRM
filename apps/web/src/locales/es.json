@@ -1948,7 +1948,6 @@
   "Updated|rows": "Actualizadas",
   "1 row updated a lead already in the CRM (empty fields only).": "1 fila actualizó un lead que ya estaba en el CRM (solo campos vacíos).",
   "{n} rows updated leads already in the CRM (empty fields only).": "{n} filas actualizaron leads que ya estaban en el CRM (solo campos vacíos).",
-  "Conflicts: {n} values differ from the CRM and were not changed (see Download rows to fix).": "Conflictos: {n} valores difieren del CRM y no se cambiaron (vea Descargar filas por corregir).",
   "Conflicts: none.": "Conflictos: ninguno.",
   "Not changed (differs from the CRM)": "Sin cambiar (difiere del CRM)",
   "+ {n} updated": "+ {n} actualizadas",
@@ -1972,5 +1971,7 @@
   "{n} rows have a Lead ID or Company ID: they fill only the empty fields of those records, never change a value and are not researched.": "{n} filas tienen un ID de lead o de empresa: solo completan los campos vacíos de esos registros, nunca cambian un valor y no se investigan.",
   "{n} leads match: more than {max} cannot be downloaded at once. Narrow the filter and try again.": "Coinciden {n} leads: no se pueden descargar más de {max} a la vez. Acote el filtro y vuelva a intentarlo.",
   "Every lead matching the current filters, as Excel, to complete and upload again through Import leads": "Todos los leads que coinciden con los filtros actuales, en Excel, para completarlos y volver a subirlos con Importar leads",
-  "Download all leads": "Descargar todos los leads"
+  "Download all leads": "Descargar todos los leads",
+  "Conflicts: 1 value was not applied (it differs from the CRM or cannot be used; see Download rows to fix).": "Conflictos: 1 valor no se aplicó (difiere del CRM o no se puede usar; vea Descargar filas por corregir).",
+  "Conflicts: {n} values were not applied (they differ from the CRM or cannot be used; see Download rows to fix).": "Conflictos: {n} valores no se aplicaron (difieren del CRM o no se pueden usar; vea Descargar filas por corregir)."
 }

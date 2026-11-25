@@ -13,6 +13,7 @@ import {
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { safeCell } from './cells.js';
+import { firstFilled } from './updates.js';
 
 /** The download's columns, in order. */
 export const EXPORT_COLUMNS: readonly ImportColumnKey[] = ['leadId', 'companyId', ...IMPORT_FIELDS, ...EXPORT_CONTEXT_COLUMNS];
@@ -36,17 +37,18 @@ type ExportLead = Prisma.LeadGetPayload<{ include: typeof exportInclude }>;
  */
 export function exportCells(l: ExportLead, lang: Lang): Record<ImportColumnKey, string> {
   const contactName = l.contact ? `${l.contact.firstName} ${l.contact.lastName}`.trim() : '';
+  // The same "first non-blank" rule as the update check (updates.ts), so a blank shown here is blank there too.
   const fields: Record<ImportField, string> = {
-    companyName: l.companyName,
-    website: l.website ?? l.company?.website ?? '',
-    country: l.country,
-    city: l.city ?? l.company?.city ?? '',
+    companyName: firstFilled(l.companyName),
+    website: firstFilled(l.website, l.company?.website),
+    country: firstFilled(l.country),
+    city: firstFilled(l.city, l.company?.city),
     contactName,
-    designation: l.contact?.designation ?? '',
-    email: l.businessEmail ?? l.contact?.businessEmail ?? '',
-    phone: l.phone ?? l.contact?.phone ?? '',
-    industry: l.company?.industry ?? '',
-    notes: l.notes ?? '',
+    designation: firstFilled(l.contact?.designation),
+    email: firstFilled(l.businessEmail, l.contact?.businessEmail),
+    phone: firstFilled(l.phone, l.contact?.phone),
+    industry: firstFilled(l.company?.industry),
+    notes: firstFilled(l.notes),
   };
   return {
     ...fields,

@@ -18,6 +18,7 @@ import { z } from 'zod';
 import {
   domainOf, type ImportActivity, type ImportField, type ResearchClaudeFailure, type ResearchEngine, type ResearchNotePart,
   type ResearchValue, type RowFields,
+  UPDATE_ERROR_CODES,
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { enqueue, STALE_AFTER_MS } from '../jobs/queue.js';
@@ -428,7 +429,9 @@ export async function startBatchResearch(batchId: number, deps: ImportDeps = {})
     const total = await tx.$executeRaw`
       UPDATE import_rows SET research_status = 'waiting', research = '{}'::jsonb, research_note = NULL, researched_at = NULL
       WHERE batch_id = ${batchId} AND include AND status = 'Missing details' AND outcome IS NULL
-        AND (btrim(COALESCE(fields->>'companyName', '')) <> '' OR btrim(COALESCE(fields->>'website', '')) <> '')`;
+        AND (btrim(COALESCE(fields->>'companyName', '')) <> '' OR btrim(COALESCE(fields->>'website', '')) <> '')
+        -- A row whose Lead ID / Company ID cannot be used is an error at import: never researched.
+        AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(problems) AS p WHERE p->>'code' = ANY(${[...UPDATE_ERROR_CODES]}::text[]))`;
     const reset = { researchTotal: total, researchDone: 0, researchPaused: false, researchStopReason: null };
     if (total === 0) {
       await tx.importBatch.update({ where: { id: batchId }, data: { ...reset, status: 'Waiting for review' } });

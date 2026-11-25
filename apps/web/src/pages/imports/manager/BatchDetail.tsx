@@ -1,6 +1,6 @@
 import { useState, type MouseEvent } from 'react';
 import {
-  IMPORT_TABLE_FIELDS, importColumnLabel, importContinueHintText, importFailureText, importRowErrorText, problemText,
+  IMPORT_TABLE_FIELDS, conflictProblem, importColumnLabel, importContinueHintText, importFailureText, importRowErrorText, problemText,
   type ImportField, type Lang, type ProblemCode, type RowProblem,
 } from '@dait-crm/shared';
 import { Link } from 'react-router-dom';
@@ -148,9 +148,11 @@ function BatchActions({ b }: { b: BatchDetail }) {
       {b.counts?.updated ? (
         <div className={b.counts.conflicts ? 'note warn' : 'note info'}>
           {b.counts.updated === 1 ? t('1 row updated a lead already in the CRM (empty fields only).') : t('{n} rows updated leads already in the CRM (empty fields only).', { n: b.counts.updated })}{' '}
-          {b.counts.conflicts
-            ? t('Conflicts: {n} values differ from the CRM and were not changed (see Download rows to fix).', { n: b.counts.conflicts })
-            : t('Conflicts: none.')}
+          {b.counts.conflicts === 1
+            ? t('Conflicts: 1 value was not applied (it differs from the CRM or cannot be used; see Download rows to fix).')
+            : b.counts.conflicts
+              ? t('Conflicts: {n} values were not applied (they differ from the CRM or cannot be used; see Download rows to fix).', { n: b.counts.conflicts })
+              : t('Conflicts: none.')}
         </div>
       ) : null}
       {canUndo ? (
@@ -178,11 +180,7 @@ function UndoneNote({ b, when }: { b: BatchDetail; when: string }) {
 
 /** An updated row's values that were not applied ("Phone: CRM has …, file has …"), in plain words. */
 export function conflictsText(r: ImportRowView, lang: Lang): string {
-  return (r.changes?.conflicts ?? [])
-    .map((c) => problemText(c.unknown
-      ? { code: 'industry_unknown', field: c.field, level: 'questionable', value: c.file }
-      : { code: 'update_conflict', field: c.field, level: 'questionable', crm: c.crm, value: c.file }, lang))
-    .join('; ');
+  return (r.changes?.conflicts ?? []).map((c) => problemText(conflictProblem(c), lang)).join('; ');
 }
 
 /** "What to fix" for a skipped row: its problems, then why it was left out (once per code), in plain words. */

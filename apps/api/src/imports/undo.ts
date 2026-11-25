@@ -55,7 +55,8 @@ type Plan = {
 /** The batch's rows that imported something (a stamp is written with the row's links). */
 async function importedRows(db: Db, batchId: number) {
   const rows = await db.importRow.findMany({
-    where: { batchId, OR: [{ leadId: { not: null } }, { companyId: { not: null } }, { contactId: { not: null } }] },
+    // Imported rows only, explicitly: an Updated row's lead and company were already in the CRM and are never removed.
+    where: { batchId, outcome: 'Imported', OR: [{ leadId: { not: null } }, { companyId: { not: null } }, { contactId: { not: null } }] },
     select: {
       id: true, leadId: true, companyId: true, contactId: true, companyCreated: true, contactCreated: true, stamps: true, importedAt: true,
     },
