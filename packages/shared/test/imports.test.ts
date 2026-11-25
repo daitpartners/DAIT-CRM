@@ -3,7 +3,7 @@ import {
   BATCH_NUMBER_RE, IMPORT_FILE_ERRORS, IMPORT_FIELDS, IMPORT_NO_CLAUDE, importNoClaudeText, IMPORT_TABLE_FIELDS, PROBLEM_CODES, importColumnLabel, importFileErrorText, importSource, IMPORT_FAILURES, importFailureText, problemText,
   importActivityText, importEngineText, importResearchNoteText, RESEARCH_CLAUDE_FAILURES, UNDO_REASONS, undoReasonText, importContinueHintText,
   ROW_STATUSES, ROW_OUTCOMES, importRowStatusText, IMPORT_ROW_ERRORS, importRowErrorText,
-  EXPORT_CONTEXT_COLUMNS, IMPORT_ID_FIELDS, LEADS_EXPORT_MAX, UPDATE_ERROR_CODES, isUpdateErrorCode,
+  EXPORT_CONTEXT_COLUMNS, IMPORT_ID_FIELDS, LEADS_EXPORT_MAX, UPDATE_ERROR_CODES, isUpdateErrorCode, CONFLICT_REASONS, conflictProblem,
   type ImportActivity, type ResearchNotePart, type RowProblem,
 } from '../src/imports';
 import {
@@ -57,6 +57,18 @@ describe('problemText', () => {
     expect(problemText(p, 'fr')).toBe('E-mail : le CRM a ana@sol.es, le fichier a info@sol.es — mettez à jour sur la page du lead si c’est correct');
     // A value holding a placeholder is never read as one.
     expect(problemText({ ...p, value: '{crm}' }, 'en')).toBe('Email: CRM has ana@sol.es, file has {crm} — update on the lead page if correct');
+  });
+
+  test('every reason a value is not applied reads in en / es / fr; long values are cut in What to fix', () => {
+    for (const reason of CONFLICT_REASONS) {
+      const p = conflictProblem({ field: 'phone', crm: '+1', file: '+2', reason });
+      expect(p.level).toBe('questionable');
+      for (const lang of LANGS) expect(problemText(p, lang), `${reason} ${lang}`).toContain('+2');
+    }
+    expect(problemText(conflictProblem({ field: 'designation', crm: 'CTO', file: 'CEO', reason: 'contact' }), 'en'))
+      .toBe('Designation: CEO not applied — the contact in the file is not the lead’s contact');
+    expect(problemText({ code: 'lead_archived', level: 'missing', value: 'LD-7' }, 'es')).toBe('El lead LD-7 está archivado: desarchívalo primero');
+    expect(conflictProblem({ field: 'notes', crm: 'x'.repeat(300), file: 'y'.repeat(300) }).value).toBe(`${'y'.repeat(120)}…`);
   });
 
   test('update id errors', () => {

@@ -329,14 +329,15 @@ describe('Import leads · update rows', () => {
     expect(foreign).toBeNull();
   });
 
-  it('planUpdate: verified empty field skipped; same value ignored; lead website wins over the company\'s', async () => {
+  it('planUpdate: verified empty field skipped (and reported); same value ignored; lead website wins over the company\'s', async () => {
     const w = await world();
     const company = await prisma.company.update({
       where: { id: w.a.id }, data: { website: 'https://acme.test', city: null, verifiedFields: { city: true } },
     });
     const lead = await prisma.lead.findUniqueOrThrow({ where: { id: w.l1.id } });
     const plan = planUpdate({ website: 'www.acme.test/', city: 'Leeds' }, { lead, company, contact: null }, { knownCountries: [], industries: [] });
-    expect(plan.conflicts).toEqual([]);
+    // The verified, empty company city is never filled: reported (M9).
+    expect(plan.conflicts).toEqual([{ field: 'city', crm: '', file: 'Leeds', reason: 'verified' }]);
     // The lead's website is empty but the CRM shows the company's (the same): nothing; the city fills the lead only.
     expect(plan.fills).toEqual([{ entity: 'lead', field: 'city', value: 'Leeds', source: 'city' }]);
   });
@@ -366,5 +367,173 @@ describe('Import leads · update rows', () => {
     // The existing leads stay; the new lead goes.
     expect(await prisma.lead.count({ where: { id: { in: [w.l1.id, w.l2.id] } } })).toBe(2);
     expect(await prisma.lead.count({ where: { companyName: 'New Co' } })).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Review round: another contact / company, value checks, verified-empty, bookkeeping columns on Undo, and the rest
+
+const known = ['India', 'United Kingdom', 'Spain', 'United States'];
+const industries = ['Retail', 'Logistics & Supply Chain'];
+
+async function records(o: { contact?: boolean; companyOverrides?: Record<string, unknown> } = {}) {
+  const company = await prisma.company.update({
+    where: { id: (await makeCompany({ name: 'Acme Freight', country: 'United Kingdom' })).id },
+    data: o.companyOverrides ?? {},
+  });
+  const contact = o.contact === false ? null : await makeContact({ companyId: company.id, firstName: 'John', lastName: 'Smith' });
+  const lead = await makeLead({ companyId: company.id, contactId: contact?.id ?? null, companyName: 'Acme Freight', country: 'United Kingdom' });
+  return { lead, company, contact };
+}
+
+describe('update rows · review round', () => {
+  it('I1: a row naming another contact (Maria vs John) fills none of the contact\'s fields, on the contact or the lead', async () => {
+    const r = await records();
+    const plan = planUpdate(
+      { contactName: 'Maria Lopez', phone: '+34 600 999 000', email: 'maria@x.es', designation: 'CEO', notes: 'Met at expo' },
+      r, { knownCountries: known, industries },
+    );
+    expect(plan.fills).toEqual([{ entity: 'lead', field: 'notes', value: 'Met at expo', source: 'notes' }]);
+    expect(plan.contact).toBeNull();
+    expect(plan.conflicts).toEqual([
+      { field: 'contactName', crm: 'John Smith', file: 'Maria Lopez' },
+      { field: 'designation', crm: '', file: 'CEO', reason: 'contact' },
+      { field: 'email', crm: '', file: 'maria@x.es', reason: 'contact' },
+      { field: 'phone', crm: '', file: '+34 600 999 000', reason: 'contact' },
+    ]);
+    // The same person (other spelling) still fills.
+    const same = planUpdate({ contactName: 'john  SMITH', designation: 'CEO' }, r, { knownCountries: known, industries });
+    expect(same.fills).toEqual([{ entity: 'contact', field: 'designation', value: 'CEO', source: 'designation' }]);
+  });
+
+  it('I1: a shifted row (another company) fills none of the company\'s fields on the lead or the company', async () => {
+    const r = await records();
+    const plan = planUpdate(
+      { companyName: 'Other Corp SA', website: 'othercorp.com', city: 'Lima', country: 'Spain', industry: 'Retail', designation: 'Buyer' },
+      r, { knownCountries: known, industries },
+    );
+    expect(plan.fills).toEqual([{ entity: 'contact', field: 'designation', value: 'Buyer', source: 'designation' }]);
+    expect(plan.conflicts).toEqual([
+      { field: 'companyName', crm: 'Acme Freight', file: 'Other Corp SA' },
+      { field: 'website', crm: '', file: 'othercorp.com', reason: 'company' },
+      { field: 'country', crm: 'United Kingdom', file: 'Spain', reason: 'company' },
+      { field: 'city', crm: '', file: 'Lima', reason: 'company' },
+      { field: 'industry', crm: '', file: 'Retail', reason: 'company' },
+    ]);
+  });
+
+  it('I3: an invalid email / website and an unknown country are not applied; a known country in another spelling is the same', async () => {
+    const r = await records({ contact: false });
+    const plan = planUpdate({ email: 'n/a', website: 'not a site', country: 'Atlantis', phone: '+44 20 1234 5678' }, r, { knownCountries: known, industries });
+    expect(plan.fills).toEqual([{ entity: 'lead', field: 'phone', value: '+44 20 1234 5678', source: 'phone' }]);
+    expect(plan.conflicts).toEqual([
+      { field: 'website', crm: '', file: 'not a site', reason: 'invalid' },
+      { field: 'country', crm: 'United Kingdom', file: 'Atlantis', reason: 'country' },
+      { field: 'email', crm: '', file: 'n/a', reason: 'invalid' },
+    ]);
+    expect(planUpdate({ country: 'UK' }, r, { knownCountries: known, industries }).conflicts).toEqual([]);
+    // A blank country is filled with the CRM's own spelling.
+    const blank = await records({ contact: false });
+    await prisma.lead.update({ where: { id: blank.lead.id }, data: { country: '' } });
+    await prisma.company.update({ where: { id: blank.company.id }, data: { country: '' } });
+    const fresh = { lead: await prisma.lead.findUniqueOrThrow({ where: { id: blank.lead.id } }), company: await prisma.company.findUniqueOrThrow({ where: { id: blank.company.id } }), contact: null };
+    expect(planUpdate({ country: 'uk' }, fresh, { knownCountries: known, industries }).fills.map((p) => [p.entity, p.value]))
+      .toEqual([['lead', 'United Kingdom'], ['company', 'United Kingdom']]);
+    // Step 2 shows the same checks on an Update row (amber), the row stays an Update.
+    const { evaluateRow } = await import('../src/imports/stage');
+    const ev = evaluateRow({ leadId: 'LD-1', email: 'n/a', website: 'not a site', country: 'Atlantis' }, {
+      knownCountries: known, match: null, notALead: false,
+      update: { kind: 'update', leadId: 1, leadNumber: 'LD-1', companyId: null, companyNumber: null },
+    });
+    expect(ev.status).toBe('Update');
+    expect(ev.problems.map((p) => [p.code, p.level])).toEqual([
+      ['email_invalid', 'questionable'], ['website_invalid', 'questionable'], ['country_unknown', 'questionable'],
+    ]);
+  });
+
+  it('M9 verified but empty, M8 Company ID rows, M5 long notes, M7 a lead with no company', async () => {
+    const r = await records({ contact: false, companyOverrides: { verifiedFields: { city: true } } });
+    const plan = planUpdate({ city: 'Leeds' }, r, { knownCountries: known, industries });
+    expect(plan.fills).toEqual([{ entity: 'lead', field: 'city', value: 'Leeds', source: 'city' }]);
+    expect(plan.conflicts).toEqual([{ field: 'city', crm: '', file: 'Leeds', reason: 'verified' }]);
+
+    const companyOnly = planUpdate({ city: 'Leeds', email: 'a@b.test', contactName: 'Ann Lee', notes: 'x' },
+      { lead: null, company: r.company, contact: null }, { knownCountries: known, industries });
+    expect(companyOnly.conflicts.map((c) => [c.field, c.reason])).toEqual([['contactName', 'ignored'], ['email', 'ignored'], ['notes', 'ignored'], ['city', 'verified']]);
+
+    const long = 'n'.repeat(600);
+    await prisma.lead.update({ where: { id: r.lead.id }, data: { notes: long } });
+    const withNote = { ...r, lead: await prisma.lead.findUniqueOrThrow({ where: { id: r.lead.id } }) };
+    expect(planUpdate({ notes: long.slice(0, 500) }, withNote, { knownCountries: known, industries }).conflicts).toEqual([]);
+
+    const orphan = await makeLead({ companyId: null, companyName: 'Solo Ltd', country: 'India' });
+    const [t] = await resolveTargets(prisma, authOf(admin), [{ leadId: orphan.number }]);
+    expect(t).toMatchObject({ kind: 'update', leadId: orphan.id, companyId: null });
+    const p = planUpdate({ city: 'Pune', industry: 'Retail', contactName: 'Ravi K' }, { lead: orphan, company: null, contact: null }, { knownCountries: known, industries });
+    expect(p.fills).toEqual([{ entity: 'lead', field: 'city', value: 'Pune', source: 'city' }]);
+    expect(p.conflicts.map((c) => [c.field, c.reason])).toEqual([['contactName', 'not_applied'], ['industry', 'not_applied']]);
+  });
+
+  it('M13 archived leads are not targets; en / em dashes in ids; M4 a Lead ID twice is counted as the import does', async () => {
+    const r = await records({ contact: false });
+    const archived = await makeLead({ companyName: 'Old Co', archivedAt: new Date() });
+    const [a, dash] = await resolveTargets(prisma, authOf(admin), [{ leadId: archived.number }, { leadId: r.lead.number.replace('-', '–') }]);
+    expect(a).toEqual({ kind: 'error', code: 'lead_archived', value: archived.number });
+    expect(dash).toMatchObject({ kind: 'update', leadId: r.lead.id });
+    expect(companyNumberOf('CO—42')).toBe('CO-0042');
+
+    const { previewUpdates } = await import('../src/imports/updates');
+    const previews = await previewUpdates(prisma, authOf(admin), [{ leadId: r.lead.number, city: 'Leeds' }, { leadId: r.lead.number, city: 'York' }], known);
+    expect(previews.map((p) => p?.fields)).toEqual([1, 0]);
+    expect(previews[1]!.conflicts).toEqual([{ field: 'city', crm: 'Leeds', file: 'York' }]);
+  });
+
+  it('M3: a row with an id error is never researched nor ticked by Include all', async () => {
+    seq += 1;
+    const batch = await prisma.importBatch.create({
+      data: { number: `IMPORT-2026-11-25-${seq + 300}`, language: 'en', leadType: 'Lead', status: 'Sorting', createdById: admin.id },
+    });
+    const file = await prisma.importFile.create({ data: { batchId: batch.id, name: 'x.xlsx', ext: 'xlsx', size: 1, storagePath: '', status: 'Read' } });
+    const row = await prisma.importRow.create({
+      data: {
+        batchId: batch.id, fileId: file.id, position: 1, originKind: 'row', originN: 2, fields: { leadId: 'LD-99999', companyName: 'Ghost Co' },
+        status: 'Missing details', include: false, problems: [{ code: 'lead_not_found', level: 'missing', value: 'LD-99999' }],
+      },
+    });
+    expect((await post(`/api/imports/batches/${batch.id}/include`, { filter: 'missing', include: true })).json()).toEqual({ changed: 0 });
+    await prisma.importRow.update({ where: { id: row.id }, data: { include: true } });
+    const { startBatchResearch } = await import('../src/imports/research');
+    expect(await startBatchResearch(batch.id)).toEqual({ total: 0 });
+    expect((await prisma.importRow.findUniqueOrThrow({ where: { id: row.id } })).researchStatus).toBeNull();
+  });
+
+  it('I2 / M15: Undo puts domain and phoneNormalised back only with their website / phone, and a required column back to \'\'', async () => {
+    const r = await records();
+    await prisma.lead.update({ where: { id: r.lead.id }, data: { country: '' } });
+    await prisma.company.update({ where: { id: r.company.id }, data: { country: '' } });
+    seq += 1;
+    const batch = await prisma.importBatch.create({
+      data: { number: `IMPORT-2026-11-25-${seq + 300}`, language: 'en', leadType: 'Lead', status: 'Waiting for review', createdById: admin.id },
+    });
+    const file = await prisma.importFile.create({ data: { batchId: batch.id, name: 'x.xlsx', ext: 'xlsx', size: 1, storagePath: '', status: 'Read' } });
+    await prisma.importRow.create({
+      data: {
+        batchId: batch.id, fileId: file.id, position: 1, originKind: 'row', originN: 2, status: 'Update', include: true, matchedCompanyId: r.company.id,
+        fields: { leadId: r.lead.number, companyName: 'Acme Freight', website: 'hotelsol.es', phone: '+34 600 111 222', country: 'India' },
+      },
+    });
+    expect((await post(`/api/imports/batches/${batch.id}/import`, { acceptHigh: false, noContactRows: 'import', notify: false })).statusCode).toBe(202);
+    expect(await runJob()).toBe(true);
+    const filled = await prisma.company.findUniqueOrThrow({ where: { id: r.company.id } });
+    expect(filled).toMatchObject({ website: 'https://hotelsol.es', domain: 'hotelsol.es', country: 'India' });
+    expect(await prisma.contact.findUniqueOrThrow({ where: { id: r.contact!.id } })).toMatchObject({ phone: '+34 600 111 222', phoneNormalised: '34600111222'.slice(-10) });
+    // A person edits the website and the phone afterwards: both stay, with their domain / normalised phone.
+    await prisma.company.update({ where: { id: r.company.id }, data: { website: 'https://www.hotelsol.es/' } });
+    await prisma.contact.update({ where: { id: r.contact!.id }, data: { phone: '+34600111222' } });
+    const res = await post(`/api/imports/batches/${batch.id}/undo`, {});
+    expect(res.statusCode, res.body).toBe(200);
+    expect(await prisma.company.findUniqueOrThrow({ where: { id: r.company.id } })).toMatchObject({ website: 'https://www.hotelsol.es/', domain: 'hotelsol.es', country: '' });
+    expect(await prisma.contact.findUniqueOrThrow({ where: { id: r.contact!.id } })).toMatchObject({ phone: '+34600111222', phoneNormalised: '4600111222' });
+    expect(await prisma.lead.findUniqueOrThrow({ where: { id: r.lead.id } })).toMatchObject({ website: null, phone: null, country: '' });
   });
 });
