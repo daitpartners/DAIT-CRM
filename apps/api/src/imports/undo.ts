@@ -55,8 +55,15 @@ type Plan = {
 /** The batch's rows that imported something (a stamp is written with the row's links). */
 async function importedRows(db: Db, batchId: number) {
   const rows = await db.importRow.findMany({
-    // Imported rows only, explicitly: an Updated row's lead and company were already in the CRM and are never removed.
-    where: { batchId, outcome: 'Imported', OR: [{ leadId: { not: null } }, { companyId: { not: null } }, { contactId: { not: null } }] },
+    // Never an Updated row, explicitly: its lead and company were already in the CRM and are never removed. (A row the
+    // job imported but could not mark before it stopped has no outcome yet, so "not Updated" rather than "Imported".)
+    where: {
+      batchId,
+      AND: [
+        { OR: [{ outcome: null }, { outcome: { not: 'Updated' } }] },
+        { OR: [{ leadId: { not: null } }, { companyId: { not: null } }, { contactId: { not: null } }] },
+      ],
+    },
     select: {
       id: true, leadId: true, companyId: true, contactId: true, companyCreated: true, contactCreated: true, stamps: true, importedAt: true,
     },
