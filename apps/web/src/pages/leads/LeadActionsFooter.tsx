@@ -8,13 +8,15 @@ type ActionsProps = {
   /** Left out when the lead has no company to pick a contact from. */
   onSwitchContact?: () => void;
   onArchive: () => void;
+  /** Delete lead… (Administrators, `delete_leads`); left out for everyone else. */
+  onDelete?: () => void;
 };
 
 /**
  * The lead-level actions the prototype has no button for (owner-approved home: the Edit profile dialog):
- * Edit lead details, Switch contact and Archive. Each opens its own dialog.
+ * Edit lead details, Switch contact, Archive and (Administrators) Delete lead…. Each opens its own dialog.
  */
-export function LeadActionsFooter({ lead, onEditLead, onSwitchContact, onArchive }: ActionsProps) {
+export function LeadActionsFooter({ lead, onEditLead, onSwitchContact, onArchive, onDelete }: ActionsProps) {
   const t = useT();
   return (
     <div className="lead-acts" role="group" aria-label={t('Lead {number}', { number: lead.number })}>
@@ -30,6 +32,11 @@ export function LeadActionsFooter({ lead, onEditLead, onSwitchContact, onArchive
       <button type="button" className="btn sm danger" onClick={onArchive}>
         {t('Archive')}
       </button>
+      {onDelete ? (
+        <button type="button" className="btn sm danger" onClick={onDelete}>
+          {t('Delete lead…')}
+        </button>
+      ) : null}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { LEAD_SORTS, LEAD_TABS, LEAD_TYPES, PRIORITIES, lookupLabel, safeUrl, type LeadType, type Priority, OUTREACH_LANGUAGES, type OutreachLanguage } from '@dait-crm/shared';
+import { LEAD_DELETE_MAX, LEAD_SORTS, LEAD_TABS, LEAD_TYPES, PRIORITIES, lookupLabel, safeUrl, type LeadType, type Priority, OUTREACH_LANGUAGES, type OutreachLanguage } from '@dait-crm/shared';
 import { OUTREACH_LABEL } from '../../lib/outreach';
 import { ApiError } from '../../api/client';
 import {
@@ -26,6 +26,7 @@ import { usePageClamp, useUrlListState } from '../../hooks/useUrlListState';
 import { errorText, leadStatusText, leadTypeText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
 import { LeadsBulkBar } from './LeadsBulkBar';
+import { DeleteLeadsModal } from './DeleteLeadsModal';
 import { DownloadLeadsButton } from './DownloadLeadsButton';
 import { useMailboxes } from '../../api/mailboxes';
 
@@ -102,6 +103,8 @@ export function LeadsList() {
   const bulk = useBulkLeads();
   const claim = useClaimLead();
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  /** The ticked leads the Delete dialog is open for (Administrators). */
+  const [deleting, setDeleting] = useState<number[] | null>(null);
   const { data: mailboxes } = useMailboxes();
   const mailboxConnected = mailboxes?.mine?.status === 'connected';
   const [assigning, setAssigning] = useState<PendingAssign | null>(null);
@@ -426,6 +429,11 @@ export function LeadsList() {
                 <button type="button" className="btn sm" disabled={bulk.isPending} onClick={() => void archive()}>
                   {t('Archive')}
                 </button>
+                {me.can('delete_leads') ? (
+                  <button type="button" className="btn sm danger" disabled={selected.size > LEAD_DELETE_MAX} title={selected.size > LEAD_DELETE_MAX ? t('At most {n} leads at once', { n: LEAD_DELETE_MAX }) : undefined} onClick={() => setDeleting([...selected])}>
+                    {t('Delete…')}
+                  </button>
+                ) : null}
               </LeadsBulkBar>
             ) : null}
             {error ? (
@@ -547,6 +555,16 @@ export function LeadsList() {
               },
             )
           }
+        />
+      ) : null}
+      {deleting ? (
+        <DeleteLeadsModal
+          ids={deleting}
+          onClose={() => setDeleting(null)}
+          onDeleted={() => {
+            setDeleting(null);
+            setSelected(new Set());
+          }}
         />
       ) : null}
     </>

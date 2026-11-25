@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { isClosedStatus } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
 import { useLeadAction, useLead, type LeadFull } from '../../api/leads';
@@ -14,6 +14,7 @@ import { errorText, leadStatusText } from '../../i18n/labels';
 import { useT, type TFn } from '../../i18n/useT';
 import { ChooseCompany } from './ChooseCompany';
 import { ComposeContext, ComposePanel, useComposeControl } from './ComposePanel';
+import { DeleteLeadsModal } from './DeleteLeadsModal';
 import { EditProfileModal } from './EditProfileModal';
 import { FollowUpPanel } from './FollowUpPanel';
 import { LeadActionsFooter, LeadActionsModal } from './LeadActionsFooter';
@@ -24,7 +25,7 @@ import { SkillsModal } from './SkillsModal';
 import { SwitchContactModal } from './SwitchContactModal';
 import { useActionError } from './staleToast';
 
-type Dialog = 'contact' | 'edit' | 'profile' | 'skills' | null;
+type Dialog = 'contact' | 'edit' | 'profile' | 'skills' | 'delete' | null;
 
 /** `/leads/:id`: the prototype's lead page (views-lead-detail.js + views-leads2.js), or the error / loading state. */
 export function LeadPage() {
@@ -72,8 +73,10 @@ function LeadView({ lead }: { lead: LeadFull }) {
   const { data: lookups } = useLookups();
   const [dialog, setDialog] = useState<Dialog>(null);
   const compose = useComposeControl();
+  const navigate = useNavigate();
 
   const canManage = me.can('manage_leads');
+  const canDelete = me.can('delete_leads');
   const archived = lead.archivedAt !== null;
   const closed = isClosedStatus(lead.status);
   const live = canManage && !archived;
@@ -102,6 +105,7 @@ function LeadView({ lead }: { lead: LeadFull }) {
       setDialog(null);
       void archive();
     },
+    onDelete: canDelete ? () => setDialog('delete') : undefined,
   };
 
   const sub = (
@@ -129,6 +133,11 @@ function LeadView({ lead }: { lead: LeadFull }) {
           {canManage && archived ? (
             <button type="button" className="btn" disabled={action.isPending} onClick={() => run({ lead, action: 'unarchive', body: {} }, t('Lead restored'))}>
               {t('Restore')}
+            </button>
+          ) : null}
+          {canDelete && archived ? (
+            <button type="button" className="btn danger" onClick={() => setDialog('delete')}>
+              {t('Delete lead…')}
             </button>
           ) : null}
         </div>
@@ -162,6 +171,20 @@ function LeadView({ lead }: { lead: LeadFull }) {
         <EditProfileModal contact={lead.contact} lead={lead} onClose={() => setDialog(null)} footer={<LeadActionsFooter {...leadActions} />} />
       ) : null}
       {dialog === 'profile' && !(lead.contact && canProfile) ? <LeadActionsModal {...leadActions} onClose={() => setDialog(null)} /> : null}
+      {dialog === 'delete' ? (
+        <DeleteLeadsModal
+          ids={[lead.id]}
+          onClose={() => setDialog(null)}
+          onDeleted={(done) => {
+            setDialog(null);
+            if (done.remove.leads.length > 0) navigate('/leads');
+          }}
+          onArchiveInstead={archived ? undefined : () => {
+            setDialog(null);
+            void archive();
+          }}
+        />
+      ) : null}
       {dialog === 'skills' && lead.contact ? <SkillsModal contact={lead.contact} onClose={() => setDialog(null)} /> : null}
     </ComposeContext.Provider>
   );

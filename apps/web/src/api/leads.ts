@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
-  ActivityType, CallOutcome, LEAD_SORTS, LEAD_TABS, LeadBulk, LeadCreate, LeadType, LeadUpdate,
+  ActivityType, CallOutcome, LEAD_SORTS, LEAD_TABS, LeadBulk, LeadCreate, LeadDeletePreview, LeadType, LeadUpdate,
   Priority,
 } from '@dait-crm/shared';
 import { ApiError, api } from './client';
@@ -345,5 +345,29 @@ export function useLeadNote() {
         qc.invalidateQueries({ queryKey: keys.leadsAll }),
       ]),
     onError: useRefreshWhenOutOfDate(),
+  });
+}
+
+/** Delete leads, listed first (Administrators, `delete_leads`): asked again each time the dialog opens, never cached. */
+export function useDeleteLeadsPreview(ids: number[]) {
+  return useQuery({
+    queryKey: ['leads-delete-preview', ids] as const,
+    queryFn: () => api<LeadDeletePreview>('/api/leads/delete/preview', { method: 'POST', body: { ids } }),
+    gcTime: 0,
+    staleTime: 0,
+    retry: false,
+  });
+}
+
+/** Deletes the leads the preview planned (only what is still safe and was in it); lists and pages refresh after. */
+export function useDeleteLeads() {
+  const refresh = useInvalidateAfterLeadWrite();
+  return useMutation({
+    mutationFn: (body: { ids: number[]; plan: LeadDeletePreview['plan'] }) =>
+      api<LeadDeletePreview>('/api/leads/delete', { method: 'POST', body: { ...body, confirm: 'delete' } }),
+    // Not awaited: the lead page leaves before its (now deleted) lead is asked for again.
+    onSuccess: () => {
+      void refresh();
+    },
   });
 }
