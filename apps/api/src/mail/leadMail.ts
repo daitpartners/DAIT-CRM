@@ -44,25 +44,39 @@ export function isExcludedDomain(domain: string, ownDomains: Iterable<string>): 
   return !d || isFreeMail(d) || isSharedHost(d) || isOwnDomain(d, ownDomains);
 }
 
+/** The domains of every mailbox's address and send-as address, whatever its status (one query). */
+export async function loadMailboxDomains(db: Db): Promise<Set<string>> {
+  const accounts = await db.emailAccount.findMany({ select: { address: true, sendAs: true } });
+  const domains = new Set<string>();
+  for (const a of accounts) {
+    for (const address of [a.address, a.sendAs]) {
+      const d = domainOf(address);
+      if (d) domains.add(d);
+    }
+  }
+  return domains;
+}
+
+/**
+ * True for an address at our own domain or a mailbox's domain (`mailboxDomains`): it never counts as a lead/contact
+ * address (F18), so it is never searched for either.
+ */
+export function isOwnAddress(address: string, mailboxDomains: Iterable<string>): boolean {
+  const domain = domainOf(address);
+  return !!domain && isOwnDomain(domain, mailboxDomains);
+}
+
 /**
  * The rules from every lead (archived and closed included) and every contact: their addresses, and the own domains
  * of companies with at least one lead (company domain, its leads' and contacts' address domains). Four queries.
  */
 export async function loadLeadMailRules(db: Db): Promise<LeadMailRules> {
-  const [leads, contacts, companies, accounts] = await Promise.all([
+  const [leads, contacts, companies, mailboxDomains] = await Promise.all([
     db.lead.findMany({ select: { businessEmail: true, companyId: true } }),
     db.contact.findMany({ where: { businessEmail: { not: null } }, select: { businessEmail: true, companyId: true } }),
     db.company.findMany({ where: { domain: { not: null }, leads: { some: {} } }, select: { domain: true } }),
-    db.emailAccount.findMany({ select: { address: true, sendAs: true } }),
+    loadMailboxDomains(db),
   ]);
-
-  const mailboxDomains = new Set<string>();
-  for (const a of accounts) {
-    for (const address of [a.address, a.sendAs]) {
-      const d = domainOf(address);
-      if (d) mailboxDomains.add(d);
-    }
-  }
   const excluded = (domain: string | null): boolean => !domain || isExcludedDomain(domain, mailboxDomains);
 
   const leadCompanies = new Set<number>();
@@ -71,9 +85,9 @@ export async function loadLeadMailRules(db: Db): Promise<LeadMailRules> {
   const addAddress = (raw: string | null, isLeadCompany: boolean) => {
     const address = normaliseAddress(raw);
     if (!address) return;
-    const domain = domainOf(address);
     // An address at our own or a mailbox's domain (a test lead with a colleague's address) never counts (F18).
-    if (domain && isOwnDomain(domain, mailboxDomains)) return;
+    if (isOwnAddress(address, mailboxDomains)) return;
+    const domain = domainOf(address);
     addresses.add(address);
     if (isLeadCompany && !excluded(domain)) domains.add(domain!);
   };

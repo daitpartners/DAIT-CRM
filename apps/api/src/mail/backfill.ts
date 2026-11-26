@@ -9,6 +9,7 @@ import { prisma } from '../db.js';
 import { enqueue, STALE_AFTER_MS } from '../jobs/queue.js';
 import type { GraphClient, MailFolder } from '../graph/client.js';
 import { FOLDERS } from '../jobs/handlers/syncMailbox.js';
+import { isOwnAddress, loadMailboxDomains } from './leadMail.js';
 
 type Db = Prisma.TransactionClient | PrismaClient;
 
@@ -25,7 +26,10 @@ const syncingMailboxWhere: Prisma.EmailAccountWhereInput = {
   kind: 'personal', status: 'connected', syncMail: true, userId: { not: null }, user: { isActive: true },
 };
 
-/** Lead and contact addresses (trimmed, lower-cased, with an `@`) not yet queued for backfill. */
+/**
+ * Lead and contact addresses (trimmed, lower-cased, with an `@`) not yet queued for backfill. Addresses at our own or a
+ * mailbox's domain are left out (and not recorded): their mail is never lead mail (F18), so searching would be wasted.
+ */
 async function newAddresses(db: Db): Promise<string[]> {
   const rows = await db.$queryRaw<{ address: string }[]>`
     SELECT DISTINCT a.address FROM (
@@ -36,7 +40,8 @@ async function newAddresses(db: Db): Promise<string[]> {
     WHERE position('@' IN a.address) > 0 AND length(a.address) <= 320
       AND NOT EXISTS (SELECT 1 FROM mail_backfill_addresses m WHERE m.address = a.address)
     ORDER BY a.address`;
-  return rows.map((r) => r.address);
+  const mailboxDomains = await loadMailboxDomains(db);
+  return rows.map((r) => r.address).filter((address) => !isOwnAddress(address, mailboxDomains));
 }
 
 /** Runs `fn` in a transaction when `db` is the client, as is when it already is one. */
@@ -69,7 +74,9 @@ export async function queueNewAddressBackfills(db: Db): Promise<number> {
 export async function queueMailboxBackfills(db: Db, accountId: number): Promise<number> {
   const account = await db.emailAccount.findFirst({ where: { id: accountId, kind: 'personal' }, select: { id: true } });
   if (!account) throw new Error('mailbox_not_found');
-  const known = await db.mailBackfillAddress.findMany({ select: { address: true } });
+  const mailboxDomains = await loadMailboxDomains(db);
+  const known = (await db.mailBackfillAddress.findMany({ select: { address: true } }))
+    .filter((k) => !isOwnAddress(k.address, mailboxDomains));
   return inTransaction(db, async (tx) => {
     const created = await tx.mailBackfill.createMany({ data: known.map((k) => ({ accountId, address: k.address })), skipDuplicates: true });
     const requeued = await tx.mailBackfill.updateMany({

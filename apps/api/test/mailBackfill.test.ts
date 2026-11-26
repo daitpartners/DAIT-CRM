@@ -118,6 +118,23 @@ describe('queueing backfills', () => {
     expect(await queueNewAddressBackfills(prisma)).toBe(0);
   });
 
+  it('addresses at our own domain or a mailbox domain are never queued (F18), not even with --mailbox', async () => {
+    const { account } = await mailbox();
+    const other = await mailbox({ status: 'disconnected' });
+    await prisma.emailAccount.update({ where: { id: other.account.id }, data: { address: 'me@ourbox.io' } });
+    await makeContact({ companyId: acme.companyId, businessEmail: 'Colleague@DaitPartners.com' });
+    await makeContact({ companyId: acme.companyId, businessEmail: 'sam@eu.daitpartners.com' });
+    await makeContact({ companyId: acme.companyId, businessEmail: 'joe@ourbox.io' });
+    expect(await queueNewAddressBackfills(prisma)).toBe(2); // ana and bob only
+    expect((await prisma.mailBackfillAddress.findMany()).map((r) => r.address).sort()).toEqual(['ana@acme.com', 'bob@acme.com']);
+    expect(await queueNewAddressBackfills(prisma)).toBe(0);
+    // An own address recorded before (e.g. before this rule) is not queued for a reconnected mailbox either.
+    await prisma.mailBackfillAddress.create({ data: { address: 'colleague@daitpartners.com' } });
+    await prisma.mailBackfill.deleteMany({ where: { accountId: account.id } });
+    expect(await queueMailboxBackfills(prisma, account.id)).toBe(2);
+    expect(await prisma.mailBackfill.count({ where: { address: { contains: 'daitpartners.com' } } })).toBe(0);
+  });
+
   it('a mailbox reconnected after the release gets rows for every known address with --mailbox (F20)', async () => {
     await mailbox();
     const late = await mailbox({ status: 'disconnected' });
