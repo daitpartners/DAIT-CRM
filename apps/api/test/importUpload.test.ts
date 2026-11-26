@@ -527,10 +527,19 @@ describe('remove a file in step 1 (26 Nov 2026)', () => {
     expect(await prisma.importRow.count({ where: { fileId: file.id } })).toBe(0);
     // Kept only as the record of the Claude call it spent: not listed, not counted against the 10 files.
     const kept = await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } });
-    expect([kept.status, kept.claudeCalls, kept.deletedAt !== null]).toEqual(['Removed', 1, true]);
+    expect([kept.status, kept.claudeCalls, kept.deletedAt !== null, kept.storagePath]).toEqual(['Removed', 1, true, '']);
+    expect((await json('GET', `/api/imports/files/${file.id}/original`, cookie)).statusCode).toBe(410);
     expect((await monthTotals(prisma)).claudeRuns).toBe(1);
     expect((await json('GET', `/api/imports/batches/${batch.id}/files`, cookie)).json()).toEqual({ items: [] });
     expect(((await json('GET', `/api/imports/batches/${batch.id}`, cookie)).json() as { files: unknown[] }).files).toEqual([]);
+    // Nor in the Data manager list (first file, "+n", the file-name search).
+    const right = (await upload(batch.id, 'right.csv', Buffer.from('Company;Email;Country\nAcme Ltd;info@acme.test;India\n'), cookie)).json() as { id: number };
+    type Row = { id: number; files: { first: string; more: number } };
+    const listed = async (q = '') => ((await json('GET', `/api/imports/batches?page=1&pageSize=25${q}`, cookie)).json() as { items: Row[] }).items;
+    expect((await listed()).find((b) => b.id === batch.id)!.files).toEqual({ first: 'right.csv', more: 0 });
+    expect((await listed('&q=visitors')).map((b) => b.id)).toEqual([]);
+    expect((await listed('&q=right')).map((b) => b.id)).toEqual([batch.id]);
+    expect(right.id).toBeGreaterThan(file.id);
     expect((await remove(batch.id, file.id, cookie)).statusCode).toBe(404);
     expect((await prisma.importBatch.findUniqueOrThrow({ where: { id: batch.id } })).rowCount).toBe(0);
   });

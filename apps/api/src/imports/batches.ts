@@ -133,7 +133,7 @@ export async function addFile(user: AuthUser, batchId: number, name: string, dat
 
 /**
  * `import_files.status` of a file a person took back in step 1 after Claude had already been spent reading it: the row
- * stays (deleted_at set, no rows, nothing on disk) only so the month's Claude count keeps that spend; every list and the
+ * stays (deleted_at set, storage_path cleared, no rows, nothing on disk) only so the month's Claude count keeps that spend; every list and the
  * 10-file limit leave it out. A removed file that spent no Claude call is deleted outright.
  */
 export const REMOVED_FILE = 'Removed';
@@ -160,7 +160,8 @@ export async function removeFile(batchId: number, fileId: number): Promise<void>
     if (file.claude_calls > 0) {
       await tx.importFile.update({
         where: { id: fileId },
-        data: { status: REMOVED_FILE, deletedAt: new Date(), error: null, meta: {}, columnMap: {}, questions: [] },
+        // storage_path '' (as before an upload is saved): originalFile answers 410, and nothing points at the removed bytes.
+        data: { status: REMOVED_FILE, deletedAt: new Date(), storagePath: '', error: null, meta: {}, columnMap: {}, questions: [] },
       });
     } else {
       await tx.importFile.delete({ where: { id: fileId } });

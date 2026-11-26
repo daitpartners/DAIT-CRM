@@ -67,7 +67,7 @@ export async function listBatches(q: ImportBatchListQuery, timezone = 'Europe/Lo
   if (q.q) {
     where.OR = [
       { number: { contains: q.q, mode: 'insensitive' } },
-      { files: { some: { name: { contains: q.q, mode: 'insensitive' } } } },
+      { files: { some: { name: { contains: q.q, mode: 'insensitive' }, ...NOT_REMOVED } } },
     ];
   }
   const [total, count, batches, tiles] = await Promise.all([
@@ -77,8 +77,8 @@ export async function listBatches(q: ImportBatchListQuery, timezone = 'Europe/Lo
       where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], ...pageArgs(q),
       include: {
         createdBy: { select: { name: true } },
-        files: { select: { name: true }, orderBy: { id: 'asc' }, take: 1 },
-        _count: { select: { files: true } },
+        files: { where: NOT_REMOVED, select: { name: true }, orderBy: { id: 'asc' }, take: 1 },
+        _count: { select: { files: { where: NOT_REMOVED } } },
       },
     }),
     dmTiles(timezone),

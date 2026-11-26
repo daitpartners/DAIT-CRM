@@ -550,18 +550,22 @@ describe('Do not email follows the do-not-email list (S1, S2: 26 Nov 2026)', () 
   });
   const listed = () => prisma.emailSuppression.findMany({ orderBy: { email: 'asc' } }).then((r) => r.map((x) => x.email));
 
-  it('a listed address shows ticked even when the stored flags are off (lead address → doNotEmail, contact address → contactUnsubscribed)', async () => {
+  it('the mailed address, when listed, shows ticked even when the stored flags are off (contact address → contactUnsubscribed)', async () => {
     await prisma.emailSuppression.createMany({ data: [
       { email: 'info@acme.test', reason: 'do_not_email', source: 'lead_deleted' },
       { email: 'ana@acme.test', reason: 'unsubscribed', source: 'lead_deleted' },
     ] });
     const { company, lead } = await leadWithContact();
-    // As an import update row would leave them: stored flags off.
+    // As an import update row would leave them: stored flags off. The Mailer writes to the contact (ana@), not info@.
     await prisma.lead.update({ where: { id: lead.id }, data: { businessEmail: 'Info@Acme.test', doNotEmail: false } });
     const res = await get(lead.id);
     expect(res.statusCode, res.body).toBe(200);
-    expect(res.json()).toMatchObject({ doNotEmail: true, contactUnsubscribed: true });
+    expect(res.json()).toMatchObject({ doNotEmail: false, contactUnsubscribed: true });
     expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).doNotEmail).toBe(false);
+    // No contact: the Mailer writes to the lead's own address, so a listed one shows on doNotEmail.
+    const loose = await makeLead({ companyId: null, businessEmail: 'INFO@acme.test', assignedToId: rep.id });
+    expect((await get(loose.id)).json()).toMatchObject({ doNotEmail: true, contactUnsubscribed: false });
+    expect((await checkRecipients(prisma, authOf(admin), [loose.id]))[0]!.block).toBe('Marked do not email');
 
     // Only the contact's address listed: the contact side only. Nothing listed: both off.
     const other = await makeContact({ companyId: company.id, businessEmail: 'ana@acme.test' });
@@ -572,7 +576,7 @@ describe('Do not email follows the do-not-email list (S1, S2: 26 Nov 2026)', () 
     // Every lead write answers with the same view.
     const fresh = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
     const patched = await app.inject({ method: 'PATCH', url: `/api/leads/${lead.id}`, headers: { cookie }, payload: { notes: 'x', updatedAt: fresh.updatedAt.toISOString() } });
-    expect(patched.json()).toMatchObject({ doNotEmail: true, contactUnsubscribed: true });
+    expect(patched.json()).toMatchObject({ doNotEmail: false, contactUnsubscribed: true });
   });
 
   it('re-saving the tick it was shown changes nothing; only an Administrator’s real untick lifts the listing', async () => {
@@ -607,6 +611,44 @@ describe('Do not email follows the do-not-email list (S1, S2: 26 Nov 2026)', () 
     expect(await listed()).toEqual([]);
     expect(await prisma.leadActivity.count({ where: { leadId: lead.id, title: 'Removed from the opt-out list' } })).toBe(1);
     expect(await prisma.leadActivity.count({ where: { leadId: lead.id, title: 'Do not email removed' } })).toBe(1);
+  });
+
+  it('lead address listed, contact address not: unticked (the Mailer writes to the contact) and a tick makes it real', async () => {
+    await prisma.emailSuppression.create({ data: { email: 'info@acme.test', reason: 'do_not_email', source: 'lead_deleted' } });
+    const { lead } = await leadWithContact();
+    await prisma.lead.update({ where: { id: lead.id }, data: { businessEmail: 'info@acme.test' } });
+    expect((await get(lead.id)).json()).toMatchObject({ doNotEmail: false, contactUnsubscribed: false });
+    expect((await checkRecipients(prisma, authOf(admin), [lead.id]))[0]!.block).toBeNull();
+
+    // A Sales Rep ticks it: stored, on the timeline, and the Mailer now skips the lead.
+    const repCookie = await signIn(app, rep);
+    const fresh = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
+    const ticked = await setFlag(lead.id, true, fresh.updatedAt, repCookie);
+    expect(ticked.statusCode, ticked.body).toBe(200);
+    expect(ticked.json()).toMatchObject({ doNotEmail: true, contactUnsubscribed: true });
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).doNotEmail).toBe(true);
+    expect(await prisma.leadActivity.count({ where: { leadId: lead.id, title: 'Marked do not email' } })).toBe(1);
+    expect((await checkRecipients(prisma, authOf(admin), [lead.id]))[0]!.block).toBe('Marked do not email');
+
+    // And the rep may untick it again: the listed address is not the one mailed, so nothing to lift, no 409.
+    const again = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
+    const unticked = await setFlag(lead.id, false, again.updatedAt, repCookie);
+    expect(unticked.statusCode, unticked.body).toBe(200);
+    expect(unticked.json()).toMatchObject({ doNotEmail: false, contactUnsubscribed: false });
+    expect(await listed()).toEqual(['info@acme.test']);
+  });
+
+  it('contact address listed, lead address not: ticked as the Mailer skips it; a re-saved tick is a no-op', async () => {
+    await prisma.emailSuppression.create({ data: { email: 'ana@acme.test', reason: 'unsubscribed', source: 'lead_deleted' } });
+    const { lead } = await leadWithContact();
+    await prisma.lead.update({ where: { id: lead.id }, data: { businessEmail: 'info@acme.test' } });
+    expect((await get(lead.id)).json()).toMatchObject({ doNotEmail: false, contactUnsubscribed: true });
+    expect((await checkRecipients(prisma, authOf(admin), [lead.id]))[0]!.block).toBe('Unsubscribed');
+    const fresh = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
+    const resaved = await setFlag(lead.id, true, fresh.updatedAt, await signIn(app, rep));
+    expect(resaved.statusCode, resaved.body).toBe(200);
+    expect(await prisma.leadActivity.count({ where: { leadId: lead.id } })).toBe(0);
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).doNotEmail).toBe(false);
   });
 
   it('S2: a lead email edit that sets Do not email adds the same timeline line as ticking it by hand', async () => {

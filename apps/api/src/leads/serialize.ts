@@ -96,9 +96,9 @@ export function leadSummary(l: LeadSummaryRow, today: string, batchIds?: Readonl
 export type ListedAddresses = { lead: boolean; contact: boolean };
 
 /**
- * The full lead: every column, its company summary, contact, assignee and creator. `listed`: an address on the
- * do-not-email list shows Do not email ticked even when the stored flag is not set (an import update row, an old row):
- * the lead's own address → `doNotEmail`, its contact's → `contactUnsubscribed`.
+ * The full lead: every column, its company summary, contact, assignee and creator. `listed`: the address the Mailer
+ * uses, when it is on the do-not-email list, shows Do not email ticked even when the stored flag is not set (an import
+ * update row, an old row): the contact's address → `contactUnsubscribed`, else the lead's own → `doNotEmail`.
  */
 export function leadDetail(l: LeadDetailRow, today: string, listed: ListedAddresses = { lead: false, contact: false }) {
   const { company, contact, assignedTo, createdBy, nextFollowUp, ...fields } = l;

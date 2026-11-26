@@ -131,6 +131,7 @@ export function Wizard() {
       {step === 1 ? (
         <StepUpload
           batchId={batchId}
+          batchStatus={batch?.status ?? null}
           language={language}
           leadType={leadType}
           alert={alert}

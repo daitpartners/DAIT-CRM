@@ -13,6 +13,8 @@ export type Step1Alert =
 
 type Props = {
   batchId: number | null;
+  /** Files can be removed only while the batch is Uploading (before Sort); null before the batch exists or loads. */
+  batchStatus?: string | null;
   language: OutreachLanguage | null;
   leadType: LeadType | null;
   alert: Step1Alert | null;
@@ -58,7 +60,7 @@ const rulesText = (rules: AllocationLine[] | undefined) =>
   (rules ?? []).map((r) => (r.people.length ? `${r.name} · ${r.people.join(', ')}` : r.name)).join('; ');
 
 /** Step 1 (mockup #s1): outreach language and Import as (nothing pre-selected), then the files. */
-export function StepUpload({ batchId, language, leadType, alert, busy, onChoose, onCreated, onRefused, onNext }: Props) {
+export function StepUpload({ batchId, batchStatus = null, language, leadType, alert, busy, onChoose, onCreated, onRefused, onNext }: Props) {
   const t = useT();
   const lang = useLang();
   const { data: options } = useImportOptions();
@@ -66,6 +68,8 @@ export function StepUpload({ batchId, language, leadType, alert, busy, onChoose,
   const create = useCreateBatch();
   const upload = useUploadFile();
   const remove = useRemoveFile();
+  // Hidden once the data is sorted (the server refuses then); shown while the batch status is still loading.
+  const canRemove = batchId !== null && (batchStatus === null || batchStatus === 'Uploading');
   const [problems, setProblems] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -228,16 +232,18 @@ export function StepUpload({ batchId, language, leadType, alert, busy, onChoose,
                       <div className="conn-meta">{fileMetaText(t, f, lang)}</div>
                     </div>
                     <span className={`badge ${badge.cls}`}>{badge.text}</span>
-                    <button
-                      type="button"
-                      className="btn xs"
-                      aria-label={t('Remove {item}', { item: f.name })}
-                      title={t('Remove {item}', { item: f.name })}
-                      disabled={uploading || (remove.isPending && remove.variables?.fileId === f.id)}
-                      onClick={() => removeFile(f.id, f.name)}
-                    >
-                      ✕
-                    </button>
+                    {canRemove ? (
+                      <button
+                        type="button"
+                        className="btn xs"
+                        aria-label={t('Remove {item}', { item: f.name })}
+                        title={t('Remove {item}', { item: f.name })}
+                        disabled={uploading || (remove.isPending && remove.variables?.fileId === f.id)}
+                        onClick={() => removeFile(f.id, f.name)}
+                      >
+                        ✕
+                      </button>
+                    ) : null}
                   </li>
                 );
               })}

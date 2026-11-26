@@ -57,7 +57,6 @@ const oneOf = <T extends string>(list: readonly T[], v: string | undefined): T |
 /** A bulk assignment waiting for confirmation (and a note when leads change hands). */
 type PendingAssign = { ids: number[]; toUserId: number | null; toName: string; needsNote: boolean };
 
-/** Leads module list (prototype V.leads2List): tiles, tab bar, filters, a paged table and bulk actions. */
 /**
  * The Created cell: date and 24-hour time in the viewer's time zone, and for a lead that came from an upload the batch
  * number on a small second line (a link to the batch in the Data manager when it is there and the viewer may open it).
@@ -82,6 +81,7 @@ export function CreatedCell({ createdAt, batch, batchId }: { createdAt: string; 
   );
 }
 
+/** Leads module list (prototype V.leads2List): tiles, tab bar, filters, a paged table and bulk actions. */
 export function LeadsList() {
   const t = useT();
   const lang = useLang();

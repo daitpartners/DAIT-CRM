@@ -264,6 +264,38 @@ describe('step 1: remove an uploaded file (26 Nov 2026)', () => {
     expect(screen.getByText('Expo.xlsx')).toBeInTheDocument();
   });
 
+  it('back on step 1 after sorting, the ✕ buttons are hidden (files can no longer be removed)', async () => {
+    const fetchFn = stubFetch((url) => {
+      if (url === '/api/imports/batches/7') return Response.json(batch('Sorting'));
+      if (url === '/api/imports/batches/7/files') return Response.json({ items: twoFiles });
+      return undefined;
+    });
+    renderPage('/leads/import?batch=7&step=1');
+    await screen.findByText('Wrong list.csv');
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^Remove / })).toBeNull());
+    expect(calls(fetchFn, 'DELETE', /files\/\d+$/)).toHaveLength(0);
+  });
+
+  it('a removal refreshes the batch as well as the file list', async () => {
+    let items = twoFiles;
+    const fetchFn = stubFetch((url, init) => {
+      if (url === '/api/imports/batches/7') return Response.json(batch('Uploading'));
+      if (url === '/api/imports/batches/7/files/2' && init?.method === 'DELETE') {
+        items = items.filter((f) => f.id !== 2);
+        return new Response(null, { status: 204 });
+      }
+      if (url === '/api/imports/batches/7/files') return Response.json({ items });
+      return undefined;
+    });
+    renderPage('/leads/import?batch=7&step=1');
+    const button = await screen.findByRole('button', { name: 'Remove Wrong list.csv' });
+    const before = calls(fetchFn, 'GET', '/api/imports/batches/7').length;
+    expect(before).toBeGreaterThan(0);
+    await userEvent.click(button);
+    await waitFor(() => expect(screen.queryByText('Wrong list.csv')).toBeNull());
+    await waitFor(() => expect(calls(fetchFn, 'GET', '/api/imports/batches/7').length).toBeGreaterThan(before));
+  });
+
   it('the remove buttons are off while a file is uploading', async () => {
     let finish!: () => void;
     stubFetch((url) => {

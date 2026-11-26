@@ -93,13 +93,21 @@ async function detailOf(db: Tx | typeof prisma, id: number, user: AuthUser) {
   return leadDetail(row, todayIn(user.timezone), await listedAddresses(db, row));
 }
 
-/** Whether the lead's own address and its contact's are on the do-not-email list (shown as Do not email ticked). */
+/** The address the Mailer and send-from-lead use (mailer/rules.ts `addressOf`): the contact's email, else the lead's. */
+const mailedAddress = (leadEmail: string | null | undefined, contactEmail: string | null | undefined) =>
+  (contactEmail || leadEmail || '').trim().toLowerCase();
+
+/**
+ * Whether the address the lead is mailed at is on the do-not-email list, shown as Do not email ticked exactly when the
+ * Mailer skips it: the contact's address (→ `contact`), or the lead's own when there is no contact email (→ `lead`). A
+ * listed lead address the Mailer does not use is not shown, so a tick can still make the exclusion real.
+ */
 async function listedAddresses(
   db: Tx | typeof prisma, row: { businessEmail: string | null; contact: { businessEmail: string | null } | null },
 ): Promise<ListedAddresses> {
-  const list = await suppressed(db, [row.businessEmail, row.contact?.businessEmail]);
-  const on = (a: string | null | undefined) => !!a && list.has(a.trim().toLowerCase());
-  return { lead: on(row.businessEmail), contact: on(row.contact?.businessEmail) };
+  const mailed = mailedAddress(row.businessEmail, row.contact?.businessEmail);
+  if (!mailed || (await suppressed(db, [mailed])).size === 0) return { lead: false, contact: false };
+  return row.contact?.businessEmail ? { lead: false, contact: true } : { lead: true, contact: false };
 }
 
 /** 409 body for a domain unique violation: names the company holding the domain. */
@@ -450,17 +458,20 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
           ? await tx.contact.findUnique({ where: { id: lead.contactId }, select: { unsubscribedAt: true, businessEmail: true } }) : null;
         const contactOn = !!contact?.unsubscribedAt;
         const addresses = [lead.businessEmail, contact?.businessEmail];
-        const listed = (await suppressed(tx, addresses)).size;
-        // A listed address already shows ticked (leadDetail): a form re-saving that tick changes nothing.
-        if (body.doNotEmail && listed > 0) return;
-        // Nothing to do when both flags already match, unless an untick has a listed address to lift.
-        if (lead.doNotEmail === body.doNotEmail && (!contact || contactOn === body.doNotEmail) && (body.doNotEmail || listed === 0)) return;
-        // A real untick of an address on the suppression list (a deleted lead or contact opted out): Administrators
-        // only, and it lifts the list entry too (counted in the audit entry, never the addresses).
+        const list = await suppressed(tx, addresses);
+        // Only the address the Mailer uses counts (as leadDetail shows it): a listed one already shows ticked, so a form
+        // re-saving that tick changes nothing; a listed address the Mailer does not use shows unticked, so a tick is real.
+        const mailed = mailedAddress(lead.businessEmail, contact?.businessEmail);
+        const mailedListed = !!mailed && list.has(mailed);
+        if (body.doNotEmail && mailedListed) return;
+        // Nothing to do when both flags already match, unless an untick has a listed mailed address to lift.
+        if (lead.doNotEmail === body.doNotEmail && (!contact || contactOn === body.doNotEmail) && (body.doNotEmail || !mailedListed)) return;
+        // A real untick of the mailed address on the suppression list (a deleted lead or contact opted out):
+        // Administrators only, and it lifts the lead's and contact's list entries (counted in the audit entry, never the addresses).
         let lifted = 0;
-        if (!body.doNotEmail && listed > 0) {
+        if (!body.doNotEmail && mailedListed) {
           if (user.role !== 'Administrator') throw new RuleError('address_suppressed');
-          lifted = listed;
+          lifted = list.size;
           await unsuppress(tx, addresses);
         }
         await tx.lead.update({ where: { id }, data: { doNotEmail: body.doNotEmail } });

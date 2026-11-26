@@ -271,7 +271,11 @@ export function useRemoveFile() {
   return useMutation({
     mutationFn: ({ batchId, fileId }: { batchId: number; fileId: number }) =>
       api<void>(`/api/imports/batches/${batchId}/files/${fileId}`, { method: 'DELETE' }),
-    onSettled: (_d, _e, v) => qc.invalidateQueries({ queryKey: importKeys.files(v.batchId) }),
+    // The batch too: a removal changes its row count.
+    onSettled: (_d, _e, v) => Promise.all([
+      qc.invalidateQueries({ queryKey: importKeys.files(v.batchId) }),
+      qc.invalidateQueries({ queryKey: importKeys.batch(v.batchId) }),
+    ]),
   });
 }
 
