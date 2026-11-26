@@ -51,7 +51,9 @@ function inTransaction<T>(db: Db, fn: (tx: Db) => Promise<T>): Promise<T> {
 
 /**
  * Lead/contact addresses not yet in `mail_backfill_addresses` are recorded there and get one queued row per syncing
- * mailbox; returns the rows created. A mailbox connected later gets no rows (its 12-month first sync covers it).
+ * mailbox; returns the rows created. A mailbox not connected with Sync mail on at that moment gets no rows: a brand-new
+ * mailbox's 12-month first sync covers it, but a reconnected one keeps its old delta links (90-day window), so after any
+ * (re)connect run `mail-backfill --mailbox <id>` (queueMailboxBackfills).
  */
 export async function queueNewAddressBackfills(db: Db): Promise<number> {
   const addresses = await newAddresses(db);

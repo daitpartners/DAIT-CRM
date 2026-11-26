@@ -7,9 +7,10 @@
  * rules of `leadMail.ts` (any participant); or in a conversation where the user keeps a lead-linked message.
  *
  * Leads deleted before `lead_deleted_at` existed (controller ruling 1, F1): their addresses come from the lead-delete
- * audit entries (`before.emails`); unlinked mail with one of them as a participant is marked `lead_deleted_at` and kept.
- * A lead-delete entry with no `before.emails` (written before release 1) cannot be recovered, so the real run refuses
- * unless `acceptUnrecordedDeletes` is given.
+ * audit entries (`before.emails`, else `before.businessEmail`, else the lead's create entry; Import Undo entries are
+ * skipped); unlinked mail with one of them as a participant (and not lead mail anyway) is marked `lead_deleted_at` and
+ * kept. A lead-delete entry that gives no address cannot be recovered, so the real run refuses unless
+ * `acceptUnrecordedDeletes` is given.
  *
  * Logs counts only (never subjects or addresses). Safe to run again: a second run removes nothing more.
  */
@@ -42,31 +43,71 @@ export class CleanupRefusedError extends Error {
 
 const strings = (v: Prisma.JsonValue): string[] => (Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string') : []);
 
+const objectOf = (v: Prisma.JsonValue | null | undefined): Prisma.JsonObject | undefined =>
+  (v && typeof v === 'object' && !Array.isArray(v) ? v : undefined);
+
 /**
- * Addresses of deleted leads (and their contacts) from the lead-delete audit entries, and how many entries record none.
+ * Addresses of deleted leads (and their contacts) from the lead-delete audit entries, and how many entries give none.
+ * - An Import Undo entry (`after.undoneImport`) is skipped: Undo never removes a lead or contact that has mail.
+ * - Otherwise the addresses are `before.emails` (lead deletes since release 1); failing that `before.businessEmail`;
+ *   failing that the `businessEmail` in that lead's own create audit entry (lead deletes before release 1).
+ * - Only an entry where none of these gives an address counts as unrecorded.
  * An address at our own or a connected mailbox's domain is dropped, as in the lead-mail rules (F18).
  */
 async function deletedLeadAddresses(db: PrismaClient): Promise<{ addresses: Set<string>; unrecorded: number }> {
   const [entries, accounts] = await Promise.all([
-    db.auditLog.findMany({ where: { entityType: 'lead', action: 'delete' }, select: { before: true } }),
+    db.auditLog.findMany({ where: { entityType: 'lead', action: 'delete' }, select: { entityId: true, before: true, after: true } }),
     db.emailAccount.findMany({ select: { address: true, sendAs: true } }),
   ]);
+  const deletes = entries.filter((e) => objectOf(e.after)?.undoneImport == null);
+  const needCreate = deletes
+    .filter((e) => { const b = objectOf(e.before); return !Array.isArray(b?.emails) && typeof b?.businessEmail !== 'string'; })
+    .map((e) => e.entityId);
+  const created = new Map<string, string>();
+  if (needCreate.length > 0) {
+    const creates = await db.auditLog.findMany({
+      where: { entityType: 'lead', action: 'create', entityId: { in: needCreate } }, select: { entityId: true, after: true },
+    });
+    for (const c of creates) {
+      const email = objectOf(c.after)?.businessEmail;
+      if (typeof email === 'string') created.set(c.entityId, email);
+    }
+  }
   const mailboxDomains = accounts.flatMap((a) => [domainOf(a.address), domainOf(a.sendAs)]).filter((d): d is string => !!d);
   const addresses = new Set<string>();
   let unrecorded = 0;
-  for (const { before } of entries) {
-    const emails = before && typeof before === 'object' && !Array.isArray(before) ? before.emails : undefined;
-    if (!Array.isArray(emails)) {
+  for (const e of deletes) {
+    const recorded = objectOf(e.before)?.emails;
+    const businessEmail = objectOf(e.before)?.businessEmail;
+    let emails: string[];
+    if (Array.isArray(recorded)) emails = strings(recorded);
+    else if (typeof businessEmail === 'string') emails = [businessEmail];
+    else if (created.has(e.entityId)) emails = [created.get(e.entityId)!];
+    else {
       unrecorded += 1;
       continue;
     }
-    for (const raw of strings(emails)) {
+    for (const raw of emails) {
       const address = normaliseAddress(raw);
       const domain = domainOf(address);
       if (address && !(domain && isOwnDomain(domain, mailboxDomains))) addresses.add(address);
     }
   }
   return { addresses, unrecorded };
+}
+
+export const CLEANUP_USAGE = 'usage: mail-cleanup [--dry-run | --apply] [--accept-unrecorded-deletes]  (no flag = dry run)';
+
+/**
+ * CLI arguments of `cli/mail-cleanup.ts`. The real run needs an explicit `--apply`; no flag or `--dry-run` is a dry run.
+ * An unknown argument, or `--apply` with `--dry-run`, is an error (so a mistyped flag never deletes).
+ */
+export function parseCleanupArgs(args: string[]): { dryRun: boolean; acceptUnrecordedDeletes: boolean } | { error: string } {
+  const known = new Set(['--dry-run', '--apply', '--accept-unrecorded-deletes']);
+  const unknown = args.filter((a) => !known.has(a));
+  if (unknown.length > 0) return { error: `unknown argument: ${unknown.join(' ')}` };
+  if (args.includes('--apply') && args.includes('--dry-run')) return { error: '--apply and --dry-run together' };
+  return { dryRun: !args.includes('--apply'), acceptUnrecordedDeletes: args.includes('--accept-unrecorded-deletes') };
 }
 
 export async function cleanUpNonLeadMail(
@@ -117,8 +158,9 @@ export async function cleanUpNonLeadMail(
         const participants = participantsOf({
           from: m.fromAddress, to: strings(m.toAddresses), cc: strings(m.ccAddresses), bcc: strings(m.bccAddresses),
         });
+        if (isLeadMail(rules, participants) || (m.threadId && leadThreads.has(m.threadId))) continue;
         if (participants.some((p) => deleted.addresses.has(p))) stamp.push(m.id);
-        else if (!isLeadMail(rules, participants) && !(m.threadId && leadThreads.has(m.threadId))) remove.push(m.id);
+        else remove.push(m.id);
       }
 
       report.stamped += stamp.length;
@@ -126,7 +168,7 @@ export async function cleanUpNonLeadMail(
         counts.removed += remove.length;
       } else {
         if (stamp.length > 0) {
-          await db.emailMessage.updateMany({ where: { id: { in: stamp }, leadDeletedAt: null }, data: { leadDeletedAt: new Date() } });
+          await db.emailMessage.updateMany({ where: { id: { in: stamp }, leadId: null, leadDeletedAt: null }, data: { leadDeletedAt: new Date() } });
         }
         if (remove.length > 0) {
           // Checked again in the delete itself, in case a message was linked or used since it was read.

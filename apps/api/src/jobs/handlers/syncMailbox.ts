@@ -111,7 +111,8 @@ export async function storeMessage(
 
   const links = await matchMail(prisma, user, {
     threadId: m.conversationId,
-    counterparts: outbound ? [...m.to, ...m.cc, ...m.bcc] : [...(m.from ? [m.from.address] : []), ...m.cc],
+    // Inbound To counts too (a lead written to alongside the user); own and colleague addresses are dropped by matchMail.
+    counterparts: outbound ? [...m.to, ...m.cc, ...m.bcc] : [...(m.from ? [m.from.address] : []), ...m.cc, ...m.to],
     ownAddress: account.address,
   });
   const threadId = m.conversationId?.slice(0, 255) ?? null;

@@ -373,6 +373,26 @@ describe('lead Emails tab and timeline: Administrators and Managers see the team
     expect(await prisma.auditLog.count({ where: { action: 'view' } })).toBe(0);
   });
 
+  it("others' mail on the lead is audited once per viewer, message and day, not on every poll", async () => {
+    const f = await team();
+    const admin = await signIn(app, f.admin);
+    await tab(f.lead.id, admin);
+    await tab(f.lead.id, admin); // the tab polls while mail is queued
+    expect(await prisma.auditLog.count({ where: { action: 'view' } })).toBe(1);
+
+    const later = await f.msg(f.maya.id, f.mayaBox.id, { subject: 'Later', leadId: f.lead.id });
+    await tab(f.lead.id, admin);
+    const rows = await prisma.auditLog.findMany({ where: { action: 'view' }, orderBy: { id: 'asc' } });
+    expect(rows.map((r) => r.after)).toEqual([{ emailMessageIds: [f.pricing.id, f.proposal.id] }, { emailMessageIds: [later.id] }]);
+
+    // Another viewer is audited separately; yesterday's rows do not count today.
+    await tab(f.lead.id, await signIn(app, f.manager));
+    expect(await prisma.auditLog.count({ where: { action: 'view', userId: f.manager.id } })).toBe(1);
+    await prisma.auditLog.updateMany({ where: { userId: f.admin.id }, data: { at: new Date(Date.now() - 86_400_000 * 2) } });
+    await tab(f.lead.id, admin);
+    expect(await prisma.auditLog.count({ where: { action: 'view', userId: f.admin.id } })).toBe(3);
+  });
+
   it('mail of a deleted lead never reaches the lead tab (it has no lead)', async () => {
     const f = await team();
     await f.msg(f.maya.id, f.mayaBox.id, { subject: 'Old lead', leadId: null, leadDeletedAt: new Date('2026-11-25T10:00:00Z') });

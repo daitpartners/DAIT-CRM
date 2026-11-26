@@ -25,6 +25,21 @@ export function emailView(m: EmailMessage & { user?: { name: string } }, viewerI
   };
 }
 
+/** Message ids `viewerId` already has a lead-page view audit row for on lead `leadId` since midnight UTC today. */
+async function auditedToday(viewerId: number, leadId: number): Promise<Set<number>> {
+  const since = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+  const entries = await prisma.auditLog.findMany({
+    where: { entityType: 'lead', entityId: String(leadId), action: 'view', userId: viewerId, at: { gte: since } },
+    select: { after: true },
+  });
+  const ids = new Set<number>();
+  for (const { after } of entries) {
+    const list = after && typeof after === 'object' && !Array.isArray(after) ? after.emailMessageIds : undefined;
+    if (Array.isArray(list)) for (const v of list) if (typeof v === 'number') ids.add(v);
+  }
+  return ids;
+}
+
 /**
  * Email from the lead page (release 2B-1). Privacy (web-mail release 1): lead mail belongs to the mailbox owner.
  * Administrators and Managers can read every user's lead mail (view only, each opening audited); Sales representatives
@@ -68,8 +83,13 @@ export const leadEmailRoutes: FastifyPluginAsync = async (app) => {
         orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: 200,
       });
       const others = rows.filter((m) => m.userId !== user.id).map((m) => m.id);
-      // Reading another user's mail is audited: which messages, never their content.
-      if (others.length) await audit(prisma, { entityType: 'lead', entityId: id, action: 'view', userId: user.id, after: { emailMessageIds: others } });
+      // Reading another user's mail is audited: which messages, never their content. Once per viewer, message and
+      // (UTC) day, not on every poll of the tab.
+      if (others.length) {
+        const audited = await auditedToday(user.id, id);
+        const fresh = others.filter((m) => !audited.has(m));
+        if (fresh.length) await audit(prisma, { entityType: 'lead', entityId: id, action: 'view', userId: user.id, after: { emailMessageIds: fresh } });
+      }
       return { items: rows.map((m) => emailView(m, user.id)) };
     });
   });

@@ -135,7 +135,7 @@ const unlinkedWhere: Prisma.EmailMessageWhereInput = { leadId: null, folder: { n
  * Linking a message (Link to lead, Create lead) also links the user's other mail in the same conversation that has no
  * lead yet, so the thread does not keep showing it as unmatched. Left alone: drafts, mail on another lead and mail
  * matched to another company. As /link: the lead's contact, else the row's own contact only when it belongs
- * to the lead's company.
+ * to the lead's company. Linking clears a deleted-lead mark (`lead_deleted_at`), as /link and /create-lead do.
  */
 async function linkConversation(db: Tx | typeof prisma, m: EmailMessage, lead: Pick<Lead, 'id' | 'companyId' | 'contactId'>) {
   if (!m.threadId) return;
@@ -148,7 +148,7 @@ async function linkConversation(db: Tx | typeof prisma, m: EmailMessage, lead: P
   });
   for (const r of rows) {
     const keep = r.contact && lead.companyId !== null && r.contact.companyId === lead.companyId ? r.contact.id : null;
-    await db.emailMessage.update({ where: { id: r.id }, data: { leadId: lead.id, companyId: lead.companyId, contactId: lead.contactId ?? keep } });
+    await db.emailMessage.update({ where: { id: r.id }, data: { leadId: lead.id, companyId: lead.companyId, contactId: lead.contactId ?? keep, leadDeletedAt: null } });
   }
 }
 
@@ -506,7 +506,8 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
       const keepContact = m.contactId && lead.companyId && (await prisma.contact.count({ where: { id: m.contactId, companyId: lead.companyId } })) > 0;
       const updated = await prisma.$transaction(async (tx) => {
         const u = await tx.emailMessage.update({
-          where: { id: m.id }, data: { leadId: lead.id, companyId: lead.companyId, contactId: lead.contactId ?? (keepContact ? m.contactId : null) },
+          where: { id: m.id },
+          data: { leadId: lead.id, companyId: lead.companyId, contactId: lead.contactId ?? (keepContact ? m.contactId : null), leadDeletedAt: null },
         });
         await linkConversation(tx, m, lead);
         return u;
@@ -542,7 +543,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
           const created = await createLeadWithCompany(tx, { ...input, contactFirstName: first || null, contactLastName: rest.join(' ') || null, contactEmail: email || null }, user);
           await auditCreatedLead(tx, user.id, created);
           const l = created.lead;
-          await tx.emailMessage.update({ where: { id: m.id }, data: { leadId: l.id, companyId: l.companyId, contactId: l.contactId } });
+          await tx.emailMessage.update({ where: { id: m.id }, data: { leadId: l.id, companyId: l.companyId, contactId: l.contactId, leadDeletedAt: null } });
           await linkConversation(tx, m, l);
           return l.id;
         });

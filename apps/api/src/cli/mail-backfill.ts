@@ -1,7 +1,8 @@
 // Web-mail release 1 backfill. Run with tsx or node on the built file:
 //   --status          rows by status, totals and per mailbox (mailbox addresses only, never lead addresses)
-//   --retry           failed and skipped rows are queued again (e.g. after a mailbox reconnect)
-//   --mailbox <id>    a mailbox reconnected after its addresses were queued gets a row for every known address (F20)
+//   --retry           failed and skipped rows (of every mailbox) are queued again
+//   --mailbox <id>    after a mailbox is (re)connected or Sync mail turned on: a row for every known address, and its
+//                     failed and skipped rows queued again (F20)
 // The worker picks queued rows up within a minute.
 import { prisma } from '../db.js';
 import { backfillStatus, ensureBackfillJob, queueMailboxBackfills, retryBackfills } from '../mail/backfill.js';

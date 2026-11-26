@@ -422,6 +422,21 @@ describe('lead mail only (web-mail release 1)', () => {
     expect(bccRow.leadId).toBe(acme.lead.id);
   });
 
+  test('inbound mail links through a lead in Cc, or in To only (final review I3, T4-3)', async () => {
+    const { user, account } = await mailbox();
+    const { graph } = scripted({
+      'start:inbox': final('inbox', [
+        msg({ subject: 'cc', from: { name: 'Friend', address: 'friend@gmail.com' }, cc: ['ana@acme.com'] }),
+        msg({ subject: 'to only', from: { name: 'Intro', address: 'introducer@gmail.com' }, to: [ADDRESS, 'ana@acme.com'] }),
+        msg({ subject: 'colleague to', from: { name: 'Raj', address: 'raj@daitpartners.com' }, to: [ADDRESS, 'ana@acme.com'] }),
+      ]),
+    });
+    await syncMailboxHandler(job(account.id), { graph });
+    const rows = await prisma.emailMessage.findMany({ where: { userId: user.id } });
+    expect(rows.map((r) => r.subject).sort()).toEqual(['cc', 'colleague to', 'to only']);
+    for (const r of rows) expect(r).toMatchObject({ leadId: acme.lead.id, contactId: acme.contact.id, companyId: acme.company.id });
+  });
+
   test('an internal forward in a conversation that already has a lead-linked message is kept', async () => {
     const { user, account } = await mailbox();
     await prisma.emailMessage.create({

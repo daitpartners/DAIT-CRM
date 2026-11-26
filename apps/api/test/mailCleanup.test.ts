@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test } from 'vitest';
 import type { EmailAccount, Lead, Prisma, User } from '@prisma/client';
 import { prisma } from '../src/db';
 import { encrypt } from '../src/crypto/tokens';
-import { CleanupRefusedError, cleanUpNonLeadMail } from '../src/mail/cleanup';
+import { CleanupRefusedError, cleanUpNonLeadMail, parseCleanupArgs } from '../src/mail/cleanup';
 import { resetDb } from './helpers';
 import { makeCompany, makeContact, makeLead, makeProject, makeUser } from './factory';
 
@@ -167,6 +167,56 @@ describe('one-off mail clean-up (web-mail release 1)', () => {
     expect(await prisma.emailMessage.findUnique({ where: { id: personal.id } })).toBeNull();
   });
 
+  test('Import Undo lead-delete entries are skipped, not counted as unrecorded (final review I1)', async () => {
+    await prisma.auditLog.create({
+      data: {
+        entityType: 'lead', entityId: '777', action: 'delete', userId: null,
+        before: { id: 777, businessEmail: 'undone@imported.com' }, after: { undoneImport: 'IMPORT-2026-11-22' },
+      },
+    });
+    const undoneMail = await mail({ fromAddress: 'undone@imported.com' });
+
+    const r = await run();
+    expect(r).toMatchObject({ unrecordedDeletes: 0, stamped: 0, removed: 1 });
+    expect(await prisma.emailMessage.findUnique({ where: { id: undoneMail.id } })).toBeNull();
+  });
+
+  test("a lead delete made before release 1 finds its address in before.businessEmail or the lead's create entry (final review I1)", async () => {
+    // Pre-release-1 delete entries: no before.emails; one carries the full lead row, one only has a create entry.
+    await prisma.auditLog.create({
+      data: { entityType: 'lead', entityId: '801', action: 'delete', userId: null, before: { id: 801, businessEmail: 'Row@Before.com' } },
+    });
+    await prisma.auditLog.create({
+      data: { entityType: 'lead', entityId: '802', action: 'create', userId: null, after: { id: 802, businessEmail: ' Made@Created.com ' } },
+    });
+    await prisma.auditLog.create({
+      data: { entityType: 'lead', entityId: '802', action: 'delete', userId: null, after: { number: 'L-0802', companyName: 'Created Co' } },
+    });
+    await leadDeleteAudit(undefined); // lead 999: no create entry, nothing to go on
+    const fromBefore = await mail({ fromAddress: 'row@before.com' });
+    const fromCreate = await mail({ toAddresses: [rep.email, 'made@created.com'] });
+    const personal = await mail();
+
+    const dry = await run(true);
+    expect(dry).toMatchObject({ unrecordedDeletes: 1, stamped: 2, removed: 1 });
+    await expect(run()).rejects.toBeInstanceOf(CleanupRefusedError);
+
+    const r = await run(false, { acceptUnrecordedDeletes: true });
+    expect(r).toMatchObject({ unrecordedDeletes: 1, stamped: 2, removed: 1 });
+    for (const m of [fromBefore, fromCreate]) {
+      expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: m.id } })).leadDeletedAt).not.toBeNull();
+    }
+    expect(await prisma.emailMessage.findUnique({ where: { id: personal.id } })).toBeNull();
+  });
+
+  test('lead mail of a current lead is kept but not marked, even when a deleted lead shared the address', async () => {
+    await leadDeleteAudit({ emails: ['ana@acme.com'] });
+    const current = await mail({ fromAddress: 'ana@acme.com' });
+    const r = await run();
+    expect(r).toMatchObject({ stamped: 0, removed: 0 });
+    expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: current.id } })).leadDeletedAt).toBeNull();
+  });
+
   test('a dry run counts but removes nothing and writes no audit row (Review Focus 5)', async () => {
     await mail({ leadId: lead.id });
     await mail();
@@ -215,5 +265,20 @@ describe('one-off mail clean-up (web-mail release 1)', () => {
     expect(entry).toMatchObject({ entityId: 'release-1', action: 'delete', userId: null });
     expect(entry.after).toMatchObject({ users: [{ userId: rep.id, removed: 1 }], removed: 1 });
     expect(JSON.stringify(entry.after)).not.toMatch(/subject|@/);
+  });
+});
+
+describe('mail-cleanup CLI arguments (final review I2)', () => {
+  test('no flag or --dry-run is a dry run; only --apply deletes', () => {
+    expect(parseCleanupArgs([])).toEqual({ dryRun: true, acceptUnrecordedDeletes: false });
+    expect(parseCleanupArgs(['--dry-run'])).toEqual({ dryRun: true, acceptUnrecordedDeletes: false });
+    expect(parseCleanupArgs(['--apply'])).toEqual({ dryRun: false, acceptUnrecordedDeletes: false });
+    expect(parseCleanupArgs(['--apply', '--accept-unrecorded-deletes'])).toEqual({ dryRun: false, acceptUnrecordedDeletes: true });
+  });
+
+  test('an unknown argument or --apply with --dry-run is an error', () => {
+    for (const args of [['--dryrun'], ['--dry_run'], ['-n'], ['--dry-run=1'], ['--apply', '--force'], ['--apply', '--dry-run']]) {
+      expect(parseCleanupArgs(args)).toHaveProperty('error');
+    }
   });
 });

@@ -582,6 +582,23 @@ describe('reading mail on the Email screen (2B-2)', () => {
     expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: first.id } })).leadId).toBe(res.json().leadId);
   });
 
+  it('linking mail of a deleted lead (link, its conversation, create lead) clears the deleted-lead mark', async () => {
+    const { rep, box, lead } = await setup();
+    const gone = new Date('2026-11-21T10:00:00Z');
+    const older = await synced(rep.id, box.id, { threadId: 'e', fromAddress: 'x@unknown.io', leadDeletedAt: gone, occurredAt: new Date('2026-11-18T10:00:00Z') });
+    const m = await synced(rep.id, box.id, { threadId: 'e', fromAddress: 'x@unknown.io', leadDeletedAt: gone });
+    const cookie = await signIn(app, rep);
+    expect((await call('POST', `/api/mail/${m.id}/link`, cookie, { leadId: lead.id })).statusCode).toBe(200);
+    for (const id of [m.id, older.id]) {
+      expect(await prisma.emailMessage.findUniqueOrThrow({ where: { id } })).toMatchObject({ leadId: lead.id, leadDeletedAt: null });
+    }
+
+    const lone = await synced(rep.id, box.id, { threadId: 'f', fromAddress: 'sara@blue-river.io', fromName: 'Sara Lind', leadDeletedAt: gone });
+    const res = await call('POST', `/api/mail/${lone.id}/create-lead`, cookie);
+    expect(res.statusCode).toBe(201);
+    expect(await prisma.emailMessage.findUniqueOrThrow({ where: { id: lone.id } })).toMatchObject({ leadId: res.json().leadId, leadDeletedAt: null });
+  });
+
   it('conversation linking also links newer mail, leaves mail of another company and drafts alone, and drops a contact of another company', async () => {
     const { rep, box, company } = await setup();
     const b = await makeCompany({ name: 'Bolt', website: 'https://bolt.io' });
