@@ -708,3 +708,15 @@ git commit -m "docs: web-mail release 1 pending notes and deploy steps"
 - **Spec coverage:** lead-mail rule + shared free-mail list → T2; conversation rule → T2/T4/T5; Deleted Items + 12-month initial → T4; linking ignores visibility, prefer open then most recent → T3; rep limited chip → T9 (server) + T11 (web); clean-up with deleted-lead exemption and per-user counts → T1 (marker) + T5; release backfill, per-address on create/change, rate limited, resumable, observable → T6 + T7; team visibility on every mail route, view only, no mark-read → T8; lead Emails tab + timeline → T10; audit without content → T8/T10; Mail of picker + view-only wording, en/es/fr → T11; docs (PENDING, MIGRATIONS, DEPLOYMENT, privacy) → T1/T5/T7/T10/T12.
 - **Types:** `LeadMailRules`, `participantsOf`, `isLeadMail`, `inLeadConversation` (T2) used by T4/T5/T7; `storeMessage(..., rules)` / `StoreResult` / `FOLDERS` (T4) used by T7; `searchStartUrl` / `searchPage` / `folderIds` (T6) used by T7; `mailScope` / `messageFor` / `teamReadableWhere` / `canSeeTeamMail` (T8) used by T9/T10; response fields named identically in T8–T11.
 - **Review Focus:** each of the five lines has its test in T2, T2/T3, T7, T8, T5.
+
+## Controller rulings (26 Nov 2026, after drafting)
+- **Lead delete is already LIVE** (03cd699, migration 25 applied 26 Nov). No lead had been deleted on live when this plan was
+  written (no delete rows in audit_logs). Task 1's `lead_deleted_at` marker still applies to future deletes. Additionally, the
+  clean-up (Task 5) must treat addresses of leads deleted before this release as deleted-lead addresses: read them from the
+  lead-delete audit rows (`before` JSON; verify what delete.ts records and record the email addresses there if it doesn't),
+  stamp matching unlinked rows `lead_deleted_at`, and exempt them. Cost if wrong: mail of leads deleted before deploy is cleaned up.
+- **Admins/Managers get the HTML body** of another user's message: the server may fetch the body from Graph with the owner's
+  stored token (server side only, read only, no state change, never marks read). Replaces drafting note 4.
+- **Timeline subject visibility follows the mailbox owner**, not who logged the line: Admin/Manager and the mailbox owner see it.
+- Drafts stay out of team view (drafting note 6). Clean-up exemptions in drafting note 7, project-tagged mail included, are accepted.
+- "Most recently active" = `leads.updatedAt` (note 8) accepted. Smart views unchanged until release 2 (note 10) accepted.
