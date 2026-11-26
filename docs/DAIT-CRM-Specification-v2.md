@@ -346,9 +346,10 @@ valid_until, notes, current_revision), `quotation_revisions` (quotation_id, revi
 > filters, Email a project, Create project), Create / Edit project dialog, Projects cards on the lead page and company
 > Overview, company Projects tab, "Mark Won and create project", **Convert to project** on an accepted quotation (once;
 > value = net before GST). No project detail page (the prototype has none); projects are never deleted (Cancelled is
-> the end state); a project's client cannot change. The project tag on an email never widens who sees it: mail stays
-> private to its owner, and the Project filter only narrows the viewer's own mail. Client names show the legal name
-> where set (owner, 23 Nov 2026).
+> the end state); a project's client cannot change. The project tag on an email never widens who sees it: lead mail
+> is seen by its mailbox owner and, view only, by Administrators and Managers (others see only their own), and the
+> Project filter only narrows the mail the viewer may see. The Outlook calendar stays private to its owner. Client names
+> show the legal name where set (owner, 23 Nov 2026).
 
 ## 10. Common database architecture
 

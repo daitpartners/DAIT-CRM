@@ -6,8 +6,8 @@ in the git history).
 ## Where things stand (23 Nov 2026)
 
 - **Live** at crm.daitpartners.com: release `79b9415` (minor fixes + handover documents, 23 Nov).
-- **Ready, waiting for "deploy":** branch `ui-review-fixes` — collapsible sidebar and Email folders column, and the 39
-  findings of the 23 Nov UI review (`~/Documents/DAIT-CRM/ui-review-2026-11-23/report.md`), reviewed and tested.
+- **Ready, waiting for "deploy":** branch `web-mail` — web-mail release 1 (lead mail only, team view for
+  Administrators and Managers). See "Ready, waiting for deploy: web-mail release 1" below.
 - **There is no test copy on the server.** Each release was checked on the developer's machine (automatic tests and
   side-by-side screenshots against the prototype) and then put live by hand, only after you said "deploy". How that is
   done, and how to undo it, is in `docs/DEPLOYMENT.md`.
@@ -36,6 +36,42 @@ in the git history).
 | 4 | AI research (Claude off) | `fa12206` |
 | Claude Code engine | Claude through the server's Claude Code, monthly run cap | `08ee5da` |
 | Minor fixes | 26 review follow-ups (time zones, mail linking, Mailer wizard, quotations, keyboard) + handover docs | `79b9415` |
+
+## Ready, waiting for deploy: web-mail release 1 (branch `web-mail`)
+
+Design: `docs/superpowers/specs/2026-11-26-web-mail-email-design.md`. Reviewed and tested; not live.
+
+**What changes:**
+- **The CRM stores lead mail only.** Mail sync keeps a message only when it is with a lead or contact address (or that
+  address's company domain, never free mail such as Gmail), or belongs to a conversation that already has lead mail.
+  **Other mail (personal, colleagues, suppliers, newsletters) leaves the CRM and stays in Outlook only**: it is
+  no longer copied in, and the clean-up below removes what was copied before. Nothing is deleted from Outlook.
+- The first sync of a mailbox reads the last **12 months** (was 90 days) and now includes Deleted Items.
+- **Backfill:** after the deploy the CRM searches each connected mailbox for 12 months of mail with every existing
+  lead and contact address, a little at a time over several hours. New leads and contacts get the same search within a
+  minute of being added.
+- **Administrators and Managers read every user's lead mail, view only:** a "Mail of" picker on the Email screen, a
+  "View only — Carlos's mailbox" banner, no reply, send, delete or mark-read on someone else's mail; each opening is
+  recorded in the audit log (without the content). The lead page's Emails tab and timeline show the whole team's mail
+  with that lead to them. Sales representatives and Data research users still see only their own mail. The Outlook
+  calendar stays private to its owner, administrators included.
+- A rep's own mail with a lead owned by someone else shows a plain "LD-xxxx · another owner's lead" chip with the
+  company name only.
+- Mail is linked to the open lead first, then the most recently active one, whoever owns it.
+
+**The deploy needs two one-time steps** (runbook: `docs/DEPLOYMENT.md`, "Web mail release 1: deploy runbook"):
+1. **Clean-up:** a dry run first; you see the counts per user (how many messages kept and removed, no subjects or
+   addresses) and say OK; then the real run. If it finds leads deleted before this release whose addresses were not
+   recorded, it stops and we ask you before going ahead.
+2. **Watching the backfill** until it has finished (several hours), plus two one-off checks on live (long searches go
+   past 250 results; the 12-month start date is read as UTC).
+
+**Calls made for you (tell us if you want any changed):**
+- **Drafts are left out of the team view:** Administrators and Managers do not see another user's drafts.
+- **The clean-up keeps project-tagged mail** (and mail linked to a lead, contact or company, queued or sending mail,
+  Mailer and quotation mail, mail in a lead conversation, and mail of deleted leads), even when it is not with a lead
+  address.
+- **Unlinked and My leads stay as they are until release 2** (the full Microsoft 365-style Email screen).
 
 ## Owner to do
 

@@ -292,6 +292,42 @@ the password. For a break-glass sign-in (Microsoft sign-in broken): add `LOCAL_A
   rewritten keys, so duplicate matching by company name is weaker until the next deploy; no data is lost. The few
   seconds between `migrate deploy` and the reload behave the same way.
 
+## Web mail release 1: deploy runbook
+
+Only after the owner says "deploy". Follow "Deploying a release to live" with these additions, in this order:
+
+1. **Back up first** (step 1 above), named `dait_crm-pre-web-mail-r1.dump`. This dump is the only way back for the
+   mail rows the clean-up removes.
+2. **Check the migration state before installing** (after step 3, as `daitcrm` in `~/build/<sha>`; read only):
+
+   ```
+   node --env-file=$HOME/live/shared/.env node_modules/prisma/build/index.js migrate status --schema prisma/schema.prisma
+   ```
+
+   The only migration listed as not yet applied must be `20261212100000_web_mail_lead_only` (number 26); anything
+   else (a failed or unknown migration, or 1–25 missing) means stop and ask. To rehearse it, restore the new dump into a
+   scratch database (as "Check the dump in a scratch database" under Restoring) and run `migrate deploy` against that
+   copy before installing.
+3. **Install and check** (steps 4–5 above).
+4. **Clean-up: dry run, owner sees the counts, then the real run** (details under "One-time steps after a release").
+   Run it with `--dry-run` and send the owner the per-user `checked, kept, removed` counts (counts only). Run it for real
+   only after the owner agrees. If it refuses because lead-delete audit entries record no addresses, do not add
+   `--accept-unrecorded-deletes` unless the owner explicitly OKs it.
+5. **Watch the backfill** with `mail-backfill.js --status` (see "One-time steps") until `queued` and `running` are 0
+   (several hours). Look at `failed` and `skipped` rows; `--retry` queues them again.
+6. **Check two Graph details once on live, while the backfill runs:**
+   - **Paging past 250:** Outlook search used to stop at 250 results. Check that at least one address with a lot of mail
+     shows `found` above 250 in the `--status` totals (or compare with the same search in Outlook). If no search goes
+     past 250 although Outlook shows more, tell the developer before relying on long results.
+   - **Date filter is UTC:** the search asks for `received>=` the date 12 months ago, written as a UTC date
+     (`YYYY-MM-DD`). Compare one address's oldest stored message with Outlook: mail from the start day itself should be
+     there. If Outlook reads the date in the mailbox's time zone instead, the edge moves by at most one day; note it for
+     the developer (no action needed on live).
+7. **After a mailbox reconnects:** a mailbox that needed reconnecting has its rows skipped (`mailbox_needs_reconnect`):
+   run `mail-backfill.js --retry` after the reconnect. A mailbox connected for the first time after the release
+   backfill was queued gets its 12-month search with `mail-backfill.js --mailbox <email account id>` (id from
+   `SELECT id, address FROM email_accounts`).
+
 ## One-time steps after a release
 
 All of these have already been run on live; they are kept for reference and for a rebuild.
