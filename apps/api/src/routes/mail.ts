@@ -43,18 +43,23 @@ const ACTION_ATTEMPTS = 3;
 const leadRef = { select: { id: true, number: true, status: true, priority: true, nextFollowUp: true, companyId: true, companyName: true, assignedToId: true } } as const;
 type WithLead = EmailMessage & {
   lead: { id: number; number: string } | null; project?: { id: number; number: string } | null; user: { id: number; name: string };
+  /** The message's lead is one the viewer cannot see (another owner's): only its number is shown. */
+  leadRestricted?: boolean;
 };
 
 /**
  * A message in the list: no body, a short one-line preview. `owner` is the user whose mailbox it is; `viewOnly` when
- * that is not the viewer (team view: read, log and tasks only).
+ * that is not the viewer (team view: read, log and tasks only). `leadRestricted`: the lead is another owner's that the
+ * viewer cannot open, so the item keeps its number only (no lead id, no company id).
  */
 function listItem(m: WithLead, viewerId: number) {
+  const restricted = m.leadRestricted === true;
   return {
     owner: { id: m.user.id, name: m.user.name }, viewOnly: m.userId !== viewerId,
     id: m.id, folder: m.folder, status: m.status, fromAddress: m.fromAddress, fromName: m.fromName, toAddresses: m.toAddresses as string[],
     subject: m.subject, preview: m.bodyText.replace(/\s+/g, ' ').trim().slice(0, PREVIEW), occurredAt: m.occurredAt, isRead: m.isRead,
-    leadId: m.leadId, leadNumber: m.lead?.number ?? null, companyId: m.companyId, hasAttachments: (m.attachmentNames as string[]).length > 0,
+    leadId: restricted ? null : m.leadId, leadNumber: m.lead?.number ?? null, companyId: restricted ? null : m.companyId, leadRestricted: restricted,
+    hasAttachments: (m.attachmentNames as string[]).length > 0,
     projectId: m.project?.id ?? null, projectNumber: m.project?.number ?? null,
   };
 }
@@ -121,12 +126,10 @@ async function awaitingIds(ownerId: number | null): Promise<number[]> {
 }
 
 /**
- * Messages with no lead the user can see: none, or one that has since moved to someone else (drafts aside). The NOT
- * wraps the relation filter: `lead: { NOT: {} }` (everyone's leads visible) would match every linked message.
+ * Messages linked to no lead (drafts aside). Mail on another owner's lead is linked, though the viewer sees only its
+ * number, so it is not "unlinked".
  */
-const unlinkedWhere = (user: AuthUser): Prisma.EmailMessageWhereInput => ({
-  OR: [{ leadId: null }, { NOT: { lead: leadWhere(user, { includeArchived: true }) } }], folder: { not: 'drafts' },
-});
+const unlinkedWhere: Prisma.EmailMessageWhereInput = { leadId: null, folder: { not: 'drafts' } };
 
 /**
  * Linking a message (Link to lead, Create lead) also links the user's other mail in the same conversation that has no
@@ -327,7 +330,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
     const scope = mailScope(user, q.mailOf);
     const view: View = (VIEWS as readonly string[]).includes(q.view ?? '') ? (q.view as View) : 'inbox';
     const and: Prisma.EmailMessageWhereInput[] = [scope.where];
-    if (view === 'unlinked') and.push(unlinkedWhere(user));
+    if (view === 'unlinked') and.push(unlinkedWhere);
     else if (view === 'mine') and.push({ lead: { assignedToId: user.id }, folder: { not: 'drafts' } });
     else if (view === 'awaiting') and.push({ id: { in: await awaitingIds(scope.ownerId) } });
     else and.push({ folder: view });
@@ -350,7 +353,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
       }),
       q.count === '0' ? null : prisma.emailMessage.count({ where }),
     ]);
-    // A lead the user can no longer see (moved to someone else) is not shown: no id, no number.
+    // A lead the user cannot see (another owner's) shows its number only: no lead id, no company id.
     const leadIds = [...new Set(rows.flatMap((m) => (m.leadId ? [m.leadId] : [])))];
     const visible = new Set(leadIds.length
       ? (await prisma.lead.findMany({ where: { AND: [{ id: { in: leadIds } }, leadWhere(user, { includeArchived: true })] }, select: { id: true } })).map((l) => l.id)
@@ -358,7 +361,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
     const projects = await visibleProjects(user, rows.map((m) => m.projectId));
     return {
       items: rows.map((m) => listItem({
-        ...(m.leadId && !visible.has(m.leadId) ? { ...m, leadId: null, lead: null } : m), project: m.projectId ? projects.get(m.projectId) ?? null : null,
+        ...m, leadRestricted: m.leadId !== null && !visible.has(m.leadId), project: m.projectId ? projects.get(m.projectId) ?? null : null,
       }, user.id)),
       total, page: q.page, pageSize: q.pageSize,
     };
@@ -373,7 +376,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
     const [mailbox, unread, unlinked, companyIds, leadIds, mailUsers] = await Promise.all([
       prisma.emailAccount.findFirst({ where: { kind: 'personal', userId: user.id, status: { not: 'disconnected' } }, select: { id: true, address: true, status: true, lastSyncAt: true } }),
       prisma.emailMessage.count({ where: { AND: [scope, { folder: 'inbox', isRead: false }] } }),
-      prisma.emailMessage.count({ where: { AND: [scope, unlinkedWhere(user)] } }),
+      prisma.emailMessage.count({ where: { AND: [scope, unlinkedWhere] } }),
       prisma.emailMessage.findMany({ where: { AND: [scope, { companyId: { not: null } }] }, distinct: ['companyId'], select: { companyId: true } }),
       prisma.emailMessage.findMany({ where: { AND: [scope, { leadId: { not: null } }] }, distinct: ['leadId'], select: { leadId: true } }),
       canSeeTeamMail(user)
@@ -413,17 +416,24 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
       }
       const owner = viewOnly ? await prisma.user.findUniqueOrThrow({ where: { id: m.userId }, select: { id: true, name: true } }) : { id: user.id, name: user.name };
       const threadWhere: Prisma.EmailMessageWhereInput = { userId: m.userId, threadId: m.threadId, id: { not: m.id } };
-      const [lead, contact, company, thread, projects] = await Promise.all([
-        m.leadId && (await canSeeLead(prisma, user, m.leadId)) ? prisma.lead.findUnique({ where: { id: m.leadId }, ...leadRef }) : null,
-        m.contactId ? prisma.contact.findUnique({ where: { id: m.contactId }, select: { id: true, firstName: true, lastName: true } }) : null,
-        m.companyId ? prisma.company.findUnique({ where: { id: m.companyId }, select: { id: true, name: true } }) : null,
+      // Another owner's lead (one the viewer cannot see): its number and company name only; no lead, contact or company.
+      const hidden = m.leadId !== null && !(await canSeeLead(prisma, user, m.leadId));
+      const [restricted, lead, contact, company, thread, projects] = await Promise.all([
+        hidden ? prisma.lead.findUnique({ where: { id: m.leadId! }, select: { number: true, companyName: true, company: { select: { name: true } } } }) : null,
+        m.leadId && !hidden ? prisma.lead.findUnique({ where: { id: m.leadId }, ...leadRef }) : null,
+        m.contactId && !hidden ? prisma.contact.findUnique({ where: { id: m.contactId }, select: { id: true, firstName: true, lastName: true } }) : null,
+        m.companyId && !hidden ? prisma.company.findUnique({ where: { id: m.companyId }, select: { id: true, name: true } }) : null,
         m.threadId
           ? prisma.emailMessage.findMany({ where: viewOnly ? { AND: [threadWhere, teamReadableWhere] } : threadWhere, orderBy: { occurredAt: 'desc' }, take: THREAD_MAX - 1 })
           : [],
         visibleProjects(user, [m.projectId]),
       ]);
       return {
-        ...listItem({ ...m, user: owner, lead: lead ? { id: lead.id, number: lead.number } : null, project: m.projectId ? projects.get(m.projectId) ?? null : null }, user.id),
+        ...listItem({
+          ...m, user: owner, lead: lead ? { id: lead.id, number: lead.number } : restricted ? { id: m.leadId!, number: restricted.number } : null,
+          leadRestricted: hidden, project: m.projectId ? projects.get(m.projectId) ?? null : null,
+        }, user.id),
+        restrictedLead: restricted ? { number: restricted.number, companyName: restricted.company?.name ?? restricted.companyName } : null,
         ccAddresses: m.ccAddresses as string[], bodyText: m.bodyText, bodyHtml: m.bodyHtml || null, attachmentNames: m.attachmentNames as string[], loggedAt: m.loggedAt,
         lead: lead ? { id: lead.id, number: lead.number, status: lead.status, priority: lead.priority, nextFollowUp: ymd(lead.nextFollowUp), companyId: lead.companyId } : null,
         contact: contact ? { id: contact.id, name: `${contact.firstName} ${contact.lastName}`.trim() } : null,

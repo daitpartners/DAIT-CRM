@@ -282,18 +282,51 @@ describe('reading mail on the Email screen (2B-2)', () => {
     expect((await call('GET', '/api/mail?view=awaiting', await signIn(app, rep))).json().items).toEqual([]);
   });
 
-  it('list hides the number of a lead the user can no longer see', async () => {
+  it('list shows a lead the rep cannot open by number only', async () => {
     const { rep, box, lead, company } = await setup();
     const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
     const m = await synced(rep.id, box.id, { leadId: lead.id, companyId: company.id });
-    await synced(rep.id, box.id, { subject: 'Draft', folder: 'drafts', status: 'draft', leadId: lead.id });
+    const mine = await synced(rep.id, box.id, { subject: 'Mine', leadId: null, occurredAt: new Date('2026-11-19T10:00:00Z') });
+    await prisma.lead.update({ where: { id: lead.id }, data: { assignedToId: other.id } });
+    const items = (await call('GET', '/api/mail?view=inbox', await signIn(app, rep))).json().items;
+    expect(items.map((i: { id: number }) => i.id)).toEqual([m.id, mine.id]);
+    const item = items[0];
+    expect(item).toMatchObject({ leadId: null, leadNumber: lead.number, companyId: null, leadRestricted: true });
+    expect(items[1]).toMatchObject({ leadId: null, leadNumber: null, leadRestricted: false });
+    // A lead the user can see is not restricted.
+    await prisma.lead.update({ where: { id: lead.id }, data: { assignedToId: rep.id } });
+    const back = (await call('GET', '/api/mail?view=inbox', await signIn(app, rep))).json().items[0];
+    expect(back).toMatchObject({ leadId: lead.id, leadNumber: lead.number, companyId: company.id, leadRestricted: false });
+  });
+
+  it('opening it gives the lead number and company name only', async () => {
+    const { rep, box, lead, company, contact } = await setup();
+    const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    const m = await synced(rep.id, box.id, { leadId: lead.id, companyId: company.id, contactId: contact.id });
+    await prisma.lead.update({ where: { id: lead.id }, data: { assignedToId: other.id } });
+    const res = await call('GET', `/api/mail/${m.id}`, await signIn(app, rep));
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body).toMatchObject({
+      restrictedLead: { number: lead.number, companyName: 'Acme' }, lead: null, contact: null, company: null,
+      leadId: null, leadNumber: lead.number, companyId: null, leadRestricted: true,
+    });
+    expect(Object.keys(body.restrictedLead).sort()).toEqual(['companyName', 'number']);
+    // A lead the user can see: the full panel and no restriction.
+    await prisma.lead.update({ where: { id: lead.id }, data: { assignedToId: rep.id } });
+    const open = (await call('GET', `/api/mail/${m.id}`, await signIn(app, rep))).json();
+    expect(open).toMatchObject({ restrictedLead: null, lead: { id: lead.id }, contact: { id: contact.id }, company: { id: company.id, name: 'Acme' }, leadRestricted: false });
+  });
+
+  it("mail on another owner's lead is not counted or listed as Unlinked", async () => {
+    const { rep, box, lead, company } = await setup();
+    const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    await synced(rep.id, box.id, { leadId: lead.id, companyId: company.id });
+    const loose = await synced(rep.id, box.id, { subject: 'Loose', leadId: null });
+    await synced(rep.id, box.id, { subject: 'Draft', folder: 'drafts', status: 'draft', leadId: null });
     await prisma.lead.update({ where: { id: lead.id }, data: { assignedToId: other.id } });
     const cookie = await signIn(app, rep);
-    const inbox = (await call('GET', '/api/mail?view=inbox', cookie)).json().items;
-    expect(inbox).toEqual([expect.objectContaining({ id: m.id, leadId: null, leadNumber: null, companyId: company.id })]);
-    const unlinked = (await call('GET', '/api/mail?view=unlinked', cookie)).json().items;
-    expect(unlinked.map((i: { id: number }) => i.id)).toEqual([m.id]);
-    expect(unlinked[0]).toMatchObject({ leadId: null, leadNumber: null });
+    expect((await call('GET', '/api/mail?view=unlinked', cookie)).json().items.map((i: { id: number }) => i.id)).toEqual([loose.id]);
     expect((await call('GET', '/api/mail/meta', cookie)).json().unlinked).toBe(1);
     // Someone who sees every lead keeps their linked mail off Unlinked.
     const admin = await makeUser({ role: 'ADMINISTRATOR' });
@@ -301,6 +334,17 @@ describe('reading mail on the Email screen (2B-2)', () => {
     const adminCookie = await signIn(app, admin);
     expect((await call('GET', '/api/mail?view=unlinked', adminCookie)).json().items).toEqual([]);
     expect((await call('GET', '/api/mail/meta', adminCookie)).json().unlinked).toBe(0);
+  });
+
+  it('Log as activity on it is 409 no_lead (already passes)', async () => {
+    const { rep, box, lead } = await setup();
+    const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    const m = await synced(rep.id, box.id, { leadId: lead.id });
+    await prisma.lead.update({ where: { id: lead.id }, data: { assignedToId: other.id } });
+    const res = await call('POST', `/api/mail/${m.id}/log`, await signIn(app, rep));
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('no_lead');
+    expect(await prisma.leadActivity.count({ where: { leadId: lead.id, activityType: 'email' } })).toBe(0);
   });
 
   it('the company filter never matches through a lead you cannot see', async () => {
