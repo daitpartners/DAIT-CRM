@@ -3,11 +3,11 @@ import type { QuotationSnapshot } from '../quotations/service.js';
 
 export type JobType =
   | 'send_email' | 'send_user_email' | 'sync_mailbox' | 'mail_action' | 'campaign_step' | 'sync_calendar' | 'research_company'
-  | 'import_read_file' | 'import_commit' | 'import_research';
+  | 'import_read_file' | 'import_commit' | 'import_research' | 'mail_backfill';
 
 export const JOB_TYPES: readonly JobType[] = [
   'send_email', 'send_user_email', 'sync_mailbox', 'mail_action', 'campaign_step', 'sync_calendar', 'research_company',
-  'import_read_file', 'import_commit', 'import_research',
+  'import_read_file', 'import_commit', 'import_research', 'mail_backfill',
 ];
 
 export const JOB_STATUSES = ['queued', 'running', 'done', 'failed'] as const;
@@ -40,6 +40,13 @@ export interface SyncMailboxPayload {
 export interface SyncCalendarPayload {
   accountId: number;
 }
+
+/**
+ * `mail_backfill` (web-mail release 1): work on the lowest-id queued `mail_backfills` row, then queue the next job (one
+ * chain, on the mail lane). `maxAttempts: 1`: a row's own attempts are counted on the row; a lost chain is restarted by
+ * the sweep.
+ */
+export type MailBackfillPayload = Record<string, never>;
 
 /** `mail_action` (release 2B-2): a change the user made in the CRM, applied to their mailbox. */
 export interface MailActionPayload {

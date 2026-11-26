@@ -317,6 +317,18 @@ All of these have already been run on live; they are kept for reference and for 
   If it refuses because lead-delete audit entries record no addresses (leads deleted on live before this release), the
   mail of those leads cannot be recognised: check with the owner, then add `--accept-unrecorded-deletes` to go ahead.
   Safe to run again (removes 0). The mail stays in Outlook; restoring the CRM copy means the pre-release dump.
+- **Web mail release 1 — backfill** (nothing to start by hand): it starts by itself within a minute of the worker
+  starting: one 12-month search per lead/contact address per connected mailbox (Sync mail on, active user), one short
+  job every 10 s, so several hours. Watch it with
+  `cd ~/live/current/apps/api && node --env-file=$HOME/live/shared/.env dist/cli/mail-backfill.js --status` (counts by
+  status and per mailbox; mailbox addresses only) and `pm2 logs crm-live-worker --lines 50 | grep mail_backfill`. It
+  is finished when `queued` and `running` are 0. `--retry` queues failed and skipped rows again (e.g. after a mailbox
+  reconnect: rows of a mailbox that needed reconnecting are skipped with `mailbox_needs_reconnect`). A mailbox that was
+  not connected when the release backfill was queued and is connected later gets the 12-month search for the existing
+  addresses with `--mailbox <email account id>` (id from `SELECT id, address FROM email_accounts`). New leads and
+  contacts are searched for the same way within a minute of being added. Check once on live that a long search
+  continues past 250 results (an address with a lot of mail shows `found` above 250 in `--status` totals) before
+  trusting long results (F6).
 
 ## Setting the server up from scratch (reference)
 
