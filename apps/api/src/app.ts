@@ -33,6 +33,7 @@ import { projectRoutes } from './routes/projects.js';
 import { settingsRoutes } from './routes/settings.js';
 import { researchRoutes } from './routes/research.js';
 import { NotFoundError, ValidationError } from './validate.js';
+import { MailAccessError } from './mail/access.js';
 import { registerAuth } from './plugins/auth.js';
 import { createMsalClient, type MicrosoftClient } from './auth/microsoft.js';
 import { createGraphClient, type GraphClient } from './graph/client.js';
@@ -134,6 +135,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ValidationError) return reply.code(400).send({ error: 'validation', issues: error.issues });
     if (error instanceof NotFoundError) return reply.code(404).send({ error: 'not_found' });
+    if (error instanceof MailAccessError) return reply.code(error.status).send({ error: error.code });
     if (error instanceof FormattedBodyError || error instanceof AttachmentError) return reply.code(error.status).send({ error: error.code });
     // A server error is logged in full and answered without its message (which can name server paths; review I4).
     const status = (error as { statusCode?: number }).statusCode ?? 500;

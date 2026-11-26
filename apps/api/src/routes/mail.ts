@@ -19,6 +19,7 @@ import { NotFoundError, parseBody, parseQuery } from '../validate.js';
 import { assertLeadVisible, canSeeLead, leadWhere } from '../leads/visibility.js';
 import { assertCompanyVisible } from '../companies/visibility.js';
 import { matchMail } from '../mail/match.js';
+import { canSeeTeamMail, mailScope, messageFor, teamReadableWhere } from '../mail/access.js';
 import { assertProjectFor, queueOutgoing } from '../mail/outgoing.js';
 import { FORMATTED_BODY_LIMIT, outgoingBody, perUser } from '../mail/formatted.js';
 import { outgoingWithFiles } from '../mail/templateFiles.js';
@@ -28,21 +29,29 @@ import { domainTaken, guard, lockLeads } from './leads.js';
 
 type Tx = Prisma.TransactionClient;
 
-const VIEWS = ['inbox', 'sent', 'drafts', 'archive', 'unlinked', 'awaiting', 'mine'] as const;
+const VIEWS = ['inbox', 'sent', 'drafts', 'archive', 'deleted', 'unlinked', 'awaiting', 'mine'] as const;
 type View = (typeof VIEWS)[number];
 /** Upper bound on Awaiting reply candidates; paging applies after the other filters. */
 const AWAITING_MAX = 5000;
 const PREVIEW = 120;
+/** `GET /mail/meta`: only the list's scope. */
+const MailMetaQuery = MailListQuery.pick({ mailOf: true });
 const DAY_MS = 86_400_000;
 /** Mailbox changes are retried a little (2, 4 minutes); the next sync shows Outlook's state anyway. */
 const ACTION_ATTEMPTS = 3;
 
 const leadRef = { select: { id: true, number: true, status: true, priority: true, nextFollowUp: true, companyId: true, companyName: true, assignedToId: true } } as const;
-type WithLead = EmailMessage & { lead: { id: number; number: string } | null; project?: { id: number; number: string } | null };
+type WithLead = EmailMessage & {
+  lead: { id: number; number: string } | null; project?: { id: number; number: string } | null; user: { id: number; name: string };
+};
 
-/** A message in the list: no body, a short one-line preview. */
-function listItem(m: WithLead) {
+/**
+ * A message in the list: no body, a short one-line preview. `owner` is the user whose mailbox it is; `viewOnly` when
+ * that is not the viewer (team view: read, log and tasks only).
+ */
+function listItem(m: WithLead, viewerId: number) {
   return {
+    owner: { id: m.user.id, name: m.user.name }, viewOnly: m.userId !== viewerId,
     id: m.id, folder: m.folder, status: m.status, fromAddress: m.fromAddress, fromName: m.fromName, toAddresses: m.toAddresses as string[],
     subject: m.subject, preview: m.bodyText.replace(/\s+/g, ' ').trim().slice(0, PREVIEW), occurredAt: m.occurredAt, isRead: m.isRead,
     leadId: m.leadId, leadNumber: m.lead?.number ?? null, companyId: m.companyId, hasAttachments: (m.attachmentNames as string[]).length > 0,
@@ -61,11 +70,11 @@ const REPLY_SUBJECT = /^\s*(re|aw|sv|rv)\s*:/i;
 
 /**
  * The side panel's thread history (prototype `history`, newest first): the open message and the rest of the
- * conversation in the user's own mailbox. `kind` words the event ("sent by Maya", "reply received", "received"),
- * `by` is the sender's first name for your own mail other than the open message, `unmatched` marks mail with no lead
- * and no contact.
+ * conversation in its owner's mailbox. `kind` words the event ("sent by Maya", "reply received", "received"),
+ * `by` is the sender's first name (else the mailbox owner's, `ownerName`) for the owner's mail other than the open
+ * message, `unmatched` marks mail with no lead and no contact.
  */
-function threadHistory(user: AuthUser, open: EmailMessage, others: EmailMessage[]) {
+function threadHistory(ownerName: string, open: EmailMessage, others: EmailMessage[]) {
   const all = [...others, open].sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime() || b.id - a.id);
   return all.map((t, i) => {
     const inbound = isInbound(t);
@@ -73,7 +82,7 @@ function threadHistory(user: AuthUser, open: EmailMessage, others: EmailMessage[
     const before = all.slice(i + 1).find((o) => o.status !== 'draft');
     const kind = t.status === 'draft' ? 'draft' : !inbound ? 'sent' : (before ? !isInbound(before) : REPLY_SUBJECT.test(t.subject)) ? 'reply' : 'received';
     // Your own open message reads plain "sent" (prototype E-6); your other mail in the thread "sent by <first name>".
-    const by = inbound || t.id === open.id ? null : ((t.fromName || user.name).trim().split(/\s+/)[0] ?? null);
+    const by = inbound || t.id === open.id ? null : ((t.fromName || ownerName).trim().split(/\s+/)[0] ?? null);
     return {
       id: t.id, occurredAt: t.occurredAt, direction: inbound ? 'in' : 'out', who: counterpart(t), subject: t.subject,
       kind, by, unmatched: !t.leadId && !t.contactId,
@@ -81,21 +90,29 @@ function threadHistory(user: AuthUser, open: EmailMessage, others: EmailMessage[
   });
 }
 
-/** Ids of the user's messages matching a search over subject, sender, recipients and text (case-insensitive). */
-async function searchIds(userId: number, s: string): Promise<number[]> {
+/**
+ * Ids of messages matching a search over subject, sender, recipients and text (case-insensitive), in one mailbox or,
+ * `ownerId` null, in every mailbox (the caller ANDs the result with the list's scope).
+ */
+async function searchIds(ownerId: number | null, s: string): Promise<number[]> {
   const like = `%${s.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  const owner = ownerId === null ? Prisma.sql`TRUE` : Prisma.sql`user_id = ${ownerId}`;
   const rows = await prisma.$queryRaw<{ id: number }[]>`
-    SELECT id FROM email_messages WHERE user_id = ${userId} AND (
+    SELECT id FROM email_messages WHERE ${owner} AND (
       subject ILIKE ${like} OR from_address ILIKE ${like} OR coalesce(from_name, '') ILIKE ${like}
       OR to_addresses::text ILIKE ${like} OR cc_addresses::text ILIKE ${like} OR body_text ILIKE ${like})
     LIMIT 2000`;
   return rows.map((r) => r.id);
 }
 
-/** Sent, linked messages with no later received message in their conversation (prototype "Awaiting reply"). */
-async function awaitingIds(userId: number): Promise<number[]> {
+/**
+ * Sent, linked messages with no later received message in their conversation (prototype "Awaiting reply"), in one
+ * mailbox or, `ownerId` null, in every mailbox (ANDed with the list's scope by the caller).
+ */
+async function awaitingIds(ownerId: number | null): Promise<number[]> {
+  const owner = ownerId === null ? Prisma.sql`TRUE` : Prisma.sql`s.user_id = ${ownerId}`;
   const rows = await prisma.$queryRaw<{ id: number }[]>`
-    SELECT s.id FROM email_messages s WHERE s.user_id = ${userId} AND s.folder = 'sent' AND s.status IN ('sent', 'queued', 'sending')
+    SELECT s.id FROM email_messages s WHERE ${owner} AND s.folder = 'sent' AND s.status IN ('sent', 'queued', 'sending')
       AND s.lead_id IS NOT NULL AND NOT EXISTS (
         SELECT 1 FROM email_messages r WHERE r.user_id = s.user_id AND r.status = 'received'
           AND r.thread_id IS NOT NULL AND r.thread_id = s.thread_id AND r.occurred_at > s.occurred_at)
@@ -147,14 +164,6 @@ function nameFromDomain(address: string): string | null {
 /** The caller's connected personal mailbox, or null. */
 const myMailbox = (userId: number) => prisma.emailAccount.findFirst({ where: { kind: 'personal', userId, status: 'connected' } });
 
-/** One of the caller's own messages, else 404: nobody reaches another user's mail (owner, 22 Nov 2026). */
-async function ownMessage(db: Tx | typeof prisma, user: AuthUser, rawId: string) {
-  const id = Number(rawId);
-  const m = Number.isInteger(id) ? await db.emailMessage.findFirst({ where: { id, userId: user.id } }) : null;
-  if (!m) throw new NotFoundError();
-  return m;
-}
-
 /** The reader waits at most this long for an older message's body (a send waits 20 s). */
 const BODY_FETCH_TIMEOUT_MS = 4000;
 /** After a refusal (401/403) or FAILS_BEFORE_PAUSE failures in a row, a mailbox is not asked for bodies for this long. */
@@ -178,16 +187,18 @@ function noteBodyFetchFailure(accountId: number, err: unknown): void {
 
 /**
  * The HTML body of a message synced before bodies were kept as HTML (owner, 23 Nov 2026), read once when it is opened:
- * only for the caller's own message (`m` comes from ownMessage) and only from the mailbox it came from while that is
- * the caller's own connected one, never anyone else's. Sanitised and stored with the cleaner text. A message the
+ * `m` comes from messageFor (the caller's own, or team view), and the body is read only from the mailbox it came from
+ * while that is still its owner's (`m.userId`) connected personal one. Team view (controller ruling 2): an
+ * Administrator or Manager gets it the same way, from the owner's mailbox, read only (a GET that never marks the
+ * message read); the sanitised body is kept as a cache. Sanitised and stored with the cleaner text. A message the
  * mailbox no longer has (or a plain-text one) is marked '' and not asked again. Any other failure leaves the text body
  * to show; the fetch waits at most 4 s, and a mailbox that refuses (401/403) or fails three times in a row is left
  * alone for 30 minutes (security review I3). A row deleted meanwhile gives 404.
  */
-async function fillHtmlBody(graph: GraphClient, log: FastifyBaseLogger, user: AuthUser, m: EmailMessage): Promise<EmailMessage> {
-  if (m.bodyHtml !== null || !m.graphId || m.accountId === null || m.userId !== user.id) return m;
+async function fillHtmlBody(graph: GraphClient, log: FastifyBaseLogger, m: EmailMessage): Promise<EmailMessage> {
+  if (m.bodyHtml !== null || !m.graphId || m.accountId === null) return m;
   if ((bodyFetchState.get(m.accountId)?.pausedUntil ?? 0) > Date.now()) return m;
-  const account = await prisma.emailAccount.findFirst({ where: { id: m.accountId, userId: user.id, kind: 'personal', status: 'connected' } });
+  const account = await prisma.emailAccount.findFirst({ where: { id: m.accountId, userId: m.userId, kind: 'personal', status: 'connected' } });
   if (!account) return m;
   let body: GraphBody | null = null;
   try {
@@ -202,16 +213,16 @@ async function fillHtmlBody(graph: GraphClient, log: FastifyBaseLogger, user: Au
   }
   bodyFetchState.delete(account.id);
   // Parsed in a worker thread with a time limit, so a hostile email cannot hold up the API for everyone.
-  const result = body ? await processEmailBody(body, BODY_MAX, { retryKey: `${user.id}:${m.graphId}` }) : null;
+  const result = body ? await processEmailBody(body, BODY_MAX, { retryKey: `${m.userId}:${m.graphId}` }) : null;
   if (result?.fellBack) log.warn({ emailMessageId: m.id, reason: result.reason }, 'mail body fell back to plain text');
   const stored = result ? storedColumns(result) : null;
   // Only a row still without its HTML (two opens at once store it once); then read back: gone meanwhile is a 404. A
   // plain-text body is marked '' (not asked again); a first timeout or crash stays null, to be tried once more.
   await prisma.emailMessage.updateMany({
-    where: { id: m.id, userId: user.id, bodyHtml: null },
+    where: { id: m.id, userId: m.userId, bodyHtml: null },
     data: stored ? { bodyHtml: result!.retry ? null : (stored.bodyHtml ?? ''), bodyText: stored.bodyText } : { bodyHtml: '' },
   });
-  const fresh = await prisma.emailMessage.findFirst({ where: { id: m.id, userId: user.id } });
+  const fresh = await prisma.emailMessage.findFirst({ where: { id: m.id, userId: m.userId } });
   if (!fresh) throw new NotFoundError();
   return fresh;
 }
@@ -232,8 +243,11 @@ async function lockedLead(tx: Tx, user: AuthUser, leadId: number): Promise<Lead>
 }
 
 /**
- * The Email screen (release 2B-2). Privacy (owner, 22 Nov 2026): a message belongs to the user whose mailbox it is;
- * every route here reads and changes only the caller's own messages, whatever their role.
+ * The Email screen (release 2B-2). Privacy (owner, 22 Nov 2026): a message belongs to the user whose mailbox it is.
+ * Web-mail release 1 (mail/access.ts): Administrators and Managers (`view_team_mail`) also read every other user's lead
+ * mail, view only: they may open it (never marking it read, audited), log it and add a task, but every change to
+ * another user's mailbox (reply, read/unread, archive, link, create lead) is 403 view_only. Everyone else reaches
+ * only their own messages (another user's is 404). Enforced here, on every route.
  */
 export const mailRoutes: FastifyPluginAsync = async (app) => {
   const pre = { preHandler: [requireRight('use_email')] };
@@ -275,11 +289,12 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // Reply (prototype Reply): to the sender of a received message, or the recipients of your own; same conversation.
+  // Only from your own mailbox: another user's message is view only (403) or not yours to see (404).
   app.post<{ Params: { id: string } }>('/mail/:id/reply', send, async (request, reply) => {
     const body = parseBody(MailReply, request.body);
     const user = request.user!;
     return guard(reply, async () => {
-      const original = await ownMessage(prisma, user, request.params.id);
+      const { m: original } = await messageFor(prisma, user, request.params.id, 'change');
       if (original.status === 'draft') return reply.code(409).send({ error: 'draft' });
       const account = await myMailbox(user.id);
       if (!account) return reply.code(409).send({ error: 'no_mailbox' });
@@ -304,15 +319,17 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // The message list, paged (owner, 22 Nov 2026): every filter applies first, `total` counts what they leave
-  // (`count=0`, the later batches of the scrolling list: no total).
+  // (`count=0`, the later batches of the scrolling list: no total). `mailOf` (mailScope): your own mail by default;
+  // `all` or a user id needs `view_team_mail` and adds only other users' team-readable mail, each item with its owner.
   app.get('/mail', pre, async (request) => {
     const user = request.user!;
     const q = parseQuery(MailListQuery, request.query);
+    const scope = mailScope(user, q.mailOf);
     const view: View = (VIEWS as readonly string[]).includes(q.view ?? '') ? (q.view as View) : 'inbox';
-    const and: Prisma.EmailMessageWhereInput[] = [{ userId: user.id }];
+    const and: Prisma.EmailMessageWhereInput[] = [scope.where];
     if (view === 'unlinked') and.push(unlinkedWhere(user));
     else if (view === 'mine') and.push({ lead: { assignedToId: user.id }, folder: { not: 'drafts' } });
-    else if (view === 'awaiting') and.push({ id: { in: await awaitingIds(user.id) } });
+    else if (view === 'awaiting') and.push({ id: { in: await awaitingIds(scope.ownerId) } });
     else and.push({ folder: view });
     const company = Number(q.company);
     // Through a lead only when the user can see that lead (a lead moved to someone else does not place your mail).
@@ -321,15 +338,15 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
     }
     const lead = Number(q.lead);
     if (q.lead && Number.isInteger(lead)) and.push({ leadId: lead });
-    // Narrows the caller's own mail only (the userId filter above stays): a tag never shows anyone else's message.
+    // Narrows the scope only (the scope filter above stays): a tag never shows mail outside it.
     const project = Number(q.project);
     if (q.project && Number.isInteger(project)) and.push({ projectId: project });
     const s = q.s?.trim().slice(0, 200);
-    if (s) and.push({ id: { in: await searchIds(user.id, s) } });
+    if (s) and.push({ id: { in: await searchIds(scope.ownerId, s) } });
     const where = { AND: and };
     const [rows, total] = await Promise.all([
       prisma.emailMessage.findMany({
-        where, include: { lead: { select: { id: true, number: true } } }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], ...pageArgs(q),
+        where, include: { lead: { select: { id: true, number: true } }, user: { select: { id: true, name: true } } }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], ...pageArgs(q),
       }),
       q.count === '0' ? null : prisma.emailMessage.count({ where }),
     ]);
@@ -342,19 +359,29 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
     return {
       items: rows.map((m) => listItem({
         ...(m.leadId && !visible.has(m.leadId) ? { ...m, leadId: null, lead: null } : m), project: m.projectId ? projects.get(m.projectId) ?? null : null,
-      })),
+      }, user.id)),
       total, page: q.page, pageSize: q.pageSize,
     };
   });
 
+  // The screen's counts and filter lists follow the list's scope (`mailOf`, as GET /mail); `mailbox` is always the
+  // caller's own. `mailUsers` (the "Mail of:" picker): with `view_team_mail`, the other active users who have a
+  // personal mailbox, by name; otherwise empty.
   app.get('/mail/meta', pre, async (request) => {
     const user = request.user!;
-    const [mailbox, unread, unlinked, companyIds, leadIds] = await Promise.all([
+    const { where: scope } = mailScope(user, parseQuery(MailMetaQuery, request.query).mailOf);
+    const [mailbox, unread, unlinked, companyIds, leadIds, mailUsers] = await Promise.all([
       prisma.emailAccount.findFirst({ where: { kind: 'personal', userId: user.id, status: { not: 'disconnected' } }, select: { id: true, address: true, status: true, lastSyncAt: true } }),
-      prisma.emailMessage.count({ where: { userId: user.id, folder: 'inbox', isRead: false } }),
-      prisma.emailMessage.count({ where: { AND: [{ userId: user.id }, unlinkedWhere(user)] } }),
-      prisma.emailMessage.findMany({ where: { userId: user.id, companyId: { not: null } }, distinct: ['companyId'], select: { companyId: true } }),
-      prisma.emailMessage.findMany({ where: { userId: user.id, leadId: { not: null } }, distinct: ['leadId'], select: { leadId: true } }),
+      prisma.emailMessage.count({ where: { AND: [scope, { folder: 'inbox', isRead: false }] } }),
+      prisma.emailMessage.count({ where: { AND: [scope, unlinkedWhere(user)] } }),
+      prisma.emailMessage.findMany({ where: { AND: [scope, { companyId: { not: null } }] }, distinct: ['companyId'], select: { companyId: true } }),
+      prisma.emailMessage.findMany({ where: { AND: [scope, { leadId: { not: null } }] }, distinct: ['leadId'], select: { leadId: true } }),
+      canSeeTeamMail(user)
+        ? prisma.user.findMany({
+          where: { id: { not: user.id }, isActive: true, emailAccounts: { some: { kind: 'personal' } } },
+          select: { id: true, name: true }, orderBy: [{ name: 'asc' }, { id: 'asc' }],
+        })
+        : [],
     ]);
     const [companies, leads, projects] = await Promise.all([
       prisma.company.findMany({ where: { id: { in: companyIds.map((c) => c.companyId!) } }, select: { id: true, name: true, legalName: true, isClient: true }, orderBy: { name: 'asc' } }),
@@ -365,42 +392,52 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
       // Release 3B: the projects the user can see (Project filter and Compose picker), not only those in their mail.
       prisma.project.findMany({ where: projectWhere(user), select: { id: true, number: true, name: true, companyId: true }, orderBy: { id: 'desc' } }),
     ]);
-    return { mailbox, unread, unlinked, companies, leads, projects };
+    return { mailbox, unread, unlinked, companies, leads, projects, mailUsers };
   });
 
   // `peek=1`: the first message shown on arrival, which the user has not opened yet, stays unread.
+  // Another user's message (team view, view only): never marked read and nothing queued for their mailbox, peek or
+  // not; its thread comes from the owner's team-readable mail; every open is audited (who, which message, whose
+  // mailbox; never subject, body or addresses).
   app.get<{ Params: { id: string }; Querystring: { peek?: string } }>('/mail/:id', pre, async (request, reply) => {
     const user = request.user!;
     return guard(reply, async () => {
-      let m = await fillHtmlBody(app.graph, request.log, user, await ownMessage(prisma, user, request.params.id));
-      if (!m.isRead && request.query.peek !== '1') {
+      const found = await messageFor(prisma, user, request.params.id, 'read');
+      const viewOnly = found.viewOnly;
+      // Recorded before the body is fetched, so an open is audited even when Microsoft fails.
+      if (viewOnly) await audit(prisma, { entityType: 'email_message', entityId: found.m.id, action: 'view', userId: user.id, after: { ownerId: found.m.userId } });
+      let m = await fillHtmlBody(app.graph, request.log, found.m);
+      if (!viewOnly && !m.isRead && request.query.peek !== '1') {
         m = await prisma.emailMessage.update({ where: { id: m.id }, data: { isRead: true } });
         await tellMailbox(prisma, m, 'read');
       }
+      const owner = viewOnly ? await prisma.user.findUniqueOrThrow({ where: { id: m.userId }, select: { id: true, name: true } }) : { id: user.id, name: user.name };
+      const threadWhere: Prisma.EmailMessageWhereInput = { userId: m.userId, threadId: m.threadId, id: { not: m.id } };
       const [lead, contact, company, thread, projects] = await Promise.all([
         m.leadId && (await canSeeLead(prisma, user, m.leadId)) ? prisma.lead.findUnique({ where: { id: m.leadId }, ...leadRef }) : null,
         m.contactId ? prisma.contact.findUnique({ where: { id: m.contactId }, select: { id: true, firstName: true, lastName: true } }) : null,
         m.companyId ? prisma.company.findUnique({ where: { id: m.companyId }, select: { id: true, name: true } }) : null,
         m.threadId
-          ? prisma.emailMessage.findMany({ where: { userId: user.id, threadId: m.threadId, id: { not: m.id } }, orderBy: { occurredAt: 'desc' }, take: THREAD_MAX - 1 })
+          ? prisma.emailMessage.findMany({ where: viewOnly ? { AND: [threadWhere, teamReadableWhere] } : threadWhere, orderBy: { occurredAt: 'desc' }, take: THREAD_MAX - 1 })
           : [],
         visibleProjects(user, [m.projectId]),
       ]);
       return {
-        ...listItem({ ...m, lead: lead ? { id: lead.id, number: lead.number } : null, project: m.projectId ? projects.get(m.projectId) ?? null : null }),
+        ...listItem({ ...m, user: owner, lead: lead ? { id: lead.id, number: lead.number } : null, project: m.projectId ? projects.get(m.projectId) ?? null : null }, user.id),
         ccAddresses: m.ccAddresses as string[], bodyText: m.bodyText, bodyHtml: m.bodyHtml || null, attachmentNames: m.attachmentNames as string[], loggedAt: m.loggedAt,
         lead: lead ? { id: lead.id, number: lead.number, status: lead.status, priority: lead.priority, nextFollowUp: ymd(lead.nextFollowUp), companyId: lead.companyId } : null,
         contact: contact ? { id: contact.id, name: `${contact.firstName} ${contact.lastName}`.trim() } : null,
         company,
-        thread: threadHistory(user, m, thread),
+        thread: threadHistory(owner.name, m, thread),
       };
     });
   });
 
+  // Read / unread and archive change the owner's mailbox: your own messages only (another user's is 403 view_only).
   app.post<{ Params: { id: string } }>('/mail/:id/read', pre, async (request, reply) => {
     const { isRead } = parseBody(MailRead, request.body);
     return guard(reply, async () => {
-      const m = await ownMessage(prisma, request.user!, request.params.id);
+      const { m } = await messageFor(prisma, request.user!, request.params.id, 'change');
       if (m.isRead === isRead) return { id: m.id, isRead };
       const updated = await prisma.$transaction(async (tx) => {
         const u = await tx.emailMessage.update({ where: { id: m.id }, data: { isRead } });
@@ -413,7 +450,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
 
   app.post<{ Params: { id: string } }>('/mail/:id/archive', pre, async (request, reply) => {
     return guard(reply, async () => {
-      const m = await ownMessage(prisma, request.user!, request.params.id);
+      const { m } = await messageFor(prisma, request.user!, request.params.id, 'change');
       if (m.folder === 'drafts') return reply.code(409).send({ error: 'draft' });
       if (m.folder !== 'archive') {
         await prisma.$transaction(async (tx) => {
@@ -425,11 +462,12 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
     });
   });
 
-  // Log as activity (prototype): once per message, on its lead; the subject is the sender's alone.
+  // Log as activity (prototype): once per message, on its lead; the subject is the sender's alone. Also on another
+  // user's lead mail in team view: the activity is by the viewer, and the owner's mailbox is not changed.
   app.post<{ Params: { id: string } }>('/mail/:id/log', pre, async (request, reply) => {
     const user = request.user!;
     return guard(reply, async () => {
-      const m = await ownMessage(prisma, user, request.params.id);
+      const { m } = await messageFor(prisma, user, request.params.id, 'crm');
       if (!m.leadId || !(await canSeeLead(prisma, user, m.leadId))) return reply.code(409).send({ error: 'no_lead' });
       const logged = m.loggedAt || (await prisma.leadActivity.count({ where: { relatedType: 'email_message', relatedId: m.id } })) > 0;
       if (logged) return reply.code(409).send({ error: 'already_logged' });
@@ -448,11 +486,12 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
     });
   });
 
+  // Link to lead: your own messages only (another user's is 403 view_only).
   app.post<{ Params: { id: string } }>('/mail/:id/link', pre, async (request, reply) => {
     const { leadId } = parseBody(MailLink, request.body);
     const user = request.user!;
     return guard(reply, async () => {
-      const m = await ownMessage(prisma, user, request.params.id);
+      const { m } = await messageFor(prisma, user, request.params.id, 'change');
       const lead = await assertLeadVisible(prisma, user, leadId);
       const keepContact = m.contactId && lead.companyId && (await prisma.contact.count({ where: { id: m.contactId, companyId: lead.companyId } })) > 0;
       const updated = await prisma.$transaction(async (tx) => {
@@ -468,10 +507,11 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
 
   // Create lead from this email (prototype): the lead form's duplicate check on the sender's domain, source Other,
   // a neutral note (the email itself stays private), a follow-up in 2 days, the allocation rules; the message is linked to it.
+  // Your own messages only (another user's is 403 view_only).
   app.post<{ Params: { id: string } }>('/mail/:id/create-lead', pre, async (request, reply) => {
     const user = request.user!;
     return guard(reply, async () => {
-      const m = await ownMessage(prisma, user, request.params.id);
+      const { m } = await messageFor(prisma, user, request.params.id, 'change');
       if (!can(user.role, 'manage_leads')) return reply.code(403).send({ error: 'forbidden' });
       const email = isInbound(m) ? m.fromAddress : ((m.toAddresses as string[])[0] ?? '');
       const name = isInbound(m) ? m.fromName?.trim() : '';
@@ -510,11 +550,12 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // Add follow-up task (prototype): due tomorrow, assigned to you, on the message's lead. Tasks are seen by everyone who
-  // sees the lead, so the title names no sender or subject (owner: nobody else sees anyone's mail).
+  // sees the lead, so the title names no sender or subject (owner: nobody else sees anyone's mail). Also on another
+  // user's lead mail in team view: the task is the viewer's.
   app.post<{ Params: { id: string } }>('/mail/:id/task', pre, async (request, reply) => {
     const user = request.user!;
     return guard(reply, async () => {
-      const m = await ownMessage(prisma, user, request.params.id);
+      const { m } = await messageFor(prisma, user, request.params.id, 'crm');
       if (!m.leadId || !(await canSeeLead(prisma, user, m.leadId))) return reply.code(409).send({ error: 'no_lead' });
       const dueDate = new Date(dateOnly(todayIn(user.timezone)).getTime() + DAY_MS);
       const task = await prisma.$transaction(async (tx) => {

@@ -153,12 +153,17 @@ describe('compose and reply (2B-2)', () => {
     expect(await prisma.job.count({ where: { type: 'send_user_email' } })).toBe(0);
   });
 
-  it("nobody can reply to another user's message, administrators included", async () => {
-    const { rep, admin, box } = await setup();
-    const original = await synced(rep.id, box.id);
+  it("a Sales rep gets 404 for another user's message; an Administrator gets 403 view_only", async () => {
+    const { rep, admin, box, lead } = await setup();
+    const original = await synced(rep.id, box.id, { leadId: lead.id });
+    const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    await personal(other.id, 'other@daitpartners.com');
+    expect((await call('POST', `/api/mail/${original.id}/reply`, await signIn(app, other), { cc: [], body: 'x' })).statusCode).toBe(404);
     const res = await call('POST', `/api/mail/${original.id}/reply`, await signIn(app, admin), { cc: [], body: 'x' });
-    expect(res.statusCode).toBe(404);
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ error: 'view_only' });
     expect(await prisma.emailMessage.count()).toBe(1);
+    expect(await prisma.job.count({ where: { type: 'send_user_email' } })).toBe(0);
   });
 
   it('the worker sends a reply through Graph reply on the original message (sendMail when it has no Graph id)', async () => {
@@ -410,7 +415,11 @@ describe('reading mail on the Email screen (2B-2)', () => {
     });
     expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: m.id } })).isRead).toBe(true);
     expect((await prisma.job.findFirstOrThrow({ where: { type: 'mail_action' } })).payload).toEqual({ emailMessageId: m.id, action: 'read' });
-    expect((await call('GET', `/api/mail/${m.id}`, await signIn(app, admin))).statusCode).toBe(404);
+    // Another Sales rep: 404. An Administrator (team view): view only, and the unlinked first message stays out of the thread.
+    expect((await call('GET', `/api/mail/${m.id}`, await signIn(app, await makeUser({ role: 'SALES_REPRESENTATIVE' })))).statusCode).toBe(404);
+    const team = await call('GET', `/api/mail/${m.id}`, await signIn(app, admin));
+    expect(team.json()).toMatchObject({ viewOnly: true, owner: { id: rep.id, name: 'Maya Pillai' }, thread: [{ id: m.id }] });
+    expect(team.json().thread).toHaveLength(1);
   });
 
   it("the opened message's lead gives its next follow-up as a calendar date (YYYY-MM-DD), like the lead API", async () => {
@@ -723,15 +732,28 @@ describe('formatted bodies (owner, 23 Nov 2026)', () => {
     expect(bodies.calls).toHaveLength(1);
   });
 
-  it("another user's message is never fetched, administrators included (404, the mailbox is not asked)", async () => {
-    const { rep, admin, box } = await setup();
+  it("another user's unlinked message is never fetched (404, the mailbox is not asked); their lead mail is, for an Administrator, once and without marking it read", async () => {
+    const { rep, admin, box, lead } = await setup();
     const m = await synced(rep.id, box.id, { graphId: 'g-private' });
     bodies.answer = async () => ({ contentType: 'html', content: '<p>secret</p>' });
-    expect((await call('GET', `/api/mail/${m.id}`, await signIn(app, admin))).statusCode).toBe(404);
+    const adminCookie = await signIn(app, admin);
+    expect((await call('GET', `/api/mail/${m.id}`, adminCookie)).statusCode).toBe(404);
     const other = await makeUser({ role: 'MANAGER' });
     expect((await call('GET', `/api/mail/${m.id}`, await signIn(app, other))).statusCode).toBe(404);
+    const rival = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    expect((await call('GET', `/api/mail/${m.id}`, await signIn(app, rival))).statusCode).toBe(404);
     expect(bodies.calls).toEqual([]);
     expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: m.id } })).bodyHtml).toBeNull();
+    // Team view (controller ruling 2): lead mail of another user gets its body from the owner's mailbox, read only.
+    const linked = await synced(rep.id, box.id, { graphId: 'g-team', leadId: lead.id });
+    const res = await call('GET', `/api/mail/${linked.id}`, adminCookie);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ viewOnly: true, bodyHtml: '<p>secret</p>' });
+    expect(bodies.calls).toEqual([{ accountId: box.id, graphId: 'g-team', timeoutMs: 4000 }]);
+    await call('GET', `/api/mail/${linked.id}`, adminCookie);
+    expect(bodies.calls).toHaveLength(1);
+    expect(await prisma.emailMessage.findUniqueOrThrow({ where: { id: linked.id } })).toMatchObject({ isRead: false, bodyHtml: '<p>secret</p>' });
+    expect(await prisma.job.count()).toBe(0);
   });
 
   it('only the owner\'s own connected mailbox is used: a disconnected one, or one now connected to someone else, is not asked', async () => {

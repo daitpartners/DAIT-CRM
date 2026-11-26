@@ -159,6 +159,11 @@ export const MailListQuery = PagingQuery.pick({ page: true, pageSize: true }).ex
   s: z.string().optional(),
   /** `0`: no total (later batches of the Email list, which scrolls; the first batch carries it). */
   count: z.enum(['0', '1']).optional(),
+  /**
+   * Web-mail release 1, whose mail (default `me`): `all` = yours plus every other user's lead mail, or a user id = that
+   * user's lead mail. Anything but your own needs `view_team_mail` (Administrator, Manager) and is view only.
+   */
+  mailOf: z.union([z.enum(['me', 'all']), z.string().regex(/^\d{1,9}$/)]).optional(),
 });
 export type MailListQuery = z.infer<typeof MailListQuery>;
 
