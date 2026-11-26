@@ -3,9 +3,9 @@
 Kept here at the owner's request; picked up when the owner says so. Items that were fixed are no longer listed (they are
 in the git history).
 
-## Where things stand (23 Nov 2026)
+## Where things stand (26 Nov 2026)
 
-- **Live** at crm.daitpartners.com: release `79b9415` (minor fixes + handover documents, 23 Nov).
+- **Live** at crm.daitpartners.com: release `7d1d8c2` (live since 26 Nov 2026).
 - **Ready, waiting for "deploy":** branch `web-mail` — web-mail release 1 (lead mail only, team view for
   Administrators and Managers). See "Ready, waiting for deploy: web-mail release 1" below.
 - **There is no test copy on the server.** Each release was checked on the developer's machine (automatic tests and
@@ -36,6 +36,7 @@ in the git history).
 | 4 | AI research (Claude off) | `fa12206` |
 | Claude Code engine | Claude through the server's Claude Code, monthly run cap | `08ee5da` |
 | Minor fixes | 26 review follow-ups (time zones, mail linking, Mailer wizard, quotations, keyboard) + handover docs | `79b9415` |
+| Leads delete, import follow-ups | Delete leads with their company (Administrators), Download all leads, update rows through Import leads, Do not email list | `7d1d8c2` (live 26 Nov) |
 
 ## Ready, waiting for deploy: web-mail release 1 (branch `web-mail`)
 
@@ -61,10 +62,11 @@ Design: `docs/superpowers/specs/2026-11-26-web-mail-email-design.md`. Reviewed a
 
 **The deploy needs two one-time steps** (runbook: `docs/DEPLOYMENT.md`, "Web mail release 1: deploy runbook"):
 1. **Clean-up:** a dry run first; you see the counts per user (how many messages kept and removed, no subjects or
-   addresses) and say OK; then the real run. If it finds leads deleted before this release whose addresses were not
-   recorded, it stops and we ask you before going ahead.
+   addresses) and say OK; then a fresh copy of the mail table is taken and the real run follows. If it finds leads
+   deleted before this release whose addresses cannot be found, it stops and we ask you before going ahead.
 2. **Watching the backfill** until it has finished (several hours), plus two one-off checks on live (long searches go
-   past 250 results; the 12-month start date is read as UTC).
+   past 250 results; the 12-month start date is read as UTC). A mailbox connected later (Sebastian has none yet) or
+   reconnected later gets its 12-month search with one command run after it connects; tell us when that happens.
 
 **Calls made for you (tell us if you want any changed):**
 - **Drafts are left out of the team view:** Administrators and Managers do not see another user's drafts.
@@ -72,6 +74,11 @@ Design: `docs/superpowers/specs/2026-11-26-web-mail-email-design.md`. Reviewed a
   Mailer and quotation mail, mail in a lead conversation, and mail of deleted leads), even when it is not with a lead
   address.
 - **Unlinked and My leads stay as they are until release 2** (the full Microsoft 365-style Email screen).
+- **Mail linked to a company only is readable by Administrators and Managers too.** The clean-up keeps mail the CRM
+  had already linked to a company (any company in the CRM, even one with no lead); in the team view, Administrators
+  and Managers can read it like lead mail, so some mail with prospect companies becomes visible to them.
+- **Emptying Deleted Items in Outlook removes the CRM copy**, lead-linked mail included. Moving a message to Deleted
+  Items keeps it in the CRM (shown as deleted); only emptying the folder, or deleting it permanently, removes it.
 
 ## Owner to do
 

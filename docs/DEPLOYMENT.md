@@ -296,8 +296,16 @@ the password. For a break-glass sign-in (Microsoft sign-in broken): add `LOCAL_A
 
 Only after the owner says "deploy". Follow "Deploying a release to live" with these additions, in this order:
 
-1. **Back up first** (step 1 above), named `dait_crm-pre-web-mail-r1.dump`. This dump is the only way back for the
-   mail rows the clean-up removes.
+1. **Back up first** (step 1 above), named `dait_crm-pre-web-mail-r1.dump`.
+   **List the personal mailboxes and their state** (as root, read only; mailbox addresses only):
+
+   ```
+   sudo -u postgres psql -d dait_crm -c "SELECT id, user_id, address, status, sync_mail FROM email_accounts WHERE kind='personal' ORDER BY id;"
+   ```
+
+   Note every mailbox that is not `connected` with `sync_mail` true: the release backfill gives it no rows, so it needs
+   step 7 after it is (re)connected. (26 Nov 2026: users 1, 2 and 3 connected with Sync mail on; Sebastian, user 4,
+   has no mailbox yet.)
 2. **Check the migration state before installing** (after step 3, as `daitcrm` in `~/build/<sha>`; read only):
 
    ```
@@ -310,23 +318,36 @@ Only after the owner says "deploy". Follow "Deploying a release to live" with th
    copy before installing.
 3. **Install and check** (steps 4–5 above).
 4. **Clean-up: dry run, owner sees the counts, then the real run** (details under "One-time steps after a release").
-   Run it with `--dry-run` and send the owner the per-user `checked, kept, removed` counts (counts only). Run it for real
-   only after the owner agrees. If it refuses because lead-delete audit entries record no addresses, do not add
-   `--accept-unrecorded-deletes` unless the owner explicitly OKs it.
+   Run it with no flag (a dry run: nothing changes) and send the owner the per-user `checked, kept, removed` counts
+   (counts only). If the dry run prints `N lead delete audit entries record no addresses`, tell the owner that too: the
+   real run will refuse, and do not add `--accept-unrecorded-deletes` unless the owner explicitly OKs it.
+   Only after the owner agrees: **take a fresh dump right before the real run** (as root; at least the mail table,
+   a full dump is fine too):
+
+   ```
+   sudo -u postgres pg_dump -Fc -t email_messages dait_crm > /home/daitcrm/backups/dait_crm-pre-mail-cleanup.dump
+   ```
+
+   then run it with `--apply`. Wrongly removed rows can be restored selectively by id from that dump (restore it into
+   a scratch database and copy the rows back), without rolling back anything else.
 5. **Watch the backfill** with `mail-backfill.js --status` (see "One-time steps") until `queued` and `running` are 0
-   (several hours). Look at `failed` and `skipped` rows; `--retry` queues them again.
+   (several hours, likely 10–14). Look at `failed` and `skipped` rows; `--retry` queues them again.
 6. **Check two Graph details once on live, while the backfill runs:**
-   - **Paging past 250:** Outlook search used to stop at 250 results. Check that at least one address with a lot of mail
-     shows `found` above 250 in the `--status` totals (or compare with the same search in Outlook). If no search goes
-     past 250 although Outlook shows more, tell the developer before relying on long results.
+   - **Paging past 250:** Outlook search used to stop at 250 results. The `--status` totals sum all rows, so they prove
+     nothing; check the **largest single search** instead (as root; counts only):
+     `sudo -u postgres psql -d dait_crm -c "SELECT max(found), count(*) FILTER (WHERE found > 250) FROM mail_backfills;"`,
+     or look for a `found=` value above 250 in the worker's `mail_backfill: row … found=N` log lines. If no search goes
+     past 250 although Outlook shows more for that address, tell the developer before relying on long results.
    - **Date filter is UTC:** the search asks for `received>=` the date 12 months ago, written as a UTC date
      (`YYYY-MM-DD`). Compare one address's oldest stored message with Outlook: mail from the start day itself should be
      there. If Outlook reads the date in the mailbox's time zone instead, the edge moves by at most one day; note it for
      the developer (no action needed on live).
-7. **After a mailbox reconnects:** a mailbox that needed reconnecting has its rows skipped (`mailbox_needs_reconnect`):
-   run `mail-backfill.js --retry` after the reconnect. A mailbox connected for the first time after the release
-   backfill was queued gets its 12-month search with `mail-backfill.js --mailbox <email account id>` (id from
-   `SELECT id, address FROM email_accounts`).
+7. **After any mailbox is (re)connected, or Sync mail is turned on later:** run
+   `mail-backfill.js --mailbox <email account id>` (id from step 1's query). It queues the 12-month search of every
+   known address for that mailbox and re-queues its failed and skipped rows. A reconnected mailbox keeps its old 90-day
+   sync window, so without this its older lead mail is never fetched. `--retry` only re-queues rows that already exist
+   (failed or skipped, every mailbox); it does nothing for a mailbox that got no rows. When Sebastian (user 4) connects
+   his mailbox, run `--mailbox` with its id.
 
 ## One-time steps after a release
 
@@ -346,25 +367,30 @@ All of these have already been run on live; they are kept for reference and for 
   Deepak and Lakshita, priority 2).
 - **Web mail release 1 — clean-up** (not yet run on live; run after the release is live, so sync no longer stores
   non-lead mail): remove the stored mail that is not lead mail, for every user. First
-  `cd ~/live/current/apps/api && node --env-file=$HOME/live/shared/.env dist/cli/mail-cleanup.js --dry-run` and check
-  the per-user counts (`checked, kept, removed`) look sane; it prints counts only, never subjects or addresses. Then run
-  it again without `--dry-run`. Lead-linked mail, mail of deleted leads (marked, or found through the lead-delete audit
-  entries), queued or sending mail, Mailer, quotation and project-tagged mail, and mail in a lead conversation are kept.
-  If it refuses because lead-delete audit entries record no addresses (leads deleted on live before this release), the
-  mail of those leads cannot be recognised: check with the owner, then add `--accept-unrecorded-deletes` to go ahead.
-  Safe to run again (removes 0). The mail stays in Outlook; restoring the CRM copy means the pre-release dump.
+  `cd ~/live/current/apps/api && node --env-file=$HOME/live/shared/.env dist/cli/mail-cleanup.js` (no flag, or
+  `--dry-run`: a dry run, nothing changes) and check the per-user counts (`checked, kept, removed`) look sane; it prints
+  counts only, never subjects or addresses. Then take a fresh dump (`sudo -u postgres pg_dump -Fc -t email_messages
+  dait_crm > /home/daitcrm/backups/dait_crm-pre-mail-cleanup.dump`, or a full dump) and run it again with `--apply`
+  (the only way it deletes; any other argument is rejected with exit 1). Lead-linked mail, mail of deleted leads
+  (marked, or found through the lead-delete audit entries: their recorded addresses, else the lead's address in the
+  entry or in its create entry; Import Undo entries are skipped), queued or sending mail, Mailer, quotation and
+  project-tagged mail, and mail in a lead conversation are kept. If the dry run reports lead-delete audit entries with
+  no address, the real run refuses: the mail of those leads cannot be recognised; check with the owner, then add
+  `--accept-unrecorded-deletes` to go ahead. Safe to run again (removes 0). The mail stays in Outlook; rows removed by
+  mistake can be restored by id from the fresh dump.
 - **Web mail release 1 — backfill** (nothing to start by hand): it starts by itself within a minute of the worker
   starting: one 12-month search per lead/contact address per connected mailbox (Sync mail on, active user), one short
   job every 10 s, so several hours. Watch it with
   `cd ~/live/current/apps/api && node --env-file=$HOME/live/shared/.env dist/cli/mail-backfill.js --status` (counts by
   status and per mailbox; mailbox addresses only) and `pm2 logs crm-live-worker --lines 50 | grep mail_backfill`. It
-  is finished when `queued` and `running` are 0. `--retry` queues failed and skipped rows again (e.g. after a mailbox
-  reconnect: rows of a mailbox that needed reconnecting are skipped with `mailbox_needs_reconnect`). A mailbox that was
-  not connected when the release backfill was queued and is connected later gets the 12-month search for the existing
-  addresses with `--mailbox <email account id>` (id from `SELECT id, address FROM email_accounts`). New leads and
-  contacts are searched for the same way within a minute of being added. Check once on live that a long search
-  continues past 250 results (an address with a lot of mail shows `found` above 250 in `--status` totals) before
-  trusting long results (F6).
+  is finished when `queued` and `running` are 0. `--retry` queues the failed and skipped rows of every mailbox again.
+  A mailbox that was not connected with Sync mail on when the release backfill was queued gets no rows; after any
+  (re)connect (or turning Sync mail on), run `--mailbox <email account id>` (id from `SELECT id, address, status,
+  sync_mail FROM email_accounts WHERE kind='personal'`): it queues every known address for that mailbox and re-queues
+  its failed and skipped rows. New leads and contacts are searched for the same way within a minute of being added.
+  Check once on live that a long search continues past 250 results before trusting long results (F6): the per-row
+  maximum, `SELECT max(found) FROM mail_backfills` (as root), or a `found=` value above 250 in the worker log; not the
+  `--status` total, which sums all rows.
 
 ## Setting the server up from scratch (reference)
 
