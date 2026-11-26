@@ -9,6 +9,7 @@ import { ConfirmProvider } from '../src/components/ConfirmDialog';
 import { ToastProvider } from '../src/components/Toast';
 import { LeadPage } from '../src/pages/leads/LeadPage';
 import { DeleteLeadsModal } from '../src/pages/leads/DeleteLeadsModal';
+import { EditProfileModal } from '../src/pages/leads/EditProfileModal';
 import { Wrap, makeClient, makeLead } from './leadFixture';
 
 const manager: Me = {
@@ -165,5 +166,24 @@ describe('delete dialog', () => {
     expect(await screen.findByText('CO-0245 · Meridian Textiles — Has other leads')).toBeInTheDocument();
     expect(screen.getByText('Will be removed for good: 1 lead with their notes, tasks and timeline, 0 companies, 0 contacts.')).toBeInTheDocument();
     expect(screen.queryByText('Contacts removed with their company:')).not.toBeInTheDocument();
+  });
+});
+
+describe('Do not email on an address that opted out (suppression list)', () => {
+  it('a refused untick says to ask an Administrator', async () => {
+    const u = userEvent.setup();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/leads/5/do-not-email') return Response.json({ error: 'address_suppressed' }, { status: 409 });
+      return Response.json({});
+    }));
+    const lead = makeLead({ doNotEmail: true });
+    render(
+      <Wrap qc={makeClient()}>
+        <EditProfileModal contact={lead.contact!} lead={lead} onClose={vi.fn()} />
+      </Wrap>,
+    );
+    await u.click(screen.getByRole('checkbox', { name: /Do not email/ }));
+    await u.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText('This address opted out; ask an Administrator')).toBeInTheDocument();
   });
 });

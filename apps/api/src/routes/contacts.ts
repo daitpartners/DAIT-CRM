@@ -6,6 +6,7 @@ import {
 } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { audit } from '../audit.js';
+import { suppressed } from '../mailer/suppression.js';
 import { NotFoundError, ValidationError, parseBody, parseQuery } from '../validate.js';
 import { requireRight, requireUser } from '../plugins/auth.js';
 import { assertCompanyVisible, companyWhere, visibleCompanyIds } from '../companies/visibility.js';
@@ -95,8 +96,13 @@ export const contactRoutes: FastifyPluginAsync = async (app) => {
         // The first (active) contact of a company is always its primary.
         const isPrimary = !hasPrimary || body.isPrimary;
         if (isPrimary && hasPrimary) await clearPrimary(tx, company.id, user.id);
+        // An address on the suppression list (a deleted lead or contact opted out): unsubscribed from the start.
+        const listed = (await suppressed(tx, [body.businessEmail])).size > 0;
         const row = await tx.contact.create({
-          data: { ...body, isPrimary, phoneNormalised: phoneKey(body.phone), mobileNormalised: phoneKey(body.mobile) },
+          data: {
+            ...body, isPrimary, phoneNormalised: phoneKey(body.phone), mobileNormalised: phoneKey(body.mobile),
+            unsubscribedAt: listed ? new Date() : null,
+          },
           include: contactSummaryInclude,
         });
         await audit(tx, { entityType: 'contact', entityId: row.id, action: 'create', userId: user.id, after: columns(row) });
@@ -123,6 +129,9 @@ export const contactRoutes: FastifyPluginAsync = async (app) => {
         if (new Date(updatedAt).getTime() !== before.updatedAt.getTime()) throw new StaleError();
         if (body.contactType !== undefined) await assertLookupValue(tx, 'contact_type', body.contactType, 'contactType');
         const data: Prisma.ContactUpdateInput = { ...body };
+        // Changed to an address on the suppression list: unsubscribed (kept when already so).
+        if (body.businessEmail && body.businessEmail.toLowerCase() !== (before.businessEmail ?? '').toLowerCase() && !before.unsubscribedAt
+          && (await suppressed(tx, [body.businessEmail])).size > 0) data.unsubscribedAt = new Date();
         const deactivating = before.isActive && body.isActive === false;
         const reactivating = !before.isActive && body.isActive === true;
         // Only an active contact can be primary.

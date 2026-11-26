@@ -395,6 +395,8 @@ export function errorText(t: TFn, code: string, vars: Record<string, string | nu
   switch (code) {
     case 'email_taken':
       return t('That email is already in use');
+    case 'address_suppressed':
+      return t('This address opted out; ask an Administrator');
     case 'message_too_long':
       return t('This message is too long to send. Shorten it, or remove large pictures or formatting.');
     case 'try_again':

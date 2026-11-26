@@ -26,7 +26,7 @@ import { dateOnly, todayIn } from '../leads/dates.js';
 import { attachmentHeader } from '../imports/exports.js';
 import { leadsWorkbook } from '../imports/leadsExport.js';
 import { LeadDeleteError, deleteLeads, deletePreview } from '../leads/delete.js';
-import { unsuppress } from '../mailer/suppression.js';
+import { suppressed, unsuppress } from '../mailer/suppression.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -39,7 +39,7 @@ const NOT_PLANNED: Prisma.LeadActivityWhereInput = { OR: [{ relatedType: null },
 /* ------------------------------------------------------------------ errors */
 
 /** RuleError codes answered with 409; `forbidden` is a 403; every other rule refusal is a 400. */
-const CONFLICT_CODES = new Set(['stale', 'company_inactive', 'already_assigned', 'company_already_linked']);
+const CONFLICT_CODES = new Set(['stale', 'company_inactive', 'already_assigned', 'company_already_linked', 'address_suppressed']);
 
 /** Maps a business-rule / concurrency error to its HTTP reply; anything else is rethrown. */
 export async function guard<T>(reply: FastifyReply, fn: () => Promise<T>): Promise<T | FastifyReply> {
@@ -384,6 +384,9 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
         // A closed lead keeps no follow-up (as Log call): refuse setting one.
         if (nextFollowUp && isClosedStatus(before.status)) throw new RuleError('lead_closed');
         const data: Prisma.LeadUncheckedUpdateInput = { ...body };
+        // Changed to an address on the suppression list: Do not email.
+        if (body.businessEmail && body.businessEmail.toLowerCase() !== (before.businessEmail ?? '').toLowerCase()
+          && (await suppressed(tx, [body.businessEmail])).size > 0) data.doNotEmail = true;
         if (nextFollowUp !== undefined) data.nextFollowUp = nextFollowUp ? dateOnly(nextFollowUp) : null;
         const after = await tx.lead.update({ where: { id }, data });
         if (nextFollowUp !== undefined || body.companyName !== undefined) await syncFollowUpTask(tx, after);
@@ -425,9 +428,16 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
         const contact = lead.contactId
           ? await tx.contact.findUnique({ where: { id: lead.contactId }, select: { unsubscribedAt: true, businessEmail: true } }) : null;
         const contactOn = !!contact?.unsubscribedAt;
-        // Unticked: the addresses come off the suppression list too (a person decided they may be emailed again).
-        if (!body.doNotEmail) await unsuppress(tx, [lead.businessEmail, contact?.businessEmail]);
         if (lead.doNotEmail === body.doNotEmail && (!contact || contactOn === body.doNotEmail)) return;
+        // A real untick of an address on the suppression list (a deleted lead or contact opted out): Administrators
+        // only, and it lifts the list entry too (counted in the audit entry, never the addresses).
+        let lifted = 0;
+        if (!body.doNotEmail) {
+          const addresses = [lead.businessEmail, contact?.businessEmail];
+          lifted = (await suppressed(tx, addresses)).size;
+          if (lifted > 0 && user.role !== 'Administrator') throw new RuleError('address_suppressed');
+          if (lifted > 0) await unsuppress(tx, addresses);
+        }
         await tx.lead.update({ where: { id }, data: { doNotEmail: body.doNotEmail } });
         if (contact && contactOn !== body.doNotEmail) {
           await tx.contact.update({ where: { id: lead.contactId! }, data: { unsubscribedAt: body.doNotEmail ? new Date() : null } });
@@ -437,7 +447,12 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
             ? { leadId: id, activityType: 'note', title: 'Marked do not email', body: 'The mailer will skip this lead.', byUserId: user.id }
             : { leadId: id, activityType: 'note', title: 'Do not email removed', body: 'The mailer may email this lead again.', byUserId: user.id },
         });
-        await audit(tx, { entityType: 'lead', entityId: id, action: 'update', userId: user.id, before: { doNotEmail: lead.doNotEmail, contactUnsubscribed: contactOn }, after: { doNotEmail: body.doNotEmail } });
+        if (lifted > 0) {
+          await tx.leadActivity.create({
+            data: { leadId: id, activityType: 'note', title: 'Removed from the opt-out list', body: 'The address had opted out before; an administrator lifted it.', byUserId: user.id },
+          });
+        }
+        await audit(tx, { entityType: 'lead', entityId: id, action: 'update', userId: user.id, before: { doNotEmail: lead.doNotEmail, contactUnsubscribed: contactOn }, after: { doNotEmail: body.doNotEmail, ...(lifted > 0 ? { suppressionLifted: lifted } : {}) } });
       });
       return detailOf(prisma, id, user);
     });
@@ -543,7 +558,12 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
           title = `Contact switched to ${`${contact.firstName} ${contact.lastName}`.trim()}`;
         }
         if (before.contactId === body.contactId) return;
-        await tx.lead.update({ where: { id }, data: { contactId: body.contactId } });
+        // A contact whose address is on the suppression list: the lead becomes Do not email and the contact unsubscribed.
+        const next = body.contactId === null ? null
+          : await tx.contact.findUnique({ where: { id: body.contactId }, select: { businessEmail: true, unsubscribedAt: true } });
+        const listed = !!next && (await suppressed(tx, [next.businessEmail])).size > 0;
+        await tx.lead.update({ where: { id }, data: { contactId: body.contactId, ...(listed ? { doNotEmail: true } : {}) } });
+        if (listed && !next.unsubscribedAt) await tx.contact.update({ where: { id: body.contactId! }, data: { unsubscribedAt: new Date() } });
         await tx.leadActivity.create({ data: { leadId: id, activityType: 'assign', title, byUserId: user.id } });
         await audit(tx, {
           entityType: 'lead', entityId: id, action: 'update', userId: user.id,

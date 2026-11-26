@@ -2013,5 +2013,6 @@
   "Contacts removed with their company:": "Contacts supprimés avec leur entreprise :",
   "(no name)": "(sans nom)",
   "1 of the chosen leads was not found (already deleted).": "1 des leads choisis est introuvable (déjà supprimé).",
-  "{n} of the chosen leads were not found (already deleted).": "{n} des leads choisis sont introuvables (déjà supprimés)."
+  "{n} of the chosen leads were not found (already deleted).": "{n} des leads choisis sont introuvables (déjà supprimés).",
+  "This address opted out; ask an Administrator": "Cette adresse s’est désinscrite ; demandez à un administrateur"
 }
