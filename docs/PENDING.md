@@ -87,7 +87,7 @@ migration (`docs/MIGRATIONS.md`).
 ## Decided (recorded)
 
 - Mailer daily limit stays 200 per mailbox; Mailer working hours are the client's (Mon–Fri 09:00–18:00 their time).
-- Mail and the Outlook calendar stay private to their owner, administrators included. Calendar **Mine / Everyone** is
+- Lead mail belongs to the mailbox owner. Administrators and Managers can read every user's lead mail (view only, each opening audited); Sales representatives and Data research users see only their own. Personal and other mail is not stored. The Outlook calendar stays private to its owner, administrators included. Calendar **Mine / Everyone** is
   for Administrators only; Everyone adds the team's CRM tasks, never anyone's Outlook events.
 - Calls and meetings planned in the CRM stay in the CRM: nothing is written to Outlook, no invitations or emails. Edit
   task gains Type and Time (Tasks page only).

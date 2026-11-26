@@ -129,12 +129,21 @@ export function leadDetail(l: LeadDetailRow, today: string, listed: ListedAddres
   };
 }
 
+/** Who reads a timeline: `teamMail` = `view_team_mail`; `mailOwners` = the mailbox owner of each logged message, by id. */
+export interface TimelineViewer {
+  id: number;
+  teamMail: boolean;
+  mailOwners: Map<number, number>;
+}
+
 /**
- * A timeline entry. `by: null` = system. Privacy (owner, 22 Nov 2026): an email sent from the CRM shows its subject
- * only to its sender (`viewerId`); everyone else sees "Email sent" / "Email received" with no subject or body.
+ * A timeline entry. `by: null` = system. Privacy (web-mail release 1): an email line shows its subject and body to the
+ * mailbox owner and to Administrators and Managers (`viewer.teamMail`), whoever logged it; everyone else sees
+ * "Email sent" / "Email received" with no subject or body. A message no longer stored has no owner: hidden.
  */
-export function activityRow(a: ActivityRow, viewerId?: number) {
-  const hidden = viewerId !== undefined && a.activityType === 'email' && a.relatedType === 'email_message' && a.byUserId !== viewerId;
+export function activityRow(a: ActivityRow, viewer?: TimelineViewer) {
+  const hidden = viewer !== undefined && a.activityType === 'email' && a.relatedType === 'email_message' && !viewer.teamMail
+    && (a.relatedId === null || viewer.mailOwners.get(a.relatedId) !== viewer.id);
   return {
     id: a.id,
     leadId: a.leadId,

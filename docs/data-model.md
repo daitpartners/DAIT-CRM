@@ -301,8 +301,7 @@ tokens (access tokens are cached in memory only), scopes, Graph change-notificat
 delta queries every 5 minutes instead), IMAP / SMTP and Gmail columns.
 
 ### email_messages
-A user's own mail, private to `user_id`. Lead mail only (web-mail release 1): Administrators and Managers (right
-`view_team_mail`) read other users' lead mail, view only.
+A user's mail (`user_id` = the mailbox owner). Lead mail belongs to the mailbox owner. Administrators and Managers can read every user's lead mail (view only, each opening audited); Sales representatives and Data research users see only their own. Personal and other mail is not stored. (Right `view_team_mail`; drafts stay with their owner.)
 
 | Column | Type | Notes |
 |---|---|---|

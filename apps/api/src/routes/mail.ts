@@ -560,7 +560,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // Add follow-up task (prototype): due tomorrow, assigned to you, on the message's lead. Tasks are seen by everyone who
-  // sees the lead, so the title names no sender or subject (owner: nobody else sees anyone's mail). Also on another
+  // sees the lead, so the title names no sender or subject (Sales reps see only their own mail). Also on another
   // user's lead mail in team view: the task is the viewer's.
   app.post<{ Params: { id: string } }>('/mail/:id/task', pre, async (request, reply) => {
     const user = request.user!;

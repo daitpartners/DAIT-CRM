@@ -264,8 +264,8 @@ subject, body, received_at, lead_id, contact_id, company_id, quotation_id), `ema
 > - **Microsoft 365 only** (owner's choice); Google Workspace and IMAP show "Coming later". One Entra app serves sign-in
 >   and mail. A **system mailbox** (connected by an administrator) exists for CRM mail; each user connects their own
 >   **personal mailbox** in Settings → Email & calendar connections. Refresh tokens are AES-256-GCM encrypted.
-> - **Privacy rule (owner):** a user's mail is visible only to that user, administrators included. On the lead timeline
->   others see only "Email sent · by {name}", the sender also sees the subject.
+> - **Privacy rule (web-mail release 1):** Lead mail belongs to the mailbox owner. Administrators and Managers can read every user's lead mail (view only, each opening audited); Sales representatives and Data research users see only their own. Personal and other mail is not stored.
+>   On the lead timeline the mailbox owner, Administrators and Managers see the subject; others see only "Email sent · by {name}".
 > - **Sync polls Graph** with delta queries every 5 minutes per folder (inbox, sent, drafts, archive; last 90 days), not
 >   change-notification webhooks. Bodies are plain text; attachments are listed by name, not downloaded; drafts are view
 >   only; shared mailboxes are stored in Options but not synced.
@@ -468,7 +468,7 @@ Validate all input server-side; protect the public endpoint (Section 6).
 > four roles, enforced in the API (a hidden row answers 404). Administrator and Manager see all leads; Sales
 > Representative sees own and unassigned leads (can claim) and their companies; Data Research User sees prospects, own
 > leads, companies and research, no quotations or email. Only Administrators edit Settings, Company details and the
-> Enrichment engine. **Mail and Outlook calendar are private to their owner, administrators included** (owner rule).
+> Enrichment engine. **Lead mail belongs to the mailbox owner. Administrators and Managers can read every user's lead mail (view only, each opening audited); Sales representatives and Data research users see only their own. Personal and other mail is not stored.** The Outlook calendar stays private to its owner, administrators included (owner rule).
 > Every write is validated with Zod and audited; every editable record uses `updated_at` concurrency (409 on a stale
 > write); every browser write must come from the site's own origin; only `http`, `https`, `mailto`, `tel` URLs are
 > accepted.

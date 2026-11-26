@@ -9,10 +9,16 @@ import { assertProjectFor, queueOutgoing } from '../mail/outgoing.js';
 import { guard, lockFresh } from './leads.js';
 import { FORMATTED_BODY_LIMIT, perUser } from '../mail/formatted.js';
 import { outgoingWithFiles } from '../mail/templateFiles.js';
+import { canSeeTeamMail, mailScope } from '../mail/access.js';
+import { audit } from '../audit.js';
 
-/** An email as its owner sees it (only ever returned to its owner). */
-export function emailView(m: EmailMessage) {
+/**
+ * An email on the lead page. `ownerName` is the mailbox owner's name when `viewerId` (the reader) is someone else (an
+ * Administrator or Manager reading the team's lead mail); null for the reader's own mail and when no reader is given.
+ */
+export function emailView(m: EmailMessage & { user?: { name: string } }, viewerId?: number) {
   return {
+    ownerName: viewerId !== undefined && m.userId !== viewerId ? (m.user?.name ?? null) : null,
     id: m.id, leadId: m.leadId, folder: m.folder, status: m.status, fromAddress: m.fromAddress,
     toAddresses: m.toAddresses as string[], ccAddresses: m.ccAddresses as string[], subject: m.subject, bodyText: m.bodyText,
     occurredAt: m.occurredAt, lastError: m.lastError,
@@ -20,8 +26,9 @@ export function emailView(m: EmailMessage) {
 }
 
 /**
- * Email from the lead page (release 2B-1). Privacy (owner, 22 Nov 2026): a message belongs to the user whose mailbox
- * it is; nobody else, administrators included, can list or read it.
+ * Email from the lead page (release 2B-1). Privacy (web-mail release 1): lead mail belongs to the mailbox owner.
+ * Administrators and Managers can read every user's lead mail (view only, each opening audited); Sales representatives
+ * and Data research users see only their own. Drafts stay with their owner.
  */
 export const leadEmailRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Params: { id: string } }>('/leads/:id/emails', { preHandler: [requireRight('use_email')], bodyLimit: FORMATTED_BODY_LIMIT, config: perUser(30) }, async (request, reply) => {
@@ -53,10 +60,17 @@ export const leadEmailRoutes: FastifyPluginAsync = async (app) => {
     const id = Number(request.params.id);
     return guard(reply, async () => {
       await assertLeadVisible(prisma, user, id, { includeArchived: true });
+      // Your own mail on the lead; with `view_team_mail`, every other user's team-readable mail too (Task 8's rule).
+      const scope = mailScope(user, canSeeTeamMail(user) ? 'all' : 'me');
       const rows = await prisma.emailMessage.findMany({
-        where: { leadId: id, userId: user.id, folder: { not: 'drafts' } }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: 200,
+        where: { AND: [scope.where, { leadId: id, folder: { not: 'drafts' } }] },
+        include: { user: { select: { name: true } } },
+        orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: 200,
       });
-      return { items: rows.map(emailView) };
+      const others = rows.filter((m) => m.userId !== user.id).map((m) => m.id);
+      // Reading another user's mail is audited: which messages, never their content.
+      if (others.length) await audit(prisma, { entityType: 'lead', entityId: id, action: 'view', userId: user.id, after: { emailMessageIds: others } });
+      return { items: rows.map((m) => emailView(m, user.id)) };
     });
   });
 };

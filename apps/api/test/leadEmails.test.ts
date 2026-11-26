@@ -95,23 +95,6 @@ describe('sending email from a lead (release 2B-1)', () => {
     expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).nextFollowUp).toBeNull();
   });
 
-  it('privacy: only the sender lists the message; others see "Email sent" without the subject', async () => {
-    const { rep, admin, lead } = await setup();
-    await personal(rep.id, 'seba@daitpartners.com');
-    const repCookie = await signIn(app, rep);
-    await call('POST', `/api/leads/${lead.id}/emails`, repCookie, body(lead.updatedAt));
-    const adminCookie = await signIn(app, admin);
-
-    expect((await call('GET', `/api/leads/${lead.id}/emails`, repCookie)).json().items).toHaveLength(1);
-    expect((await call('GET', `/api/leads/${lead.id}/emails`, adminCookie)).json().items).toEqual([]);
-
-    const titles = async (cookie: string) =>
-      ((await call('GET', `/api/leads/${lead.id}`, cookie)).json().activities as { activityType: string; title: string; body: string | null }[])
-        .filter((a) => a.activityType === 'email');
-    expect(await titles(repCookie)).toMatchObject([{ title: 'Email sent · ¿Una llamada esta semana?' }]);
-    expect(await titles(adminCookie)).toEqual([expect.objectContaining({ title: 'Email sent', body: null })]);
-  });
-
   it('the worker sends through the user\'s mailbox and marks the message sent', async () => {
     const { rep, lead } = await setup();
     const box = await personal(rep.id, 'seba@daitpartners.com');
@@ -288,6 +271,123 @@ describe('sending email from a lead (release 2B-1)', () => {
     fresh = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
     await call('POST', `/api/leads/${lead.id}/emails`, cookie, body(fresh.updatedAt));
     expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).status).toBe('Interested');
+  });
+});
+
+describe('lead Emails tab and timeline: Administrators and Managers see the team\'s lead mail (web-mail release 1)', () => {
+  /** An unassigned lead (so every Sales rep may open it) with mail in three mailboxes. */
+  async function team() {
+    const maya = await makeUser({ role: 'SALES_REPRESENTATIVE', name: 'Maya Pillai' });
+    const carlos = await makeUser({ role: 'SALES_REPRESENTATIVE', name: 'Carlos Mendez' });
+    const ravi = await makeUser({ role: 'SALES_REPRESENTATIVE', name: 'Ravi Kumar' });
+    const admin = await makeUser({ role: 'ADMINISTRATOR', name: 'Deepak Singh' });
+    const manager = await makeUser({ role: 'MANAGER', name: 'Neha Rao' });
+    const company = await makeCompany({ name: 'Grupo Andino' });
+    const lead = await makeLead({ companyId: company.id, assignedToId: null, status: 'Contacted' });
+    const mayaBox = await personal(maya.id, 'maya@daitpartners.com');
+    const carlosBox = await personal(carlos.id, 'carlos@daitpartners.com');
+    const adminBox = await personal(admin.id, 'deepak@daitpartners.com');
+    let n = 0;
+    const msg = (userId: number, accountId: number, data: Record<string, unknown>) => {
+      n += 1;
+      return prisma.emailMessage.create({
+        data: {
+          userId, accountId, folder: 'inbox', status: 'received', source: 'sync', fromAddress: 'ana@andino.cl', toAddresses: [],
+          subject: 'Proposal', bodyText: 'Looks good', graphId: `g-${n}`, threadId: `conv-${n}`, isRead: false,
+          occurredAt: new Date('2026-11-20T10:00:00Z'), leadId: lead.id, companyId: company.id, ...data,
+        },
+      });
+    };
+    const proposal = await msg(maya.id, mayaBox.id, { subject: 'Proposal' });
+    const pricing = await msg(carlos.id, carlosBox.id, { subject: 'Pricing', occurredAt: new Date('2026-11-20T11:00:00Z') });
+    const intro = await msg(admin.id, adminBox.id, { subject: 'Intro', occurredAt: new Date('2026-11-20T09:00:00Z') });
+    await msg(maya.id, mayaBox.id, { subject: 'Draft to Ana', folder: 'drafts', status: 'draft', occurredAt: new Date('2026-11-20T12:00:00Z') });
+    return { maya, carlos, ravi, admin, manager, lead, mayaBox, proposal, pricing, intro, msg };
+  }
+  const tab = async (leadId: number, cookie: string) =>
+    (await call('GET', `/api/leads/${leadId}/emails`, cookie)).json().items as { id: number; subject: string; ownerName: string | null }[];
+  const emailLines = async (leadId: number, cookie: string) =>
+    ((await call('GET', `/api/leads/${leadId}`, cookie)).json().activities as { activityType: string; title: string; body: string | null }[])
+      .filter((a) => a.activityType === 'email');
+
+  it('Emails tab: an Administrator or Manager lists every user\'s mail on the lead with ownerName; a Sales rep only their own', async () => {
+    const f = await team();
+    const adminItems = await tab(f.lead.id, await signIn(app, f.admin));
+    expect(adminItems.map((e) => [e.subject, e.ownerName])).toEqual([['Pricing', 'Carlos Mendez'], ['Proposal', 'Maya Pillai'], ['Intro', null]]);
+    const managerItems = await tab(f.lead.id, await signIn(app, f.manager));
+    expect(managerItems.map((e) => [e.subject, e.ownerName])).toEqual([['Pricing', 'Carlos Mendez'], ['Proposal', 'Maya Pillai'], ['Intro', 'Deepak Singh']]);
+    const mayaItems = await tab(f.lead.id, await signIn(app, f.maya));
+    expect(mayaItems.map((e) => [e.subject, e.ownerName])).toEqual([['Proposal', null]]);
+    const otherRepItems = await tab(f.lead.id, await signIn(app, f.ravi));
+    expect(otherRepItems).toEqual([]);
+  });
+
+  it('timeline: Administrators, Managers and the mailbox owner see the email subject; a Sales rep who does not own the mailbox sees "Email received" only', async () => {
+    const f = await team();
+    // The admin logs Maya's message: the line is the admin's, the mail stays Maya's (ruling 3: the mailbox owner decides).
+    expect((await call('POST', `/api/mail/${f.proposal.id}/log`, await signIn(app, f.admin))).statusCode).toBe(201);
+    const line = await prisma.leadActivity.findFirstOrThrow({ where: { activityType: 'email' } });
+    expect(line).toMatchObject({ title: 'Email received · Proposal', relatedId: f.proposal.id, byUserId: f.admin.id });
+    for (const viewer of [f.admin, f.manager, f.maya]) {
+      expect(await emailLines(f.lead.id, await signIn(app, viewer))).toMatchObject([{ title: 'Email received · Proposal' }]);
+    }
+    expect(await emailLines(f.lead.id, await signIn(app, f.carlos))).toEqual([expect.objectContaining({ title: 'Email received', body: null })]);
+  });
+
+  it('timeline: a line whose message is gone shows no subject, even to the user who logged it; the team still sees it', async () => {
+    const f = await team();
+    await prisma.leadActivity.create({
+      data: { leadId: f.lead.id, activityType: 'email', title: 'Email sent · Gone', body: 'text', relatedType: 'email_message', relatedId: 999_999, byUserId: f.maya.id },
+    });
+    expect(await emailLines(f.lead.id, await signIn(app, f.maya))).toEqual([expect.objectContaining({ title: 'Email sent', body: null })]);
+    expect(await emailLines(f.lead.id, await signIn(app, f.admin))).toMatchObject([{ title: 'Email sent · Gone' }]);
+  });
+
+  it('company activities follow the same rule', async () => {
+    const f = await team();
+    // A Sales rep sees a company through their own leads: Carlos's lead first, then handed to Maya (the mail stays Carlos's).
+    await prisma.lead.update({ where: { id: f.lead.id }, data: { assignedToId: f.carlos.id } });
+    await call('POST', `/api/mail/${f.pricing.id}/log`, await signIn(app, f.carlos));
+    const companyLines = async (cookie: string) =>
+      ((await call('GET', `/api/companies/${f.lead.companyId}/activities`, cookie)).json().items as { activityType: string; title: string }[])
+        .filter((a) => a.activityType === 'email').map((a) => a.title);
+    expect(await companyLines(await signIn(app, f.manager))).toEqual(['Email received · Pricing']);
+    expect(await companyLines(await signIn(app, f.carlos))).toEqual(['Email received · Pricing']);
+    await prisma.lead.update({ where: { id: f.lead.id }, data: { assignedToId: f.maya.id } });
+    expect(await companyLines(await signIn(app, f.maya))).toEqual(['Email received']);
+  });
+
+  it("listing others' mail on the lead writes one audit row with message ids and no content", async () => {
+    const f = await team();
+    await tab(f.lead.id, await signIn(app, f.admin));
+    const rows = await prisma.auditLog.findMany({ where: { action: 'view' } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ entityType: 'lead', entityId: String(f.lead.id), action: 'view', userId: f.admin.id });
+    expect(rows[0]!.after).toEqual({ emailMessageIds: [f.pricing.id, f.proposal.id] });
+    // Your own mail only (a Sales rep, or an admin on a lead with only their own mail): no audit row.
+    await prisma.auditLog.deleteMany();
+    await tab(f.lead.id, await signIn(app, f.maya));
+    const ownOnly = await makeLead({ assignedToId: null });
+    await f.msg(f.admin.id, (await prisma.emailAccount.findFirstOrThrow({ where: { userId: f.admin.id } })).id, { leadId: ownOnly.id });
+    await tab(ownOnly.id, await signIn(app, f.admin));
+    expect(await prisma.auditLog.count({ where: { action: 'view' } })).toBe(0);
+  });
+
+  it('mail of a deleted lead never reaches the lead tab (it has no lead)', async () => {
+    const f = await team();
+    await f.msg(f.maya.id, f.mayaBox.id, { subject: 'Old lead', leadId: null, leadDeletedAt: new Date('2026-11-25T10:00:00Z') });
+    expect((await tab(f.lead.id, await signIn(app, f.admin))).map((e) => e.subject)).toEqual(['Pricing', 'Proposal', 'Intro']);
+    expect((await tab(f.lead.id, await signIn(app, f.maya))).map((e) => e.subject)).toEqual(['Proposal']);
+  });
+
+  it('the sender still lists their own message from the lead page, with no owner name', async () => {
+    const { rep, lead } = await setup();
+    await personal(rep.id, 'seba@daitpartners.com');
+    const repCookie = await signIn(app, rep);
+    const sent = await call('POST', `/api/leads/${lead.id}/emails`, repCookie, body(lead.updatedAt));
+    expect(sent.json()).toMatchObject({ subject: '¿Una llamada esta semana?', ownerName: null });
+    expect(await tab(lead.id, repCookie)).toMatchObject([{ subject: '¿Una llamada esta semana?', ownerName: null }]);
+    expect(await emailLines(lead.id, repCookie)).toMatchObject([{ title: 'Email sent · ¿Una llamada esta semana?' }]);
   });
 });
 

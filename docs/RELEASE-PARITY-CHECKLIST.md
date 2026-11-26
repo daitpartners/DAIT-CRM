@@ -130,7 +130,7 @@ Prototype `#/settings` (cards "Email & calendar connections" and "Email template
 - [ ] With your mailbox connected: lead page → Email tab → To, Subject, Message → **Send email** → "Email queued — it is sent from {your address}"; the email arrives at the recipient and is in your Outlook **Sent Items**.
 - [ ] **Emails** tab: your email with Sending, then Sent (or Failed with the reason); open it to read it. The count is on the tab.
 - [ ] "Set follow-up in 3 days" sets the lead's next follow-up (open leads only).
-- [ ] History (Calls tab): you see "Email sent · {subject}"; a colleague, administrators included, sees only "Email sent", and their Emails tab does not show your email.
+- [ ] History (Calls tab): you see "Email sent · {subject}", and so do Administrators and Managers; another Sales representative sees only "Email sent", and their Emails tab does not show your email. An Administrator's or Manager's Emails tab lists your email with your name (view only).
 - [ ] Without a connected mailbox the Email tab says "Connect your Microsoft 365 mailbox in Settings to send email from the CRM." and Send is greyed out.
 
 ## Email screen and mail sync (release 2B-2)

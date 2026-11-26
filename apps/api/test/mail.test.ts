@@ -528,7 +528,7 @@ describe('reading mail on the Email screen (2B-2)', () => {
     }
   });
 
-  it('Log as activity writes "Email received" once; others see no subject; needs a lead', async () => {
+  it('Log as activity writes "Email received" once; a Sales rep who does not own the mailbox sees no subject; needs a lead', async () => {
     const { rep, admin, box, lead } = await setup();
     const loose = await synced(rep.id, box.id);
     const m = await synced(rep.id, box.id, { leadId: lead.id });
@@ -541,8 +541,13 @@ describe('reading mail on the Email screen (2B-2)', () => {
     expect(again.statusCode).toBe(409);
     expect(again.json().error).toBe('already_logged');
     expect(await prisma.leadActivity.findFirst({ where: { leadId: lead.id, activityType: 'email' } })).toMatchObject({ title: 'Email received · Proposal', relatedType: 'email_message', relatedId: m.id, byUserId: rep.id });
-    const seenByAdmin = (await call('GET', `/api/leads/${lead.id}`, await signIn(app, admin))).json().activities.find((x: { activityType: string }) => x.activityType === 'email');
-    expect(seenByAdmin).toMatchObject({ title: 'Email received', body: null });
+    const emailLine = async (viewer: typeof rep) =>
+      (await call('GET', `/api/leads/${lead.id}`, await signIn(app, viewer))).json().activities.find((x: { activityType: string }) => x.activityType === 'email');
+    // Web-mail release 1: Administrators and Managers read the team's lead mail, so they see the subject.
+    expect(await emailLine(admin)).toMatchObject({ title: 'Email received · Proposal' });
+    const other = await makeUser({ role: 'SALES_REPRESENTATIVE', name: 'Carlos Mendez' });
+    await prisma.lead.update({ where: { id: lead.id }, data: { assignedToId: other.id } });
+    expect(await emailLine(other)).toMatchObject({ title: 'Email received', body: null });
   });
 
   it('link puts the message on a lead you can see (its contact and company); a hidden lead is 404', async () => {
