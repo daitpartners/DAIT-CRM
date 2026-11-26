@@ -31,7 +31,7 @@ export interface MailMessage {
 }
 
 /** Folders mail sync reads (Graph well-known names). */
-export type MailFolder = 'inbox' | 'sentitems' | 'drafts' | 'archive';
+export type MailFolder = 'inbox' | 'sentitems' | 'drafts' | 'archive' | 'deleteditems';
 
 /** A message as sync stores it (addresses lower-cased). */
 export interface GraphMessage {
@@ -40,6 +40,8 @@ export interface GraphMessage {
   from: { name: string; address: string } | null;
   to: string[];
   cc: string[];
+  /** Hidden copies (from `bccRecipients`): Graph returns them on the sender's own copies only. */
+  bcc: string[];
   receivedAt: string;
   sentAt: string | null;
   isRead: boolean;
@@ -122,7 +124,7 @@ export const GRAPH_CALENDAR_SCOPES = ['https://graph.microsoft.com/Calendars.Rea
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
 const SYNC_FIELDS = [
-  'subject', 'from', 'toRecipients', 'ccRecipients', 'receivedDateTime', 'sentDateTime', 'isRead', 'isDraft',
+  'subject', 'from', 'toRecipients', 'ccRecipients', 'bccRecipients', 'receivedDateTime', 'sentDateTime', 'isRead', 'isDraft',
   'conversationId', 'internetMessageId', 'hasAttachments', 'body',
 ];
 /** Immutable ids survive moves between folders, so a message keeps its row when archived. */
@@ -193,6 +195,7 @@ function toMessage(v: Record<string, unknown>): GraphMessage {
     from: fromAddress ? { name: str(from?.emailAddress?.name) ?? '', address: fromAddress } : null,
     to: addressList(v.toRecipients),
     cc: addressList(v.ccRecipients),
+    bcc: addressList(v.bccRecipients),
     receivedAt: str(v.receivedDateTime) ?? new Date().toISOString(),
     sentAt: str(v.sentDateTime),
     isRead: v.isRead !== false,

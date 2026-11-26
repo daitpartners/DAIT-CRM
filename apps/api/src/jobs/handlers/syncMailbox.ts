@@ -4,19 +4,22 @@ import { enqueue, errorMessage } from '../queue.js';
 import { GraphError, deltaStartUrl, isAuthFailure, type GraphMessage, type MailFolder } from '../../graph/client.js';
 import { isForeignKeyViolation, isUniqueViolation } from '../../prismaErrors.js';
 import { mailUser, matchMail } from '../../mail/match.js';
+import { inLeadConversation, isLeadMail, loadLeadMailRules, participantsOf, type LeadMailRules } from '../../mail/leadMail.js';
 import { processEmailBody, storedColumns } from '../../mail/bodies.js';
 import type { AuthUser } from '../../plugins/auth.js';
 import type { SyncMailboxPayload } from '../types.js';
 import type { JobContext } from '../runner.js';
 
 /** Graph folder → CRM folder, in the order they are read. */
-const FOLDERS: { graph: MailFolder; folder: string }[] = [
+export const FOLDERS: { graph: MailFolder; folder: string }[] = [
   { graph: 'inbox', folder: 'inbox' },
   { graph: 'sentitems', folder: 'sent' },
   { graph: 'drafts', folder: 'drafts' },
   { graph: 'archive', folder: 'archive' },
+  { graph: 'deleteditems', folder: 'deleted' },
 ];
-export const INITIAL_DAYS = 90;
+/** A new mailbox (or a folder whose delta link expired) starts this many days back (web-mail release 1: 12 months). */
+export const INITIAL_DAYS = 365;
 export const MAX_PAGES = 20;
 export const BODY_MAX = 50_000;
 /** A CRM-sent message and its Sent Items copy are this close in time. */
@@ -79,7 +82,18 @@ async function bodyColumns(userId: number, m: GraphMessage, emailMessageId: numb
   return storedColumns(result);
 }
 
-async function storeMessage(account: EmailAccount, user: AuthUser, folder: string, m: GraphMessage, ctx: JobContext): Promise<void> {
+/** What `storeMessage` did with a message. */
+export type StoreResult = 'stored' | 'updated' | 'claimed' | 'skipped';
+
+/**
+ * Stores one synced message (web-mail release 1: lead mail only). A row already stored is updated whatever its
+ * participants are now; a Sent Items copy of a CRM-sent message claims the CRM row; any other message is stored only
+ * when it is lead mail (a participant is a lead/contact address or at a lead company's domain) or joins a
+ * conversation where the user already keeps lead-linked mail. A skipped message writes and fetches nothing.
+ */
+export async function storeMessage(
+  account: EmailAccount, user: AuthUser, folder: string, m: GraphMessage, ctx: JobContext, rules: LeadMailRules,
+): Promise<StoreResult> {
   const existing = await prisma.emailMessage.findUnique({ where: { userId_graphId: { userId: user.id, graphId: m.id } } });
   const outbound = m.isDraft || folder === 'sent' || folder === 'drafts' || isOwn(account, m.from?.address);
   const occurredAt = new Date(outbound ? (m.sentAt ?? m.receivedAt) : m.receivedAt);
@@ -89,13 +103,15 @@ async function storeMessage(account: EmailAccount, user: AuthUser, folder: strin
     // A row stored before bodies came as HTML takes the HTML (and the cleaner text) now that it is here anyway.
     const bodies = existing.bodyHtml === null && m.body.contentType === 'html' ? await bodyColumns(user.id, m, existing.id) : {};
     await prisma.emailMessage.update({ where: { id: existing.id }, data: { folder, isRead: outbound ? true : m.isRead, ...sentDraft, ...bodies } });
-    return;
+    return 'updated';
   }
-  if (outbound && !m.isDraft && (await claimCrmCopy(user.id, m))) return;
+  if (outbound && !m.isDraft && (await claimCrmCopy(user.id, m))) return 'claimed';
+  const participants = participantsOf({ from: m.from?.address ?? null, to: m.to, cc: m.cc, bcc: m.bcc });
+  if (!isLeadMail(rules, participants) && !(await inLeadConversation(prisma, user.id, m.conversationId))) return 'skipped';
 
   const links = await matchMail(prisma, user, {
     threadId: m.conversationId,
-    counterparts: outbound ? [...m.to, ...m.cc] : m.from ? [m.from.address] : [],
+    counterparts: outbound ? [...m.to, ...m.cc, ...m.bcc] : [...(m.from ? [m.from.address] : []), ...m.cc],
     ownAddress: account.address,
   });
   const threadId = m.conversationId?.slice(0, 255) ?? null;
@@ -109,7 +125,7 @@ async function storeMessage(account: EmailAccount, user: AuthUser, folder: strin
       userId: user.id, accountId: account.id, graphId: m.id, source: 'sync', folder,
       status: m.isDraft ? 'draft' : outbound ? 'sent' : 'received',
       fromAddress: m.from?.address ?? '', fromName: m.from?.name ? m.from.name.slice(0, 255) : null,
-      toAddresses: m.to, ccAddresses: m.cc, subject: m.subject.slice(0, 500), bodyText, bodyHtml,
+      toAddresses: m.to, ccAddresses: m.cc, bccAddresses: m.bcc, subject: m.subject.slice(0, 500), bodyText, bodyHtml,
       messageId: m.internetMessageId?.slice(0, 255) ?? null, threadId,
       isRead: outbound ? true : m.isRead, occurredAt,
       attachmentNames, projectId, ...linked,
@@ -126,8 +142,9 @@ async function storeMessage(account: EmailAccount, user: AuthUser, folder: strin
     }
     if (result.fellBack) warnFallback(row.id, result.reason);
   } catch (err) {
-    if (!isUniqueViolation(err)) throw err; // a concurrent run stored it first
+    if (!isUniqueViolation(err)) throw err; // a concurrent run stored it first: stored all the same
   }
+  return 'stored';
 }
 
 /**
@@ -149,6 +166,7 @@ async function applyRemovals(userId: number, removed: { graphId: string; folder:
  */
 async function readFolder(
   account: EmailAccount, user: AuthUser, f: { graph: MailFolder; folder: string }, link: string | undefined, since: Date, ctx: JobContext,
+  rules: LeadMailRules,
 ): Promise<{ link: string | null; removed: { graphId: string; folder: string }[]; more: boolean }> {
   let url = link ?? deltaStartUrl(f.graph, since);
   let restarted = !link;
@@ -167,7 +185,7 @@ async function readFolder(
       }
       throw err;
     }
-    for (const m of page.messages) await storeMessage(account, user, f.folder, m, ctx);
+    for (const m of page.messages) await storeMessage(account, user, f.folder, m, ctx, rules);
     for (const graphId of page.removed) removed.push({ graphId, folder: f.folder });
     if (!page.nextLink) return { link: page.deltaLink ?? url, removed, more: false };
     url = page.nextLink;
@@ -176,8 +194,10 @@ async function readFolder(
 }
 
 /**
- * Reads new mail from a personal mailbox (release 2B-2): each folder continues from its stored delta link, or starts
- * 90 days back; at most MAX_PAGES pages per folder per run (the rest a minute later). A revoked token puts the mailbox
+ * Reads new mail from a personal mailbox (release 2B-2; web-mail release 1: lead mail only; 12 months; five folders,
+ * Deleted Items included): each folder continues from its stored delta link, or starts INITIAL_DAYS (365) back; only
+ * lead mail is stored (`storeMessage`), with the rules loaded once per run; at most MAX_PAGES pages per folder per run
+ * (the rest a minute later). A revoked token puts the mailbox
  * in `error`; a folder that fails is skipped (noted in `lastError`) and read again next run; the run fails only when
  * every folder does.
  */
@@ -190,6 +210,7 @@ export async function syncMailboxHandler(job: Job, ctx: JobContext): Promise<voi
 
   const state: SyncState = { ...(account.syncState as SyncState) };
   const since = new Date(Date.now() - INITIAL_DAYS * 86_400_000);
+  const rules = await loadLeadMailRules(prisma);
   const removed: { graphId: string; folder: string }[] = [];
   const failures: { folder: MailFolder; err: unknown }[] = [];
   let more = false;
@@ -198,7 +219,7 @@ export async function syncMailboxHandler(job: Job, ctx: JobContext): Promise<voi
       // A folder's new link and removals count only once the folder is read to a stopping point; a folder that fails
       // keeps its old link, so the same changes (removals included) are read again next time. Storing is idempotent.
       try {
-        const done = await readFolder(account, user, f, state[f.graph]?.link, since, ctx);
+        const done = await readFolder(account, user, f, state[f.graph]?.link, since, ctx, rules);
         if (done.link) state[f.graph] = { link: done.link };
         else delete state[f.graph];
         removed.push(...done.removed);

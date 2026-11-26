@@ -12,7 +12,17 @@ import { makeCompany, makeContact, makeLead, makeProject, makeUser } from './fac
 beforeEach(async () => {
   await resetDb();
   boxes = 0;
+  acme = await seedAcme();
 });
+
+/** Company Acme (acme.com), contact ana@acme.com and a lead on it: the default `msg()` sender is lead mail. */
+let acme: Awaited<ReturnType<typeof seedAcme>>;
+async function seedAcme() {
+  const company = await makeCompany({ name: 'Acme', website: 'https://acme.com' });
+  const contact = await makeContact({ companyId: company.id, businessEmail: 'ana@acme.com' });
+  const lead = await makeLead({ companyId: company.id, contactId: contact.id });
+  return { company, contact, lead };
+}
 
 const ADDRESS = 'maya@daitpartners.com';
 
@@ -35,7 +45,7 @@ function msg(over: Partial<GraphMessage> = {}): GraphMessage {
   return {
     id: `g${n}`, subject: 'Hello', from: { name: 'Ana Ruiz', address: 'ana@acme.com' }, to: [ADDRESS], cc: [],
     receivedAt: '2026-11-20T10:00:00.000Z', sentAt: '2026-11-20T09:59:00.000Z', isRead: false, isDraft: false,
-    conversationId: `conv-${n}`, internetMessageId: `<m${n}@acme.com>`, hasAttachments: false, body: { contentType: 'text', content: 'Hi Maya' }, ...over,
+    bcc: [], conversationId: `conv-${n}`, internetMessageId: `<m${n}@acme.com>`, hasAttachments: false, body: { contentType: 'text', content: 'Hi Maya' }, ...over,
   };
 }
 
@@ -65,9 +75,7 @@ const final = (folder: string, messages: GraphMessage[], removed: string[] = [])
 describe('mail sync (2B-2)', () => {
   test('a first run stores each folder’s mail with status, links and attachments, and keeps the delta links', async () => {
     const { user, account } = await mailbox();
-    const company = await makeCompany({ website: 'https://acme.com' });
-    const contact = await makeContact({ companyId: company.id, businessEmail: 'ana@acme.com' });
-    const lead = await makeLead({ companyId: company.id, contactId: contact.id, assignedToId: user.id });
+    const { company, contact, lead } = acme;
     const inbound = msg({ hasAttachments: true });
     const sent = msg({ from: { name: 'Maya', address: ADDRESS }, to: ['ana@acme.com'], isRead: true, subject: 'Proposal' });
     const draft = msg({ from: { name: 'Maya', address: ADDRESS }, to: ['x@gmail.com'], isDraft: true, subject: 'Draft' });
@@ -75,12 +83,13 @@ describe('mail sync (2B-2)', () => {
 
     await syncMailboxHandler(job(account.id), { graph });
 
-    expect(seen.filter((u) => u.includes('/mailFolders/')).map((u) => /mailFolders\/(\w+)/.exec(u)![1])).toEqual(['inbox', 'sentitems', 'drafts', 'archive']);
+    expect(seen.filter((u) => u.includes('/mailFolders/')).map((u) => /mailFolders\/(\w+)/.exec(u)![1])).toEqual(['inbox', 'sentitems', 'drafts', 'archive', 'deleteditems']);
     const since = new URL(seen[0]!).searchParams.get('$filter')!.slice('receivedDateTime ge '.length);
-    expect(Math.round((Date.now() - Date.parse(since)) / 86_400_000)).toBe(90);
+    expect(Math.round((Date.now() - Date.parse(since)) / 86_400_000)).toBe(365);
     const rows = await prisma.emailMessage.findMany({ where: { userId: user.id }, orderBy: { id: 'asc' } });
+    // The draft to x@gmail.com has no lead participant: not stored.
     expect(rows.map((r) => [r.folder, r.status, r.source, r.isRead])).toEqual([
-      ['inbox', 'received', 'sync', false], ['sent', 'sent', 'sync', true], ['drafts', 'draft', 'sync', true],
+      ['inbox', 'received', 'sync', false], ['sent', 'sent', 'sync', true],
     ]);
     expect(rows[0]).toMatchObject({
       graphId: inbound.id, fromAddress: 'ana@acme.com', fromName: 'Ana Ruiz', subject: 'Hello', bodyText: 'Hi Maya', threadId: inbound.conversationId,
@@ -92,9 +101,10 @@ describe('mail sync (2B-2)', () => {
     expect(after.syncState).toEqual({
       inbox: { link: 'https://graph.microsoft.com/v1.0/delta/inbox/1' }, sentitems: { link: 'https://graph.microsoft.com/v1.0/delta/sentitems/1' },
       drafts: { link: 'https://graph.microsoft.com/v1.0/delta/drafts/1' }, archive: { link: 'https://graph.microsoft.com/v1.0/delta/archive/done' },
+      deleteditems: { link: 'https://graph.microsoft.com/v1.0/delta/deleteditems/done' },
     });
     expect(after.lastSyncAt).toBeInstanceOf(Date);
-    expect(after.messageCount).toBe(3);
+    expect(after.messageCount).toBe(2);
   });
 
   test('a later run continues from the stored links', async () => {
@@ -213,7 +223,7 @@ describe('mail sync (2B-2)', () => {
   test('when every folder fails the run fails', async () => {
     const { account } = await mailbox();
     const down = new GraphError('graph_request_failed status=503', 503);
-    const { graph } = scripted({ 'start:inbox': down, 'start:sentitems': down, 'start:drafts': down, 'start:archive': down });
+    const { graph } = scripted({ 'start:inbox': down, 'start:sentitems': down, 'start:drafts': down, 'start:archive': down, 'start:deleteditems': down });
     await expect(syncMailboxHandler(job(account.id), { graph })).rejects.toThrow('503');
     expect((await prisma.emailAccount.findUniqueOrThrow({ where: { id: account.id } })).lastSyncAt).toBeNull();
   });
@@ -230,7 +240,7 @@ describe('mail sync (2B-2)', () => {
   test('other failures leave the mailbox connected', async () => {
     const { account } = await mailbox();
     const down = new GraphError('graph_request_failed status=503', 503);
-    const { graph } = scripted({ 'start:inbox': down, 'start:sentitems': down, 'start:drafts': down, 'start:archive': down });
+    const { graph } = scripted({ 'start:inbox': down, 'start:sentitems': down, 'start:drafts': down, 'start:archive': down, 'start:deleteditems': down });
     await expect(syncMailboxHandler(job(account.id), { graph })).rejects.toThrow('503');
     expect((await prisma.emailAccount.findUniqueOrThrow({ where: { id: account.id } })).status).toBe('connected');
   });
@@ -370,6 +380,107 @@ describe('mail sync (2B-2)', () => {
   });
 });
 
+describe('lead mail only (web-mail release 1)', () => {
+  const filterSince = (url: string) => new URL(url).searchParams.get('$filter')!.slice('receivedDateTime ge '.length);
+
+  test('mail with no lead participant is not stored, not counted and costs no attachment call', async () => {
+    const { account } = await mailbox();
+    let attachmentCalls = 0;
+    const m = msg({ from: { name: 'Friend', address: 'friend@gmail.com' }, to: [ADDRESS], hasAttachments: true, body: { contentType: 'html', content: '<p>Hi</p>' } });
+    const { graph } = scripted({ 'start:inbox': final('inbox', [m]) }, {
+      async attachmentNames() {
+        attachmentCalls += 1;
+        return ['x.pdf'];
+      },
+    });
+    await syncMailboxHandler(job(account.id), { graph });
+    expect(await prisma.emailMessage.count()).toBe(0);
+    expect(attachmentCalls).toBe(0);
+    expect((await prisma.emailAccount.findUniqueOrThrow({ where: { id: account.id } })).messageCount).toBe(0);
+  });
+
+  test('kept when From, To, Cc or Bcc is a lead/contact address or at a lead company domain', async () => {
+    const { user, account } = await mailbox();
+    const me = { name: 'Maya', address: ADDRESS };
+    const { graph } = scripted({
+      'start:inbox': final('inbox', [
+        msg({ subject: 'domain', from: { name: 'Bob', address: 'bob@acme.com' } }),
+        msg({ subject: 'cc', from: { name: 'Friend', address: 'friend@gmail.com' }, cc: ['ana@acme.com'] }),
+        msg({ subject: 'none', from: { name: 'Friend', address: 'friend@gmail.com' }, cc: ['other@elsewhere.org'] }),
+      ]),
+      'start:sentitems': final('sentitems', [
+        msg({ subject: 'to', from: me, to: ['ana@acme.com'] }),
+        msg({ subject: 'bcc', from: me, to: ['friend@gmail.com'], bcc: ['ana@acme.com'] }),
+      ]),
+    });
+    await syncMailboxHandler(job(account.id), { graph });
+    const rows = await prisma.emailMessage.findMany({ where: { userId: user.id } });
+    expect(rows.map((r) => r.subject).sort()).toEqual(['bcc', 'cc', 'domain', 'to']);
+    const bccRow = rows.find((r) => r.subject === 'bcc')!;
+    expect(bccRow.bccAddresses).toEqual(['ana@acme.com']);
+    // Outbound mail matches its Bcc too.
+    expect(bccRow.leadId).toBe(acme.lead.id);
+  });
+
+  test('an internal forward in a conversation that already has a lead-linked message is kept', async () => {
+    const { user, account } = await mailbox();
+    await prisma.emailMessage.create({
+      data: {
+        userId: user.id, accountId: account.id, graphId: 'first', folder: 'inbox', status: 'received', source: 'sync', fromAddress: 'ana@acme.com',
+        subject: 'Proposal', threadId: 'conv-fwd', leadId: acme.lead.id,
+      },
+    });
+    const fwd = msg({ subject: 'FW: Proposal', from: { name: 'Raj', address: 'raj@daitpartners.com' }, to: [ADDRESS], conversationId: 'conv-fwd' });
+    const { graph } = scripted({ 'start:inbox': final('inbox', [fwd]) });
+    await syncMailboxHandler(job(account.id), { graph });
+    expect(await prisma.emailMessage.findFirstOrThrow({ where: { graphId: fwd.id } })).toMatchObject({ leadId: acme.lead.id, threadId: 'conv-fwd' });
+  });
+
+  test('colleague-only mail at daitpartners.com is not stored', async () => {
+    const { account } = await mailbox();
+    const m = msg({ from: { name: 'Raj', address: 'raj@daitpartners.com' }, to: [ADDRESS], cc: ['carlos@daitpartners.com'] });
+    const { graph } = scripted({ 'start:inbox': final('inbox', [m]) });
+    await syncMailboxHandler(job(account.id), { graph });
+    expect(await prisma.emailMessage.count()).toBe(0);
+  });
+
+  test('Deleted Items is read as a fifth folder; a message moved there from Inbox keeps its row with folder deleted', async () => {
+    const { user, account } = await mailbox();
+    const moved = await prisma.emailMessage.create({
+      data: { userId: user.id, accountId: account.id, graphId: 'moved', folder: 'inbox', status: 'received', source: 'sync', fromAddress: 'ana@acme.com', subject: 's' },
+    });
+    const { graph, seen } = scripted({
+      'start:inbox': final('inbox', [], ['moved']),
+      'start:deleteditems': final('deleteditems', [msg({ id: 'moved' })]),
+    });
+    await syncMailboxHandler(job(account.id), { graph });
+    expect(seen.some((u) => u.includes('/mailFolders/deleteditems/messages/delta'))).toBe(true);
+    const row = await prisma.emailMessage.findUniqueOrThrow({ where: { id: moved.id } });
+    expect(row.folder).toBe('deleted');
+  });
+
+  test('a new mailbox starts 365 days back', async () => {
+    const { account } = await mailbox();
+    const { graph, seen } = scripted({});
+    await syncMailboxHandler(job(account.id), { graph });
+    expect(new Date(filterSince(seen[0]!)).getTime()).toBeCloseTo(Date.now() - 365 * 86_400_000, -5);
+  });
+
+  test('a stored row whose contact email changed since is still updated, never removed', async () => {
+    const { user, account } = await mailbox();
+    const m = msg({ from: { name: 'Old', address: 'old@formerco.org' } });
+    await prisma.emailMessage.create({
+      data: {
+        userId: user.id, accountId: account.id, graphId: m.id, folder: 'inbox', status: 'received', source: 'sync', fromAddress: 'old@formerco.org',
+        subject: 'Hello', isRead: false, leadId: acme.lead.id,
+      },
+    });
+    const { graph } = scripted({ 'start:archive': final('archive', [{ ...m, isRead: true }]) });
+    await syncMailboxHandler(job(account.id), { graph });
+    expect(await prisma.emailMessage.findFirstOrThrow({ where: { graphId: m.id } })).toMatchObject({ folder: 'archive', isRead: true, leadId: acme.lead.id });
+  });
+});
+
 describe('mail sync scheduling (2B-2)', () => {
   test('one job per connected mailbox with Sync mail on, 5 minutes after its last sync, never two', async () => {
     const recent = new Date(Date.now() - 60_000);
@@ -427,7 +538,7 @@ describe('project tag on synced replies (3B)', () => {
   test('a reply in a conversation whose earlier message of yours carries a project inherits the latest one', async () => {
     const { user, account } = await mailbox();
     const other = await mailbox();
-    const company = await makeCompany({ website: 'https://acme.com' });
+    const { company } = acme;
     const older = await makeProject({ companyId: company.id, managerId: user.id });
     const latest = await makeProject({ companyId: company.id, managerId: user.id });
     const theirs = await makeProject({ companyId: company.id, managerId: other.user.id });

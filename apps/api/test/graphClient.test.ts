@@ -205,7 +205,7 @@ describe('graph client — mail sync and actions (2B-2)', () => {
     const page = await createGraphClient(env).deltaPage(await account(), 'https://graph.microsoft.com/v1.0/x');
     expect(page).toEqual({
       messages: [{
-        id: 'g1', subject: 'Re: Proposal', from: { name: 'Ana Ruiz', address: 'ana@acme.com' }, to: ['maya@daitpartners.com'], cc: ['cc@acme.com'],
+        id: 'g1', subject: 'Re: Proposal', from: { name: 'Ana Ruiz', address: 'ana@acme.com' }, to: ['maya@daitpartners.com'], cc: ['cc@acme.com'], bcc: [],
         receivedAt: '2026-11-20T10:00:00Z', sentAt: '2026-11-20T09:59:00Z', isRead: false, isDraft: false, conversationId: 'conv-1',
         internetMessageId: '<m1@acme.com>', hasAttachments: true, body: { contentType: 'html', content: '<p>Hello</p>' },
       }],
@@ -219,6 +219,18 @@ describe('graph client — mail sync and actions (2B-2)', () => {
     expect(headers(init).Prefer).toContain('odata.maxpagesize=50');
     expect(headers(init).Prefer).toContain('outlook.body-content-type="html"');
     expect(msalState.scopes[0]).toEqual(GRAPH_MAIL_SCOPES);
+  });
+
+  test('deltaStartUrl asks for bccRecipients; deltaPage maps them lower-cased', async () => {
+    const q = new URL(deltaStartUrl('deleteditems', new Date('2026-08-24T00:00:00.000Z'))).searchParams;
+    expect(q.get('$select')!.split(',')).toContain('bccRecipients');
+    vi.stubGlobal('fetch', vi.fn(async () => json({
+      value: [{ id: 'g1', bccRecipients: [{ emailAddress: { address: ' Hidden@Acme.com ' } }] }, { id: 'g2' }],
+      '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/d',
+    })));
+    const page = await createGraphClient(env).deltaPage(await account(), 'https://graph.microsoft.com/v1.0/x');
+    expect(page.messages[0]!.bcc).toEqual(['hidden@acme.com']);
+    expect(page.messages[1]!.bcc).toEqual([]);
   });
 
   test('deltaPage keeps a plain-text body as text, and a missing body as empty text', async () => {
