@@ -3,10 +3,9 @@ import { prisma } from '../../db.js';
 import { enqueue, errorMessage } from '../queue.js';
 import { GraphError, calendarDeltaStartUrl, isAuthFailure, type GraphEvent } from '../../graph/client.js';
 import { isUniqueViolation } from '../../prismaErrors.js';
-import { mailUser, matchMail } from '../../mail/match.js';
+import { mailUser, matchCalendarEvent } from '../../mail/match.js';
 import { dropCalendarCopy, type CalendarSyncState } from '../../calendar/schedule.js';
 import { allDayMidnight } from '../../leads/dates.js';
-import { canSeeLead } from '../../leads/visibility.js';
 import type { AuthUser } from '../../plugins/auth.js';
 import type { SyncCalendarPayload } from '../types.js';
 import type { JobContext } from '../runner.js';
@@ -24,9 +23,9 @@ const DAY_MS = 86_400_000;
 const isOwn = (account: EmailAccount, address: string) => [account.address, account.sendAs].some((a) => a?.toLowerCase() === address);
 
 /**
- * Stores or updates one event for its owner; a cancelled one is deleted. The lead link follows mail matching (an
- * attendee or the organiser, not the mailbox itself), but only to a lead the user can see (mail matching ignores
- * visibility since web-mail release 1; calendar links keep the 3C rule); only the lead and company are kept. Every stored event is written, so a restart can tell which ones it did not see.
+ * Stores or updates one event for its owner; a cancelled one is deleted. The lead link follows the 3C rule (an
+ * attendee or the organiser, not the mailbox itself, who is a contact on an open lead the user can see); only the
+ * lead and company are kept. Every stored event is written, so a restart can tell which ones it did not see.
  */
 async function storeEvent(account: EmailAccount, user: AuthUser, e: GraphEvent): Promise<void> {
   if (e.isCancelled) {
@@ -36,9 +35,7 @@ async function storeEvent(account: EmailAccount, user: AuthUser, e: GraphEvent):
   const attendees = [...new Set(e.attendees.map((a) => a.trim().toLowerCase()).filter(Boolean))];
   const organizerAddress = e.organizer?.address.trim().toLowerCase() || null;
   const counterparts = [...attendees, ...(organizerAddress ? [organizerAddress] : [])].filter((a) => !isOwn(account, a));
-  const matched = await matchMail(prisma, user, { threadId: null, counterparts, ownAddress: account.address });
-  const leadId = matched.leadId !== null && (await canSeeLead(prisma, user, matched.leadId)) ? matched.leadId : null;
-  const { companyId } = matched;
+  const { leadId, companyId } = await matchCalendarEvent(prisma, user, { counterparts, ownAddress: account.address });
   // All-day: midnight to midnight UTC of its dates in the owner's zone.
   const when = (iso: string) => (e.isAllDay ? allDayMidnight(new Date(iso), user.timezone) : new Date(iso));
   const data = {

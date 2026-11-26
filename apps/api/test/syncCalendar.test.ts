@@ -143,6 +143,41 @@ describe('calendar sync (3C)', () => {
     expect(rows.map((r) => [r.graphId, r.leadId, r.companyId])).toEqual([[visible.id, lead.id, acme.id], [hidden.id, null, hiddenCo.id]]);
   });
 
+  test("a rep's own open lead links the event even when another rep's lead at the company was updated more recently", async () => {
+    const { user, account } = await mailbox();
+    const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
+    const acme = await makeCompany({ website: 'https://acme.com' });
+    const ana = await makeContact({ companyId: acme.id, businessEmail: 'ana@acme.com' });
+    const mine = await makeLead({ companyId: acme.id, contactId: ana.id, assignedToId: user.id });
+    const theirs = await makeLead({ companyId: acme.id, contactId: ana.id, assignedToId: other.id });
+    await prisma.$executeRaw`UPDATE leads SET updated_at = ${new Date('2026-01-01T00:00:00Z')} WHERE id = ${mine.id}`;
+    await prisma.$executeRaw`UPDATE leads SET updated_at = ${new Date('2026-06-01T00:00:00Z')} WHERE id = ${theirs.id}`;
+    const byContact = event({ attendees: ['ana@acme.com'] });
+    const byDomain = event({ attendees: ['new.person@acme.com'] });
+    const { graph } = scripted({ start: final([byContact, byDomain]) });
+
+    await syncCalendarHandler(job(account.id), { graph });
+
+    const rows = await prisma.calendarEvent.findMany({ where: { userId: user.id }, orderBy: { id: 'asc' } });
+    expect(rows.map((r) => [r.graphId, r.leadId, r.companyId])).toEqual([[byContact.id, mine.id, acme.id], [byDomain.id, mine.id, acme.id]]);
+  });
+
+  test("a closed or archived lead the user can see never links an event (open leads only); the company still does", async () => {
+    const { user, account } = await mailbox();
+    const acme = await makeCompany({ website: 'https://acme.com' });
+    const ana = await makeContact({ companyId: acme.id, businessEmail: 'ana@acme.com' });
+    await makeLead({ companyId: acme.id, contactId: ana.id, assignedToId: user.id, status: 'Won' });
+    await makeLead({ companyId: acme.id, contactId: ana.id, assignedToId: user.id, archivedAt: new Date() });
+    const byContact = event({ attendees: ['ana@acme.com'] });
+    const byDomain = event({ attendees: ['new.person@acme.com'] });
+    const { graph } = scripted({ start: final([byContact, byDomain]) });
+
+    await syncCalendarHandler(job(account.id), { graph });
+
+    const rows = await prisma.calendarEvent.findMany({ where: { userId: user.id }, orderBy: { id: 'asc' } });
+    expect(rows.map((r) => [r.graphId, r.leadId, r.companyId])).toEqual([[byContact.id, null, acme.id], [byDomain.id, null, acme.id]]);
+  });
+
   test('a run more than 24 hours after the last restart starts again from scratch and drops events no longer in the window', async () => {
     const { user, account } = await mailbox({ state: { link: LINK, at: new Date().toISOString() }, syncAt: new Date(Date.now() - 25 * 3600_000) });
     const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });

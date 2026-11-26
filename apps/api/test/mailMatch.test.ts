@@ -169,7 +169,6 @@ describe('matching synced mail to CRM records (web-mail release 1: lead visibili
     });
     await prisma.lead.update({ where: { id: lead.id }, data: { assignedToId: other.id } });
     const links = await matchMail(prisma, user, { threadId: 'conv-3', counterparts: [], ownAddress: own });
-    expect(links.leadId).toBe(lead.id);
     expect(links).toEqual({ leadId: lead.id, contactId: contact.id, companyId: company.id });
   });
 
