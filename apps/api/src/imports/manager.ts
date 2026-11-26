@@ -8,7 +8,7 @@ import { IMPORT_RETENTION_DAYS, pageArgs, type ImportBatchListQuery, type Import
 import { prisma } from '../db.js';
 import { startOfDayIn, todayIn } from '../leads/dates.js';
 import { NotFoundError } from '../validate.js';
-import { ImportError } from './batches.js';
+import { ImportError, NOT_REMOVED } from './batches.js';
 import { importFileStream, removeBatchFiles, removeImportFile, storedFileExists } from './storage.js';
 import { canUndo } from './undo.js';
 
@@ -107,6 +107,7 @@ export async function batchDetail(id: number) {
     include: {
       createdBy: { select: { name: true } }, importedBy: { select: { name: true } }, undoneBy: { select: { name: true } },
       files: {
+        where: NOT_REMOVED,
         orderBy: { id: 'asc' },
         select: { id: true, name: true, ext: true, size: true, status: true, error: true, meta: true, createdAt: true, deletedAt: true },
       },

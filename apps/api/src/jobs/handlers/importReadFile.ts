@@ -14,6 +14,12 @@ export const importReadOptions: ReadInWorkerOptions = {};
 /** Test seam: a fake Claude runner and environment for staging documents. */
 export const importReadDeps: ImportDeps = {};
 
+/** The file was taken back (Remove in step 1) after its job started: its row is gone or kept only as Removed. */
+async function removedMeanwhile(fileId: number): Promise<boolean> {
+  const file = await prisma.importFile.findUnique({ where: { id: fileId }, select: { deletedAt: true } });
+  return !file || file.deletedAt !== null;
+}
+
 /**
  * `import_read_file` (Import leads): reads one stored upload in a child process (timeout, heap ceiling) and records
  * its status (Read / Scan / Failed), meta and failure code. Anything thrown marks the file Failed `unreadable` and
@@ -44,6 +50,8 @@ export async function importReadFileHandler(job: Job, _ctx: JobContext): Promise
     const status = result.status === 'Read' && result.extract ? 'Reading' : result.status;
     written = (await write({ status, meta: result.meta as Prisma.InputJsonValue, error: result.error ?? null })).count === 1;
   } catch (e) {
+    // Removed in step 1 while it was being read (its bytes may already be gone): nothing to record, the job ends quietly.
+    if (await removedMeanwhile(fileId)) return;
     await write({ status: 'Failed', meta: {}, error: 'unreadable' });
     throw e;
   }
@@ -55,7 +63,9 @@ export async function importReadFileHandler(job: Job, _ctx: JobContext): Promise
   } catch (e) {
     // A file whose rows could not be staged is not half-staged: no rows, Failed, the error kept on the job.
     await prisma.importRow.deleteMany({ where: { fileId } });
-    await prisma.importFile.update({ where: { id: fileId }, data: { status: 'Failed', error: 'unreadable' } });
+    // Removed in step 1 while it was being staged (e.g. a Claude reservation found the row gone): nothing to bring back.
+    if (await removedMeanwhile(fileId)) return;
+    await prisma.importFile.updateMany({ where: { id: fileId }, data: { status: 'Failed', error: 'unreadable' } });
     await refreshBatch(file.batchId, []).catch(() => undefined);
     throw e;
   }

@@ -20,7 +20,7 @@ export class ImportError extends Error {
     readonly code:
       | 'batch_locked' | 'research_started' | 'too_many_files' | 'file_type' | 'file_size' | 'files_reading' | 'no_rows'
       | 'research_stopped' | 'research_done' | 'claude_cap_reached' | 'choice_required' | 'nothing_to_import' | 'cannot_continue' | 'import_running'
-      | 'file_deleted' | 'try_again',
+      | 'file_deleted' | 'try_again' | 'file_remove_locked',
     readonly status: number,
   ) {
     super(code);
@@ -115,7 +115,7 @@ export async function addFile(user: AuthUser, batchId: number, name: string, dat
       if (!batch) throw new NotFoundError();
       if (RESEARCH_STARTED.has(batch.status)) throw new ImportError('research_started', 409);
       if (!ACCEPTS_FILES.has(batch.status)) throw new ImportError('batch_locked', 409);
-      if (await tx.importFile.count({ where: { batchId } }) >= IMPORT_MAX_FILES) throw new ImportError('too_many_files', 400);
+      if (await tx.importFile.count({ where: { batchId, ...NOT_REMOVED } }) >= IMPORT_MAX_FILES) throw new ImportError('too_many_files', 400);
       const ext = importExt(fileName);
       if (!ext) throw new ImportError('file_type', 400);
       if (data.length === 0 || data.length > IMPORT_MAX_FILE_BYTES) throw new ImportError('file_size', 400);
@@ -131,12 +131,52 @@ export async function addFile(user: AuthUser, batchId: number, name: string, dat
   }
 }
 
-/** A batch's files, in upload order. */
+/**
+ * `import_files.status` of a file a person took back in step 1 after Claude had already been spent reading it: the row
+ * stays (deleted_at set, no rows, nothing on disk) only so the month's Claude count keeps that spend; every list and the
+ * 10-file limit leave it out. A removed file that spent no Claude call is deleted outright.
+ */
+export const REMOVED_FILE = 'Removed';
+/** Leaves removed files out of a file query. */
+export const NOT_REMOVED = { status: { not: REMOVED_FILE } } satisfies Prisma.ImportFileWhereInput;
+
+/**
+ * Takes an uploaded file back (Import leads step 1, "Remove {name}"): only while the batch is still Uploading (409
+ * `file_remove_locked` once it has been sorted; 404 for a file not in the batch). Under the batch and file row locks it
+ * removes the file's staged rows and the file row (kept as Removed when it spent Claude calls, see REMOVED_FILE) and
+ * updates the batch's row count; the stored bytes are removed after the commit. A read still running for the file is
+ * harmless: its result is written only while the file is still Reading, staging re-checks the file under the batch lock,
+ * and the job ends quietly once the file is gone (importReadFile), so nothing is brought back.
+ */
+export async function removeFile(batchId: number, fileId: number): Promise<void> {
+  const storagePath = await prisma.$transaction(async (tx) => {
+    const [batch] = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM import_batches WHERE id = ${batchId} FOR UPDATE`;
+    if (!batch) throw new NotFoundError();
+    const [file] = await tx.$queryRaw<{ storage_path: string; claude_calls: number; status: string }[]>`
+      SELECT storage_path, claude_calls, status FROM import_files WHERE id = ${fileId} AND batch_id = ${batchId} FOR UPDATE`;
+    if (!file || file.status === REMOVED_FILE) throw new NotFoundError();
+    if (batch.status !== 'Uploading') throw new ImportError('file_remove_locked', 409);
+    await tx.importRow.deleteMany({ where: { fileId } });
+    if (file.claude_calls > 0) {
+      await tx.importFile.update({
+        where: { id: fileId },
+        data: { status: REMOVED_FILE, deletedAt: new Date(), error: null, meta: {}, columnMap: {}, questions: [] },
+      });
+    } else {
+      await tx.importFile.delete({ where: { id: fileId } });
+    }
+    await tx.importBatch.update({ where: { id: batchId }, data: { rowCount: await tx.importRow.count({ where: { batchId } }) } });
+    return file.storage_path;
+  });
+  if (storagePath) await removeImportFile(storagePath).catch(() => undefined);
+}
+
+/** A batch's files, in upload order (removed files left out). */
 export async function listFiles(batchId: number) {
   const batch = await prisma.importBatch.findUnique({ where: { id: batchId }, select: { id: true } });
   if (!batch) throw new NotFoundError();
   return prisma.importFile.findMany({
-    where: { batchId }, orderBy: { id: 'asc' },
+    where: { batchId, ...NOT_REMOVED }, orderBy: { id: 'asc' },
     select: { id: true, name: true, ext: true, size: true, status: true, meta: true, error: true },
   });
 }

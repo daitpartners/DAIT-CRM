@@ -484,8 +484,12 @@ describe('delete leads: review round (contacts, drafts, unknown ids, opt-outs)',
       method: 'POST', url: `/api/leads/${fresh.id}/do-not-email`, headers: { cookie: c }, payload: { doNotEmail: false, updatedAt: updatedAt.toISOString() },
     });
     const repCookie = await signIn(app, rep);
-    // Nothing to untick (Do not email already off): the list stays as it is.
-    expect((await untick(repCookie, fresh.updatedAt)).statusCode).toBe(200);
+    // The stored flag is off but the contact's address is listed: the lead shows Do not email ticked (S1, 26 Nov 2026),
+    // so unticking it is a real untick, refused for a Sales Rep; the list stays as it is.
+    const shown = await app.inject({ method: 'GET', url: `/api/leads/${fresh.id}`, headers: { cookie } });
+    expect(shown.json()).toMatchObject({ doNotEmail: false, contactUnsubscribed: true });
+    const early = await untick(repCookie, fresh.updatedAt);
+    expect([early.statusCode, early.json()]).toEqual([409, { error: 'address_suppressed' }]);
     expect(await prisma.emailSuppression.count()).toBe(2);
 
     // A real untick of a listed address: a Sales Rep is refused, nothing changes.
@@ -536,5 +540,101 @@ describe('delete leads: review round (contacts, drafts, unknown ids, opt-outs)',
     expect(switched.statusCode, switched.body).toBe(200);
     expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).doNotEmail).toBe(true);
     expect((await prisma.contact.findUniqueOrThrow({ where: { id: newId } })).unsubscribedAt).not.toBeNull();
+  });
+});
+
+describe('Do not email follows the do-not-email list (S1, S2: 26 Nov 2026)', () => {
+  const get = (id: number, c = cookie) => app.inject({ method: 'GET', url: `/api/leads/${id}`, headers: { cookie: c } });
+  const setFlag = (id: number, doNotEmail: boolean, updatedAt: Date, c = cookie) => app.inject({
+    method: 'POST', url: `/api/leads/${id}/do-not-email`, headers: { cookie: c }, payload: { doNotEmail, updatedAt: updatedAt.toISOString() },
+  });
+  const listed = () => prisma.emailSuppression.findMany({ orderBy: { email: 'asc' } }).then((r) => r.map((x) => x.email));
+
+  it('a listed address shows ticked even when the stored flags are off (lead address → doNotEmail, contact address → contactUnsubscribed)', async () => {
+    await prisma.emailSuppression.createMany({ data: [
+      { email: 'info@acme.test', reason: 'do_not_email', source: 'lead_deleted' },
+      { email: 'ana@acme.test', reason: 'unsubscribed', source: 'lead_deleted' },
+    ] });
+    const { company, lead } = await leadWithContact();
+    // As an import update row would leave them: stored flags off.
+    await prisma.lead.update({ where: { id: lead.id }, data: { businessEmail: 'Info@Acme.test', doNotEmail: false } });
+    const res = await get(lead.id);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toMatchObject({ doNotEmail: true, contactUnsubscribed: true });
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).doNotEmail).toBe(false);
+
+    // Only the contact's address listed: the contact side only. Nothing listed: both off.
+    const other = await makeContact({ companyId: company.id, businessEmail: 'ana@acme.test' });
+    const second = await makeLead({ companyId: company.id, contactId: other.id, businessEmail: 'sales@acme.test', assignedToId: rep.id });
+    expect((await get(second.id)).json()).toMatchObject({ doNotEmail: false, contactUnsubscribed: true });
+    const clean = await makeLead({ companyId: company.id, businessEmail: 'hello@acme.test', assignedToId: rep.id });
+    expect((await get(clean.id)).json()).toMatchObject({ doNotEmail: false, contactUnsubscribed: false });
+    // Every lead write answers with the same view.
+    const fresh = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
+    const patched = await app.inject({ method: 'PATCH', url: `/api/leads/${lead.id}`, headers: { cookie }, payload: { notes: 'x', updatedAt: fresh.updatedAt.toISOString() } });
+    expect(patched.json()).toMatchObject({ doNotEmail: true, contactUnsubscribed: true });
+  });
+
+  it('re-saving the tick it was shown changes nothing; only an Administrator’s real untick lifts the listing', async () => {
+    await prisma.emailSuppression.create({ data: { email: 'ana@acme.test', reason: 'unsubscribed', source: 'lead_deleted' } });
+    const { lead } = await leadWithContact();
+    const repCookie = await signIn(app, rep);
+    const managerCookie = await signIn(app, manager);
+    const before = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
+    const timeline = () => prisma.leadActivity.count({ where: { leadId: lead.id } });
+    const audits = () => prisma.auditLog.count({ where: { entityType: 'lead', entityId: String(lead.id) } });
+    const [t0, a0] = [await timeline(), await audits()];
+
+    // A form re-saving "ticked": no change, no timeline line, no audit entry, the stored flags as they were.
+    const resaved = await setFlag(lead.id, true, before.updatedAt, repCookie);
+    expect(resaved.statusCode, resaved.body).toBe(200);
+    expect(resaved.json()).toMatchObject({ doNotEmail: false, contactUnsubscribed: true });
+    expect([await timeline(), await audits()]).toEqual([t0, a0]);
+    const after = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id }, include: { contact: true } });
+    expect([after.doNotEmail, after.contact!.unsubscribedAt]).toEqual([false, null]);
+
+    // A real untick by anyone but an Administrator: 409 address_suppressed, the listing stays.
+    for (const c of [repCookie, managerCookie]) {
+      const refused = await setFlag(lead.id, false, after.updatedAt, c);
+      expect([refused.statusCode, refused.json()]).toEqual([409, { error: 'address_suppressed' }]);
+    }
+    expect(await listed()).toEqual(['ana@acme.test']);
+
+    // An Administrator's untick lifts it: off the list, shown unticked, on the timeline.
+    const lifted = await setFlag(lead.id, false, after.updatedAt);
+    expect(lifted.statusCode, lifted.body).toBe(200);
+    expect(lifted.json()).toMatchObject({ doNotEmail: false, contactUnsubscribed: false });
+    expect(await listed()).toEqual([]);
+    expect(await prisma.leadActivity.count({ where: { leadId: lead.id, title: 'Removed from the opt-out list' } })).toBe(1);
+    expect(await prisma.leadActivity.count({ where: { leadId: lead.id, title: 'Do not email removed' } })).toBe(1);
+  });
+
+  it('S2: a lead email edit that sets Do not email adds the same timeline line as ticking it by hand', async () => {
+    await prisma.emailSuppression.create({ data: { email: 'gone@optout.test', reason: 'do_not_email', source: 'lead_deleted' } });
+    const lead = await makeLead({ companyId: null, assignedToId: admin.id, businessEmail: 'old@acme.test' });
+    const patch = async (payload: object) => {
+      const fresh = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
+      return app.inject({ method: 'PATCH', url: `/api/leads/${lead.id}`, headers: { cookie }, payload: { ...payload, updatedAt: fresh.updatedAt.toISOString() } });
+    };
+    const lines = () => prisma.leadActivity.findMany({ where: { leadId: lead.id, title: 'Marked do not email' } });
+
+    const res = await patch({ businessEmail: 'Gone@OptOut.test' });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toMatchObject({ doNotEmail: true });
+    const [line, ...more] = await lines();
+    expect(more).toEqual([]);
+    expect(line).toMatchObject({ activityType: 'note', title: 'Marked do not email', body: 'The mailer will skip this lead.', byUserId: admin.id });
+
+    // The manual change produces exactly that line.
+    const manual = await makeLead({ companyId: null, assignedToId: admin.id });
+    await setFlag(manual.id, true, manual.updatedAt);
+    const manualLine = await prisma.leadActivity.findFirstOrThrow({ where: { leadId: manual.id } });
+    expect([manualLine.activityType, manualLine.title, manualLine.body]).toEqual([line!.activityType, line!.title, line!.body]);
+
+    // Already Do not email, or an address not on the list: no second line.
+    await patch({ businessEmail: 'gone2@optout.test' });
+    await prisma.emailSuppression.create({ data: { email: 'gone3@optout.test', reason: 'do_not_email', source: 'lead_deleted' } });
+    await patch({ businessEmail: 'gone3@optout.test' });
+    expect(await lines()).toHaveLength(1);
   });
 });

@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type DragEvent } from 'react';
 import { IMPORT_EXTENSIONS, IMPORT_MAX_FILE_BYTES, IMPORT_MAX_FILES, type LeadType, type OutreachLanguage } from '@dait-crm/shared';
 import { ApiError } from '../../../api/client';
-import { useBatchFiles, useCreateBatch, useImportOptions, useUploadFile, type AllocationLine } from '../../../api/imports';
+import { useBatchFiles, useCreateBatch, useImportOptions, useRemoveFile, useUploadFile, type AllocationLine } from '../../../api/imports';
 import { useLang, useT, type TFn } from '../../../i18n/useT';
 import { fileBadge, fileLogo, fileMetaText, importErrorText } from '../labels';
 
@@ -65,6 +65,7 @@ export function StepUpload({ batchId, language, leadType, alert, busy, onChoose,
   const { data: files } = useBatchFiles(batchId);
   const create = useCreateBatch();
   const upload = useUploadFile();
+  const remove = useRemoveFile();
   const [problems, setProblems] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -124,6 +125,16 @@ export function StepUpload({ batchId, language, leadType, alert, busy, onChoose,
       busyRef.current = false;
       setUploading(false);
     }
+  }
+
+  /** "Remove {name}": no confirm (nothing is saved to the CRM until step 4); the list refreshes and frees a place. */
+  function removeFile(fileId: number, name: string) {
+    if (batchId === null) return;
+    setProblems([]);
+    remove.mutate(
+      { batchId, fileId },
+      { onError: (e) => setProblems([`${name}: ${importErrorText(t, e instanceof ApiError ? e.code : '')}`]) },
+    );
   }
 
   function onDrop(e: DragEvent<HTMLDivElement>) {
@@ -217,6 +228,16 @@ export function StepUpload({ batchId, language, leadType, alert, busy, onChoose,
                       <div className="conn-meta">{fileMetaText(t, f, lang)}</div>
                     </div>
                     <span className={`badge ${badge.cls}`}>{badge.text}</span>
+                    <button
+                      type="button"
+                      className="btn xs"
+                      aria-label={t('Remove {item}', { item: f.name })}
+                      title={t('Remove {item}', { item: f.name })}
+                      disabled={uploading || (remove.isPending && remove.variables?.fileId === f.id)}
+                      onClick={() => removeFile(f.id, f.name)}
+                    >
+                      ✕
+                    </button>
                   </li>
                 );
               })}

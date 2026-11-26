@@ -16,7 +16,7 @@ import { StaleError, isNotFound, isUniqueViolation } from '../prismaErrors.js';
 import { assertLeadVisible, leadWhere } from '../leads/visibility.js';
 import {
   activityInclude, activityRow, assignmentInclude, assignmentRow, leadDetail, leadDetailInclude, leadSummary,
-  leadSummaryInclude, taskInclude, taskRow,
+  leadSummaryInclude, taskInclude, taskRow, type ListedAddresses,
 } from '../leads/serialize.js';
 import {
   RuleError, applyStatusChange, auditCreatedLead, companyDataFromLead, createLeadWithCompany, recordAssignment,
@@ -90,7 +90,16 @@ export async function lockFresh(
 async function detailOf(db: Tx | typeof prisma, id: number, user: AuthUser) {
   const row = await db.lead.findUnique({ where: { id }, include: leadDetailInclude });
   if (!row) throw new NotFoundError();
-  return leadDetail(row, todayIn(user.timezone));
+  return leadDetail(row, todayIn(user.timezone), await listedAddresses(db, row));
+}
+
+/** Whether the lead's own address and its contact's are on the do-not-email list (shown as Do not email ticked). */
+async function listedAddresses(
+  db: Tx | typeof prisma, row: { businessEmail: string | null; contact: { businessEmail: string | null } | null },
+): Promise<ListedAddresses> {
+  const list = await suppressed(db, [row.businessEmail, row.contact?.businessEmail]);
+  const on = (a: string | null | undefined) => !!a && list.has(a.trim().toLowerCase());
+  return { lead: on(row.businessEmail), contact: on(row.contact?.businessEmail) };
 }
 
 /** 409 body for a domain unique violation: names the company holding the domain. */
@@ -199,8 +208,14 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
         prisma.task.count({ where: followUpTasks(user, { lt: dateOnly(today) }) }),
         prisma.lead.count({ where: { AND: [live, tabWhere('unassigned', user, today), { leadType: 'Prospect' }] } }),
       ]);
+    // The batch number in the Created cell links to the batch in the Data manager (Administrators and Managers).
+    const numbers = [...new Set(rows.map((r) => r.importBatch?.toUpperCase()).filter((n): n is string => !!n))];
+    const batches = numbers.length > 0 && can(user.role, 'import_leads')
+      ? await prisma.importBatch.findMany({ where: { number: { in: numbers, mode: 'insensitive' } }, select: { id: true, number: true } })
+      : [];
+    const batchIds = new Map(batches.map((b) => [b.number.toUpperCase(), b.id]));
     return {
-      items: rows.map((r) => leadSummary(r, today)),
+      items: rows.map((r) => leadSummary(r, today, batchIds)),
       total,
       page: query.page,
       pageSize: query.pageSize,
@@ -331,7 +346,7 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
       // The AI line's Run research: only when the user can see the company (an unassigned lead's may be hidden).
       const companyVisible = row.companyId !== null && (await visibleCompanyIds(prisma, user, [row.companyId])).has(row.companyId);
       return {
-        ...leadDetail(row, today),
+        ...leadDetail(row, today, await listedAddresses(prisma, row)),
         companyVisible,
         activities: activities.map((a) => activityRow(a, user.id)),
         activityTotal,
@@ -389,6 +404,12 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
           && (await suppressed(tx, [body.businessEmail])).size > 0) data.doNotEmail = true;
         if (nextFollowUp !== undefined) data.nextFollowUp = nextFollowUp ? dateOnly(nextFollowUp) : null;
         const after = await tx.lead.update({ where: { id }, data });
+        // Set automatically by the new address: the same timeline line as ticking Do not email by hand.
+        if (data.doNotEmail === true && !before.doNotEmail) {
+          await tx.leadActivity.create({
+            data: { leadId: id, activityType: 'note', title: 'Marked do not email', body: 'The mailer will skip this lead.', byUserId: user.id },
+          });
+        }
         if (nextFollowUp !== undefined || body.companyName !== undefined) await syncFollowUpTask(tx, after);
         await audit(tx, { entityType: 'lead', entityId: id, action: 'update', userId: user.id, before, after });
       });
@@ -428,15 +449,19 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
         const contact = lead.contactId
           ? await tx.contact.findUnique({ where: { id: lead.contactId }, select: { unsubscribedAt: true, businessEmail: true } }) : null;
         const contactOn = !!contact?.unsubscribedAt;
-        if (lead.doNotEmail === body.doNotEmail && (!contact || contactOn === body.doNotEmail)) return;
+        const addresses = [lead.businessEmail, contact?.businessEmail];
+        const listed = (await suppressed(tx, addresses)).size;
+        // A listed address already shows ticked (leadDetail): a form re-saving that tick changes nothing.
+        if (body.doNotEmail && listed > 0) return;
+        // Nothing to do when both flags already match, unless an untick has a listed address to lift.
+        if (lead.doNotEmail === body.doNotEmail && (!contact || contactOn === body.doNotEmail) && (body.doNotEmail || listed === 0)) return;
         // A real untick of an address on the suppression list (a deleted lead or contact opted out): Administrators
         // only, and it lifts the list entry too (counted in the audit entry, never the addresses).
         let lifted = 0;
-        if (!body.doNotEmail) {
-          const addresses = [lead.businessEmail, contact?.businessEmail];
-          lifted = (await suppressed(tx, addresses)).size;
-          if (lifted > 0 && user.role !== 'Administrator') throw new RuleError('address_suppressed');
-          if (lifted > 0) await unsuppress(tx, addresses);
+        if (!body.doNotEmail && listed > 0) {
+          if (user.role !== 'Administrator') throw new RuleError('address_suppressed');
+          lifted = listed;
+          await unsuppress(tx, addresses);
         }
         await tx.lead.update({ where: { id }, data: { doNotEmail: body.doNotEmail } });
         if (contact && contactOn !== body.doNotEmail) {

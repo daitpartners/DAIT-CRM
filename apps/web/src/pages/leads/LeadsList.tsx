@@ -58,6 +58,30 @@ const oneOf = <T extends string>(list: readonly T[], v: string | undefined): T |
 type PendingAssign = { ids: number[]; toUserId: number | null; toName: string; needsNote: boolean };
 
 /** Leads module list (prototype V.leads2List): tiles, tab bar, filters, a paged table and bulk actions. */
+/**
+ * The Created cell: date and 24-hour time in the viewer's time zone, and for a lead that came from an upload the batch
+ * number on a small second line (a link to the batch in the Data manager when it is there and the viewer may open it).
+ */
+export function CreatedCell({ createdAt, batch, batchId }: { createdAt: string; batch: string | null; batchId: number | null }) {
+  const t = useT();
+  if (!batch) return <>{createdAt}</>;
+  const label = t('Import batch {number}', { number: batch });
+  return (
+    <>
+      {createdAt}
+      {batchId !== null ? (
+        <Link to={`/leads/import/manager?batch=${batchId}`} className="cell-sub" title={label} aria-label={label} onClick={(e) => e.stopPropagation()}>
+          {batch}
+        </Link>
+      ) : (
+        <span className="cell-sub" title={label}>
+          {batch}
+        </span>
+      )}
+    </>
+  );
+}
+
 export function LeadsList() {
   const t = useT();
   const lang = useLang();
@@ -67,7 +91,7 @@ export function LeadsList() {
   const navigate = useNavigate();
   const toast = useToast();
   const confirm = useConfirm();
-  const { day, date } = useFormatDate();
+  const { day, dateTime } = useFormatDate();
   const [searchParams] = useSearchParams();
   const { params, set: update, reset, search } = useUrlListState({ sorts: LEAD_SORTS, defaultSort: 'createdAt', extra: FILTERS });
   // Without an explicit sort the API lists newest first.
@@ -516,7 +540,9 @@ export function LeadsList() {
                           dim
                         )}
                       </td>
-                      <td className="muted">{date(l.createdAt)}</td>
+                      <td className="muted nowrap">
+                        <CreatedCell createdAt={dateTime(l.createdAt)} batch={l.importBatch} batchId={l.importBatchId ?? null} />
+                      </td>
                     </tr>
                   );
                 })}

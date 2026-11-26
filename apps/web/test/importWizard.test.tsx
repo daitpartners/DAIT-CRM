@@ -221,6 +221,73 @@ describe('step 1: no default language or import type', () => {
   });
 });
 
+describe('step 1: remove an uploaded file (26 Nov 2026)', () => {
+  const twoFiles = [
+    { id: 1, name: 'Expo.xlsx', ext: 'xlsx', size: 100, status: 'Read', meta: { sheets: 1, rows: 3 }, error: null },
+    { id: 2, name: 'Wrong list.csv', ext: 'csv', size: 100, status: 'Read', meta: { rows: 9 }, error: null },
+  ];
+
+  it('each file has a ✕ "Remove {name}"; removing calls DELETE with no confirm and the list refreshes', async () => {
+    let items = twoFiles;
+    const fetchFn = stubFetch((url, init) => {
+      if (url === '/api/imports/batches/7') return Response.json(batch('Uploading'));
+      if (url === '/api/imports/batches/7/files/2' && init?.method === 'DELETE') {
+        items = items.filter((f) => f.id !== 2);
+        return new Response(null, { status: 204 });
+      }
+      if (url === '/api/imports/batches/7/files') return Response.json({ items });
+      return undefined;
+    });
+    renderPage('/leads/import?batch=7&step=1');
+    const wrong = (await screen.findByText('Wrong list.csv')).closest('li')!;
+    const button = within(wrong).getByRole('button', { name: 'Remove Wrong list.csv' });
+    expect(button).toHaveAttribute('title', 'Remove Wrong list.csv');
+    expect(button).toHaveClass('btn', 'xs');
+    expect(screen.getByRole('button', { name: 'Remove Expo.xlsx' })).toBeEnabled();
+    await userEvent.click(button);
+    await waitFor(() => expect(screen.queryByText('Wrong list.csv')).toBeNull());
+    expect(calls(fetchFn, 'DELETE', '/api/imports/batches/7/files/2')).toHaveLength(1);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByText('Expo.xlsx')).toBeInTheDocument();
+  });
+
+  it('after sorting the server refuses (409 file_remove_locked): the reason is shown and the file stays', async () => {
+    stubFetch((url, init) => {
+      if (url === '/api/imports/batches/7') return Response.json(batch('Uploading'));
+      if (url === '/api/imports/batches/7/files/1' && init?.method === 'DELETE') return Response.json({ error: 'file_remove_locked' }, { status: 409 });
+      if (url === '/api/imports/batches/7/files') return Response.json({ items: twoFiles });
+      return undefined;
+    });
+    renderPage('/leads/import?batch=7&step=1');
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove Expo.xlsx' }));
+    expect(await screen.findByText(/Expo\.xlsx: Files can't be removed once the data has been sorted\./)).toBeInTheDocument();
+    expect(screen.getByText('Expo.xlsx')).toBeInTheDocument();
+  });
+
+  it('the remove buttons are off while a file is uploading', async () => {
+    let finish!: () => void;
+    stubFetch((url) => {
+      if (url === '/api/imports/batches/7') return Response.json(batch('Uploading'));
+      if (url === '/api/imports/batches/7/files') return Response.json({ items: twoFiles });
+      return undefined;
+    });
+    // The upload hangs until released.
+    const base = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/imports/batches/7/files?') && init?.method === 'POST') {
+        return new Promise<Response>((resolve) => { finish = () => resolve(Response.json({ id: 3, name: 'c.csv', ext: 'csv', size: 10, status: 'Reading' }, { status: 201 })); });
+      }
+      return base(url, init);
+    }));
+    renderPage('/leads/import?batch=7&step=1');
+    const remove = await screen.findByRole('button', { name: 'Remove Expo.xlsx' });
+    fireEvent.change(document.getElementById('imp-files')!, { target: { files: [fileOf('c.csv')] } });
+    await waitFor(() => expect(remove).toBeDisabled());
+    finish();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Remove Expo.xlsx' })).toBeEnabled());
+  });
+});
+
 describe('step 1: Sort while a file is still being read', () => {
   it('says the files are still being read (not "add a file") and does not sort', async () => {
     const fetchFn = stubFetch((url) => {

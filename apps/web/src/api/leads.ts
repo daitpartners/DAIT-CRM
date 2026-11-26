@@ -33,6 +33,10 @@ export type LeadSummary = {
   isOverdue: boolean;
   archivedAt: string | null;
   createdAt: string;
+  /** The upload it came from (IMPORT-… / CSV-…); null for a lead made by hand. */
+  importBatch: string | null;
+  /** List only: the batch's Data manager id, when it is there and the viewer may open it. */
+  importBatchId?: number | null;
   updatedAt: string;
 };
 

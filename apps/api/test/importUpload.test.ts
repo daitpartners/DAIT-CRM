@@ -10,6 +10,7 @@ import { runOnce } from '../src/jobs/runner';
 import { importReadDeps, importReadFileHandler, importReadOptions } from '../src/jobs/handlers/importReadFile';
 import type { ClaudeRunner } from '../src/research/providers';
 import { sweepImportFiles } from '../src/imports/batches';
+import { monthTotals } from '../src/research/service';
 import { readImportFile, removeBatchFiles, saveImportFile, storageDir } from '../src/imports/storage';
 import { fakeGraph, resetDb, seedLookups } from './helpers';
 import { makeLead, makeUser, signIn } from './factory';
@@ -43,7 +44,7 @@ async function as(role: Role, name?: string, timezone?: string) {
   return { user, cookie: await signIn(app, user) };
 }
 
-const json = (method: 'GET' | 'POST' | 'PATCH', url: string, cookie: string, payload?: unknown) =>
+const json = (method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, cookie: string, payload?: unknown) =>
   app.inject({ method, url, payload: payload as object, headers: { cookie } });
 
 const upload = (batchId: number, name: string, data: Buffer, cookie: string) =>
@@ -409,6 +410,129 @@ describe('a file stays Reading until its rows are saved (final review I1)', () =
     expect((await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } })).status).toBe('Read');
     const rows = await prisma.importRow.findMany({ where: { fileId: file.id } });
     expect(rows.map((r) => (r.fields as { companyName?: string }).companyName)).toEqual(['Acme Ltd']);
+  });
+});
+
+describe('remove a file in step 1 (26 Nov 2026)', () => {
+  const remove = (batchId: number, fileId: number, cookie: string) => json('DELETE', `/api/imports/batches/${batchId}/files/${fileId}`, cookie);
+  const onDisk = async (batchId: number, fileId: number) =>
+    stat(path.join(storage, 'imports', String(batchId), String(fileId))).then(() => true, () => false);
+  afterEach(() => {
+    delete importReadDeps.claude;
+    delete importReadDeps.env;
+  });
+
+  it('the uploader takes a read file back: its row, its rows and the stored file go; the 10-file place frees up', async () => {
+    const { cookie } = await as('MANAGER');
+    const batch = await newBatch(cookie);
+    const wrong = (await upload(batch.id, 'wrong.csv', Buffer.from('Company;Email;Country\nWrong Ltd;a@wrong.test;India\nWorse Ltd;b@worse.test;India\n'), cookie)).json() as { id: number };
+    const right = (await upload(batch.id, 'right.csv', Buffer.from('Company;Email;Country\nAcme Ltd;info@acme.test;India\n'), cookie)).json() as { id: number };
+    expect(await runReadJob()).toBe(true);
+    expect(await runReadJob()).toBe(true);
+    expect(await prisma.importRow.count({ where: { fileId: wrong.id } })).toBe(2);
+    expect((await prisma.importBatch.findUniqueOrThrow({ where: { id: batch.id } })).rowCount).toBe(3);
+    expect(await onDisk(batch.id, wrong.id)).toBe(true);
+
+    const res = await remove(batch.id, wrong.id, cookie);
+    expect(res.statusCode, res.body).toBe(204);
+    expect(await prisma.importFile.findUnique({ where: { id: wrong.id } })).toBeNull();
+    expect(await prisma.importRow.count({ where: { fileId: wrong.id } })).toBe(0);
+    expect(await onDisk(batch.id, wrong.id)).toBe(false);
+    expect((await prisma.importBatch.findUniqueOrThrow({ where: { id: batch.id } })).rowCount).toBe(1);
+    const list = await json('GET', `/api/imports/batches/${batch.id}/files`, cookie);
+    expect((list.json() as { items: { id: number }[] }).items.map((f) => f.id)).toEqual([right.id]);
+    // The other file is untouched and the batch still sorts.
+    expect(await onDisk(batch.id, right.id)).toBe(true);
+    expect(await prisma.importRow.count({ where: { fileId: right.id } })).toBe(1);
+
+    // Ten files again after the removal (one is already there): nine more fit, the eleventh is refused.
+    for (let i = 0; i < 9; i += 1) expect((await upload(batch.id, `more ${i}.txt`, Buffer.from(`Acme ${i}`), cookie)).statusCode).toBe(201);
+    expect((await upload(batch.id, 'one too many.txt', Buffer.from('Acme'), cookie)).json()).toEqual({ error: 'too_many_files' });
+    // Gone means gone: a second remove is 404.
+    expect((await remove(batch.id, wrong.id, cookie)).statusCode).toBe(404);
+  });
+
+  it('refuses people without the import right, a file of another batch and an unknown file', async () => {
+    const { cookie } = await as('ADMINISTRATOR');
+    const batch = await newBatch(cookie);
+    const file = (await upload(batch.id, 'a.txt', Buffer.from('Acme'), cookie)).json() as { id: number };
+    for (const role of ['SALES_REPRESENTATIVE', 'DATA_RESEARCH_USER'] as const) {
+      const { cookie: other } = await as(role);
+      expect((await remove(batch.id, file.id, other)).statusCode).toBe(403);
+    }
+    const otherBatch = await newBatch(cookie);
+    expect((await remove(otherBatch.id, file.id, cookie)).statusCode).toBe(404);
+    expect((await remove(batch.id, 999999, cookie)).statusCode).toBe(404);
+    expect((await remove(999999, file.id, cookie)).statusCode).toBe(404);
+    expect(await prisma.importFile.count({ where: { id: file.id } })).toBe(1);
+    expect(await onDisk(batch.id, file.id)).toBe(true);
+  });
+
+  it('once the batch is sorted (or later) it answers 409 file_remove_locked and keeps the file', async () => {
+    const { cookie } = await as('ADMINISTRATOR');
+    const batch = await newBatch(cookie);
+    const file = (await upload(batch.id, 'a.csv', Buffer.from('Company;Email;Country\nAcme Ltd;info@acme.test;India\n'), cookie)).json() as { id: number };
+    expect(await runReadJob()).toBe(true);
+    expect((await json('POST', `/api/imports/batches/${batch.id}/sort`, cookie)).statusCode).toBe(200);
+    for (const status of ['Sorting', 'Researching', 'Imported']) {
+      await prisma.importBatch.update({ where: { id: batch.id }, data: { status } });
+      const res = await remove(batch.id, file.id, cookie);
+      expect([res.statusCode, res.json()]).toEqual([409, { error: 'file_remove_locked' }]);
+    }
+    expect(await prisma.importRow.count({ where: { fileId: file.id } })).toBe(1);
+    expect(await onDisk(batch.id, file.id)).toBe(true);
+  });
+
+  it('removed before its read job runs: the job ends quietly and brings nothing back', async () => {
+    const { cookie } = await as('ADMINISTRATOR');
+    const batch = await newBatch(cookie);
+    const file = (await upload(batch.id, 'a.csv', Buffer.from('Company;Email;Country\nAcme Ltd;info@acme.test;India\n'), cookie)).json() as { id: number };
+    expect((await remove(batch.id, file.id, cookie)).statusCode).toBe(204);
+    expect(await runReadJob()).toBe(true);
+    expect((await prisma.job.findFirstOrThrow({ where: { type: 'import_read_file' } })).status).toBe('done');
+    expect(await prisma.importFile.count()).toBe(0);
+    expect(await prisma.importRow.count()).toBe(0);
+    expect(await onDisk(batch.id, file.id)).toBe(false);
+  });
+
+  it('removed while Claude is reading it: the job ends quietly, no rows are staged, and the Claude spend still counts', async () => {
+    const { cookie } = await as('ADMINISTRATOR');
+    await prisma.enrichmentSettings.create({ data: { id: 1, claudeEnabled: true, claudeMonthlyRunCap: 10 } });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let called = false;
+    importReadDeps.claude = async () => {
+      called = true;
+      await gate;
+      return {
+        output: { rows: [{
+          companyName: 'Gulf Freight Partners LLC', website: 'gulffreight.ae', email: 'sales@gulffreight.ae', country: 'United Arab Emirates',
+          contactName: null, designation: null, phone: null, city: null, industry: null,
+        }] },
+        searchUrls: [],
+      };
+    };
+    importReadDeps.env = { CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-test-token', CLAUDE_BIN: process.execPath };
+    const batch = await newBatch(cookie);
+    const line = 'Gulf Freight Partners LLC · gulffreight.ae · sales@gulffreight.ae · United Arab Emirates\n';
+    const file = (await upload(batch.id, 'visitors.txt', Buffer.from(line), cookie)).json() as { id: number };
+    const job = runReadJob();
+    await vi.waitFor(() => expect(called).toBe(true), { timeout: 10_000 });
+
+    expect((await remove(batch.id, file.id, cookie)).statusCode).toBe(204);
+    expect(await onDisk(batch.id, file.id)).toBe(false);
+    release();
+    expect(await job).toBe(true);
+    expect((await prisma.job.findFirstOrThrow({ where: { type: 'import_read_file' } })).status).toBe('done');
+    expect(await prisma.importRow.count({ where: { fileId: file.id } })).toBe(0);
+    // Kept only as the record of the Claude call it spent: not listed, not counted against the 10 files.
+    const kept = await prisma.importFile.findUniqueOrThrow({ where: { id: file.id } });
+    expect([kept.status, kept.claudeCalls, kept.deletedAt !== null]).toEqual(['Removed', 1, true]);
+    expect((await monthTotals(prisma)).claudeRuns).toBe(1);
+    expect((await json('GET', `/api/imports/batches/${batch.id}/files`, cookie)).json()).toEqual({ items: [] });
+    expect(((await json('GET', `/api/imports/batches/${batch.id}`, cookie)).json() as { files: unknown[] }).files).toEqual([]);
+    expect((await remove(batch.id, file.id, cookie)).statusCode).toBe(404);
+    expect((await prisma.importBatch.findUniqueOrThrow({ where: { id: batch.id } })).rowCount).toBe(0);
   });
 });
 

@@ -7,7 +7,7 @@ import {
 import { prisma } from '../db.js';
 import { NotFoundError, parseBody, parseQuery } from '../validate.js';
 import { requireRight } from '../plugins/auth.js';
-import { ImportError, addFile, createBatch, listFiles, updateBatch } from '../imports/batches.js';
+import { ImportError, addFile, createBatch, listFiles, removeFile, updateBatch } from '../imports/batches.js';
 import { addBatchCountries, answerColumn, includeAll, listRows, rematchBatch, sortBatch, updateRow } from '../imports/stage.js';
 import { loadEnrichmentSettings, monthTotals } from '../research/service.js';
 import { claudeCodeConfig, claudeCodeReady } from '../research/providers.js';
@@ -154,6 +154,16 @@ export const importBatchRoutes: FastifyPluginAsync = async (app) => {
 
   app.get<{ Params: { id: string } }>('/imports/batches/:id/files', canImport, async (request) => {
     return { items: await listFiles(idOf(request.params.id)) };
+  });
+
+  /** Step 1 "Remove {name}": takes an uploaded file back (204); 409 `file_remove_locked` once the batch is sorted. */
+  app.delete<{ Params: { id: string; fileId: string } }>('/imports/batches/:id/files/:fileId', canImport, async (request, reply) => {
+    const id = idOf(request.params.id);
+    const fileId = idOf(request.params.fileId);
+    return guard(reply, async () => {
+      await removeFile(id, fileId);
+      return reply.code(204).send();
+    });
   });
 
   /** Step 1 → step 2 (Uploading → Sorting): every file read, at least one row staged. */

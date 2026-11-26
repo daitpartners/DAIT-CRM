@@ -649,3 +649,40 @@ describe('leads API', () => {
     expect((await prisma.contact.findUniqueOrThrow({ where: { id: contact.id } })).unsubscribedAt).not.toBeNull();
   });
 });
+
+describe('Leads list: the upload a lead came from (26 Nov 2026)', () => {
+  it('returns importBatch on every row, and the Data manager batch id only to people who may open it', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const rep = await as('SALES_REPRESENTATIVE');
+    const batch = await prisma.importBatch.create({
+      data: { number: 'IMPORT-2026-11-22', language: 'en', leadType: 'Prospect', status: 'Imported', createdById: admin.user.id },
+    });
+    const fromWizard = await makeLead({ importBatch: 'IMPORT-2026-11-22', assignedToId: rep.user.id });
+    const fromCsv = await makeLead({ importBatch: 'CSV-20261120-0915', assignedToId: rep.user.id });
+    const byHand = await makeLead({ assignedToId: rep.user.id });
+    type Row = { id: number; importBatch: string | null; importBatchId: number | null; createdAt: string };
+    const rows = async (cookie: string) => new Map(((await req('GET', '/api/leads', cookie)).json().items as Row[]).map((r) => [r.id, r]));
+
+    const seen = await rows(admin.cookie);
+    expect(seen.get(fromWizard.id)).toMatchObject({ importBatch: 'IMPORT-2026-11-22', importBatchId: batch.id });
+    // An older CSV import has no batch in the Data manager: its number only.
+    expect(seen.get(fromCsv.id)).toMatchObject({ importBatch: 'CSV-20261120-0915', importBatchId: null });
+    expect(seen.get(byHand.id)).toMatchObject({ importBatch: null, importBatchId: null });
+    // The timestamp keeps its time of day (the cell shows date and time).
+    expect(seen.get(byHand.id)!.createdAt).toBe(byHand.createdAt.toISOString());
+
+    const repSees = await rows(rep.cookie);
+    expect(repSees.get(fromWizard.id)).toMatchObject({ importBatch: 'IMPORT-2026-11-22', importBatchId: null });
+  });
+
+  it('sorting by Created still works', async () => {
+    const admin = await as('ADMINISTRATOR');
+    const a = await makeLead({ assignedToId: admin.user.id });
+    const b = await makeLead({ assignedToId: admin.user.id });
+    await prisma.lead.update({ where: { id: a.id }, data: { createdAt: new Date('2026-11-20T08:30:00Z') } });
+    await prisma.lead.update({ where: { id: b.id }, data: { createdAt: new Date('2026-11-20T17:45:00Z') } });
+    const ids = async (dir: string) => (await req('GET', `/api/leads?sort=createdAt&dir=${dir}`, admin.cookie)).json().items.map((i: { id: number }) => i.id);
+    expect(await ids('desc')).toEqual([b.id, a.id]);
+    expect(await ids('asc')).toEqual([a.id, b.id]);
+  });
+});

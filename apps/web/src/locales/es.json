@@ -2014,5 +2014,7 @@
   "(no name)": "(sin nombre)",
   "1 of the chosen leads was not found (already deleted).": "1 de los leads elegidos no se encontró (ya eliminado).",
   "{n} of the chosen leads were not found (already deleted).": "{n} de los leads elegidos no se encontraron (ya eliminados).",
-  "This address opted out; ask an Administrator": "Esta dirección se dio de baja; pide ayuda a un administrador"
+  "This address opted out; ask an Administrator": "Esta dirección se dio de baja; pide ayuda a un administrador",
+  "Import batch {number}": "Lote de importación {number}",
+  "Files can't be removed once the data has been sorted. Start a new import to use other files.": "No se pueden quitar archivos una vez ordenados los datos. Inicia una nueva importación para usar otros archivos."
 }

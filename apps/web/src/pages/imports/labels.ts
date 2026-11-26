@@ -217,6 +217,8 @@ export function importErrorText(t: TFn, code: string): string {
       return t('Someone was changing these records at the same moment. Nothing was undone. Try again.');
     case 'file_deleted':
       return t('Deleted after 90 days');
+    case 'file_remove_locked':
+      return t("Files can't be removed once the data has been sorted. Start a new import to use other files.");
     case 'duplicate_value':
       return t('That value already exists in this list');
     case 'forbidden':

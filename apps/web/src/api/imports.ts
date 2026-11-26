@@ -265,6 +265,16 @@ export function useUploadFile() {
   });
 }
 
+/** Step 1 "Remove {name}": takes an uploaded file back (409 `file_remove_locked` once the batch is sorted). */
+export function useRemoveFile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ batchId, fileId }: { batchId: number; fileId: number }) =>
+      api<void>(`/api/imports/batches/${batchId}/files/${fileId}`, { method: 'DELETE' }),
+    onSettled: (_d, _e, v) => qc.invalidateQueries({ queryKey: importKeys.files(v.batchId) }),
+  });
+}
+
 /** The batch's files; polls every 2 s while any is still being read. */
 export function useBatchFiles(batchId: number | null) {
   return useQuery({

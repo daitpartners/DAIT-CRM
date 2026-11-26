@@ -59,8 +59,11 @@ function leadOverdue(l: { nextFollowUp: Date | null; status: string }, today: st
   return d !== null && d < today && !isClosedStatus(l.status);
 }
 
-/** A row in the lead list. */
-export function leadSummary(l: LeadSummaryRow, today: string) {
+/**
+ * A row in the lead list. `batchIds` maps an import batch number to its Data manager batch id (only for viewers who may
+ * open the Data manager): the Created cell links the batch number to that batch.
+ */
+export function leadSummary(l: LeadSummaryRow, today: string, batchIds?: ReadonlyMap<string, number>) {
   return {
     id: l.id,
     number: l.number,
@@ -82,15 +85,26 @@ export function leadSummary(l: LeadSummaryRow, today: string) {
     isOverdue: leadOverdue(l, today),
     archivedAt: l.archivedAt,
     createdAt: l.createdAt,
+    // The upload it came from (Import leads wizard: IMPORT-…; older CSV import: CSV-…); null for a lead made by hand.
+    importBatch: l.importBatch,
+    importBatchId: (l.importBatch && batchIds?.get(l.importBatch.toUpperCase())) ?? null,
     updatedAt: l.updatedAt,
   };
 }
 
-/** The full lead: every column, its company summary, contact, assignee and creator. */
-export function leadDetail(l: LeadDetailRow, today: string) {
+/** Which of a lead's addresses are on the do-not-email list (`email_suppressions`): its own, its contact's. */
+export type ListedAddresses = { lead: boolean; contact: boolean };
+
+/**
+ * The full lead: every column, its company summary, contact, assignee and creator. `listed`: an address on the
+ * do-not-email list shows Do not email ticked even when the stored flag is not set (an import update row, an old row):
+ * the lead's own address → `doNotEmail`, its contact's → `contactUnsubscribed`.
+ */
+export function leadDetail(l: LeadDetailRow, today: string, listed: ListedAddresses = { lead: false, contact: false }) {
   const { company, contact, assignedTo, createdBy, nextFollowUp, ...fields } = l;
   return {
     ...fields,
+    doNotEmail: fields.doNotEmail || listed.lead,
     nextFollowUp: ymd(nextFollowUp),
     isOverdue: leadOverdue(l, today),
     company: company
@@ -109,7 +123,7 @@ export function leadDetail(l: LeadDetailRow, today: string) {
     // The full contact profile; `name` and `email` kept for the existing lead screens.
     contact: contact ? { ...contactProfile(contact), name: fullName(contact), email: contact.businessEmail } : null,
     // The contact unsubscribed (through this or another lead): Do not email shows as ticked = doNotEmail || this.
-    contactUnsubscribed: !!contact?.unsubscribedAt,
+    contactUnsubscribed: !!contact?.unsubscribedAt || listed.contact,
     assignedTo: ref(assignedTo),
     createdBy: ref(createdBy),
   };
