@@ -237,6 +237,49 @@ describe('delete leads: what goes and what stays', () => {
     expect(adminInbox.items).toEqual([]);
   });
 
+  it('mail of a removed lead stays with its owner, unlinked, marked lead_deleted_at; other mail is untouched', async () => {
+    const { lead } = await leadWithContact();
+    const otherLead = await makeLead({ companyName: 'Other Co', assignedToId: rep.id });
+    const box = await prisma.emailAccount.create({
+      data: { userId: rep.id, address: rep.email, provider: 'microsoft', kind: 'personal', refreshTokenEnc: encrypt('rt'), status: 'connected' },
+    });
+    const synced = (leadId: number, graphId: string) => prisma.emailMessage.create({
+      data: { userId: rep.id, accountId: box.id, leadId, folder: 'inbox', status: 'received', source: 'sync', fromAddress: 'x@y.test', subject: 'Hi', graphId },
+    });
+    const onLead = await synced(lead.id, 'g-1');
+    const onOther = await synced(otherLead.id, 'g-2');
+
+    await del([lead.id]);
+    const kept = await prisma.emailMessage.findUniqueOrThrow({ where: { id: onLead.id } });
+    const other = await prisma.emailMessage.findUniqueOrThrow({ where: { id: onOther.id } });
+    expect(kept).toMatchObject({ userId: rep.id, leadId: null, leadDeletedAt: expect.any(Date) });
+    expect(other).toMatchObject({ leadId: otherLead.id, leadDeletedAt: null });
+  });
+
+  it('mail linked only to a removed contact or company is marked too; mail of a kept company or contact is not', async () => {
+    const { company, contact, lead } = await leadWithContact();
+    const keptCompany = await makeCompany({ name: 'Kept Co' });
+    const keptContact = await makeContact({ companyId: keptCompany.id, firstName: 'Kim', lastName: 'Kept', businessEmail: 'kim@kept.test' });
+    const lead2 = await makeLead({ companyId: keptCompany.id, contactId: keptContact.id, companyName: 'Kept Co' });
+    await makeLead({ companyId: keptCompany.id, companyName: 'Kept Co' }); // keeps the company and its contacts
+    const mail = (data: { contactId?: number; companyId?: number }, subject: string) => prisma.emailMessage.create({
+      data: { userId: rep.id, folder: 'sent', status: 'sent', fromAddress: rep.email, subject, ...data },
+    });
+    const byContact = await mail({ contactId: contact.id }, 'contact only');
+    const byCompany = await mail({ companyId: company.id }, 'company only');
+    const byKeptContact = await mail({ contactId: keptContact.id }, 'kept contact');
+    const byKeptCompany = await mail({ companyId: keptCompany.id }, 'kept company');
+
+    const p = await del([lead.id, lead2.id]);
+    expect(p.remove.leads.map((l) => l.id).sort()).toEqual([lead.id, lead2.id].sort());
+    expect(await exists.company(keptCompany.id)).toBe(true);
+    const at = async (id: number) => (await prisma.emailMessage.findUniqueOrThrow({ where: { id } })).leadDeletedAt;
+    expect(await at(byContact.id)).toBeInstanceOf(Date);
+    expect(await at(byCompany.id)).toBeInstanceOf(Date);
+    expect(await at(byKeptContact.id)).toBeNull();
+    expect(await at(byKeptCompany.id)).toBeNull();
+  });
+
   it('draft quotations go with the lead; a sent one blocks it (archive instead)', async () => {
     const a = await leadWithContact({ name: 'Draft Co' });
     const draft = await quotation({ companyId: a.company.id, leadId: a.lead.id, contactId: a.contact.id });
@@ -402,10 +445,29 @@ describe('delete leads: concurrency and audit', () => {
     ]);
     expect(entries[0]!.after).toMatchObject({ number: lead.number, companyName: 'Acme Dyes', removed: { activities: 1, tasks: 0, draftQuotations: 0, quotationNumbers: [] } });
     expect(entries[1]!.after).toMatchObject({ number: company.number, name: 'Acme Dyes', removed: { contacts: 1 } });
-    const text = JSON.stringify(entries);
+    const text = JSON.stringify(entries.map((e) => e.after));
     for (const secret of ['Secretname', 'ana@acme.test', 'Private note text', 'Secret body']) expect(text).not.toContain(secret);
-    expect(entries.every((e) => e.before === null)).toBe(true);
+    // The lead's addresses only (lower-cased), so web-mail clean-up can still recognise its mail; nothing else.
+    expect(entries[0]!.before).toEqual({ emails: ['ana@acme.test'] });
+    expect(entries[1]!.before).toBeNull();
+    expect(JSON.stringify(entries.map((e) => e.before))).not.toMatch(/Secretname|Private note text|Secret body/);
     expect(await exists.lead(kept.id)).toBe(true);
+  });
+
+  it('the lead audit entry records the lead and contact addresses lower-cased, without duplicates or blanks', async () => {
+    const company = await makeCompany({ name: 'Case Co' });
+    const contact = await makeContact({ companyId: company.id, firstName: 'Bo', lastName: 'Case', businessEmail: ' Bo@Case.TEST ' });
+    const lead = await makeLead({ companyId: company.id, contactId: contact.id, companyName: 'Case Co', businessEmail: 'Sales@Case.test' });
+    const twinCo = await makeCompany({ name: 'Twin Co' });
+    const twinContact = await makeContact({ companyId: twinCo.id, firstName: 'Tw', lastName: 'In', businessEmail: 'Same@Twin.TEST' });
+    const twin = await makeLead({ companyId: twinCo.id, contactId: twinContact.id, companyName: 'Twin Co', businessEmail: 'same@twin.test' });
+    const bare = await makeLead({ companyId: null, companyName: 'Bare', businessEmail: '' });
+    await del([lead.id, twin.id, bare.id]);
+    const before = async (id: number) =>
+      (await prisma.auditLog.findFirstOrThrow({ where: { action: 'delete', entityType: 'lead', entityId: String(id) } })).before;
+    expect(await before(lead.id)).toEqual({ emails: ['sales@case.test', 'bo@case.test'] });
+    expect(await before(twin.id)).toEqual({ emails: ['same@twin.test'] });
+    expect(await before(bare.id)).toEqual({ emails: [] });
   });
 });
 

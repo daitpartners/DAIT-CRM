@@ -7,7 +7,8 @@
  * Per relation (prisma/schema.prisma; no ON DELETE had to change):
  * - removed with the lead: activities (notes, calls, meetings, timeline) and assignments (FK cascade), tasks (cascade),
  *   its Draft quotations (deleted here, with their lines, revisions and tasks), notifications linking to it or to them;
- * - unlinked, never removed (FK set null): email_messages and calendar_events (they stay with their owner, private),
+ * - unlinked, never removed (FK set null): email_messages (they stay with their owner, private, unlinked and marked
+ *   `lead_deleted_at` when linked to a removed lead, contact or company) and calendar_events (with their owner),
  *   Mailer recipients (campaign history kept), import rows, research runs and source records of a company kept;
  * - blocks the lead (kept, archive instead): a project, or a quotation that is not a never-sent Draft;
  * - the company goes, with ALL its contacts, locations, research runs, suggestions and sources (and notifications linking
@@ -15,6 +16,8 @@
  *   its contacts is used by another lead, a quotation or a project. A company kept keeps every contact (owner ruling).
  * - opt-outs survive: the address of a removed lead marked Do not email, and of a removed contact that unsubscribed, goes
  *   on the suppression list (`email_suppressions`, address only).
+ * - each lead's audit entry keeps its own and its contact's address (lower-cased, `before.emails`) and nothing else, so
+ *   web-mail clean-up can still recognise mail of a lead deleted before `lead_deleted_at` existed.
  *
  * Locks are taken in the order import Undo and update rows take them (companies → contacts → leads, each by id).
  */
@@ -48,6 +51,8 @@ type Planned = {
   /** Per removed lead: what goes with it (for its audit entry; numbers and counts only). */
   leadCounts: Map<number, { activities: number; tasks: number; draftQuotations: number; quotationNumbers: string[] }>;
   companyCounts: Map<number, { contacts: number; locations: number; researchRuns: number; sources: number }>;
+  /** Per removed lead: its own and its contact's address, lower-cased (for its audit entry's `before`). */
+  leadEmails: Map<number, string[]>;
   /** Addresses that go on the suppression list. */
   suppress: { email: string | null; reason: SuppressionReason }[];
 };
@@ -58,6 +63,9 @@ const neverSent = (q: { status: string; projectId: number | null; sendingMessage
 
 const sortedUnique = (ids: (number | null)[]) => [...new Set(ids.filter((id): id is number => id !== null))].sort((a, b) => a - b);
 const nameOf = (c: { firstName: string; lastName: string }) => `${c.firstName} ${c.lastName}`.trim();
+/** Trimmed, lower-cased, blanks and repeats dropped. */
+const addressesOf = (emails: (string | null | undefined)[]) =>
+  [...new Set(emails.map((e) => e?.trim().toLowerCase() ?? '').filter((e) => e !== ''))];
 
 /**
  * What deleting `ids` would do now. With `restrict` (confirm), nothing outside the preview's plan is removed: a record
@@ -137,6 +145,7 @@ async function planDelete(db: Db, ids: number[], restrict: LeadDeletePlan | null
   const leadCounts: Planned['leadCounts'] = new Map(removeLeads.map((l) => [l.id, {
     activities: l._count.activities, tasks: l._count.tasks, draftQuotations: l.quotations.length, quotationNumbers: l.quotations.map((q) => q.number),
   }]));
+  const leadEmails: Planned['leadEmails'] = new Map(removeLeads.map((l) => [l.id, addressesOf([l.businessEmail, l.contact?.businessEmail])]));
   const found = new Set(leads.map((l) => l.id));
   return {
     preview: {
@@ -154,7 +163,7 @@ async function planDelete(db: Db, ids: number[], restrict: LeadDeletePlan | null
         contacts: removeContacts.map((c) => c.id).sort((a, b) => a - b), quotations: [...draftIds].sort((a, b) => a - b),
       },
     },
-    leadCounts, companyCounts,
+    leadCounts, companyCounts, leadEmails,
     suppress: [
       ...removeLeads.filter((l) => l.doNotEmail).flatMap((l) => [
         { email: l.businessEmail, reason: 'do_not_email' as const }, { email: l.contact?.businessEmail ?? null, reason: 'do_not_email' as const },
@@ -208,8 +217,9 @@ async function lockAll(tx: Db, ids: number[]): Promise<void> {
 
 /**
  * Deletes the leads in one transaction: locks, plans again (removing only what is safe now and was in `plan`), puts the
- * opt-outs on the suppression list, removes Draft quotations → notifications → leads → contacts → companies, and writes
- * one audit entry per lead and company (numbers, names and counts only). Answers with what it did. A deadlock with a
+ * opt-outs on the suppression list, marks the mail of what goes `lead_deleted_at`, removes Draft quotations →
+ * notifications → leads → contacts → companies, and writes one audit entry per lead and company (numbers, names and
+ * counts; a lead's entry also keeps its addresses). Answers with what it did. A deadlock with a
  * concurrent edit (nothing changed): 409 `try_again`.
  */
 export async function deleteLeads(user: AuthUser, rawIds: number[], plan: LeadDeletePlan): Promise<LeadDeletePreview> {
@@ -244,12 +254,20 @@ async function apply(tx: Db, user: AuthUser, planned: Planned): Promise<void> {
   await dropNotifications(tx, 'quotations', draftIds);
   await dropNotifications(tx, 'leads', leadIds);
   await dropNotifications(tx, 'companies', companyIds);
+  // Mail of what goes stays with its owner, unlinked by the FKs below; mark it so clean-up never removes it.
+  const linked: Prisma.EmailMessageWhereInput[] = [
+    ...(leadIds.length ? [{ leadId: { in: leadIds } }] : []),
+    ...(contactIds.length ? [{ contactId: { in: contactIds } }] : []),
+    ...(companyIds.length ? [{ companyId: { in: companyIds } }] : []),
+  ];
+  if (linked.length > 0) await tx.emailMessage.updateMany({ where: { OR: linked }, data: { leadDeletedAt: new Date() } });
   await tx.lead.deleteMany({ where: { id: { in: leadIds } } });
   if (contactIds.length > 0) await tx.contact.deleteMany({ where: { id: { in: contactIds } } });
   if (companyIds.length > 0) await tx.company.deleteMany({ where: { id: { in: companyIds } } });
 
   const leadEntries = planned.preview.remove.leads.map((l) => ({
     entityType: 'lead', entityId: String(l.id), action: 'delete', userId: user.id,
+    before: { emails: planned.leadEmails.get(l.id) ?? [] },
     after: { number: l.number, companyName: l.companyName, removed: planned.leadCounts.get(l.id)! },
   }));
   const companyEntries = planned.preview.remove.companies.map((co) => ({

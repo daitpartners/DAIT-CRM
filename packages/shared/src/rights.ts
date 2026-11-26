@@ -4,13 +4,13 @@ export type Action =
   | 'manage_users' | 'manage_lookups' | 'manage_allocation' | 'view_all_leads'
   | 'transfer_leads' | 'manage_quotes' | 'use_email' | 'manage_prospects'
   | 'view_admin_settings' | 'manage_companies' | 'view_all_companies' | 'manage_leads' | 'claim_leads'
-  | 'import_leads' | 'undo_imports' | 'delete_leads';
+  | 'import_leads' | 'undo_imports' | 'delete_leads' | 'view_team_mail';
 
 export const ACTIONS: readonly Action[] = [
   'manage_users', 'manage_lookups', 'manage_allocation', 'view_all_leads',
   'transfer_leads', 'manage_quotes', 'use_email', 'manage_prospects', 'view_admin_settings',
   'manage_companies', 'view_all_companies', 'manage_leads', 'claim_leads', 'import_leads', 'undo_imports',
-  'delete_leads',
+  'delete_leads', 'view_team_mail',
 ];
 
 /** Rights an Administrator has and a Manager does not. */

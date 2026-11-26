@@ -301,7 +301,8 @@ tokens (access tokens are cached in memory only), scopes, Graph change-notificat
 delta queries every 5 minutes instead), IMAP / SMTP and Gmail columns.
 
 ### email_messages
-A user's own mail, private to `user_id` (administrators included).
+A user's own mail, private to `user_id`. Lead mail only (web-mail release 1): Administrators and Managers (right
+`view_team_mail`) read other users' lead mail, view only.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -309,7 +310,7 @@ A user's own mail, private to `user_id` (administrators included).
 | user_id | FK users | cascade delete |
 | account_id | FK email_accounts, nullable | set null |
 | lead_id, contact_id, company_id | FK, nullable | set null; auto-linked by sync matching, or by hand |
-| folder | text | sent / inbox / drafts / archive |
+| folder | text | sent / inbox / drafts / archive / deleted |
 | status | text | CRM-sent: queued / sending / sent / failed; synced: received / sent / draft |
 | source | text | `crm` written in the CRM, `sync` read from the mailbox |
 | from_address | text | |
@@ -327,11 +328,34 @@ A user's own mail, private to `user_id` (administrators included).
 | reply_to_id | FK email_messages, nullable | the message this one answers |
 | logged_at | timestamp | when it was logged on the lead ("Log as activity") |
 | last_error | text | |
+| lead_deleted_at | timestamp, nullable | set when the lead, contact or company it was linked to is deleted: kept with its owner, unlinked, never cleaned up as unrelated mail (web-mail release 1) |
 | created_at, updated_at | timestamp | |
 
 Indexes: unique (`user_id`, `graph_id`); (`user_id`, `thread_id`), (`user_id`, `lead_id`), (`user_id`, `folder`,
 `occurred_at`), (`user_id`, `project_id`). There is no `quotation_id`: a quotation's sent email is found through
 `quotations.sending_message_id` while sending, and the timeline.
+
+### mail_backfills (web-mail release 1)
+One 12-month mailbox search per mailbox × lead/contact address, resumable.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | PK | |
+| account_id | FK email_accounts | cascade delete |
+| address | varchar(320) | lower-cased; unique with `account_id` |
+| status | text | queued (default) / running / done / failed / skipped |
+| next_link | text, nullable | Graph next link to continue from |
+| found, stored | int | messages found / stored so far (default 0) |
+| attempts | int | default 0 |
+| last_error | text, nullable | |
+| finished_at | timestamp, nullable | |
+| created_at, updated_at | timestamp | |
+
+Indexes: unique (`account_id`, `address`); (`status`, `id`).
+
+### mail_backfill_addresses (web-mail release 1)
+Lead/contact addresses already queued for backfill, so each is queued once: `address` varchar(320) PK (lower-cased),
+`first_seen_at` timestamp (default now).
 
 ### email_templates
 | Column | Type | Notes |
@@ -553,7 +577,9 @@ id PK; user_id FK (cascade); text; detail; link; is_read; created_at. Index (`us
 
 ### audit_logs
 id PK; entity_type; entity_id (text); action; user_id FK (nullable); before jsonb; after jsonb; at. Index
-(`entity_type`, `entity_id`).
+(`entity_type`, `entity_id`). A lead `delete` row keeps only the lead's and its contact's addresses in `before`
+(`{ emails: [...] }`, lower-cased), so web-mail clean-up can recognise mail of a deleted lead; action `view` records
+an Administrator or Manager opening another user's message.
 
 Planned but not built: `password_resets` (no password sign-in except the break-glass admin), `updated_by` columns.
 
@@ -568,6 +594,7 @@ quotations 1─n quotation_revisions                                     quotati
 quotations 1─1 projects (projects.quotation_id unique; quotations.project_id back)
 companies 1─n projects            leads 1─n projects                   projects n─n contacts (project_stakeholders)
 users 1─n email_accounts 1─n email_messages     email_messages n─1 leads / contacts / companies / projects
+email_accounts 1─n mail_backfills
 email_templates 1─n email_campaigns 1─n email_campaign_recipients     email_campaigns 1─n email_messages
 users 1─n calendar_events         email_accounts 1─n calendar_events   calendar_events n─1 leads / companies
 users ← assigned_to / owner / manager / created_by / by_user / decided_by on the tables above

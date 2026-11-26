@@ -26,3 +26,10 @@ test('delete leads: Administrators only', () => {
   expect(can('Sales Representative', 'delete_leads')).toBe(false);
   expect(can('Data Research User', 'delete_leads')).toBe(false);
 });
+
+test('view_team_mail: Administrators and Managers only', () => {
+  expect(can('Administrator', 'view_team_mail')).toBe(true);
+  expect(can('Manager', 'view_team_mail')).toBe(true);
+  expect(can('Sales Representative', 'view_team_mail')).toBe(false);
+  expect(can('Data Research User', 'view_team_mail')).toBe(false);
+});

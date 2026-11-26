@@ -142,6 +142,7 @@ model EmailAccount {
   user           User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
   messages       EmailMessage[]
   campaigns      EmailCampaign[]
+  backfills      MailBackfill[]
   calendarEvents CalendarEvent[]
 
   /// One system row and at most one personal row per user; the same address may be both (Deepak's).
@@ -150,6 +151,7 @@ model EmailAccount {
 }
 
 /// A user's email (release 2B): sent from the CRM now, synced from their mailbox in 2B-2. Private to `userId`.
+/// Lead mail only (web-mail release 1); Administrators and Managers read it view only.
 model EmailMessage {
   id              Int       @id @default(autoincrement())
   userId          Int       @map("user_id")
@@ -157,7 +159,7 @@ model EmailMessage {
   leadId          Int?      @map("lead_id")
   contactId       Int?      @map("contact_id")
   companyId       Int?      @map("company_id")
-  /// 'sent' | 'inbox' | 'drafts' | 'archive'
+  /// 'sent' | 'inbox' | 'drafts' | 'archive' | 'deleted'
   folder          String
   /// 'queued' | 'sending' | 'sent' | 'failed' (sent from the CRM); synced mail is 'received' | 'sent' | 'draft'.
   status          String
@@ -190,6 +192,9 @@ model EmailMessage {
   /// When the user logged it on the lead ("Log as activity"); once per message.
   loggedAt        DateTime? @map("logged_at")
   lastError       String?   @map("last_error")
+  /// When the lead, contact or company it was linked to was deleted (leads/delete.ts): kept with its owner, unlinked,
+  /// and never cleaned up as unrelated mail.
+  leadDeletedAt   DateTime? @map("lead_deleted_at")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
@@ -1175,4 +1180,37 @@ model EmailSuppression {
   createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
   @@map("email_suppressions")
+}
+
+/// Web-mail release 1: one 12-month mailbox search per mailbox × lead/contact address (Graph $search), resumable.
+model MailBackfill {
+  id         Int       @id @default(autoincrement())
+  accountId  Int       @map("account_id")
+  /// Lower-cased.
+  address    String    @db.VarChar(320)
+  /// 'queued' | 'running' | 'done' | 'failed' | 'skipped'
+  status     String    @default("queued")
+  /// Graph next link to continue from.
+  nextLink   String?   @map("next_link")
+  found      Int       @default(0)
+  stored     Int       @default(0)
+  attempts   Int       @default(0)
+  lastError  String?   @map("last_error")
+  finishedAt DateTime? @map("finished_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  account EmailAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, address])
+  @@index([status, id])
+  @@map("mail_backfills")
+}
+
+/// Web-mail release 1: lead/contact addresses already queued for backfill (lower-cased), so each is queued once.
+model MailBackfillAddress {
+  address     String   @id @db.VarChar(320)
+  firstSeenAt DateTime @default(now()) @map("first_seen_at")
+
+  @@map("mail_backfill_addresses")
 }

@@ -3,7 +3,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 export interface AuditEntry {
   entityType: string;
   entityId: string | number;
-  action: 'create' | 'update' | 'delete' | 'merge' | 'verify' | 'test_email';
+  action: 'create' | 'update' | 'delete' | 'merge' | 'verify' | 'test_email' | 'view';
   userId: number | null;
   before?: unknown;
   after?: unknown;
