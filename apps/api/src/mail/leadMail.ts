@@ -29,13 +29,19 @@ function inDomains(list: Iterable<string>, domain: string): boolean {
   return false;
 }
 
+/** True for our own mail domain(s) or one of `ownDomains` (the connected mailboxes' own), subdomains included. */
+export function isOwnDomain(domain: string, ownDomains: Iterable<string>): boolean {
+  const d = domain.trim().toLowerCase();
+  return d !== '' && (inDomains(OWN_MAIL_DOMAINS, d) || inDomains(ownDomains, d));
+}
+
 /**
  * True for a domain that never makes mail lead mail: free mail, shared hosts, `OWN_MAIL_DOMAINS` and `ownDomains`
  * (the connected mailboxes' own domains), subdomains included.
  */
 export function isExcludedDomain(domain: string, ownDomains: Iterable<string>): boolean {
   const d = domain.trim().toLowerCase();
-  return !d || isFreeMail(d) || isSharedHost(d) || inDomains(OWN_MAIL_DOMAINS, d) || inDomains(ownDomains, d);
+  return !d || isFreeMail(d) || isSharedHost(d) || isOwnDomain(d, ownDomains);
 }
 
 /**
@@ -67,7 +73,7 @@ export async function loadLeadMailRules(db: Db): Promise<LeadMailRules> {
     if (!address) return;
     const domain = domainOf(address);
     // An address at our own or a mailbox's domain (a test lead with a colleague's address) never counts (F18).
-    if (domain && (inDomains(OWN_MAIL_DOMAINS, domain) || inDomains(mailboxDomains, domain))) return;
+    if (domain && isOwnDomain(domain, mailboxDomains)) return;
     addresses.add(address);
     if (isLeadCompany && !excluded(domain)) domains.add(domain!);
   };

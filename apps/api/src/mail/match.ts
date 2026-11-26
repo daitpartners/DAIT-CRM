@@ -2,7 +2,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { CLOSED_STATUSES, domainOf } from '@dait-crm/shared';
 import type { AuthUser } from '../plugins/auth.js';
 import { activeUser } from '../leads/visibility.js';
-import { isExcludedDomain, normaliseAddress } from './leadMail.js';
+import { isExcludedDomain, isOwnDomain, normaliseAddress } from './leadMail.js';
 
 type Db = Prisma.TransactionClient | PrismaClient;
 
@@ -54,7 +54,8 @@ async function leadsAtDomain(db: Db, domain: string): Promise<number[]> {
  * 4. a domain (not free mail, shared host, our own or the mailbox's): the company with that domain and its lead; else a
  *    lead with an address there (its company and lead, or that lead alone when it has no company); else a contact
  *    there whose company has a lead; else the company alone.
- * Several leads: an open one first, then the most recently updated (`pickLead`). Addresses compare trimmed, any case.
+ * Several leads: an open one first, then the most recently updated (`pickLead`). Addresses compare trimmed, any case;
+ * an address at our own or the mailbox's domain never links.
  */
 export async function matchMail(
   db: Db, user: AuthUser, m: { threadId: string | null; counterparts: string[]; ownAddress: string },
@@ -68,7 +69,14 @@ export async function matchMail(
     if (linked) return linked;
   }
 
-  const addresses = [...new Set(m.counterparts.map(normaliseAddress).filter(Boolean))];
+  const ownDomain = domainOf(m.ownAddress);
+  const ownDomains = ownDomain ? [ownDomain] : [];
+  // An address at our own or the mailbox's domain (a test lead with a colleague's address) never links (as in
+  // leadMail, F18).
+  const addresses = [...new Set(m.counterparts.map(normaliseAddress).filter(Boolean))].filter((a) => {
+    const domain = domainOf(a);
+    return !domain || !isOwnDomain(domain, ownDomains);
+  });
   if (addresses.length === 0) return NONE;
 
   const byAddress = await leadsAt(db, addresses);
@@ -89,10 +97,7 @@ export async function matchMail(
     return { leadId, contactId: contact.id, companyId: contact.companyId };
   }
 
-  const ownDomain = domainOf(m.ownAddress);
-  const domains = [...new Set(addresses.map(domainOf))].filter(
-    (d): d is string => d !== null && !isExcludedDomain(d, ownDomain ? [ownDomain] : []),
-  );
+  const domains = [...new Set(addresses.map(domainOf))].filter((d): d is string => d !== null && !isExcludedDomain(d, ownDomains));
   let companyOnly: number | null = null;
   for (const domain of domains) {
     const company = await db.company.findUnique({ where: { domain }, select: { id: true } });

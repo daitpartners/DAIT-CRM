@@ -144,6 +144,20 @@ describe('matching synced mail to CRM records (web-mail release 1: lead visibili
     })).toEqual({ leadId: null, contactId: null, companyId: null });
   });
 
+  test("a lead's or contact's address at our own or the mailbox's domain never links (a test lead with a colleague's address)", async () => {
+    const user = await rep();
+    await makeLead({ companyId: null, businessEmail: 'deepak@daitpartners.com' });
+    await makeLead({ companyId: null, businessEmail: ' Colleague@Mail.DaitPartners.com ' });
+    const company = await makeCompany({ website: null });
+    await makeContact({ companyId: company.id, businessEmail: 'boss@mybox.example' });
+    await makeLead({ companyId: company.id });
+    expect(await matchMail(prisma, user, {
+      threadId: null,
+      counterparts: ['deepak@daitpartners.com', 'colleague@mail.daitpartners.com', 'boss@mybox.example'],
+      ownAddress: 'me@mybox.example',
+    })).toEqual({ leadId: null, contactId: null, companyId: null });
+  });
+
   test('a conversation the user already linked keeps its lead after the lead moved to someone else', async () => {
     const user = await rep();
     const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
