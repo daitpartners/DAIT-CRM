@@ -308,6 +308,15 @@ All of these have already been run on live; they are kept for reference and for 
 - **Outreach language:** the live allocation rules were set in Settings → Lead allocation rules ("Spanish market
   (Español)", any country + es → Carlos and Sebastian, priority 1; "English market (US and Canada)", US/CA + en →
   Deepak and Lakshita, priority 2).
+- **Web mail release 1 — clean-up** (not yet run on live; run after the release is live, so sync no longer stores
+  non-lead mail): remove the stored mail that is not lead mail, for every user. First
+  `cd ~/live/current/apps/api && node --env-file=$HOME/live/shared/.env dist/cli/mail-cleanup.js --dry-run` and check
+  the per-user counts (`checked, kept, removed`) look sane; it prints counts only, never subjects or addresses. Then run
+  it again without `--dry-run`. Lead-linked mail, mail of deleted leads (marked, or found through the lead-delete audit
+  entries), queued or sending mail, Mailer, quotation and project-tagged mail, and mail in a lead conversation are kept.
+  If it refuses because lead-delete audit entries record no addresses (leads deleted on live before this release), the
+  mail of those leads cannot be recognised: check with the owner, then add `--accept-unrecorded-deletes` to go ahead.
+  Safe to run again (removes 0). The mail stays in Outlook; restoring the CRM copy means the pre-release dump.
 
 ## Setting the server up from scratch (reference)
 
