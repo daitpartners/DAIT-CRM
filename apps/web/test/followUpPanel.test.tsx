@@ -159,7 +159,7 @@ describe('FollowUpPanel', () => {
     await u.click(screen.getByRole('tab', { name: /Emails/ }));
     const list = await screen.findByRole('list', { name: 'Emails' });
     const [theirs, mine] = within(list).getAllByRole('listitem');
-    expect(theirs).toHaveTextContent("Carlos Torres's mailbox");
+    expect(theirs).toHaveTextContent("Carlos's mailbox");
     expect(mine).not.toHaveTextContent('mailbox');
   });
 });

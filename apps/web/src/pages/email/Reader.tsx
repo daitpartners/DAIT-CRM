@@ -7,7 +7,7 @@ import { Icons } from '../../components/Icons';
 import { PriorityLabel } from '../../components/StatusBadge';
 import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
-import { errorText, leadStatusText } from '../../i18n/labels';
+import { errorText, firstName, leadStatusText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
 import type { ComposeStart } from './ComposeModal';
 import { LinkLeadModal } from './LinkLeadModal';
@@ -43,7 +43,7 @@ export function Reader({ id, peek = false, connected, onReply, onArchived }: Pro
   const draft = m.status === 'draft';
   const inbound = m.status === 'received';
   const viewOnly = m.viewOnly;
-  const ownerFirst = m.owner.name.trim().split(/\s+/)[0] ?? m.owner.name;
+  const ownerFirst = firstName(m.owner.name);
   const voTitle = viewOnly ? t("View only — {name}'s mailbox", { name: ownerFirst }) : undefined;
   const restricted = m.restrictedLead !== null;
   const fail = (err: unknown) => toast(err instanceof ApiError ? errorText(t, err.code) : t('Something went wrong. Try again.'), 'warn');
@@ -123,7 +123,7 @@ export function Reader({ id, peek = false, connected, onReply, onArchived }: Pro
               {viewOnly ? (
                 <span className="vo-pill">
                   {Icons.lock}
-                  {t("View only — {name}'s mailbox.", { name: ownerFirst })}
+                  {t("View only — {name}'s mailbox", { name: ownerFirst })}
                 </span>
               ) : null}
               {restricted ? null : t('Suggested actions:')}

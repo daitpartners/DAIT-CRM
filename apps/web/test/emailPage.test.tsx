@@ -869,7 +869,7 @@ describe('Email screen: team view (web-mail release 1, mockup state 5)', () => {
     expect(screen.getByText(/for other mailboxes/)).toBeInTheDocument();
     const list = screen.getByRole('region', { name: 'Message list' });
     const row = within(list).getByRole('link', { name: /Propuesta/ });
-    expect(row).toHaveTextContent("Carlos Torres's mailbox");
+    expect(row).toHaveTextContent("Carlos's mailbox");
     expect(within(list).getByRole('link', { name: /Proposal/ })).toHaveTextContent('Your mailbox');
     // One user's mail: the line names them.
     await u.selectOptions(picker, 'Carlos Torres');
@@ -902,7 +902,7 @@ describe('Email screen: team view (web-mail release 1, mockup state 5)', () => {
     const reader = await screen.findByRole('article');
     expect(await within(reader).findByText("View only — Carlos's mailbox.", { selector: '.viewonly strong' })).toBeInTheDocument();
     expect(within(reader).getByText(/You can read, log and create tasks; only Carlos can reply from this mailbox\./)).toBeInTheDocument();
-    expect(within(reader).getByText("View only — Carlos's mailbox.", { selector: '.vo-pill' })).toBeInTheDocument();
+    expect(within(reader).getByText("View only — Carlos's mailbox", { selector: '.vo-pill' })).toBeInTheDocument();
     for (const name of ['Reply', 'Archive']) {
       expect(within(reader).getByRole('button', { name })).toBeDisabled();
       expect(within(reader).getByRole('button', { name })).toHaveAttribute('title', "View only — Carlos's mailbox");

@@ -35,7 +35,7 @@ test("send from the lead page; an administrator sees it marked with the sender's
   const adminPanel = page.getByRole('region', { name: 'Follow-up and history' });
   await adminPanel.getByRole('tab', { name: /^Emails/ }).click();
   await expect(adminPanel.getByRole('tab', { name: /^Emails/ })).toHaveText('Emails 1');
-  await expect(adminPanel.getByRole('listitem').filter({ hasText: 'Intro call this week?' })).toContainText("Neha Kapoor's mailbox");
+  await expect(adminPanel.getByRole('listitem').filter({ hasText: 'Intro call this week?' })).toContainText("Neha's mailbox");
   await adminPanel.getByRole('tab', { name: /^Calls/ }).click();
   const timeline = page.getByRole('list', { name: 'Activity timeline' });
   await expect(timeline).toContainText('Email sent · Intro call this week?');

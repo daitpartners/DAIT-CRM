@@ -533,3 +533,8 @@ export function initials(name: string): string {
     .slice(0, 2)
     .toUpperCase();
 }
+
+/** A person's first name (web-mail release 1, mockup state 5: "Carlos's mailbox", "View only — Carlos's mailbox"). */
+export function firstName(name: string): string {
+  return name.trim().split(/\s+/)[0] || name;
+}

@@ -10,7 +10,7 @@ import { useLeadEmails, type LeadEmail } from '../../api/leadEmails';
 import { Tabs } from '../../components/Tabs';
 import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
-import { errorText, leadStatusText, leadTypeText, priorityText, taskWhenText } from '../../i18n/labels';
+import { errorText, firstName, leadStatusText, leadTypeText, priorityText, taskWhenText } from '../../i18n/labels';
 import { useT, type TFn } from '../../i18n/useT';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { TaskModal } from '../tasks/TaskModal';
@@ -343,7 +343,7 @@ function EmailList({ emails }: { emails: LeadEmail[] }) {
               <span className="mail-meta">
                 {m.status === 'received' ? t('From {from}', { from: m.fromAddress }) : t('To {to}', { to: m.toAddresses.join(', ') })}
                 {m.ccAddresses.length ? ` · ${t('cc {cc}', { cc: m.ccAddresses.join(', ') })}` : ''} · {date(m.occurredAt)}
-                {m.ownerName ? ` · ${t("{name}'s mailbox", { name: m.ownerName })}` : ''}
+                {m.ownerName ? ` · ${t("{name}'s mailbox", { name: firstName(m.ownerName) })}` : ''}
               </span>
             </summary>
             <pre className="mail-body">{m.bodyText}</pre>

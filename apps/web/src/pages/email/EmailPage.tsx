@@ -9,7 +9,7 @@ import { Topbar } from '../../components/Topbar';
 import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
 import { useStoredFlag } from '../../hooks/useStoredFlag';
-import { initials } from '../../i18n/labels';
+import { firstName, initials } from '../../i18n/labels';
 import { useT, type TFn } from '../../i18n/useT';
 import { fillTemplate, fillTemplateHtml } from '../../lib/mergeFields';
 import { ComposeModal, type ComposeStart } from './ComposeModal';
@@ -499,7 +499,7 @@ function MessageRow({ m, on, to, team }: { m: MailItem; on: boolean; to: string;
           {m.projectNumber ? <span className="badge b-ok">{m.projectNumber}</span> : null}
           {m.status === 'failed' ? <span className="badge b-bad">{t('Failed')}</span> : null}
           {m.status === 'queued' || m.status === 'sending' ? <span className="badge b-grey">{t('Sending')}</span> : null}
-          {team ? <span className="mail-mbx">{m.viewOnly ? t("{name}'s mailbox", { name: m.owner.name }) : t('Your mailbox')}</span> : null}
+          {team ? <span className="mail-mbx">{m.viewOnly ? t("{name}'s mailbox", { name: firstName(m.owner.name) }) : t('Your mailbox')}</span> : null}
         </span>
       </span>
     </Link>
