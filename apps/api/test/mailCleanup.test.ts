@@ -4,7 +4,7 @@ import { prisma } from '../src/db';
 import { encrypt } from '../src/crypto/tokens';
 import { CleanupRefusedError, cleanUpNonLeadMail } from '../src/mail/cleanup';
 import { resetDb } from './helpers';
-import { makeCompany, makeLead, makeProject, makeUser } from './factory';
+import { makeCompany, makeContact, makeLead, makeProject, makeUser } from './factory';
 
 let rep: User;
 let account: EmailAccount;
@@ -111,6 +111,20 @@ describe('one-off mail clean-up (web-mail release 1)', () => {
     const r = await run();
 
     expect(r.users[0]).toMatchObject({ checked: 3, kept: 2, removed: 1 });
+  });
+
+  test('keeps mail the CRM linked to a contact or a company without a lead (fix round 1)', async () => {
+    const solo = await makeCompany({ name: 'Solo', website: 'https://solo.io' }); // no lead: lends no domain
+    const contact = await makeContact({ companyId: solo.id, businessEmail: 'bo@solo.io' });
+    const toContact = await mail({ contactId: contact.id, fromAddress: 'helper@gmail.com' });
+    const toCompany = await mail({ companyId: solo.id, fromAddress: 'other@solo.io' });
+    await mail();
+
+    const r = await run();
+
+    expect(r.users[0]).toMatchObject({ checked: 3, kept: 2, removed: 1 });
+    expect(await prisma.emailMessage.findUnique({ where: { id: toContact.id } })).not.toBeNull();
+    expect(await prisma.emailMessage.findUnique({ where: { id: toCompany.id } })).not.toBeNull();
   });
 
   test('mail of a lead deleted before this release is kept and marked, found through its delete audit entry (ruling F1)', async () => {

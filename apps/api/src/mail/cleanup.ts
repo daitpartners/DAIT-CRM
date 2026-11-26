@@ -2,7 +2,7 @@
  * One-off clean-up for web-mail release 1 (CLI `cli/mail-cleanup.ts`, run once after the release is live): removes the
  * stored mail that is not lead mail, for every user. Mail stays in Outlook; only the CRM copy goes.
  *
- * A message is kept when any of: linked to a lead; marked `lead_deleted_at`; a send still queued or in flight; Mailer
+ * A message is kept when any of: linked to a lead, contact or company; marked `lead_deleted_at`; a send still queued or in flight; Mailer
  * campaign mail or project-tagged; the queued send of a quotation or a Mailer recipient's message; lead mail by the
  * rules of `leadMail.ts` (any participant); or in a conversation where the user keeps a lead-linked message.
  *
@@ -99,7 +99,8 @@ export async function cleanUpNonLeadMail(
         orderBy: { id: 'asc' },
         take: BATCH,
         select: {
-          id: true, leadId: true, leadDeletedAt: true, status: true, campaignId: true, projectId: true, threadId: true,
+          id: true, leadId: true, contactId: true, companyId: true, leadDeletedAt: true, status: true, campaignId: true,
+          projectId: true, threadId: true,
           fromAddress: true, toAddresses: true, ccAddresses: true, bccAddresses: true,
           _count: { select: { sendingQuotations: true, campaignRecipients: true } },
         },
@@ -111,8 +112,8 @@ export async function cleanUpNonLeadMail(
       const stamp: number[] = [];
       const remove: number[] = [];
       for (const m of rows) {
-        if (m.leadId !== null || m.leadDeletedAt !== null || IN_FLIGHT.includes(m.status) || m.campaignId !== null
-          || m.projectId !== null || m._count.sendingQuotations > 0 || m._count.campaignRecipients > 0) continue;
+        if (m.leadId !== null || m.contactId !== null || m.companyId !== null || m.leadDeletedAt !== null
+          || IN_FLIGHT.includes(m.status) || m.campaignId !== null || m.projectId !== null || m._count.sendingQuotations > 0 || m._count.campaignRecipients > 0) continue;
         const participants = participantsOf({
           from: m.fromAddress, to: strings(m.toAddresses), cc: strings(m.ccAddresses), bcc: strings(m.bccAddresses),
         });
@@ -131,7 +132,8 @@ export async function cleanUpNonLeadMail(
           // Checked again in the delete itself, in case a message was linked or used since it was read.
           const { count } = await db.emailMessage.deleteMany({
             where: {
-              id: { in: remove }, leadId: null, leadDeletedAt: null, status: { notIn: IN_FLIGHT }, campaignId: null, projectId: null,
+              id: { in: remove }, leadId: null, contactId: null, companyId: null, leadDeletedAt: null,
+              status: { notIn: IN_FLIGHT }, campaignId: null, projectId: null,
               sendingQuotations: { none: {} }, campaignRecipients: { none: {} },
             },
           });
