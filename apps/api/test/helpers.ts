@@ -35,6 +35,7 @@ export function fakeGraph(impl: Partial<GraphClient> = {}): GraphClient {
     sendMail: unexpected('sendMail'), deltaPage: unexpected('deltaPage'), attachmentNames: unexpected('attachmentNames'),
     calendarDeltaPage: unexpected('calendarDeltaPage'), messageBody: unexpected('messageBody'),
     markRead: unexpected('markRead'), moveTo: unexpected('moveTo'), reply: unexpected('reply'),
+    searchPage: unexpected('searchPage'), folderIds: unexpected('folderIds'),
     ...impl,
   };
 }

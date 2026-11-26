@@ -26,7 +26,7 @@ vi.mock('@azure/msal-node', () => ({
 
 import { prisma } from '../src/db';
 import { decrypt, encrypt } from '../src/crypto/tokens';
-import { calendarDeltaStartUrl, createGraphClient, deltaStartUrl, GRAPH_CALENDAR_SCOPES, GRAPH_MAIL_SCOPES, GRAPH_SEND_SCOPES, GraphError, isAuthFailure } from '../src/graph/client';
+import { calendarDeltaStartUrl, createGraphClient, deltaStartUrl, GRAPH_CALENDAR_SCOPES, GRAPH_MAIL_SCOPES, GRAPH_SEND_SCOPES, GraphError, isAuthFailure, searchStartUrl } from '../src/graph/client';
 import { resetDb } from './helpers';
 
 const env = { MS_TENANT_ID: 't', MS_CLIENT_ID: 'c', MS_CLIENT_SECRET: 's' };
@@ -425,5 +425,103 @@ describe('graph client — access token reuse (2B-2 review)', () => {
     expect(msalState.refreshTokensSeen).toHaveLength(1);
     await g.deltaPage({ ...acc, refreshTokenEnc: encrypt('reconnected-rt') }, 'https://graph.microsoft.com/v1.0/c');
     expect(msalState.refreshTokensSeen).toEqual(['original-rt', 'reconnected-rt']);
+  });
+});
+
+describe('graph client — search by address and folder ids (web-mail release 1)', () => {
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  const call = (m: ReturnType<typeof vi.fn>, i = 0) => m.mock.calls[i] as unknown as [string, RequestInit];
+  const headers = (init: RequestInit) => init.headers as Record<string, string>;
+
+  test('searchStartUrl searches the whole mailbox for the address since a date, with the sync fields and parentFolderId', () => {
+    const url = searchStartUrl('Ana@acme.com"', new Date('2025-11-26T00:00:00Z'));
+    expect(url.startsWith('https://graph.microsoft.com/v1.0/me/messages?')).toBe(true);
+    const q = new URL(url).searchParams;
+    expect(q.get('$search')).toBe('"participants:ana@acme.com AND received>=2025-11-26"');
+    expect(q.get('$select')!.split(',')).toEqual(expect.arrayContaining(['bccRecipients', 'parentFolderId', 'body']));
+    expect(q.get('$top')).toBe('50');
+  });
+
+  test('searchStartUrl removes backslashes from the address too', () => {
+    const q = new URL(searchStartUrl('a\\b@acme.com', new Date('2025-11-26T12:00:00Z'))).searchParams;
+    expect(q.get('$search')).toBe('"participants:ab@acme.com AND received>=2025-11-26"');
+  });
+
+  test('searchPage maps messages with their folder id and the next link, immutable ids and HTML bodies', async () => {
+    const fetchMock = vi.fn(async () => json({
+      value: [
+        {
+          id: 'g1', parentFolderId: 'folder-inbox', subject: 'Proposal', from: { emailAddress: { name: 'Ana Ruiz', address: 'Ana@Acme.com' } },
+          toRecipients: [{ emailAddress: { address: 'maya@daitpartners.com' } }], bccRecipients: [{ emailAddress: { address: 'Hidden@Acme.com' } }],
+          receivedDateTime: '2026-01-20T10:00:00Z', isRead: true, body: { contentType: 'html', content: '<p>Hello</p>' },
+        },
+        { id: 'g2', parentFolderId: 'folder-sent', body: { contentType: 'text', content: 'Hi' } },
+      ],
+      '@odata.nextLink': 'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=abc',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const page = await createGraphClient(env).searchPage(await account(), 'https://graph.microsoft.com/v1.0/me/messages?x');
+    expect(page.nextLink).toBe('https://graph.microsoft.com/v1.0/me/messages?$skiptoken=abc');
+    expect(page.items.map((i) => i.folderId)).toEqual(['folder-inbox', 'folder-sent']);
+    expect(page.items[0]!.message).toMatchObject({
+      id: 'g1', subject: 'Proposal', from: { name: 'Ana Ruiz', address: 'ana@acme.com' }, to: ['maya@daitpartners.com'], bcc: ['hidden@acme.com'],
+      body: { contentType: 'html', content: '<p>Hello</p>' },
+    });
+    expect(page.items[1]!.message.body).toEqual({ contentType: 'text', content: 'Hi' });
+    const [url, init] = call(fetchMock);
+    expect(url).toBe('https://graph.microsoft.com/v1.0/me/messages?x');
+    expect(init.method).toBe('GET');
+    expect(headers(init).Prefer).toContain('IdType="ImmutableId"');
+    expect(headers(init).Prefer).toContain('outlook.body-content-type="html"');
+    expect(msalState.scopes[0]).toEqual(GRAPH_MAIL_SCOPES);
+  });
+
+  test('searchPage: the last page has no next link', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ value: [] })));
+    expect(await createGraphClient(env).searchPage(await account(), 'https://graph.microsoft.com/v1.0/me/messages?x')).toEqual({ items: [], nextLink: undefined });
+  });
+
+  test('searchPage refuses a link that is not Graph', async () => {
+    const fetchMock = vi.fn(async () => json({ value: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const err = await createGraphClient(env).searchPage(await account(), 'https://evil.example/me/messages').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe('not_a_graph_link');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test('folderIds reads the five well-known folders', async () => {
+    const fetchMock = vi.fn(async (url: string) => json({ id: `id-${new URL(url).pathname.split('/').pop()}` }));
+    vi.stubGlobal('fetch', fetchMock);
+    const ids = await createGraphClient(env).folderIds(await account());
+    expect(Object.keys(ids).sort()).toEqual(['archive', 'deleteditems', 'drafts', 'inbox', 'sentitems']);
+    expect(ids.inbox).toBe('id-inbox');
+    expect(ids.deleteditems).toBe('id-deleteditems');
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    const urls = fetchMock.mock.calls.map((c) => (c as unknown as [string])[0]).sort();
+    expect(urls).toContain('https://graph.microsoft.com/v1.0/me/mailFolders/inbox?$select=id');
+    for (let i = 0; i < 5; i++) {
+      expect(headers(call(fetchMock, i)[1]).Prefer).toContain('IdType="ImmutableId"');
+      expect(headers(call(fetchMock, i)[1]).Prefer).toContain('outlook.body-content-type="html"');
+    }
+    expect(msalState.scopes[0]).toEqual(GRAPH_MAIL_SCOPES);
+    expect(msalState.refreshTokensSeen).toHaveLength(1);
+  });
+
+  test('folderIds skips a folder the mailbox does not have (Archive 404)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const name = new URL(url).pathname.split('/').pop();
+      return name === 'archive' ? json({ error: { code: 'ErrorFolderNotFound' } }, 404) : json({ id: `id-${name}` });
+    }));
+    const ids = await createGraphClient(env).folderIds(await account());
+    expect(Object.keys(ids).sort()).toEqual(['deleteditems', 'drafts', 'inbox', 'sentitems']);
+    expect(ids.archive).toBeUndefined();
+  });
+
+  test('folderIds fails on any other error (throttling is not a missing folder)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ error: { code: 'TooManyRequests' } }, 429)));
+    const err = await createGraphClient(env).folderIds(await account()).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GraphError);
+    expect((err as GraphError).status).toBe(429);
   });
 });

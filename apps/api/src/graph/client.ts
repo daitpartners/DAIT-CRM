@@ -76,6 +76,12 @@ export interface GraphEvent {
   isOnline: boolean;
 }
 
+/** One page of a mailbox search: each message with the id of the folder it sits in, and the link to continue from. */
+export interface SearchPage {
+  items: { folderId: string; message: GraphMessage }[];
+  nextLink?: string;
+}
+
 /** One page of a calendar view delta query. */
 export interface CalendarDeltaPage {
   events: GraphEvent[];
@@ -99,6 +105,10 @@ export interface GraphClient {
    * shortens the usual request timeout.
    */
   messageBody(account: EmailAccount, graphId: string, opts?: { timeoutMs?: number }): Promise<GraphBody>;
+  /** Web-mail release 1 (backfill): one page of a whole-mailbox search (start with searchStartUrl). */
+  searchPage(account: EmailAccount, url: string): Promise<SearchPage>;
+  /** Graph ids of the well-known folders sync reads; a folder the mailbox does not have (404) is left out. */
+  folderIds(account: EmailAccount): Promise<Partial<Record<MailFolder, string>>>;
   /** Release 3C (the account's own calendar, read only): */
   calendarDeltaPage(account: EmailAccount, url: string): Promise<CalendarDeltaPage>;
 }
@@ -137,6 +147,24 @@ export function deltaStartUrl(folder: MailFolder, since: Date): string {
   const q = new URLSearchParams({ $select: SYNC_FIELDS.join(','), $filter: `receivedDateTime ge ${since.toISOString()}` });
   return `${GRAPH}/me/mailFolders/${folder}/messages/delta?${q.toString()}`;
 }
+
+/**
+ * Start of a whole-mailbox search for messages to or from `address` received since `since` (date only), 50 a page,
+ * with the fields sync stores and the folder each message is in. `"` and `\` are removed from the address so it cannot
+ * break out of the quoted search.
+ */
+export function searchStartUrl(address: string, since: Date): string {
+  const clean = address.replace(/["\\]/g, '').trim().toLowerCase();
+  const q = new URLSearchParams({
+    $search: `"participants:${clean} AND received>=${since.toISOString().slice(0, 10)}"`,
+    $select: [...SYNC_FIELDS, 'parentFolderId'].join(','),
+    $top: '50',
+  });
+  return `${GRAPH}/me/messages?${q.toString()}`;
+}
+
+/** The well-known folders sync reads, in order. */
+const MAIL_FOLDERS: MailFolder[] = ['inbox', 'sentitems', 'drafts', 'archive', 'deleteditems'];
 
 /**
  * Start of a calendar view delta query over [start, end): recurring meetings come as single occurrences. The view
@@ -408,6 +436,33 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
     async messageBody(account, graphId, opts) {
       const res = await mailCall(account, `${messageUrl(graphId)}?$select=body`, 'GET', undefined, `${IMMUTABLE}, ${HTML_BODY}`, opts?.timeoutMs);
       return bodyOf(((await res.json()) as { body?: unknown }).body);
+    },
+
+    async searchPage(account, url) {
+      // Next links come from Graph; never send the token anywhere else.
+      if (!url.startsWith(`${GRAPH}/`)) throw new Error('not_a_graph_link');
+      const res = await mailCall(account, url, 'GET', undefined, `${IMMUTABLE}, ${HTML_BODY}`);
+      const page = (await res.json()) as { value?: Record<string, unknown>[]; '@odata.nextLink'?: string };
+      return {
+        items: (page.value ?? []).map((v) => ({ folderId: str(v.parentFolderId) ?? '', message: toMessage(v) })),
+        nextLink: page['@odata.nextLink'],
+      };
+    },
+
+    async folderIds(account) {
+      // One at a time: the first call signs in and the rest reuse its token (parallel calls would each sign in).
+      const ids: Partial<Record<MailFolder, string>> = {};
+      for (const folder of MAIL_FOLDERS) {
+        try {
+          const res = await mailCall(account, `${GRAPH}/me/mailFolders/${folder}?$select=id`, 'GET', undefined, `${IMMUTABLE}, ${HTML_BODY}`);
+          const id = str(((await res.json()) as { id?: unknown }).id);
+          if (id) ids[folder] = id;
+        } catch (err) {
+          // A mailbox without the folder (often Archive): sync tolerates the same 404 per folder.
+          if (!(err instanceof GraphError && err.status === 404)) throw err;
+        }
+      }
+      return ids;
     },
 
     async calendarDeltaPage(account, url) {

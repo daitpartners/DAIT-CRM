@@ -26,7 +26,7 @@ const graph: GraphClient = {
     }));
     console.log(`e2e-sent: ${JSON.stringify({ to: msg.to, subject: msg.subject, html: msg.html, text: msg.text, attachments })}`);
   },
-  deltaPage: refuse, attachmentNames: refuse, markRead: refuse, moveTo: refuse, reply: refuse, calendarDeltaPage: refuse, messageBody: refuse,
+  deltaPage: refuse, attachmentNames: refuse, markRead: refuse, moveTo: refuse, reply: refuse, calendarDeltaPage: refuse, messageBody: refuse, searchPage: refuse, folderIds: refuse,
 };
 
 try {
