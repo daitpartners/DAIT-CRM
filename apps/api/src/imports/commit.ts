@@ -21,6 +21,7 @@ import {
 import { prisma } from '../db.js';
 import { enqueue, STALE_AFTER_MS } from '../jobs/queue.js';
 import { audit } from '../audit.js';
+import { suppressed } from '../mailer/suppression.js';
 import { rowMessage } from '../leads/csv.js';
 import { auditCreatedLead, companyDataFromLead, createLeadWithCompany } from '../leads/service.js';
 import { notifyUser } from '../leads/notify.js';
@@ -506,10 +507,12 @@ export async function importRow(
     if (firstName) {
       const phone = clean(f.phone);
       const primary = companyCreated && (await tx.contact.count({ where: { companyId: company.id, isPrimary: true } })) === 0;
+      // An address on the suppression list (a deleted lead or contact opted out): unsubscribed from the start.
+      const listed = (await suppressed(tx, [email])).size > 0;
       contact = await tx.contact.create({
         data: {
           companyId: company.id, firstName, lastName, designation: clean(f.designation), businessEmail: email,
-          phone, phoneNormalised: normalisePhone(phone) || null, isPrimary: primary,
+          phone, phoneNormalised: normalisePhone(phone) || null, isPrimary: primary, unsubscribedAt: listed ? new Date() : null,
         },
       });
       contactCreated = true;

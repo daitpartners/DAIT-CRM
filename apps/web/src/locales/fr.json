@@ -2009,5 +2009,9 @@
   "Type \"delete\" to confirm": "Saisissez « delete » pour confirmer",
   "Delete lead…": "Supprimer le lead…",
   "At most {n} leads at once": "{n} leads au maximum à la fois",
-  "Delete…": "Supprimer…"
+  "Delete…": "Supprimer…",
+  "Contacts removed with their company:": "Contacts supprimés avec leur entreprise :",
+  "(no name)": "(sans nom)",
+  "1 of the chosen leads was not found (already deleted).": "1 des leads choisis est introuvable (déjà supprimé).",
+  "{n} of the chosen leads were not found (already deleted).": "{n} des leads choisis sont introuvables (déjà supprimés)."
 }

@@ -8,6 +8,9 @@ export function isUniqueViolation(e: unknown, target?: string): boolean {
   return Array.isArray(t) ? t.includes(target) : typeof t === 'string' && t.includes(target);
 }
 
+/** A foreign-key violation (P2003): a row it points at went in the meantime (e.g. a lead deleted). */
+export const isForeignKeyViolation = (e: unknown): boolean => e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2003';
+
 /** The record to update or delete was not found (P2025): with an `updatedAt` in the where, a concurrent write. */
 export const isNotFound = (e: unknown): boolean => e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025';
 

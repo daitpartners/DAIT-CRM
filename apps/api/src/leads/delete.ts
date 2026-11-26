@@ -1,18 +1,20 @@
 /**
  * Delete leads (owner, 25 Nov 2026; docs/superpowers/specs/2026-11-25-lead-delete-design.md). Administrators only
  * (`delete_leads`), at most LEAD_DELETE_MAX at once, archived leads included. A preview lists what goes and what stays
- * (and why); confirm plans again under locks and removes only what is still safe AND was in the preview.
+ * (and why); confirm plans again under locks and removes only what is still safe AND was in the preview (leads,
+ * companies, contacts and Draft quotations alike).
  *
  * Per relation (prisma/schema.prisma; no ON DELETE had to change):
  * - removed with the lead: activities (notes, calls, meetings, timeline) and assignments (FK cascade), tasks (cascade),
- *   its Draft quotations (deleted here, with their lines, revisions and tasks), notifications linking to it;
+ *   its Draft quotations (deleted here, with their lines, revisions and tasks), notifications linking to it or to them;
  * - unlinked, never removed (FK set null): email_messages and calendar_events (they stay with their owner, private),
  *   Mailer recipients (campaign history kept), import rows, research runs and source records of a company kept;
  * - blocks the lead (kept, archive instead): a project, or a quotation that is not a never-sent Draft;
- * - the company goes (with its contacts, locations, research runs, suggestions and sources, notifications linking to it)
- *   only when, after the deletion, it has no other lead (archived included), project or quotation, and none of its
- *   contacts is used by another lead, a quotation or a project; otherwise it stays with all its contacts;
- * - a lead's own contact on a company that stays goes when nothing else uses it (other lead, quotation, project).
+ * - the company goes, with ALL its contacts, locations, research runs, suggestions and sources (and notifications linking
+ *   to it), only when, after the deletion, it has no other lead (archived included), project or quotation, and none of
+ *   its contacts is used by another lead, a quotation or a project. A company kept keeps every contact (owner ruling).
+ * - opt-outs survive: the address of a removed lead marked Do not email, and of a removed contact that unsubscribed, goes
+ *   on the suppression list (`email_suppressions`, address only).
  *
  * Locks are taken in the order import Undo and update rows take them (companies → contacts → leads, each by id).
  */
@@ -21,6 +23,7 @@ import type { LeadDeletePlan, LeadDeletePreview, LeadDeleteReason } from '@dait-
 import { prisma } from '../db.js';
 import type { AuthUser } from '../plugins/auth.js';
 import { isRetryable } from '../imports/undo.js';
+import { suppress, type SuppressionReason } from '../mailer/suppression.js';
 
 type Db = Prisma.TransactionClient;
 type Keep = LeadDeletePreview['keep'][number];
@@ -33,7 +36,7 @@ export class LeadDeleteError extends Error {
 }
 
 const contactSelect = {
-  id: true, firstName: true, lastName: true,
+  id: true, firstName: true, lastName: true, businessEmail: true, unsubscribedAt: true,
   leads: { select: { id: true } },
   quotations: { select: { id: true } },
   _count: { select: { projectStakeholders: true } },
@@ -42,10 +45,11 @@ type ContactRow = Prisma.ContactGetPayload<{ select: typeof contactSelect }>;
 
 type Planned = {
   preview: LeadDeletePreview;
-  draftIds: number[];
-  /** Per removed lead: what goes with it (for its audit entry). */
-  leadCounts: Map<number, { activities: number; tasks: number; draftQuotations: number; contacts: number }>;
+  /** Per removed lead: what goes with it (for its audit entry; numbers and counts only). */
+  leadCounts: Map<number, { activities: number; tasks: number; draftQuotations: number; quotationNumbers: string[] }>;
   companyCounts: Map<number, { contacts: number; locations: number; researchRuns: number; sources: number }>;
+  /** Addresses that go on the suppression list. */
+  suppress: { email: string | null; reason: SuppressionReason }[];
 };
 
 /** A quotation that was never sent (status Draft, no revision frozen, no send queued, no project). */
@@ -53,21 +57,27 @@ const neverSent = (q: { status: string; projectId: number | null; sendingMessage
   q.status === 'Draft' && q._count.revisions === 0 && q.sendingMessageId === null && q.projectId === null;
 
 const sortedUnique = (ids: (number | null)[]) => [...new Set(ids.filter((id): id is number => id !== null))].sort((a, b) => a - b);
+const nameOf = (c: { firstName: string; lastName: string }) => `${c.firstName} ${c.lastName}`.trim();
 
 /**
  * What deleting `ids` would do now. With `restrict` (confirm), nothing outside the preview's plan is removed: a record
- * that became removable since stays (`changed`), and a company whose contacts grew since stays too.
+ * that became removable since stays (`changed`), as does a lead with a Draft made since, or a company whose contacts grew.
  */
 async function planDelete(db: Db, ids: number[], restrict: LeadDeletePlan | null): Promise<Planned> {
   const allowed = restrict && {
     leads: new Set(restrict.leads), companies: new Set(restrict.companies), contacts: new Set(restrict.contacts),
+    quotations: new Set(restrict.quotations),
   };
   const leads = await db.lead.findMany({
     where: { id: { in: ids } },
     orderBy: { id: 'asc' },
     select: {
-      id: true, number: true, companyName: true, companyId: true, contactId: true,
-      quotations: { select: { id: true, status: true, projectId: true, sendingMessageId: true, _count: { select: { revisions: true } } } },
+      id: true, number: true, companyName: true, companyId: true, doNotEmail: true, businessEmail: true,
+      contact: { select: { businessEmail: true } },
+      quotations: {
+        select: { id: true, number: true, status: true, projectId: true, sendingMessageId: true, _count: { select: { revisions: true } } },
+        orderBy: { id: 'asc' },
+      },
       _count: { select: { projects: true, tasks: true, activities: true } },
     },
   });
@@ -75,7 +85,7 @@ async function planDelete(db: Db, ids: number[], restrict: LeadDeletePlan | null
   const removeLeads: typeof leads = [];
   for (const l of leads) {
     const reason: LeadDeleteReason | null = l._count.projects ? 'projects' : l.quotations.some((q) => !neverSent(q)) ? 'quotations'
-      : allowed && !allowed.leads.has(l.id) ? 'changed' : null;
+      : allowed && (!allowed.leads.has(l.id) || l.quotations.some((q) => !allowed.quotations.has(q.id))) ? 'changed' : null;
     if (reason) keep.push({ kind: 'lead', id: l.id, label: `${l.number} · ${l.companyName}`, reason });
     else removeLeads.push(l);
   }
@@ -99,63 +109,58 @@ async function planDelete(db: Db, ids: number[], restrict: LeadDeletePlan | null
     },
   });
   const removeCompanies: typeof companies = [];
-  const removeContacts = new Set<number>();
+  const removeContacts: ContactRow[] = [];
+  const keptContacts: Keep[] = [];
   const companyCounts: Planned['companyCounts'] = new Map();
   for (const co of companies) {
+    const busy = co.contacts.map((c) => [c, contactReason(c)] as const).filter(([, r]) => r !== null);
     let reason: LeadDeleteReason | null = co._count.projects ? 'projects' : co.quotations.some((q) => !drafts.has(q.id)) ? 'quotations'
-      : co.leads.some((l) => !removing.has(l.id)) ? 'other_leads' : co.contacts.some((c) => contactReason(c) !== null) ? 'contact_in_use' : null;
+      : co.leads.some((l) => !removing.has(l.id)) ? 'other_leads' : busy.length > 0 ? 'contact_in_use' : null;
     if (!reason && allowed && (!allowed.companies.has(co.id) || co.contacts.some((c) => !allowed.contacts.has(c.id)))) reason = 'changed';
     if (reason) {
       keep.push({ kind: 'company', id: co.id, label: `${co.number} · ${co.name}`, reason });
+      // The contacts that hold it, by name, when that is the reason.
+      if (reason === 'contact_in_use') for (const [c, r] of busy) keptContacts.push({ kind: 'contact', id: c.id, label: nameOf(c), reason: r! });
       continue;
     }
     removeCompanies.push(co);
-    for (const c of co.contacts) removeContacts.add(c.id);
+    removeContacts.push(...co.contacts);
     companyCounts.set(co.id, {
       contacts: co.contacts.length, locations: co._count.locations, researchRuns: co._count.enrichmentRuns, sources: co._count.sourceRecords,
     });
   }
-
-  // The leads' own contacts that do not go with their company.
-  const own = await db.contact.findMany({
-    where: { id: { in: sortedUnique(removeLeads.map((l) => l.contactId)).filter((id) => !removeContacts.has(id)) } },
-    orderBy: { id: 'asc' },
-    select: contactSelect,
-  });
-  const ownRemoved = new Set<number>();
-  for (const c of own) {
-    let reason = contactReason(c);
-    if (!reason && allowed && !allowed.contacts.has(c.id)) reason = 'changed';
-    if (reason) keep.push({ kind: 'contact', id: c.id, label: `${c.firstName} ${c.lastName}`.trim(), reason });
-    else ownRemoved.add(c.id);
-  }
-  for (const id of ownRemoved) removeContacts.add(id);
+  keep.push(...keptContacts);
 
   const leadIds = removeLeads.map((l) => l.id);
   const tasks = leadIds.length === 0 ? 0
     : await db.task.count({ where: { OR: [{ leadId: { in: leadIds } }, ...(draftIds.length ? [{ quotationId: { in: draftIds } }] : [])] } });
-  const leadCounts: Planned['leadCounts'] = new Map();
-  const ownCounted = new Set<number>();
-  for (const l of removeLeads) {
-    // A contact removed on its own is counted once, on the first lead that had it.
-    const contact = l.contactId !== null && ownRemoved.has(l.contactId) && !ownCounted.has(l.contactId);
-    if (contact) ownCounted.add(l.contactId!);
-    leadCounts.set(l.id, { activities: l._count.activities, tasks: l._count.tasks, draftQuotations: l.quotations.length, contacts: contact ? 1 : 0 });
-  }
-  const contactIds = [...removeContacts].sort((a, b) => a - b);
+  const leadCounts: Planned['leadCounts'] = new Map(removeLeads.map((l) => [l.id, {
+    activities: l._count.activities, tasks: l._count.tasks, draftQuotations: l.quotations.length, quotationNumbers: l.quotations.map((q) => q.number),
+  }]));
+  const found = new Set(leads.map((l) => l.id));
   return {
     preview: {
       remove: {
         leads: removeLeads.map((l) => ({ id: l.id, number: l.number, companyName: l.companyName })),
         companies: removeCompanies.map((co) => ({ id: co.id, number: co.number, name: co.name })),
-        contacts: contactIds.length,
+        contacts: removeContacts.map((c) => ({ id: c.id, name: nameOf(c) })),
         draftQuotations: draftIds.length,
         tasks,
       },
       keep,
-      plan: { leads: leadIds, companies: removeCompanies.map((co) => co.id), contacts: contactIds },
+      notFound: ids.filter((id) => !found.has(id)).length,
+      plan: {
+        leads: leadIds, companies: removeCompanies.map((co) => co.id),
+        contacts: removeContacts.map((c) => c.id).sort((a, b) => a - b), quotations: [...draftIds].sort((a, b) => a - b),
+      },
     },
-    draftIds, leadCounts, companyCounts,
+    leadCounts, companyCounts,
+    suppress: [
+      ...removeLeads.filter((l) => l.doNotEmail).flatMap((l) => [
+        { email: l.businessEmail, reason: 'do_not_email' as const }, { email: l.contact?.businessEmail ?? null, reason: 'do_not_email' as const },
+      ]),
+      ...removeContacts.filter((c) => c.unsubscribedAt).map((c) => ({ email: c.businessEmail, reason: 'unsubscribed' as const })),
+    ],
   };
 }
 
@@ -202,10 +207,10 @@ async function lockAll(tx: Db, ids: number[]): Promise<void> {
 }
 
 /**
- * Deletes the leads in one transaction: locks, plans again (removing only what is safe now and was in `plan`), removes
- * Draft quotations → notifications → leads → contacts → companies, and writes one audit entry per lead and company
- * (numbers, names and counts only). Answers with what it did. A deadlock with a concurrent edit (nothing changed): 409
- * `try_again`.
+ * Deletes the leads in one transaction: locks, plans again (removing only what is safe now and was in `plan`), puts the
+ * opt-outs on the suppression list, removes Draft quotations → notifications → leads → contacts → companies, and writes
+ * one audit entry per lead and company (numbers, names and counts only). Answers with what it did. A deadlock with a
+ * concurrent edit (nothing changed): 409 `try_again`.
  */
 export async function deleteLeads(user: AuthUser, rawIds: number[], plan: LeadDeletePlan): Promise<LeadDeletePreview> {
   const ids = sortedUnique(rawIds);
@@ -222,21 +227,23 @@ export async function deleteLeads(user: AuthUser, rawIds: number[], plan: LeadDe
   }
 }
 
+/** Notifications that open one of `ids` under `/<path>/<id>` (with an optional `#…` or `?…`). */
+async function dropNotifications(tx: Db, path: 'leads' | 'companies' | 'quotations', ids: number[]) {
+  if (ids.length === 0) return;
+  const pattern = `^/${path}/([0-9]{1,9})(?:[#?].*)?$`;
+  await tx.$executeRaw`DELETE FROM notifications WHERE substring(link from ${pattern})::int = ANY(${ids}::int[])`;
+}
+
 async function apply(tx: Db, user: AuthUser, planned: Planned): Promise<void> {
-  const { leads: leadIds, companies: companyIds, contacts: contactIds } = planned.preview.plan;
-  if (planned.draftIds.length > 0) {
-    await tx.task.deleteMany({ where: { quotationId: { in: planned.draftIds } } });
-    await tx.quotation.deleteMany({ where: { id: { in: planned.draftIds } } });
+  const { leads: leadIds, companies: companyIds, contacts: contactIds, quotations: draftIds } = planned.preview.plan;
+  await suppress(tx, planned.suppress, 'lead_deleted', user.id);
+  if (draftIds.length > 0) {
+    await tx.task.deleteMany({ where: { quotationId: { in: draftIds } } });
+    await tx.quotation.deleteMany({ where: { id: { in: draftIds } } });
   }
-  // Notifications that open a removed lead or company (`/leads/12`, `/companies/7#ai`).
-  if (leadIds.length > 0) {
-    await tx.$executeRaw`DELETE FROM notifications
-      WHERE substring(link from '^/leads/([0-9]{1,9})(?:[#?].*)?$')::int = ANY(${leadIds}::int[])`;
-  }
-  if (companyIds.length > 0) {
-    await tx.$executeRaw`DELETE FROM notifications
-      WHERE substring(link from '^/companies/([0-9]{1,9})(?:[#?].*)?$')::int = ANY(${companyIds}::int[])`;
-  }
+  await dropNotifications(tx, 'quotations', draftIds);
+  await dropNotifications(tx, 'leads', leadIds);
+  await dropNotifications(tx, 'companies', companyIds);
   await tx.lead.deleteMany({ where: { id: { in: leadIds } } });
   if (contactIds.length > 0) await tx.contact.deleteMany({ where: { id: { in: contactIds } } });
   if (companyIds.length > 0) await tx.company.deleteMany({ where: { id: { in: companyIds } } });

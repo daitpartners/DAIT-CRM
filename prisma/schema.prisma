@@ -63,6 +63,8 @@ model User {
   importBatchesImported ImportBatch[] @relation("ImportBatchImporter")
   importBatchesUndone   ImportBatch[] @relation("ImportBatchUndoer")
 
+  emailSuppressions EmailSuppression[]
+
   @@map("users")
 }
 
@@ -1154,4 +1156,23 @@ model ImportRow {
   @@index([fileId])
   @@index([claudeAt])
   @@map("import_rows")
+}
+
+/// Addresses the CRM must not email (lead delete, 25 Nov 2026): kept when a lead marked Do not email, or a contact that
+/// unsubscribed, is deleted. Only the address is kept. The Mailer skips it; a lead or contact created for it later is
+/// marked Do not email / unsubscribed.
+model EmailSuppression {
+  id          Int      @id @default(autoincrement())
+  /// Lower-cased.
+  email       String   @unique @db.VarChar(320)
+  /// 'unsubscribed' | 'do_not_email'
+  reason      String   @db.VarChar(20)
+  /// Where it came from, e.g. 'lead_deleted'.
+  source      String   @db.VarChar(40)
+  createdAt   DateTime @default(now()) @map("created_at")
+  createdById Int?     @map("created_by")
+
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@map("email_suppressions")
 }

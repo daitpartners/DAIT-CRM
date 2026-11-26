@@ -26,6 +26,7 @@ import { dateOnly, todayIn } from '../leads/dates.js';
 import { attachmentHeader } from '../imports/exports.js';
 import { leadsWorkbook } from '../imports/leadsExport.js';
 import { LeadDeleteError, deleteLeads, deletePreview } from '../leads/delete.js';
+import { unsuppress } from '../mailer/suppression.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -421,8 +422,11 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
         // a contact unsubscribed through another lead can be emailed from this one again. Nothing to do when both
         // already match. The contact row is locked: two of its leads changed at once both see the other's change.
         if (lead.contactId) await tx.$queryRaw`SELECT id FROM contacts WHERE id = ${lead.contactId} FOR UPDATE`;
-        const contact = lead.contactId ? await tx.contact.findUnique({ where: { id: lead.contactId }, select: { unsubscribedAt: true } }) : null;
+        const contact = lead.contactId
+          ? await tx.contact.findUnique({ where: { id: lead.contactId }, select: { unsubscribedAt: true, businessEmail: true } }) : null;
         const contactOn = !!contact?.unsubscribedAt;
+        // Unticked: the addresses come off the suppression list too (a person decided they may be emailed again).
+        if (!body.doNotEmail) await unsuppress(tx, [lead.businessEmail, contact?.businessEmail]);
         if (lead.doNotEmail === body.doNotEmail && (!contact || contactOn === body.doNotEmail)) return;
         await tx.lead.update({ where: { id }, data: { doNotEmail: body.doNotEmail } });
         if (contact && contactOn !== body.doNotEmail) {

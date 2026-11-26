@@ -7,8 +7,11 @@ import { buildApp } from '../src/app';
 import { encrypt } from '../src/crypto/tokens';
 import type { AuthUser } from '../src/plugins/auth';
 import { deleteLeads } from '../src/leads/delete';
+import { checkRecipients, sendBlock } from '../src/mailer/rules';
+import { importCommitHandler } from '../src/jobs/handlers/importCommit';
+import { runOnce } from '../src/jobs/runner';
 import { makeCompany, makeContact, makeLead, makeProject, makeUser, signIn } from './factory';
-import { resetDb, seedLookups } from './helpers';
+import { fakeGraph, resetDb, seedLookups } from './helpers';
 
 let app: FastifyInstance;
 beforeAll(async () => {
@@ -80,7 +83,7 @@ describe('delete leads: permissions and limits', () => {
     for (const u of [manager, rep]) {
       const c = await signIn(app, u);
       expect((await preview([lead.id], c)).statusCode).toBe(403);
-      expect((await confirm([lead.id], { leads: [lead.id], companies: [], contacts: [] }, c)).statusCode).toBe(403);
+      expect((await confirm([lead.id], { leads: [lead.id], companies: [], contacts: [], quotations: [] }, c)).statusCode).toBe(403);
     }
     expect(await exists.lead(lead.id)).toBe(true);
   });
@@ -117,10 +120,11 @@ describe('delete leads: what goes and what stays', () => {
     const p = await planOf([lead.id]);
     expect(p.remove.leads).toEqual([{ id: lead.id, number: lead.number, companyName: 'Acme Dyes' }]);
     expect(p.remove.companies).toEqual([{ id: company.id, number: company.number, name: 'Acme Dyes' }]);
-    expect(p.remove.contacts).toBe(2);
+    expect(p.remove.contacts).toEqual([{ id: contact.id, name: 'Ana Secretname' }, { id: other.id, name: 'Bo Extra' }]);
     expect(p.remove.tasks).toBe(1);
     expect(p.keep).toEqual([]);
-    expect(p.plan).toEqual({ leads: [lead.id], companies: [company.id], contacts: [contact.id, other.id] });
+    expect(p.notFound).toBe(0);
+    expect(p.plan).toEqual({ leads: [lead.id], companies: [company.id], contacts: [contact.id, other.id], quotations: [] });
     // The preview changes nothing.
     expect(await exists.lead(lead.id)).toBe(true);
 
@@ -140,7 +144,7 @@ describe('delete leads: what goes and what stays', () => {
     expect((await prisma.notification.findMany()).map((n) => n.id)).toEqual([keepNote.id]);
   });
 
-  it('keeps a company that has another lead (archived included), and its contacts; removes the lead’s own unused contact', async () => {
+  it('keeps a company that has another lead (archived included) with ALL its contacts, the lead’s own contact included', async () => {
     const { company, contact, lead } = await leadWithContact();
     const otherContact = await makeContact({ companyId: company.id });
     const sibling = await makeLead({ companyId: company.id, contactId: otherContact.id, archivedAt: new Date() });
@@ -149,12 +153,13 @@ describe('delete leads: what goes and what stays', () => {
     const p = await planOf([lead.id]);
     expect(p.remove.companies).toEqual([]);
     expect(p.keep).toEqual([{ kind: 'company', id: company.id, label: `${company.number} · Acme Dyes`, reason: 'other_leads' }]);
-    expect(p.plan.contacts).toEqual([contact.id]);
+    expect(p.plan.contacts).toEqual([]);
+    expect(p.remove.contacts).toEqual([]);
 
     await del([lead.id]);
     expect(await exists.lead(lead.id)).toBe(false);
     expect(await exists.company(company.id)).toBe(true);
-    expect(await exists.contact(contact.id)).toBe(false);
+    expect(await exists.contact(contact.id)).toBe(true);
     expect(await exists.contact(otherContact.id)).toBe(true);
     expect(await exists.lead(sibling.id)).toBe(true);
     // Research on a company kept stays; only its lead link is cleared.
@@ -248,7 +253,13 @@ describe('delete leads: what goes and what stays', () => {
     expect(p.remove.companies.map((c) => c.id)).toEqual([a.company.id]);
     expect(p.keep).toEqual([{ kind: 'lead', id: b.lead.id, label: `${b.lead.number} · Sent Co`, reason: 'quotations' }]);
 
+    expect(p.plan.quotations).toEqual([draft.id]);
+    await prisma.notification.create({ data: { userId: rep.id, text: 'Quote', link: `/quotations/${draft.id}` } });
+
     await del([a.lead.id, b.lead.id]);
+    expect(await prisma.notification.count()).toBe(0);
+    const entry = await prisma.auditLog.findFirstOrThrow({ where: { action: 'delete', entityType: 'lead', entityId: String(a.lead.id) } });
+    expect(entry.after).toMatchObject({ removed: { draftQuotations: 1, quotationNumbers: [draft.number] } });
     expect(await prisma.quotation.count({ where: { id: draft.id } })).toBe(0);
     expect(await prisma.quotationLine.count()).toBe(0);
     expect(await prisma.task.count({ where: { id: draftTask.id } })).toBe(0);
@@ -318,7 +329,7 @@ describe('delete leads: concurrency and audit', () => {
     expect(done.keep).toEqual([{ kind: 'company', id: company.id, label: `${company.number} · Acme Dyes`, reason: 'other_leads' }]);
     expect(await exists.lead(lead.id)).toBe(false);
     expect(await exists.company(company.id)).toBe(true);
-    expect(await exists.contact(contact.id)).toBe(false);
+    expect(await exists.contact(contact.id)).toBe(true);
   });
 
   it('re-plans on confirm: a quotation sent since the preview blocks the lead', async () => {
@@ -340,7 +351,7 @@ describe('delete leads: concurrency and audit', () => {
     expect(d1.keep).toEqual([{ kind: 'company', id: a.company.id, label: `${a.company.number} · Grown Co`, reason: 'changed' }]);
     expect(await exists.company(a.company.id)).toBe(true);
     expect(await exists.contact(newcomer.id)).toBe(true);
-    expect(await exists.contact(a.contact.id)).toBe(false);
+    expect(await exists.contact(a.contact.id)).toBe(true);
 
     const b = await leadWithContact({ name: 'Freed Co' });
     const sibling = await makeLead({ companyId: b.company.id });
@@ -389,11 +400,92 @@ describe('delete leads: concurrency and audit', () => {
     expect(entries.map((e) => [e.entityType, e.entityId, e.userId])).toEqual([
       ['lead', String(lead.id), admin.id], ['company', String(company.id), admin.id],
     ]);
-    expect(entries[0]!.after).toMatchObject({ number: lead.number, companyName: 'Acme Dyes', removed: { activities: 1, tasks: 0, draftQuotations: 0, contacts: 0 } });
+    expect(entries[0]!.after).toMatchObject({ number: lead.number, companyName: 'Acme Dyes', removed: { activities: 1, tasks: 0, draftQuotations: 0, quotationNumbers: [] } });
     expect(entries[1]!.after).toMatchObject({ number: company.number, name: 'Acme Dyes', removed: { contacts: 1 } });
     const text = JSON.stringify(entries);
     for (const secret of ['Secretname', 'ana@acme.test', 'Private note text', 'Secret body']) expect(text).not.toContain(secret);
     expect(entries.every((e) => e.before === null)).toBe(true);
     expect(await exists.lead(kept.id)).toBe(true);
+  });
+});
+
+describe('delete leads: review round (contacts, drafts, unknown ids, opt-outs)', () => {
+  it('a Draft quotation made after the preview keeps its lead (changed)', async () => {
+    const { company, lead } = await leadWithContact();
+    const p = await planOf([lead.id]);
+    expect(p.plan.quotations).toEqual([]);
+    const late = await quotation({ companyId: company.id, leadId: lead.id });
+    const done = (await confirm([lead.id], p.plan)).json() as LeadDeletePreview;
+    expect(done.remove.leads).toEqual([]);
+    expect(done.keep).toEqual(expect.arrayContaining([{ kind: 'lead', id: lead.id, label: `${lead.number} · Acme Dyes`, reason: 'changed' }]));
+    expect(await prisma.quotation.count({ where: { id: late.id } })).toBe(1);
+    expect(await exists.lead(lead.id)).toBe(true);
+  });
+
+  it('reports ids that are not in the CRM instead of dropping them silently', async () => {
+    const { lead } = await leadWithContact();
+    const p = await planOf([lead.id, lead.id, 999_999]);
+    expect(p.notFound).toBe(1);
+    expect(p.remove.leads.map((l) => l.id)).toEqual([lead.id]);
+  });
+
+  it('an unsubscribed contact deleted with its company is suppressed; a re-import is flagged; the Mailer skips it', async () => {
+    const { company, contact, lead } = await leadWithContact();
+    await prisma.contact.update({ where: { id: contact.id }, data: { unsubscribedAt: new Date(), businessEmail: 'Ana@Acme.test' } });
+    const p = await del([lead.id]);
+    expect(p.remove.companies.map((c) => c.id)).toEqual([company.id]);
+    const rows = await prisma.emailSuppression.findMany();
+    expect(rows.map((r) => ({ email: r.email, reason: r.reason, source: r.source, createdById: r.createdById })))
+      .toEqual([{ email: 'ana@acme.test', reason: 'unsubscribed', source: 'lead_deleted', createdById: admin.id }]);
+
+    // Re-imported: the new contact is unsubscribed and the new lead Do not email from the start.
+    const batch = await prisma.importBatch.create({ data: { number: 'IMPORT-2026-11-26', language: 'en', leadType: 'Lead', status: 'Waiting for review', createdById: admin.id } });
+    const file = await prisma.importFile.create({ data: { batchId: batch.id, name: 'Again.xlsx', ext: 'xlsx', size: 1, storagePath: '', status: 'Read' } });
+    await prisma.importRow.create({
+      data: {
+        batchId: batch.id, fileId: file.id, position: 1, originKind: 'row', originN: 2, status: 'Ready', include: true,
+        fields: { companyName: 'Acme Dyes Again', country: 'India', email: 'ana@acme.test', contactName: 'Ana Secretname' },
+      },
+    });
+    const res = await app.inject({
+      method: 'POST', url: `/api/imports/batches/${batch.id}/import`, headers: { cookie },
+      payload: { acceptHigh: false, noContactRows: 'import', notify: false },
+    });
+    expect(res.statusCode, res.body).toBe(202);
+    expect(await runOnce({ types: ['import_commit'], handlers: { import_commit: importCommitHandler }, graph: fakeGraph() })).toBe(true);
+    const row = await prisma.importRow.findFirstOrThrow({ where: { batchId: batch.id } });
+    expect(row.leadId).not.toBeNull();
+    const again = await prisma.lead.findUniqueOrThrow({ where: { id: row.leadId! }, include: { contact: true } });
+    expect(again.doNotEmail).toBe(true);
+    expect(again.contact?.unsubscribedAt).not.toBeNull();
+
+    // Even with both flags cleared by hand behind the list's back, the Mailer still skips the address.
+    await prisma.lead.update({ where: { id: again.id }, data: { doNotEmail: false } });
+    await prisma.contact.update({ where: { id: again.contactId! }, data: { unsubscribedAt: null } });
+    const [check] = await checkRecipients(prisma, authOf(admin), [again.id]);
+    expect(check!.block).toBe('Unsubscribed');
+    expect(await sendBlock(prisma, authOf(admin), again.id, new Date(0))).toBe('Unsubscribed');
+  });
+
+  it('a lead marked Do not email is suppressed when deleted (its addresses only); unticking Do not email later lifts it', async () => {
+    const { company, contact, lead } = await leadWithContact();
+    await prisma.lead.update({ where: { id: lead.id }, data: { doNotEmail: true, businessEmail: 'info@acme.test' } });
+    await makeLead({ companyId: company.id });
+    await del([lead.id]);
+    expect(await exists.contact(contact.id)).toBe(true);
+    const rows = await prisma.emailSuppression.findMany({ orderBy: { email: 'asc' } });
+    expect(rows.map((r) => [r.email, r.reason])).toEqual([['ana@acme.test', 'do_not_email'], ['info@acme.test', 'do_not_email']]);
+    expect(Object.keys(rows[0]!).sort()).toEqual(['createdAt', 'createdById', 'email', 'id', 'reason', 'source']);
+
+    const fresh = await makeLead({ companyId: company.id, contactId: contact.id, assignedToId: admin.id });
+    const [check] = await checkRecipients(prisma, authOf(admin), [fresh.id]);
+    expect(check!.block).toBe('Marked do not email');
+    const untick = await app.inject({
+      method: 'POST', url: `/api/leads/${fresh.id}/do-not-email`, headers: { cookie },
+      payload: { doNotEmail: false, updatedAt: fresh.updatedAt.toISOString() },
+    });
+    expect(untick.statusCode, untick.body).toBe(200);
+    expect((await prisma.emailSuppression.findMany()).map((r) => r.email)).toEqual(['info@acme.test']);
+    expect((await checkRecipients(prisma, authOf(admin), [fresh.id]))[0]!.block).toBeNull();
   });
 });

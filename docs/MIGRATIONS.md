@@ -32,6 +32,7 @@ previous release keeps working against it. Release shas are the commits that wer
 | 22 | `20261208100000_template_body_html` | `email_templates.body_html` and `email_campaigns.body_html` (nullable: a formatted template's sanitised HTML, and the copy a Mailer campaign keeps when queued; null = plain text as before) | Formatted templates (not yet released) |
 | 23 | `20261209100000_template_attachments` | Table `email_template_attachments` (a template's inline pictures and attachments read from its .oft: file name, type from the bytes, size, content-id, inline flag, sha256, storage path under STORAGE_DIR/templates/; cascade-deleted with the template) and `email_campaigns.attachments` (JSONB, default `[]`: the campaign's copies under STORAGE_DIR/campaigns/) | Template pictures and attachments (not yet released) |
 | 24 | `20261210100000_import_row_changes` | `import_rows.changes` (nullable jsonb: what an update row — Lead ID / Company ID from "Download all leads" — filled, for Undo, and the conflicts it did not apply) | Leads export (not yet released) |
+| 25 | `20261211100000_email_suppressions` | Table `email_suppressions` (lower-cased address, unique; reason `unsubscribed` / `do_not_email`; source, e.g. `lead_deleted`; created_at, created_by → users set null): addresses kept when a Do-not-email lead or an unsubscribed contact is deleted; the Mailer skips them and imports flag new leads / contacts for them | Delete leads (not yet released) |
 
 ## Known leftover
 

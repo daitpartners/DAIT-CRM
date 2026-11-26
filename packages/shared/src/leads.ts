@@ -49,21 +49,25 @@ export const LEAD_DELETE_REASONS = ['quotations', 'projects', 'other_leads', 'co
 export type LeadDeleteReason = (typeof LEAD_DELETE_REASONS)[number];
 
 /** The records a preview offers to remove; sent back on confirm, which never removes anything outside it. */
-export type LeadDeletePlan = { leads: number[]; companies: number[]; contacts: number[] };
+export type LeadDeletePlan = { leads: number[]; companies: number[]; contacts: number[]; quotations: number[] };
 
 /**
  * What Delete removes and keeps (`POST /leads/delete/preview` lists it; `POST /leads/delete` does it and answers with
- * what it actually did). Emails and calendar events are never counted or removed: they are only unlinked.
+ * what it actually did). Emails and calendar events are never counted or removed: they are only unlinked. The address of a
+ * removed lead marked Do not email, or of a removed contact that unsubscribed, goes on the suppression list.
  */
 export type LeadDeletePreview = {
   remove: {
     leads: { id: number; number: string; companyName: string }[];
     companies: { id: number; number: string; name: string }[];
-    contacts: number;
+    /** The removed companies' contacts (a company kept keeps all its contacts). */
+    contacts: { id: number; name: string }[];
     /** Draft quotations of the leads (never sent), removed with them. */
     draftQuotations: number;
     tasks: number;
   };
   keep: { kind: 'lead' | 'company' | 'contact'; id: number; label: string; reason: LeadDeleteReason }[];
+  /** Chosen ids that are not (or no longer) in the CRM. */
+  notFound: number;
   plan: LeadDeletePlan;
 };

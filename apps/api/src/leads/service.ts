@@ -5,6 +5,7 @@ import { findCompanyMatches } from '../companies/match.js';
 import { assertCompanyVisible } from '../companies/visibility.js';
 import type { AuthUser } from '../plugins/auth.js';
 import { audit } from '../audit.js';
+import { suppressed } from '../mailer/suppression.js';
 import { ValidationError } from '../validate.js';
 import { dateOnly, todayIn } from './dates.js';
 import { notifyUser } from './notify.js';
@@ -229,12 +230,15 @@ async function resolveCompany(
   const contactEmail = input.contactEmail?.trim() || input.businessEmail;
   let createdContactId: number | null = null;
   if (firstName && (contactEmail || input.phone)) {
+    const listed = (await suppressed(tx, [contactEmail])).size > 0;
     ({ id: createdContactId } = await tx.contact.create({
       data: {
         companyId: company.id,
         firstName,
         lastName: input.contactLastName?.trim() ?? '',
         businessEmail: contactEmail?.toLowerCase() ?? null,
+        // An address on the suppression list (a deleted lead or contact opted out): unsubscribed from the start.
+        unsubscribedAt: listed ? new Date() : null,
         phone: input.phone ?? null,
         phoneNormalised: normalisePhone(input.phone) || null,
         isPrimary: true,
@@ -270,8 +274,14 @@ export async function createLeadWithCompany(
     contactId = (await tx.contact.findFirst({ where: { companyId, isPrimary: true, isActive: true }, select: { id: true } }))?.id ?? null;
   }
 
+  // The lead is Do not email from the start when its address (its own, or its contact's) is on the suppression list.
+  const contactEmail = contactId === null ? null
+    : (await tx.contact.findUnique({ where: { id: contactId }, select: { businessEmail: true } }))?.businessEmail;
+  const listed = (await suppressed(tx, [input.businessEmail, contactEmail])).size > 0;
+
   const lead = await tx.lead.create({
     data: {
+      doNotEmail: listed,
       leadType: input.leadType,
       companyName: input.companyName,
       companyId,

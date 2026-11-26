@@ -21,10 +21,11 @@ const preview: LeadDeletePreview = {
   remove: {
     leads: [{ id: 5, number: 'LD-1005', companyName: 'Meridian Textiles' }],
     companies: [{ id: 4, number: 'CO-0245', name: 'Meridian Textiles' }],
-    contacts: 2, draftQuotations: 1, tasks: 3,
+    contacts: [{ id: 9, name: 'Tom Hale' }, { id: 10, name: 'Rita Bose' }], draftQuotations: 1, tasks: 3,
   },
   keep: [],
-  plan: { leads: [5], companies: [4], contacts: [9, 10] },
+  notFound: 0,
+  plan: { leads: [5], companies: [4], contacts: [9, 10], quotations: [31] },
 };
 
 afterEach(() => vi.unstubAllGlobals());
@@ -83,12 +84,13 @@ describe('delete lead: who sees it', () => {
 });
 
 describe('delete dialog', () => {
-  function renderModal(p: LeadDeletePreview, onDeleted = vi.fn(), onArchiveInstead?: () => void) {
+  function renderModal(p: LeadDeletePreview, onDeleted = vi.fn(), onArchiveInstead?: () => void, hold?: Promise<void>) {
     const posted: unknown[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/leads/delete/preview') return Response.json(p);
       if (url === '/api/leads/delete') {
         posted.push(JSON.parse(String(init?.body)));
+        await hold;
         return Response.json(p);
       }
       throw new Error(`unexpected fetch ${url}`);
@@ -104,13 +106,17 @@ describe('delete dialog', () => {
   it('lists what is removed and that emails stay, and deletes only after "delete" is typed', async () => {
     const u = userEvent.setup();
     const onDeleted = vi.fn();
-    const posted = renderModal(preview, onDeleted);
+    let release!: () => void;
+    const posted = renderModal(preview, onDeleted, undefined, new Promise<void>((r) => { release = r; }));
     const dialog = await screen.findByRole('dialog', { name: 'Delete lead?' });
     expect(await within(dialog).findByText(
       'Will be removed for good: 1 lead with their notes, tasks and timeline, 1 company, 2 contacts. 1 draft quotation goes too.',
     )).toBeInTheDocument();
     expect(within(dialog).getByText('LD-1005 · Meridian Textiles')).toBeInTheDocument();
     expect(within(dialog).getByText('CO-0245 · Meridian Textiles')).toBeInTheDocument();
+    expect(within(dialog).getByText('Contacts removed with their company:')).toBeInTheDocument();
+    expect(within(dialog).getByText('Tom Hale')).toBeInTheDocument();
+    expect(within(dialog).getByText('Rita Bose')).toBeInTheDocument();
     expect(within(dialog).getByText(/Emails and calendar events are not deleted/)).toBeInTheDocument();
     const button = within(dialog).getByRole('button', { name: 'Delete permanently' });
     expect(button).toBeDisabled();
@@ -122,7 +128,10 @@ describe('delete dialog', () => {
     expect(button).toBeDisabled();
     await u.type(input, 'e');
     expect(button).toBeEnabled();
-    await u.click(button);
+    // Enter twice in the field sends once (the button's pending guard holds for Enter too).
+    await u.type(input, '{Enter}{Enter}');
+    expect(button).toBeDisabled();
+    release();
     await vi.waitFor(() => expect(onDeleted).toHaveBeenCalled());
     expect(posted).toEqual([{ ids: [5], plan: preview.plan, confirm: 'delete' }]);
   });
@@ -131,13 +140,15 @@ describe('delete dialog', () => {
     const u = userEvent.setup();
     const archive = vi.fn();
     renderModal({
-      remove: { leads: [], companies: [], contacts: 0, draftQuotations: 0, tasks: 0 },
+      remove: { leads: [], companies: [], contacts: [], draftQuotations: 0, tasks: 0 },
       keep: [{ kind: 'lead', id: 5, label: 'LD-1005 · Meridian Textiles', reason: 'quotations' }],
-      plan: { leads: [], companies: [], contacts: [] },
+      notFound: 1,
+      plan: { leads: [], companies: [], contacts: [], quotations: [] },
     }, vi.fn(), archive);
     const dialog = await screen.findByRole('dialog', { name: 'Delete lead?' });
     expect(await within(dialog).findByText('LD-1005 · Meridian Textiles — Has a sent quotation')).toBeInTheDocument();
     expect(within(dialog).getByText('Nothing can be deleted.')).toBeInTheDocument();
+    expect(within(dialog).getByText('1 of the chosen leads was not found (already deleted).')).toBeInTheDocument();
     expect(within(dialog).queryByLabelText('Type "delete" to confirm')).not.toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Delete permanently' })).toBeDisabled();
     await u.click(within(dialog).getByRole('button', { name: 'Archive instead' }));
@@ -147,11 +158,12 @@ describe('delete dialog', () => {
   it('a company kept for its other leads reads with its reason', async () => {
     renderModal({
       ...preview,
-      remove: { ...preview.remove, companies: [], contacts: 1, draftQuotations: 0 },
+      remove: { ...preview.remove, companies: [], contacts: [], draftQuotations: 0 },
       keep: [{ kind: 'company', id: 4, label: 'CO-0245 · Meridian Textiles', reason: 'other_leads' }],
-      plan: { leads: [5], companies: [], contacts: [9] },
+      plan: { leads: [5], companies: [], contacts: [], quotations: [] },
     });
     expect(await screen.findByText('CO-0245 · Meridian Textiles — Has other leads')).toBeInTheDocument();
-    expect(screen.getByText('Will be removed for good: 1 lead with their notes, tasks and timeline, 0 companies, 1 contact.')).toBeInTheDocument();
+    expect(screen.getByText('Will be removed for good: 1 lead with their notes, tasks and timeline, 0 companies, 0 contacts.')).toBeInTheDocument();
+    expect(screen.queryByText('Contacts removed with their company:')).not.toBeInTheDocument();
   });
 });

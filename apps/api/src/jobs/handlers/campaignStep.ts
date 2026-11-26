@@ -91,7 +91,13 @@ export async function campaignStepHandler(job: Job, ctx: JobContext): Promise<vo
   }
 
   const { c, user, account, r } = claimed;
-  const lead = await prisma.lead.findUniqueOrThrow({ where: { id: r.leadId! }, include: { contact: { select: { firstName: true } } } });
+  const lead = r.leadId === null ? null
+    : await prisma.lead.findUnique({ where: { id: r.leadId }, include: { contact: { select: { firstName: true } } } });
+  // Deleted (lead delete) between the claim and now: nothing was sent.
+  if (!lead) {
+    await prisma.emailCampaignRecipient.update({ where: { id: r.id }, data: { status: 'Skipped', error: 'Lead no longer available' } });
+    return afterSend(c.id, job.id);
+  }
   const ctxFill = { firstName: lead.contact?.firstName || 'there', company: lead.companyName, me: user.name, leadNumber: lead.number };
   const subject = fillTemplate(c.subject, ctxFill).slice(0, 500);
   const optOut = c.unsubscribeLine ? (UNSUBSCRIBE[c.language] ?? UNSUBSCRIBE.en) : '';
@@ -135,14 +141,18 @@ export async function campaignStepHandler(job: Job, ctx: JobContext): Promise<vo
   }
 
   await prisma.$transaction(async (tx) => {
+    // The lead as it is now, held until the transaction ends: deleted while the email was going out, the sent email is
+    // still filed (unlinked) and the recipient still counts as Sent.
+    const [held] = await tx.$queryRaw<{ id: number }[]>`SELECT id FROM leads WHERE id = ${lead.id} FOR SHARE`;
+    const now = held ? await tx.lead.findUnique({ where: { id: lead.id } }) : null;
     const msg = await tx.emailMessage.create({
       data: {
-        userId: c.senderId, accountId: account.id, leadId: lead.id, contactId: lead.contactId, companyId: lead.companyId, campaignId: c.id,
+        userId: c.senderId, accountId: account.id, leadId: now?.id ?? null, contactId: now?.contactId ?? null, companyId: now?.companyId ?? null, campaignId: c.id,
         folder: 'sent', status: 'sent', source: 'crm', fromAddress: account.address, toAddresses: [r.toAddress], ccAddresses: c.cc, bccAddresses: c.bcc,
         subject, bodyText: text, bodyHtml: html, occurredAt: new Date(), attachmentNames: attachments.filter((a) => !a.isInline).map((a) => a.name),
       },
     });
-    await recordOnLead(tx, user, lead, msg, subject);
+    if (now) await recordOnLead(tx, user, now, msg, subject);
     await tx.emailCampaignRecipient.update({ where: { id: r.id }, data: { status: 'Sent', sentAt: msg.occurredAt, emailMessageId: msg.id, error: null } });
   });
   return afterSend(c.id, job.id);

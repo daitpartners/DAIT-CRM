@@ -167,6 +167,8 @@ export const LeadDeleteConfirm = z.object({
     leads: leadIdList.max(LEAD_DELETE_MAX),
     companies: leadIdList.max(LEAD_DELETE_MAX),
     contacts: leadIdList.max(50_000),
+    /** The Draft quotations the preview showed (a draft made after it keeps its lead). */
+    quotations: leadIdList.max(50_000),
   }),
   confirm: z.literal('delete'),
 });

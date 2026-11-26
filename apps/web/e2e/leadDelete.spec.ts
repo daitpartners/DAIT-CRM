@@ -9,12 +9,16 @@ test('an Administrator deletes a lead whose company has no other leads: lead and
   expect(created.status()).toBe(201);
   const { id, number, companyId } = (await created.json()) as { id: number; number: string; companyId: number };
   expect(companyId).toBeTruthy();
+  const contact = await page.request.post('/api/contacts', { data: { companyId, firstName: 'Priya', lastName: 'Nair', businessEmail: 'priya@deleteco.test' } });
+  expect(contact.status()).toBe(201);
+  const { id: contactId } = (await contact.json()) as { id: number };
   await page.goto(`/leads/${id}`);
 
   await page.locator('.topbar').getByRole('button', { name: 'Edit profile' }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Delete lead…' }).click();
   const dialog = page.getByRole('dialog', { name: 'Delete lead?' });
-  await expect(dialog).toContainText('Will be removed for good: 1 lead with their notes, tasks and timeline, 1 company, 0 contacts.');
+  await expect(dialog).toContainText('Will be removed for good: 1 lead with their notes, tasks and timeline, 1 company, 1 contact.');
+  await expect(dialog.getByText('Priya Nair')).toBeVisible();
   await expect(dialog.getByText(`${number} · ${company}`)).toBeVisible();
   await expect(dialog.getByText(new RegExp(`CO-\\d+ · ${company}`))).toBeVisible();
   const remove = dialog.getByRole('button', { name: 'Delete permanently' });
@@ -26,6 +30,7 @@ test('an Administrator deletes a lead whose company has no other leads: lead and
   await expect(page.getByRole('status').filter({ hasText: 'Lead deleted' })).toBeVisible();
   expect((await page.request.get(`/api/leads/${id}`)).status()).toBe(404);
   expect((await page.request.get(`/api/companies/${companyId}`)).status()).toBe(404);
+  expect((await page.request.get(`/api/contacts/${contactId}`)).status()).toBe(404);
 });
 
 test('a Manager sees no delete action on the lead page or in the bulk bar, and the API refuses', async ({ page }) => {

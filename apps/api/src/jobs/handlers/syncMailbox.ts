@@ -2,7 +2,7 @@ import type { EmailAccount, Job } from '@prisma/client';
 import { prisma } from '../../db.js';
 import { enqueue, errorMessage } from '../queue.js';
 import { GraphError, deltaStartUrl, isAuthFailure, type GraphMessage, type MailFolder } from '../../graph/client.js';
-import { isUniqueViolation } from '../../prismaErrors.js';
+import { isForeignKeyViolation, isUniqueViolation } from '../../prismaErrors.js';
 import { mailUser, matchMail } from '../../mail/match.js';
 import { processEmailBody, storedColumns } from '../../mail/bodies.js';
 import type { AuthUser } from '../../plugins/auth.js';
@@ -104,18 +104,26 @@ async function storeMessage(account: EmailAccount, user: AuthUser, folder: strin
   // In a worker thread with a time limit: no email can hold up the sync (or the jobs that share its process).
   const result = await processEmailBody(m.body, BODY_MAX, { retryKey: `${user.id}:${m.id}` });
   const { bodyHtml, bodyText } = storedColumns(result);
+  const store = (linked: typeof links) => prisma.emailMessage.create({
+    data: {
+      userId: user.id, accountId: account.id, graphId: m.id, source: 'sync', folder,
+      status: m.isDraft ? 'draft' : outbound ? 'sent' : 'received',
+      fromAddress: m.from?.address ?? '', fromName: m.from?.name ? m.from.name.slice(0, 255) : null,
+      toAddresses: m.to, ccAddresses: m.cc, subject: m.subject.slice(0, 500), bodyText, bodyHtml,
+      messageId: m.internetMessageId?.slice(0, 255) ?? null, threadId,
+      isRead: outbound ? true : m.isRead, occurredAt,
+      attachmentNames, projectId, ...linked,
+    },
+  });
   try {
-    const row = await prisma.emailMessage.create({
-      data: {
-        userId: user.id, accountId: account.id, graphId: m.id, source: 'sync', folder,
-        status: m.isDraft ? 'draft' : outbound ? 'sent' : 'received',
-        fromAddress: m.from?.address ?? '', fromName: m.from?.name ? m.from.name.slice(0, 255) : null,
-        toAddresses: m.to, ccAddresses: m.cc, subject: m.subject.slice(0, 500), bodyText, bodyHtml,
-        messageId: m.internetMessageId?.slice(0, 255) ?? null, threadId,
-        isRead: outbound ? true : m.isRead, occurredAt,
-        attachmentNames, projectId, ...links,
-      },
-    });
+    let row;
+    try {
+      row = await store(links);
+    } catch (err) {
+      // The matched lead, contact or company was deleted between the match and now: the message is stored unlinked.
+      if (!isForeignKeyViolation(err)) throw err;
+      row = await store({ ...links, leadId: null, contactId: null, companyId: null });
+    }
     if (result.fellBack) warnFallback(row.id, result.reason);
   } catch (err) {
     if (!isUniqueViolation(err)) throw err; // a concurrent run stored it first

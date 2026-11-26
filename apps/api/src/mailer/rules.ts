@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { CLOSED_STATUSES, resolveTimezones, type TimezoneSource } from '@dait-crm/shared';
 import type { AuthUser } from '../plugins/auth.js';
 import { leadWhere } from '../leads/visibility.js';
+import { suppressed, suppressionBlock, type SuppressionReason } from './suppression.js';
 
 type Db = Prisma.TransactionClient | PrismaClient;
 
@@ -29,13 +30,17 @@ type MailLead = Prisma.LeadGetPayload<{ include: typeof leadInclude }>;
 /** The address a lead is emailed at: its contact's business email, else the lead's. */
 const addressOf = (l: MailLead) => (l.contact?.businessEmail || l.businessEmail || '').trim().toLowerCase();
 
-/** Why a lead cannot be mailed right now, or null (prototype `mailBlock`; the same texts). */
-function blockOf(l: MailLead): string | null {
+/**
+ * Why a lead cannot be mailed right now, or null (prototype `mailBlock`; the same texts). `listed`: the address is on the
+ * suppression list (a deleted lead or contact had opted out), read the same as the lead's own flags.
+ */
+function blockOf(l: MailLead, listed?: SuppressionReason): string | null {
   const to = addressOf(l);
   if (!to) return 'No email address';
   if (!EMAIL_RE.test(to)) return 'Invalid email address';
   if (l.doNotEmail) return 'Marked do not email';
   if (l.contact?.unsubscribedAt) return 'Unsubscribed';
+  if (listed) return suppressionBlock(listed);
   if (l.archivedAt) return 'Lead is archived';
   if ((CLOSED_STATUSES as readonly string[]).includes(l.status)) return `Lead is closed (${l.status})`;
   return null;
@@ -50,12 +55,13 @@ export async function checkRecipients(db: Db, user: AuthUser, leadIds: number[])
   const ids = [...new Set(leadIds.filter((id) => Number.isInteger(id)))];
   const leads = await db.lead.findMany({ where: { AND: [{ id: { in: ids } }, leadWhere(user, { includeArchived: true })] }, include: leadInclude });
   const byId = new Map(leads.map((l) => [l.id, l]));
+  const listed = await suppressed(db, leads.map(addressOf));
   const seen = new Set<string>();
   return ids.map((id) => {
     const l = byId.get(id);
     if (!l) return { leadId: id, leadNumber: null, contactId: null, to: '', name: '', company: '', block: 'Lead not available', zones: [user.timezone], source: 'sender' as const };
     const to = addressOf(l);
-    let block = blockOf(l);
+    let block = blockOf(l, listed.get(to));
     if (!block) {
       if (seen.has(to)) block = 'Same address as another selected lead';
       else seen.add(to);
@@ -86,7 +92,7 @@ export async function sendBlock(
 ): Promise<string | null> {
   const l = leadId === null ? null : await db.lead.findFirst({ where: { AND: [{ id: leadId }, leadWhere(user, { includeArchived: true })] }, include: leadInclude });
   if (!l) return 'Lead no longer available';
-  const block = blockOf(l);
+  const block = blockOf(l, (await suppressed(db, [addressOf(l)])).get(addressOf(l)));
   if (block) return block;
   if (queued) {
     if (addressOf(l) !== queued.toAddress.toLowerCase()) return 'Email address changed since the campaign was queued';

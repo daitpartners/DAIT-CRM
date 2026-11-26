@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { LeadDeletePreview } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
 import { useDeleteLeads, useDeleteLeadsPreview } from '../../api/leads';
@@ -36,7 +36,7 @@ function removeCounts(t: TFn, r: LeadDeletePreview['remove']) {
   return {
     leads: r.leads.length === 1 ? t('1 lead') : t('{n} leads', { n: r.leads.length }),
     companies: r.companies.length === 1 ? t('1 company') : t('{n} companies', { n: r.companies.length }),
-    contacts: r.contacts === 1 ? t('1 contact') : t('{n} contacts', { n: r.contacts }),
+    contacts: r.contacts.length === 1 ? t('1 contact') : t('{n} contacts', { n: r.contacts.length }),
     drafts: r.draftQuotations === 0 ? ''
       : r.draftQuotations === 1 ? t('1 draft quotation goes too.') : t('{n} draft quotations go too.', { n: r.draftQuotations }),
   };
@@ -48,8 +48,9 @@ function Names({ items }: { items: string[] }) {
   const shown = items.slice(0, LISTED);
   return (
     <ul className="rules">
-      {shown.map((label) => (
-        <li key={label}>{label}</li>
+      {shown.map((label, i) => (
+        // Two contacts may share a name.
+        <li key={i}>{label}</li>
       ))}
       {items.length > LISTED ? <li className="dim">{t('and {n} more', { n: items.length - LISTED })}</li> : null}
     </ul>
@@ -81,16 +82,26 @@ export function DeleteLeadsModal({ ids, onClose, onDeleted, onArchiveInstead }: 
   const counts = p ? removeCounts(t, p.remove) : null;
   const previewError = preview.error ? errorText(t, preview.error instanceof ApiError ? preview.error.code : 'unknown') : null;
 
+  const busy = del.isPending || preview.isFetching;
+  /** Set at once on confirm (isPending only shows on the next render): a second Enter cannot send again. */
+  const sending = useRef(false);
+
   function confirm() {
-    if (!p || !typed) return;
+    // The same guard as the button (Enter in the field must not send twice, or the previous plan during a refetch).
+    if (!p || nothing || !typed || busy || sending.current) return;
+    sending.current = true;
     setError(null);
     del.mutate(
       { ids, plan: p.plan },
       {
+        onSettled: () => {
+          sending.current = false;
+        },
         onSuccess: (done) => {
           const n = done.remove.leads.length;
           toast(n === 1 ? t('Lead deleted') : t('{n} leads deleted', { n }));
-          const less = n < p.plan.leads.length || done.remove.companies.length < p.plan.companies.length || done.remove.contacts < p.plan.contacts.length;
+          const less = n < p.plan.leads.length || done.remove.companies.length < p.plan.companies.length
+            || done.remove.contacts.length < p.plan.contacts.length;
           if (less) toast(t('Some records changed since the preview and were kept.'), 'warn');
           onDeleted(done);
         },
@@ -119,7 +130,7 @@ export function DeleteLeadsModal({ ids, onClose, onDeleted, onArchiveInstead }: 
               {t('Archive instead')}
             </button>
           ) : null}
-          <button type="button" className="btn danger" disabled={!p || nothing || !typed || del.isPending || preview.isFetching} onClick={confirm}>
+          <button type="button" className="btn danger" disabled={!p || nothing || !typed || busy} onClick={confirm}>
             {t('Delete permanently')}
           </button>
         </>
@@ -137,6 +148,12 @@ export function DeleteLeadsModal({ ids, onClose, onDeleted, onArchiveInstead }: 
                 {counts!.drafts ? ` ${counts!.drafts}` : null}
               </p>
               <Names items={[...p.remove.leads.map((l) => `${l.number} · ${l.companyName}`), ...p.remove.companies.map((c) => `${c.number} · ${c.name}`)]} />
+              {p.remove.contacts.length > 0 ? (
+                <>
+                  <p>{t('Contacts removed with their company:')}</p>
+                  <Names items={p.remove.contacts.map((c) => c.name || t('(no name)'))} />
+                </>
+              ) : null}
             </>
           )}
           {p.keep.length > 0 ? (
@@ -151,6 +168,11 @@ export function DeleteLeadsModal({ ids, onClose, onDeleted, onArchiveInstead }: 
                 {p.keep.length > LISTED * 2 ? <li className="dim">{t('and {n} more', { n: p.keep.length - LISTED * 2 })}</li> : null}
               </ul>
             </>
+          ) : null}
+          {p.notFound > 0 ? (
+            <p className="muted-text">
+              {p.notFound === 1 ? t('1 of the chosen leads was not found (already deleted).') : t('{n} of the chosen leads were not found (already deleted).', { n: p.notFound })}
+            </p>
           ) : null}
           {blocked.length > 0 ? (
             <div className="note warn">{t('A lead with a sent quotation or a project cannot be deleted. Archive it instead.')}</div>

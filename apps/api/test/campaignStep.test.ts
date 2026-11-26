@@ -350,3 +350,36 @@ describe('Mailer step: a formatted template near the size cap (security review I
   });
 });
 
+
+describe('Mailer step: a lead deleted mid-step (lead delete, 25 Nov 2026)', () => {
+  test('deleted while the email was going out: the email is filed unlinked and the recipient counts as Sent', async () => {
+    at(WED_NOON_SANTIAGO);
+    const { sender, c } = await campaign({ leads: 1 });
+    const leadId = c.recipients[0]!.leadId!;
+    const graph = fakeGraph({ async sendMail() { await prisma.lead.delete({ where: { id: leadId } }); } });
+    await campaignStepHandler(job(c.id), { graph });
+    const [r] = await recipients(c.id);
+    expect(r).toMatchObject({ status: 'Sent', leadId: null, error: null });
+    expect(await prisma.emailMessage.findUniqueOrThrow({ where: { id: r!.emailMessageId! } }))
+      .toMatchObject({ userId: sender.id, campaignId: c.id, leadId: null, contactId: null, companyId: null, status: 'sent' });
+  });
+
+  test('deleted after the claim and before the send: nothing goes out and the recipient is Skipped', async () => {
+    at(WED_NOON_SANTIAGO);
+    const { c } = await campaign({ leads: 1 });
+    const leadId = c.recipients[0]!.leadId!;
+    // The lead goes right after the claim (the recipient is Sending), as the step reads it to fill the template.
+    const lead = prisma.lead;
+    const original = lead.findUnique.bind(lead);
+    const spy = vi.spyOn(lead, 'findUnique').mockImplementationOnce((async (args: Parameters<typeof original>[0]) => {
+      await prisma.lead.delete({ where: { id: leadId } });
+      return original(args);
+    }) as never);
+    const { sent, graph } = recording();
+    await campaignStepHandler(job(c.id), { graph });
+    spy.mockRestore();
+    expect(sent).toHaveLength(0);
+    const [r] = await recipients(c.id);
+    expect(r).toMatchObject({ status: 'Skipped', error: 'Lead no longer available' });
+  });
+});

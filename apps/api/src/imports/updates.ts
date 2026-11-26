@@ -25,6 +25,7 @@ import {
   type UpdateFill, conflictProblem,
 } from '@dait-crm/shared';
 import { audit } from '../audit.js';
+import { suppressed } from '../mailer/suppression.js';
 import { companyWhere } from '../companies/visibility.js';
 import { leadWhere } from '../leads/visibility.js';
 import type { AuthUser } from '../plugins/auth.js';
@@ -530,10 +531,12 @@ export async function applyUpdate(
     contactId = plan.contact.link.id;
   } else if (plan.contact && 'create' in plan.contact && r.lead && r.company) {
     const c = plan.contact.create;
+    // An address on the suppression list (a deleted lead or contact opted out): unsubscribed from the start.
+    const listed = (await suppressed(tx, [c.email])).size > 0;
     const created = await tx.contact.create({
       data: {
         companyId: r.company.id, firstName: c.firstName, lastName: c.lastName, designation: c.designation, businessEmail: c.email,
-        phone: c.phone, phoneNormalised: normalisePhone(c.phone) || null,
+        phone: c.phone, phoneNormalised: normalisePhone(c.phone) || null, unsubscribedAt: listed ? new Date() : null,
       },
     });
     await audit(tx, { entityType: 'contact', entityId: created.id, action: 'create', userId: ctx.user.id, after: { ...created, source } });
