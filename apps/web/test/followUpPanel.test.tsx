@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FollowUpPanel } from '../src/pages/leads/FollowUpPanel';
+import type { Me } from '../src/api/queries';
 import { STATUSES, Wrap, inDays, makeClient, makeLead, rep } from './leadFixture';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -136,5 +137,29 @@ describe('FollowUpPanel', () => {
     const panel = screen.getByRole('tabpanel');
     expect(within(panel).getByText('No emails yet')).toBeInTheDocument();
     expect(within(panel).queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it("Emails tab marks another user's mail with their mailbox (web-mail release 1, team view)", async () => {
+    const u = userEvent.setup();
+    const mail = (id: number, subject: string, ownerName: string | null) => ({
+      ownerName, id, leadId: 5, folder: 'inbox', status: 'received', fromAddress: 'tom@meridian.com', toAddresses: ['x@daitpartners.com'],
+      ccAddresses: [], subject, bodyText: 'Hello', occurredAt: '2026-11-20T10:00:00.000Z', lastError: null,
+    });
+    const admin: Me = { ...rep, role: 'Administrator', rights: [...rep.rights, 'use_email', 'view_team_mail'] };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/me') return Response.json(admin);
+      if (url === '/api/leads/5/emails') return Response.json({ items: [mail(1, 'Re: Proposal', 'Carlos Torres'), mail(2, 'My note', null)] });
+      return Response.json({});
+    }));
+    render(
+      <Wrap qc={makeClient(admin)}>
+        <FollowUpPanel lead={makeLead()} statuses={STATUSES} live />
+      </Wrap>,
+    );
+    await u.click(screen.getByRole('tab', { name: /Emails/ }));
+    const list = await screen.findByRole('list', { name: 'Emails' });
+    const [theirs, mine] = within(list).getAllByRole('listitem');
+    expect(theirs).toHaveTextContent("Carlos Torres's mailbox");
+    expect(mine).not.toHaveTextContent('mailbox');
   });
 });

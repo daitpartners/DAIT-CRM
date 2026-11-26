@@ -40,7 +40,7 @@ export function FollowUpPanel({ lead, statuses, live }: Props) {
   const t = useT();
   const [tab, setTab] = useState('followup');
   const me = useCurrentUser();
-  // Your own emails with this lead only (owner, 22 Nov 2026: mail is private to its mailbox owner).
+  // Your own emails with this lead; Administrators and Managers also see the team's (web-mail release 1, view only).
   const { data: emails } = useLeadEmails(lead.id, me.can('use_email'));
   return (
     <section className="card flush l2tl" aria-label={t('Follow-up and history')}>
@@ -343,6 +343,7 @@ function EmailList({ emails }: { emails: LeadEmail[] }) {
               <span className="mail-meta">
                 {m.status === 'received' ? t('From {from}', { from: m.fromAddress }) : t('To {to}', { to: m.toAddresses.join(', ') })}
                 {m.ccAddresses.length ? ` · ${t('cc {cc}', { cc: m.ccAddresses.join(', ') })}` : ''} · {date(m.occurredAt)}
+                {m.ownerName ? ` · ${t("{name}'s mailbox", { name: m.ownerName })}` : ''}
               </span>
             </summary>
             <pre className="mail-body">{m.bodyText}</pre>

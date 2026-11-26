@@ -2,8 +2,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, api } from './client';
 import { keys } from './queries';
 
-/** One of your own emails (release 2B-1). Nobody else's mail is ever returned. */
+/**
+ * An email on the lead page (release 2B-1). Your own; for Administrators and Managers (web-mail release 1) also the
+ * team's lead mail, view only, with `ownerName` = whose mailbox it is (null for your own). Drafts stay with their owner.
+ */
 export type LeadEmail = {
+  ownerName: string | null;
   id: number;
   leadId: number | null;
   folder: string;

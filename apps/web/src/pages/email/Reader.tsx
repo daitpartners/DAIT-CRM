@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import type { Priority } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
 import { useMailAction, useMailMessage, type MailDetail } from '../../api/mail';
+import { Icons } from '../../components/Icons';
 import { PriorityLabel } from '../../components/StatusBadge';
 import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
@@ -21,7 +22,12 @@ type Props = {
   onArchived: () => void;
 };
 
-/** Reading pane + side panel (prototype `.reader` and `.mailside`). */
+/**
+ * Reading pane + side panel (prototype `.reader` and `.mailside`). Another user's message (web-mail release 1, team
+ * view) is view only: a banner and a footer pill say whose mailbox it is; Reply, Archive and Link / Create lead are
+ * disabled; Log as activity, Add follow-up task and opening the lead stay. A message on another owner's lead shows its
+ * number and company name only.
+ */
 export function Reader({ id, peek = false, connected, onReply, onArchived }: Props) {
   const t = useT();
   const toast = useToast();
@@ -36,6 +42,10 @@ export function Reader({ id, peek = false, connected, onReply, onArchived }: Pro
 
   const draft = m.status === 'draft';
   const inbound = m.status === 'received';
+  const viewOnly = m.viewOnly;
+  const ownerFirst = m.owner.name.trim().split(/\s+/)[0] ?? m.owner.name;
+  const voTitle = viewOnly ? t("View only — {name}'s mailbox", { name: ownerFirst }) : undefined;
+  const restricted = m.restrictedLead !== null;
   const fail = (err: unknown) => toast(err instanceof ApiError ? errorText(t, err.code) : t('Something went wrong. Try again.'), 'warn');
   const run = (a: 'log' | 'task' | 'archive', done: string) =>
     action.mutate({ id: m.id, action: a }, {
@@ -68,7 +78,7 @@ export function Reader({ id, peek = false, connected, onReply, onArchived }: Pro
           </div>
           {draft ? null : (
             <div className="reader-actions">
-              <button type="button" className="btn sm" onClick={reply} disabled={!connected} title={connected ? undefined : t('Connect your mailbox to reply')}>
+              <button type="button" className="btn sm" onClick={reply} disabled={viewOnly || !connected} title={voTitle ?? (connected ? undefined : t('Connect your mailbox to reply'))}>
                 {t('Reply')}
               </button>
               <button
@@ -79,19 +89,28 @@ export function Reader({ id, peek = false, connected, onReply, onArchived }: Pro
               >
                 {t('Log as activity')}
               </button>
-              {m.lead ? null : (
-                <button type="button" className="btn sm primary" onClick={() => setLinking(true)}>
+              {m.lead || restricted ? null : (
+                <button type="button" className="btn sm primary" disabled={viewOnly} title={voTitle} onClick={() => setLinking(true)}>
                   {t('Link to lead / create lead')}
                 </button>
               )}
               {m.folder !== 'archive' ? (
-                <button type="button" className="btn sm" disabled={action.isPending} onClick={() => run('archive', t('Archived'))}>
+                <button type="button" className="btn sm" disabled={viewOnly || action.isPending} title={voTitle} onClick={() => run('archive', t('Archived'))}>
                   {t('Archive')}
                 </button>
               ) : null}
             </div>
           )}
         </div>
+        {viewOnly ? (
+          <div className="viewonly">
+            {Icons.lock}
+            <span>
+              <strong>{t("View only — {name}'s mailbox.", { name: ownerFirst })}</strong>{' '}
+              {t('You can read, log and create tasks; only {name} can reply from this mailbox.', { name: ownerFirst })}
+            </span>
+          </div>
+        ) : null}
         <MailBody html={m.bodyHtml} text={m.bodyText} />
         {m.attachmentNames.length ? (
           <div className="reader-attach">{t('Attachments: {names}', { names: m.attachmentNames.join(', ') })}</div>
@@ -101,8 +120,14 @@ export function Reader({ id, peek = false, connected, onReply, onArchived }: Pro
             t('Drafts are edited in Outlook.')
           ) : (
             <>
-              {t('Suggested actions:')}
-              {m.lead ? (
+              {viewOnly ? (
+                <span className="vo-pill">
+                  {Icons.lock}
+                  {t("View only — {name}'s mailbox.", { name: ownerFirst })}
+                </span>
+              ) : null}
+              {restricted ? null : t('Suggested actions:')}
+              {restricted ? null : m.lead ? (
                 <>
                   {/* Prototype: the calendar's New follow-up for this lead. */}
                   <Link className="btn sm" to={`/calendar?new=1&lead=${m.lead.id}`}>
@@ -118,7 +143,7 @@ export function Reader({ id, peek = false, connected, onReply, onArchived }: Pro
                   </button>
                 </>
               ) : (
-                <button type="button" className="btn sm" onClick={() => setLinking(true)}>
+                <button type="button" className="btn sm" disabled={viewOnly} title={voTitle} onClick={() => setLinking(true)}>
                   {t('Create lead from this email')}
                 </button>
               )}
@@ -153,7 +178,13 @@ function MailSide({ m, day, short }: { m: MailDetail; day: (ymd: string) => stri
   return (
     <aside className="mailside" aria-label={t('Linked records')}>
       <div className="navsec mail-sec">{t('Linked records')}</div>
-      {l ? (
+      {m.restrictedLead ? (
+        <>
+          {/* Another owner's lead: its number and company name only, not links (web-mail release 1). */}
+          <SideLink to={null} title={t('Lead')} sub={t("{lead} · another owner's lead", { lead: m.restrictedLead.number })} />
+          <SideLink to={null} title={t('Company')} sub={m.restrictedLead.companyName} />
+        </>
+      ) : l ? (
         <>
           <Link className="link" to={`/leads/${l.id}`}>
             <span>

@@ -206,4 +206,17 @@ export const Icons: Record<string, ReactElement> = {
       <path d="M21 12H9" />
     </svg>
   ),
+  /* Web-mail release 1 (mockup 2026-11-26-outlook-mail): view only, and the "what the CRM keeps" note. */
+  lock: (
+    <svg {...base}>
+      <rect x="5" y="11" width="14" height="10" rx="2" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+    </svg>
+  ),
+  shield: (
+    <svg {...base}>
+      <path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z" />
+      <path d="M9 12l2 2 4-4" />
+    </svg>
+  ),
 };

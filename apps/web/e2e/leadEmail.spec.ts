@@ -1,8 +1,11 @@
 import { expect, test } from '@playwright/test';
 import { ARJUN, MAYA, NEHA, signInAs } from './fixtures';
 
-/** Release 2B-1: send from the lead page through your own mailbox; mail is private to its sender. */
-test('send from the lead page; others see only "Email sent"', async ({ page }) => {
+/**
+ * Release 2B-1: send from the lead page through your own mailbox. Web-mail release 1: an Administrator reads it too,
+ * view only, marked with the sender's mailbox.
+ */
+test("send from the lead page; an administrator sees it marked with the sender's mailbox", async ({ page }) => {
   await signInAs(page, NEHA);
   const me = (await (await page.request.get('/api/me')).json()) as { id: number };
   const company = `Mailco ${Date.now()}`;
@@ -26,17 +29,16 @@ test('send from the lead page; others see only "Email sent"', async ({ page }) =
   await panel.getByRole('tab', { name: /^Calls/ }).click();
   await expect(page.getByRole('list', { name: 'Activity timeline' })).toContainText('Email sent · Intro call this week?');
 
-  // An administrator sees that an email was sent, not what it said.
+  // An administrator reads the team's lead mail (view only): the row says whose mailbox it is in.
   await signInAs(page, MAYA);
   await page.goto(`/leads/${id}`);
   const adminPanel = page.getByRole('region', { name: 'Follow-up and history' });
   await adminPanel.getByRole('tab', { name: /^Emails/ }).click();
-  await expect(adminPanel.getByRole('tab', { name: /^Emails/ })).toHaveText('Emails 0');
-  await expect(adminPanel).toContainText('No emails yet');
+  await expect(adminPanel.getByRole('tab', { name: /^Emails/ })).toHaveText('Emails 1');
+  await expect(adminPanel.getByRole('listitem').filter({ hasText: 'Intro call this week?' })).toContainText("Neha Kapoor's mailbox");
   await adminPanel.getByRole('tab', { name: /^Calls/ }).click();
   const timeline = page.getByRole('list', { name: 'Activity timeline' });
-  await expect(timeline).toContainText('Email sent');
-  await expect(timeline).not.toContainText('Intro call this week?');
+  await expect(timeline).toContainText('Email sent · Intro call this week?');
 });
 
 test('without a connected mailbox the Email tab says how to connect and does not send', async ({ page }) => {

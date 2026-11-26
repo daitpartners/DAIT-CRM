@@ -777,6 +777,25 @@ td.nowrap{white-space:nowrap}
 /* 761–1099 px (review M-5): folders, list and reader share the first row (the reader may narrow to 280 px) and
    Linked records takes its own row under them, instead of four squeezed columns. */
 @media (min-width:761px) and (max-width:1099.98px){.reader{flex-basis:280px}.msglist{max-width:none}.mailside{flex:1 1 100%;border-left:0;border-top:1px solid var(--line)}}
+/* Web-mail release 1 (mockup 2026-11-26-outlook-mail state 5): "Mail of:" picker, the team view's mailbox on each row,
+   view only (banner and footer pill), and the folder column's "what the CRM keeps" note with its Why? popover. */
+.mail-of{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.mail-of label{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding-left:2px}
+.mail-of select.chip{width:100%;min-width:0;padding:0 26px 0 8px;background-position:right 8px center;font-size:12.5px;font-weight:700}
+.folders-head:has(.mail-of){align-items:flex-end;gap:6px;margin:-6px -4px 8px}
+@media (min-width:761px){.folders.collapsed .mail-of{display:none}.folders.collapsed .folders-head:has(.mail-of){margin:0}}
+.mail-mbx{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;align-self:center}
+.viewonly{display:flex;align-items:center;gap:10px;margin:14px 24px 0;padding:9px 12px;border-radius:8px;background:var(--warn-bg);border:1px solid #F0C98A;color:var(--warn-fg);font-size:12.5px;font-weight:500}
+.viewonly svg{width:16px;height:16px;flex:none}
+.vo-pill{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 12px;border-radius:8px;background:var(--grey-bg);color:var(--grey-fg);font-size:12.5px;font-weight:600}
+.vo-pill svg{width:15px;height:15px;flex:none}
+.mail-why{position:relative;margin-top:auto;padding:14px 4px 0;font-size:11.5px;line-height:1.5;color:var(--muted);display:flex;gap:6px;align-items:flex-start}
+.mail-why > svg{width:13px;height:13px;flex:none;margin-top:2px}
+.mail-why-btn{border:0;background:none;padding:0;font:inherit;font-weight:700;color:var(--purple);cursor:pointer}
+.mail-why-pop{position:fixed;width:300px;max-width:calc(100vw - 16px);background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 34px rgba(31,2,73,.18);padding:12px 14px;font-size:12px;color:var(--body);z-index:60;line-height:1.5}
+.mail-why-pop strong{color:var(--text)}
+.mail-why-pop ul{margin:6px 0;padding-left:16px}
+@media (max-width:760px){.mail-why{flex-basis:100%;margin-top:6px}}
 .mail-connect{margin:16px 28px 0;padding:12px 16px;border:1px solid #F0C98A;background:#FFF8EC;border-radius:10px;font-size:13px;color:var(--body);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 @media (max-width:760px){.mail-connect{margin:12px 16px 0}}
 

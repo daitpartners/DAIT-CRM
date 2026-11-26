@@ -1,8 +1,11 @@
 import { expect, test } from '@playwright/test';
 import { MAYA, NEHA, signInAs } from './fixtures';
 
-/** Release 2B-2: the Email screen shows your own synced mail only, linked to leads, and acts on it. */
-test('Email screen: read, log on the lead, add a task; mail stays private', async ({ page }) => {
+/**
+ * Release 2B-2: the Email screen shows your own synced mail, linked to leads, and acts on it. Web-mail release 1:
+ * Administrators and Managers read the team's lead mail, view only.
+ */
+test('Email screen: read, log on the lead, add a task; team mail is view only for an administrator', async ({ page }) => {
   await signInAs(page, NEHA);
   const nav = page.getByRole('navigation', { name: 'Main navigation' });
   await expect(nav.getByRole('link', { name: /^Email\s*2$/ })).toBeVisible();
@@ -44,16 +47,29 @@ test('Email screen: read, log on the lead, add a task; mail stays private', asyn
   await expect(list).toContainText(/^Inbox · 1/);
   await expect(list).toContainText('Website enquiry');
 
-  // An administrator sees none of Neha's mail; on the lead only "Email received", without the subject.
+  // An administrator's own mailbox is empty (Mail of: Me). Mail of: Neha Kapoor shows her lead mail, view only, and
+  // not her unlinked mail (web-mail release 1); on the lead the timeline now shows the subject.
   await signInAs(page, MAYA);
   await page.goto('/email');
-  await expect(page.getByRole('region', { name: 'Message list' })).toContainText('Nothing here.');
+  const mayaList = page.getByRole('region', { name: 'Message list' });
+  await expect(mayaList).toContainText('Nothing here.');
+  const mailOf = page.getByRole('combobox', { name: 'Mail of:' });
+  await expect(mailOf.getByRole('option', { name: 'Neha Kapoor' })).toBeAttached();
+  await mailOf.selectOption({ label: 'Neha Kapoor' });
+  await expect(page.getByText('Team view · lead mail of Neha Kapoor')).toBeVisible();
+  await expect(mayaList.getByRole('link', { name: /Re: Orbit proposal/ })).toBeVisible();
+  await expect(mayaList).not.toContainText('Website enquiry');
+  await mayaList.getByRole('link', { name: /Re: Orbit proposal/ }).click();
+  const theirs = page.getByRole('article', { name: 'Re: Orbit proposal' });
+  await expect(theirs.getByText("View only — Neha's mailbox.", { exact: true }).first()).toBeVisible();
+  await expect(theirs.getByRole('button', { name: 'Reply' })).toBeDisabled();
+  await expect(theirs.getByRole('button', { name: 'Reply' })).toHaveAttribute('title', "View only — Neha's mailbox");
   const leads = (await (await page.request.get('/api/leads?q=Orbit')).json()) as { items: { id: number }[] };
   await page.goto(`/leads/${leads.items[0]!.id}`);
   await page.getByRole('region', { name: 'Follow-up and history' }).getByRole('tab', { name: /^Calls/ }).click();
   const timeline = page.getByRole('list', { name: 'Activity timeline' });
   await expect(timeline).toContainText('Email received');
-  await expect(timeline).not.toContainText('Re: Orbit proposal');
+  await expect(timeline).toContainText('Re: Orbit proposal');
 });
 
 test('an unlinked email becomes a lead', async ({ page }) => {

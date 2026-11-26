@@ -26,16 +26,24 @@ function viewLabel(t: TFn, v: MailView): string {
     case 'sent': return t('Sent');
     case 'drafts': return t('Drafts');
     case 'archive': return t('Archive');
+    case 'deleted': return t('Deleted items');
     case 'unlinked': return t('Unlinked');
     case 'awaiting': return t('Awaiting reply');
     case 'mine': return t('My leads');
   }
 }
 
+/** `?mailof=` (`all` or a user id) for a user with `view_team_mail`; anything else, or no right, is your own mailbox. */
+function mailOfParam(v: string | null, team: boolean): 'all' | number | undefined {
+  if (!team || !v) return undefined;
+  return v === 'all' ? 'all' : num(v);
+}
+
 /**
  * The Email screen (release 2B-2; prototype views-work.js V.email): the user's own mailbox, synced every 5 minutes.
  * Folders and smart views, "Show mail for" Client / Lead / Project, search, the message list, the reader with its
- * linked records. Nobody sees anyone else's mail: the Project filter only narrows your own.
+ * linked records. Web-mail release 1 (mockup state 5): Administrators and Managers pick "Mail of:" Me / Everyone / one
+ * user to read the team's lead mail, view only; everyone else sees their own mailbox only.
  * `?compose=1` (with `company`, `lead`, `project`) opens Compose preset (the Projects list's Email buttons).
  * No page numbers (owner, 23 Nov 2026): the list loads the next 50 when scrolled near its foot.
  */
@@ -48,10 +56,13 @@ export function EmailPage() {
   const { id } = useParams();
   const [params, setParams] = useSearchParams();
   const view: MailView = (MAIL_VIEWS as readonly string[]).includes(params.get('folder') ?? '') ? (params.get('folder') as MailView) : 'inbox';
+  const teamRight = me.can('view_team_mail');
+  const mailOf = mailOfParam(params.get('mailof'), teamRight);
   const filter: MailFilter = {
     view, company: num(params.get('company')), lead: num(params.get('lead')), project: num(params.get('project')), s: params.get('s') ?? undefined,
+    ...(mailOf !== undefined ? { mailOf } : {}),
   };
-  const { data: meta } = useMailMeta();
+  const { data: meta } = useMailMeta(mailOf);
   const { items, total, isLoading, hasNextPage, isFetchingNextPage, isPlaceholderData, fetchNextPage } = useMailList(filter);
   const { data: templates } = useTemplates();
   const sync = useSyncNow();
@@ -170,7 +181,13 @@ export function EmailPage() {
   const leadNumber = meta?.leads.find((l) => l.id === filter.lead)?.number;
   const projectOptions = (meta?.projects ?? []).filter((p) => !filter.company || p.companyId === filter.company);
 
-  const sub = !meta ? null : mailbox ? (
+  const mailUsers = meta?.mailUsers ?? [];
+  const teamWho = mailOf === 'all' ? t('everyone') : mailUsers.find((u) => u.id === mailOf)?.name;
+  const sub = !meta ? null : mailOf !== undefined ? (
+    <>
+      <span>{t('Team view · lead mail of {who}', { who: teamWho ?? '' })}</span> <span className="badge b-warn">{t('View only')}</span> {t('for other mailboxes')}
+    </>
+  ) : mailbox ? (
     <>
       {t('{address} · Microsoft 365', { address: mailbox.address })}{' '}
       {connected ? <span className="badge b-ok">{t('Connected')}</span> : <span className="badge b-warn">{t('Needs reconnecting')}</span>} ·{' '}
@@ -294,13 +311,34 @@ export function EmailPage() {
       <div className="mail">
         <nav id="mail-folders" className={foldersClosed ? 'folders collapsed' : 'folders'} aria-label={t('Mail folders')}>
           {/* One toggle in both states, so it keeps the keyboard focus when pressed. */}
-          <div className="folders-head">{foldButton}</div>
+          <div className="folders-head">
+            {teamRight ? (
+              <div className="mail-of">
+                <label htmlFor="mail-of">{t('Mail of:')}</label>
+                <select
+                  id="mail-of"
+                  className="chip"
+                  title={t('Administrators and managers. Team mail is view only.')}
+                  value={mailOf === undefined ? '' : String(mailOf)}
+                  onChange={(e) => setQuery({ mailof: e.target.value || undefined })}
+                >
+                  <option value="">{t('Me')}</option>
+                  <option value="all">{t('Everyone')}</option>
+                  {mailUsers.map((u) => (
+                    <option key={u.id} value={u.id}>{u.name}</option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
+            {foldButton}
+          </div>
           {/* Folded, the list is hidden by CSS on wider screens; on a phone the folders always show (no lone strip). */}
           <div className="folders-list">
             {folder('inbox', meta?.unread)}
             {folder('sent')}
             {folder('drafts')}
             {folder('archive')}
+            {folder('deleted')}
             <div className="navsec mail-sec">{t('Smart views')}</div>
             {folder('unlinked', meta?.unlinked, true)}
             {folder('awaiting')}
@@ -327,6 +365,7 @@ export function EmailPage() {
             <Link className="fold mail-manage" to="/settings/templates">
               {t('Manage templates…')}
             </Link>
+            <WhyNote />
           </div>
         </nav>
 
@@ -339,7 +378,13 @@ export function EmailPage() {
           {/* The rows scroll on their own on desktop. */}
           <div className="msglist-rows" ref={rowsRef}>
             {items.map((m) => (
-              <MessageRow key={m.id} m={opened?.id === m.id && opened.isRead ? { ...m, isRead: true } : m} on={m.id === selectedId} to={`/email/${m.id}${params.toString() ? `?${params.toString()}` : ''}`} />
+              <MessageRow
+                key={m.id}
+                m={opened?.id === m.id && opened.isRead ? { ...m, isRead: true } : m}
+                on={m.id === selectedId}
+                team={mailOf !== undefined}
+                to={`/email/${m.id}${params.toString() ? `?${params.toString()}` : ''}`}
+              />
             ))}
             {!isLoading && items.length === 0 ? (
               <div className="empty">
@@ -372,7 +417,63 @@ export function EmailPage() {
   );
 }
 
-function MessageRow({ m, on, to }: { m: MailItem; on: boolean; to: string }) {
+/**
+ * The folder column's foot (web-mail release 1, mockup state 5): the CRM keeps lead mail only, and Why? opens what it
+ * keeps. The popover is placed beside the note in the window (the column scrolls and would clip it); a click outside,
+ * Escape or scrolling closes it.
+ */
+function WhyNote() {
+  const t = useT();
+  const noteRef = useRef<HTMLDivElement>(null);
+  const [at, setAt] = useState<{ left: number; bottom: number } | null>(null);
+  useEffect(() => {
+    if (!at) return;
+    const away = (e: MouseEvent) => {
+      if (!noteRef.current?.contains(e.target as Node)) setAt(null);
+    };
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setAt(null);
+    // It is placed once: scrolling (the page on a phone, the column on desktop) closes it rather than leave it behind.
+    const scrolled = () => setAt(null);
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', esc);
+    document.addEventListener('scroll', scrolled, true);
+    return () => {
+      document.removeEventListener('mousedown', away);
+      document.removeEventListener('keydown', esc);
+      document.removeEventListener('scroll', scrolled, true);
+    };
+  }, [at]);
+  const toggle = () => {
+    if (at) return setAt(null);
+    const r = noteRef.current?.getBoundingClientRect();
+    setAt({ left: Math.max(8, r?.left ?? 0), bottom: Math.max(8, window.innerHeight - (r?.top ?? 0) + 6) });
+  };
+  return (
+    <div className="mail-why" ref={noteRef}>
+      {Icons.shield}
+      <span>
+        {t('Only mail with your leads and contacts is shown here')} ·{' '}
+        <button type="button" className="mail-why-btn" aria-expanded={!!at} aria-controls="mail-why-pop" onClick={toggle}>
+          {t('Why?')}
+        </button>
+      </span>
+      {at ? (
+        <div id="mail-why-pop" className="mail-why-pop" style={{ left: at.left, bottom: at.bottom }}>
+          <strong>{t('What the CRM keeps')}</strong>
+          <ul>
+            <li>{t("Mail to and from your leads' and contacts' addresses.")}</li>
+            <li>{t("Mail from a lead company's own domain (not gmail.com, outlook.com and similar).")}</li>
+            <li>{t('The past 12 months are fetched when a lead is added.')}</li>
+          </ul>
+          <div>{t('Personal and other work mail stays in Outlook only.')}</div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** `team`: the team view, where each row shows whose mailbox it is in (mockup state 5). */
+function MessageRow({ m, on, to, team }: { m: MailItem; on: boolean; to: string; team: boolean }) {
   const t = useT();
   const { relative } = useFormatDate();
   // Prototype list row: rel(e.at).replace(/, /, ' ') — "Today 09:05", no comma.
@@ -388,10 +489,17 @@ function MessageRow({ m, on, to }: { m: MailItem; on: boolean; to: string }) {
         <span className="sub">{m.subject || t('(no subject)')}</span>
         <span className="pre">{m.preview}</span>
         <span className="msg-tags">
-          {m.leadNumber ? <span className="badge b-purple">{m.leadNumber}</span> : <span className="badge b-warn">{t('Unlinked · create lead?')}</span>}
+          {m.leadRestricted && m.leadNumber ? (
+            <span className="badge b-grey">{t("{lead} · another owner's lead", { lead: m.leadNumber })}</span>
+          ) : m.leadNumber ? (
+            <span className="badge b-purple">{m.leadNumber}</span>
+          ) : (
+            <span className="badge b-warn">{t('Unlinked · create lead?')}</span>
+          )}
           {m.projectNumber ? <span className="badge b-ok">{m.projectNumber}</span> : null}
           {m.status === 'failed' ? <span className="badge b-bad">{t('Failed')}</span> : null}
           {m.status === 'queued' || m.status === 'sending' ? <span className="badge b-grey">{t('Sending')}</span> : null}
+          {team ? <span className="mail-mbx">{m.viewOnly ? t("{name}'s mailbox", { name: m.owner.name }) : t('Your mailbox')}</span> : null}
         </span>
       </span>
     </Link>

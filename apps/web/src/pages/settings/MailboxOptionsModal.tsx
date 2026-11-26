@@ -51,7 +51,7 @@ export function MailboxOptionsModal({ mailbox, onClose }: { mailbox: Mailbox; on
     >
       <label className="sw">
         <input type="checkbox" checked={syncMail} onChange={(e) => setSyncMail(e.target.checked)} />
-        {t('Sync mail (inbox and sent, last 90 days then continuous)')}
+        {t('Sync mail (the CRM keeps lead mail only: mail with your leads and contacts, from the last 12 months, then continuous)')}
       </label>
       <label className="sw">
         <input type="checkbox" checked={syncCalendar} onChange={(e) => setSyncCalendar(e.target.checked)} />

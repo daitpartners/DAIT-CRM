@@ -18,7 +18,7 @@ const me = { ...rep, rights: [...rep.rights, 'use_email' as const] };
 const META: MailMeta = {
   mailbox: { id: 7, address: 'arjun@daitpartners.com', status: 'connected', lastSyncAt: '2026-11-22T09:00:00.000Z' },
   unread: 0, unlinked: 0, companies: [{ id: 4, name: 'Acme', legalName: null, isClient: true }], leads: [{ id: 5, number: 'LD-1005', companyId: 4, companyName: 'Acme', status: 'Won' }],
-  projects: [{ id: 3, number: 'PRJ-3', name: 'Website rebuild', companyId: 4 }],
+  projects: [{ id: 3, number: 'PRJ-3', name: 'Website rebuild', companyId: 4 }], mailUsers: [],
 };
 
 const contact = (id: number, first: string, email: string, isPrimary = false) => ({

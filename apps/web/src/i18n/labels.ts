@@ -411,6 +411,8 @@ export function errorText(t: TFn, code: string, vars: Record<string, string | nu
       return t('This template’s files have changed or are missing. Pick the template again (or upload the .oft again).');
     case 'attachment_invalid':
       return t('One of the template’s files could not be read. Upload the .oft again.');
+    case 'view_only':
+      return t('View only: only the mailbox owner can do this.');
     case 'no_mailbox':
       return t('Connect your Microsoft 365 mailbox in Settings to send email from the CRM.');
     case 'cannot_deactivate_self':

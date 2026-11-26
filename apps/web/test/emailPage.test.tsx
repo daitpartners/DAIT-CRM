@@ -21,17 +21,18 @@ afterEach(() => {
 const me = { ...rep, rights: [...rep.rights, 'use_email' as const] };
 
 const item = (over: Partial<MailItem> = {}): MailItem => ({
-  id: 1, folder: 'inbox', status: 'received', fromAddress: 'ana@acme.com', fromName: 'Ana Ruiz', toAddresses: ['arjun@daitpartners.com'],
+  id: 1, owner: { id: 2, name: 'Arjun Mehta' }, viewOnly: false, leadRestricted: false, folder: 'inbox', status: 'received', fromAddress: 'ana@acme.com', fromName: 'Ana Ruiz', toAddresses: ['arjun@daitpartners.com'],
   subject: 'Proposal', preview: 'Looks good', occurredAt: '2026-11-20T10:00:00.000Z', isRead: false, leadId: null, leadNumber: null,
   companyId: null, hasAttachments: false, projectId: null, projectNumber: null, ...over,
 });
 const detail = (m: MailItem, over: Partial<MailDetail> = {}): MailDetail => ({
-  ...m, ccAddresses: [], bodyText: 'Looks good', bodyHtml: null, attachmentNames: [], loggedAt: null, lead: null, contact: null, company: null, thread: [], ...over,
+  ...m, ccAddresses: [], bodyText: 'Looks good', bodyHtml: null, attachmentNames: [], loggedAt: null, lead: null, contact: null, company: null, restrictedLead: null, thread: [], ...over,
 });
 const META: MailMeta = {
   mailbox: { id: 7, address: 'arjun@daitpartners.com', status: 'connected', lastSyncAt: '2026-11-22T09:00:00.000Z' },
   unread: 3, unlinked: 2, companies: [{ id: 4, name: 'Acme', legalName: null, isClient: true }, { id: 6, name: 'Bolt', legalName: 'Bolt Industries Ltd', isClient: false }], leads: [{ id: 5, number: 'LD-1005', companyId: 4, companyName: 'Acme', status: 'New' }],
   projects: [{ id: 3, number: 'PRJ-3', name: 'Website rebuild', companyId: 4 }, { id: 8, number: 'PRJ-8', name: 'Brand refresh', companyId: 6 }],
+  mailUsers: [],
 };
 
 /** `extra` answers a GET first (stateful or filtered responses); anything it leaves undefined falls through. */
@@ -47,7 +48,7 @@ function stub(items: MailItem[], details: Record<number, MailDetail>, meta: Mail
       return Response.json({ id: 99, leadId: 5 }, { status: 201 });
     }
     if (url.startsWith('/api/mail?')) return Response.json({ items, total: items.length, page: 1, pageSize: 50 });
-    if (url === '/api/mail/meta') return Response.json(meta);
+    if (url === '/api/mail/meta' || url.startsWith('/api/mail/meta?')) return Response.json(meta);
     const m = /^\/api\/mail\/(\d+)(\?peek=1)?$/.exec(url);
     if (m) return Response.json(details[Number(m[1])]);
     if (url.startsWith('/api/email-templates')) {
@@ -110,7 +111,7 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     const folders = screen.getByRole('navigation', { name: 'Mail folders' });
     expect(within(folders).getByRole('link', { name: /Inbox\s*3/ })).toBeTruthy();
     expect(within(folders).getByRole('link', { name: /Unlinked\s*2/ })).toBeTruthy();
-    for (const name of ['Sent', 'Drafts', 'Archive', 'Awaiting reply', 'My leads']) expect(within(folders).getByRole('link', { name })).toBeTruthy();
+    for (const name of ['Sent', 'Drafts', 'Archive', 'Deleted items', 'Awaiting reply', 'My leads']) expect(within(folders).getByRole('link', { name })).toBeTruthy();
     expect(await within(folders).findByRole('button', { name: 'Intro' })).toBeTruthy();
     const list = screen.getByRole('region', { name: 'Message list' });
     expect(await within(list).findByText('Unlinked · create lead?')).toBeTruthy();
@@ -833,6 +834,168 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     await u.click(within(again).getByRole('button', { name: 'Expand folders' }));
     expect(within(again).getByRole('link', { name: 'Sent' })).toHaveAttribute('aria-current', 'page');
     expect(localStorage.getItem('dait-mail-folders-collapsed')).toBe('0');
+  });
+});
+
+/** An Administrator (web-mail release 1): reads the team's lead mail, view only. */
+const admin: Me = { ...me, id: 1, name: 'Maya Iyer', role: 'Administrator', rights: [...me.rights, 'view_team_mail' as const] };
+const TEAM_META: MailMeta = { ...META, mailUsers: [{ id: 9, name: 'Carlos Torres' }] };
+const carlos = { id: 9, name: 'Carlos Torres' };
+/** The screen refetches the signed-in user: answer as the Administrator. */
+const asAdmin = (url: string) => (url === '/api/me' ? admin : undefined);
+
+describe('Email screen: team view (web-mail release 1, mockup state 5)', () => {
+  it("Mail of picker (Administrator / Manager): Me, Everyone and each user; Everyone asks for mailOf=all and shows each row's mailbox", async () => {
+    const u = userEvent.setup();
+    const asked: string[] = [];
+    const theirs = item({ id: 2, subject: 'Propuesta', owner: carlos, viewOnly: true, leadId: 5, leadNumber: 'LD-1005' });
+    stub([item(), theirs], { 1: detail(item()) }, TEAM_META, (url) => {
+      asked.push(url);
+      return asAdmin(url);
+    });
+    show('/email', admin);
+    const picker = await screen.findByRole('combobox', { name: 'Mail of:' });
+    expect(picker).toHaveAttribute('title', 'Administrators and managers. Team mail is view only.');
+    await waitFor(() => expect(within(picker).getAllByRole('option').map((o) => o.textContent)).toEqual(['Me', 'Everyone', 'Carlos Torres']));
+    // Me: your own mailbox, no mailOf asked.
+    expect(asked.filter((x) => x.includes('mailOf'))).toEqual([]);
+    await u.selectOptions(picker, 'Everyone');
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/email?mailof=all'));
+    const lastListUrl = () => asked.filter((x) => x.startsWith('/api/mail?')).at(-1) ?? '';
+    await waitFor(() => expect(lastListUrl()).toContain('mailOf=all'));
+    expect(asked).toContain('/api/mail/meta?mailOf=all');
+    expect(await screen.findByText('Team view · lead mail of everyone')).toBeInTheDocument();
+    expect(screen.getByText('View only', { selector: '.badge' })).toBeInTheDocument();
+    expect(screen.getByText(/for other mailboxes/)).toBeInTheDocument();
+    const list = screen.getByRole('region', { name: 'Message list' });
+    const row = within(list).getByRole('link', { name: /Propuesta/ });
+    expect(row).toHaveTextContent("Carlos Torres's mailbox");
+    expect(within(list).getByRole('link', { name: /Proposal/ })).toHaveTextContent('Your mailbox');
+    // One user's mail: the line names them.
+    await u.selectOptions(picker, 'Carlos Torres');
+    await waitFor(() => expect(lastListUrl()).toContain('mailOf=9'));
+    expect(await screen.findByText('Team view · lead mail of Carlos Torres')).toBeInTheDocument();
+  });
+
+  it('no Mail of picker for a Sales rep, and no mailOf in its requests (an address mailof is ignored)', async () => {
+    const asked: string[] = [];
+    stub([item()], { 1: detail(item()) }, META, (url) => {
+      asked.push(url);
+      return undefined;
+    });
+    show('/email?mailof=all');
+    expect(await screen.findByText(/arjun@daitpartners.com · Microsoft 365/)).toBeTruthy();
+    expect(screen.queryByRole('combobox', { name: 'Mail of:' })).toBeNull();
+    expect(screen.queryByText(/Team view/)).toBeNull();
+    expect(asked.some((x) => x.startsWith('/api/mail'))).toBe(true);
+    expect(asked.filter((x) => x.includes('mailOf'))).toEqual([]);
+  });
+
+  it("another user's message is view only: banner, pill, Reply / Archive / Link disabled with the title; Log and task enabled", async () => {
+    const linked = item({ id: 2, owner: carlos, viewOnly: true, leadId: 5, leadNumber: 'LD-1005' });
+    const loose = item({ id: 3, owner: carlos, viewOnly: true, companyId: 4 });
+    stub([linked, loose], {
+      2: detail(linked, { lead: { id: 5, number: 'LD-1005', status: 'Proposal', priority: 'High', nextFollowUp: null, companyId: 4 }, company: { id: 4, name: 'Acme' } }),
+      3: detail(loose, { company: { id: 4, name: 'Acme' } }),
+    }, TEAM_META, asAdmin);
+    const view = show('/email/2?mailof=all', admin);
+    const reader = await screen.findByRole('article');
+    expect(await within(reader).findByText("View only — Carlos's mailbox.", { selector: '.viewonly strong' })).toBeInTheDocument();
+    expect(within(reader).getByText(/You can read, log and create tasks; only Carlos can reply from this mailbox\./)).toBeInTheDocument();
+    expect(within(reader).getByText("View only — Carlos's mailbox.", { selector: '.vo-pill' })).toBeInTheDocument();
+    for (const name of ['Reply', 'Archive']) {
+      expect(within(reader).getByRole('button', { name })).toBeDisabled();
+      expect(within(reader).getByRole('button', { name })).toHaveAttribute('title', "View only — Carlos's mailbox");
+    }
+    await waitFor(() => expect(within(reader).getByRole('button', { name: 'Log as activity' })).toBeEnabled());
+    expect(within(reader).getByRole('button', { name: 'Add follow-up task' })).toBeEnabled();
+    view.unmount();
+    // Not linked to a lead (a contact or company only): Link / Create lead are disabled too.
+    show('/email/3?mailof=all', admin);
+    const other = await screen.findByRole('article');
+    for (const name of ['Link to lead / create lead', 'Create lead from this email']) {
+      const b = await within(other).findByRole('button', { name });
+      expect(b).toBeDisabled();
+      expect(b).toHaveAttribute('title', "View only — Carlos's mailbox");
+    }
+  });
+
+  it("your own message in team view stays yours: no banner, Reply enabled", async () => {
+    const a = item();
+    stub([a], { 1: detail(a) }, TEAM_META, asAdmin);
+    show('/email/1?mailof=all', admin);
+    const reader = await screen.findByRole('article');
+    await waitFor(() => expect(within(reader).getByRole('button', { name: 'Reply' })).toBeEnabled());
+    expect(reader.querySelector('.viewonly')).toBeNull();
+    expect(reader.querySelector('.vo-pill')).toBeNull();
+  });
+
+  it("a message on another owner's lead: chip 'LD-1005 · another owner's lead', side panel company name only, no lead link", async () => {
+    const a = item({ leadRestricted: true, leadNumber: 'LD-1005' });
+    stub([a], { 1: detail(a, { restrictedLead: { number: 'LD-1005', companyName: 'Acme' } }) });
+    show('/email/1');
+    const list = screen.getByRole('region', { name: 'Message list' });
+    expect(await within(list).findByText("LD-1005 · another owner's lead")).toBeInTheDocument();
+    expect(within(list).queryByText('Unlinked · create lead?')).toBeNull();
+    const side = await screen.findByRole('complementary', { name: 'Linked records' });
+    expect(await within(side).findByText("LD-1005 · another owner's lead")).toBeInTheDocument();
+    expect(within(side).getByText('Acme')).toBeInTheDocument();
+    expect(within(side).queryByRole('link', { name: /Lead/ })).toBeNull();
+    expect(within(side).queryByRole('link', { name: /Company/ })).toBeNull();
+    expect(within(side).queryByText(/No matching contact or lead/)).toBeNull();
+    const reader = screen.getByRole('article');
+    expect(within(reader).queryByRole('button', { name: 'Link to lead / create lead' })).toBeNull();
+    expect(within(reader).queryByRole('button', { name: 'Create lead from this email' })).toBeNull();
+  });
+
+  it('Deleted items folder; footer note with a Why? popover', async () => {
+    const u = userEvent.setup();
+    const asked: string[] = [];
+    stub([], {}, META, (url) => {
+      asked.push(url);
+      return undefined;
+    });
+    show('/email');
+    const folders = screen.getByRole('navigation', { name: 'Mail folders' });
+    await u.click(within(folders).getByRole('link', { name: 'Deleted items' }));
+    await waitFor(() => expect(asked.some((x) => x.startsWith('/api/mail?view=deleted'))).toBe(true));
+    expect(screen.getByRole('region', { name: 'Message list' })).toHaveTextContent(/^Deleted items/);
+    expect(within(folders).getByText(/Only mail with your leads and contacts is shown here/)).toBeInTheDocument();
+    const why = within(folders).getByRole('button', { name: 'Why?' });
+    expect(why).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('What the CRM keeps')).toBeNull();
+    await u.click(why);
+    expect(why).toHaveAttribute('aria-expanded', 'true');
+    const pop = screen.getByText('What the CRM keeps').closest('.mail-why-pop') as HTMLElement;
+    expect(within(pop).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      "Mail to and from your leads' and contacts' addresses.",
+      "Mail from a lead company's own domain (not gmail.com, outlook.com and similar).",
+      'The past 12 months are fetched when a lead is added.',
+    ]);
+    expect(pop).toHaveTextContent('Personal and other work mail stays in Outlook only.');
+    await u.click(why);
+    expect(screen.queryByText('What the CRM keeps')).toBeNull();
+    // Escape and a click elsewhere close it too.
+    await u.click(why);
+    await u.keyboard('{Escape}');
+    expect(screen.queryByText('What the CRM keeps')).toBeNull();
+    await u.click(why);
+    await u.click(screen.getByRole('region', { name: 'Message list' }));
+    expect(screen.queryByText('What the CRM keeps')).toBeNull();
+  });
+
+  it('team view wording in Spanish', async () => {
+    const spanish: Me = { ...admin, language: 'es' };
+    const theirs = item({ id: 2, owner: carlos, viewOnly: true, leadId: 5, leadNumber: 'LD-1005' });
+    stub([theirs], { 2: detail(theirs, { lead: { id: 5, number: 'LD-1005', status: 'Proposal', priority: 'High', nextFollowUp: null, companyId: 4 } }) }, TEAM_META,
+      (url) => (url === '/api/me' ? spanish : undefined));
+    show('/email/2?mailof=all', spanish);
+    const picker = await screen.findByRole('combobox', { name: es['Mail of:'] });
+    await waitFor(() => expect(within(picker).getAllByRole('option').map((o) => o.textContent)).toEqual([es.Me, es.Everyone, 'Carlos Torres']));
+    expect(await screen.findByText(es['Team view · lead mail of {who}'].replace('{who}', es.everyone))).toBeInTheDocument();
+    const reader = await screen.findByRole('article');
+    expect(await within(reader).findByText(es["View only — {name}'s mailbox."].replace('{name}', 'Carlos'), { selector: '.viewonly strong' })).toBeInTheDocument();
+    expect(within(reader).getByRole('button', { name: es.Reply })).toHaveAttribute('title', es["View only — {name}'s mailbox"].replace('{name}', 'Carlos'));
   });
 });
 

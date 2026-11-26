@@ -4,10 +4,14 @@ import { ApiError, api } from './client';
 import { keys } from './queries';
 
 /** Email screen views (prototype folders and smart views). */
-export const MAIL_VIEWS = ['inbox', 'sent', 'drafts', 'archive', 'unlinked', 'awaiting', 'mine'] as const;
+export const MAIL_VIEWS = ['inbox', 'sent', 'drafts', 'archive', 'deleted', 'unlinked', 'awaiting', 'mine'] as const;
 export type MailView = (typeof MAIL_VIEWS)[number];
 
-export type MailFilter = { view: MailView; company?: number; lead?: number; project?: number; s?: string };
+/**
+ * `mailOf` (web-mail release 1, `view_team_mail` only): `all` = your mail plus the team's lead mail, a user id = that
+ * user's lead mail; absent = your own mailbox.
+ */
+export type MailFilter = { view: MailView; company?: number; lead?: number; project?: number; s?: string; mailOf?: 'all' | number };
 
 /**
  * Messages per batch: the list loads the next 50 when scrolled near its foot (owner, 23 Nov 2026: no page numbers on
@@ -18,9 +22,16 @@ export const MAIL_BATCH = 50;
 /** One batch of the list; `total` counts every message the filters leave (null on later batches, asked with count=0). */
 export type MailPage = { items: MailItem[]; total: number | null; page: number; pageSize: number };
 
-/** A message in the list (release 2B-2): only ever the signed-in user's own. */
+/**
+ * A message in the list (release 2B-2). Your own, or (web-mail release 1, Administrators and Managers) another user's
+ * lead mail: `owner` is whose mailbox it is, `viewOnly` when that is not you (read, log and tasks only).
+ */
 export type MailItem = {
   id: number;
+  owner: { id: number; name: string };
+  viewOnly: boolean;
+  /** The lead is another owner's that you cannot open: only its number is shown (`leadId` and `companyId` are null). */
+  leadRestricted: boolean;
   folder: string;
   status: 'queued' | 'sending' | 'sent' | 'failed' | 'received' | 'draft';
   fromAddress: string;
@@ -49,6 +60,8 @@ export type MailDetail = MailItem & {
   lead: { id: number; number: string; status: string; priority: string; nextFollowUp: string | null; companyId: number | null } | null;
   contact: { id: number; name: string } | null;
   company: { id: number; name: string } | null;
+  /** Another owner's lead (`leadRestricted`): its number and company name only; `lead`, `contact`, `company` are null. */
+  restrictedLead: { number: string; companyName: string } | null;
   /** Thread history, newest first, the open message included (see the API's threadHistory). */
   thread: {
     id: number; occurredAt: string; direction: 'in' | 'out'; who: string; subject: string;
@@ -65,6 +78,8 @@ export type MailMeta = {
   leads: { id: number; number: string; companyId: number | null; companyName: string; status: string }[];
   /** Release 3B: every project the user can see (the Project filter). */
   projects: { id: number; number: string; name: string; companyId: number }[];
+  /** The "Mail of:" picker (`view_team_mail`): the other users with a mailbox, by name; empty for everyone else. */
+  mailUsers: { id: number; name: string }[];
 };
 
 export type MailCompose = {
@@ -80,6 +95,7 @@ const listPath = (f: MailFilter, page: number) => {
   if (f.lead) q.set('lead', String(f.lead));
   if (f.project) q.set('project', String(f.project));
   if (f.s) q.set('s', f.s);
+  if (f.mailOf !== undefined) q.set('mailOf', String(f.mailOf));
   // Later batches need no total: the first batch (and its refresh) carries it.
   if (page > 1) {
     q.set('page', String(page));
@@ -169,8 +185,13 @@ export function useMailList(f: MailFilter, enabled = true) {
   return { ...q, items, total: pages?.[0]?.total ?? 0 };
 }
 
-export function useMailMeta() {
-  return useQuery({ queryKey: [...ROOT, 'meta'], queryFn: () => api<MailMeta>('/api/mail/meta'), refetchInterval: 60_000 });
+/** Counts and filter lists for the list's scope (`mailOf`, as the list); `mailbox` is always your own. */
+export function useMailMeta(mailOf?: 'all' | number) {
+  return useQuery({
+    queryKey: [...ROOT, 'meta', mailOf ?? 'me'],
+    queryFn: () => api<MailMeta>(`/api/mail/meta${mailOf !== undefined ? `?mailOf=${mailOf}` : ''}`),
+    refetchInterval: 60_000,
+  });
 }
 
 /** `peek`: shown without the user opening it (the first message on arrival), so it stays unread. */
@@ -180,8 +201,9 @@ export function useMailMessage(id: number | null, peek = false) {
     queryKey: [...ROOT, 'message', id, peek],
     queryFn: async () => {
       const m = await api<MailDetail>(`/api/mail/${id}${peek ? '?peek=1' : ''}`);
-      // Opening marks it read: the row loses its bold at once (no list refetch), the counts change.
-      if (!peek) {
+      // Opening marks it read: the row loses its bold at once (no list refetch), the counts change. Another user's
+      // message (view only) is never marked read.
+      if (!peek && !m.viewOnly) {
         // Every loaded batch of every list: the message is in whichever batch holds it.
         qc.setQueriesData<InfiniteData<MailPage, number>>({ queryKey: [...ROOT, 'list'] }, (data) =>
           data?.pages.some((p) => p.items.some((x) => x.id === id && !x.isRead))
