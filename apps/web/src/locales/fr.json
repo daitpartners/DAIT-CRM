@@ -2130,5 +2130,13 @@
   "More actions": "Plus d’actions",
   "To:": "À :",
   "Cc:": "Cc :",
-  "Reading pane": "Volet de lecture"
+  "Reading pane": "Volet de lecture",
+  "No lead linked": "Aucun lead lié",
+  "Link to lead ▾": "Lier à un lead ▾",
+  "due": "échue",
+  "Linked automatically: {value} belongs to this lead.": "Lié automatiquement : {value} appartient à ce lead.",
+  "Linked automatically: {value} is on this lead.": "Lié automatiquement : {value} figure sur ce lead.",
+  "Last activity": "Dernière activité",
+  "Recent on the lead": "Récemment sur le lead",
+  "Lead · {number}": "Lead · {number}"
 }

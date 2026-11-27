@@ -686,9 +686,9 @@ td.nowrap{white-space:nowrap}
 .mail-body{white-space:pre-wrap;font:inherit;font-size:13px;color:var(--body);margin:10px 0 0}
 
 /* Email screen (web-mail release 2, mockup 2026-11-26-outlook-mail): the .wm root holds the top bar with the lead-mail
-   search and its Filters panel, the command bar, and the panes (folder pane, message list, reading pane). The mockup's
+   search and its Filters panel, the command bar, and the panes (folder pane, message list, reading pane, lead panel). The mockup's
    own sizes are variables on .wm; colours, fonts and components are the live CRM's. */
-.wm{--fp:196px;--ml:322px;--pane:#F7F4FC;--row-hover:#F6F2FD;display:flex;flex-direction:column;flex:1 1 auto;min-width:0}
+.wm{--fp:196px;--ml:322px;--lp:236px;--pane:#F7F4FC;--row-hover:#F6F2FD;display:flex;flex-direction:column;flex:1 1 auto;min-width:0}
 @media (max-width:1360px){.wm{--fp:184px;--ml:300px}}
 .wm .ico{display:inline-flex;width:16px;height:16px;flex:0 0 auto}
 .wm .ico svg{width:100%;height:100%;display:block}
@@ -794,8 +794,7 @@ td.nowrap{white-space:nowrap}
   .fp-toggle{display:none}
   .fp-scroll{max-height:220px}
 }
-/* Message list and reading pane (release 2B-2; prototype .msglist, .msg, .reader, .mailside). */
-.mail-sec{color:var(--muted)}
+/* Message list and reading pane (release 2B-2; prototype .msglist, .msg, .reader). */
 .msglist{flex:1 1 300px;max-width:400px;min-width:0;border-right:1px solid var(--line);background:var(--surface)}
 .wm-linkchip{height:26px;padding:0 10px;font-size:12px;font-weight:600;color:var(--text);max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wm-linkchip:hover{background:var(--tint);color:var(--text)}
@@ -807,7 +806,8 @@ td.nowrap{white-space:nowrap}
   main:has(> .wm){height:100vh;overflow:hidden}
   .wm{min-height:0}
   .wm-panes{flex:1 1 0;min-height:0;flex-wrap:nowrap}
-  .mailside{overflow-y:auto;min-height:0}
+  .wm .lpanel{min-height:0}
+  .wm .lp-scroll{min-height:0}
   .wm .rpane{min-height:0}
   .wm .rp-scroll{overflow-y:auto;min-height:0;flex:1 1 0}
   .msglist{display:flex;flex-direction:column;min-height:0}
@@ -816,21 +816,54 @@ td.nowrap{white-space:nowrap}
 }
 .wm .rpane{flex:999 1 420px;min-width:0;display:flex;flex-direction:column;background:var(--pane)}
 .wm .rpane.empty{align-items:center;justify-content:center;color:var(--muted);font-size:13px}
-.mailside{flex:0 1 250px;min-width:0;padding:18px 16px;border-left:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;gap:12px}
-.mailside .navsec{padding:0 0 4px}
-.mailside .link{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;color:var(--text);text-decoration:none;font-size:13px}
-.mailside .link-sub{display:block;color:var(--muted)}
-.mail-thread{font-size:12.5px;color:var(--body);display:flex;flex-direction:column;gap:6px}
+/* Lead panel (web-mail release 2, mockup "Lead panel"): folds to a 44 px rail "Lead · LD-xxxx". */
+.wm .lpanel{width:var(--lp);flex:0 0 var(--lp);background:var(--surface);border-left:1px solid var(--line);display:flex;flex-direction:column;min-width:0;transition:width .15s,flex-basis .15s}
+.wm .lp-head{display:flex;align-items:center;gap:6px;padding:12px 10px 8px 16px}
+.wm .lp-head h3{flex:1;margin:0;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.wm .lp-scroll{flex:1;overflow-y:auto;padding:0 16px 16px;display:flex;flex-direction:column;gap:12px}
+.wm .lp-co{display:flex;gap:10px;align-items:center}
+.wm .lp-co .logo{margin:0;width:40px;height:40px;border-radius:9px;font-size:13px;flex:none}
+.wm .lp-co-t{min-width:0}
+.wm .lp-co b{display:block;font-size:13.5px;color:var(--text)}
+.wm .lp-co small{display:block;font-size:11.5px;color:var(--muted);overflow-wrap:anywhere}
+.wm .lp-badges{display:flex;gap:6px;flex-wrap:wrap}
+.wm .lp-kv{display:grid;grid-template-columns:86px 1fr;gap:7px 8px;font-size:12px;margin:0}
+.wm .lp-kv dt{color:var(--muted)}
+.wm .lp-kv dd{margin:0;font-weight:500;min-width:0;overflow-wrap:anywhere;color:var(--text)}
+.wm .lp-kv dd.due{color:var(--bad-fg);font-weight:700}
+.wm .lp-role{display:block;color:var(--muted);font-weight:400}
+.wm .lp-acts{display:flex;flex-direction:column;gap:6px}
+.wm .lp-acts .btn{justify-content:flex-start;height:32px;font-size:12.5px}
+.wm .lp-acts .btn .ico{width:15px;height:15px;color:var(--orange)}
+.wm .lp-acts .btn.primary .ico{color:#fff}
+.wm .lp-sec{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:4px}
+.wm .lp-tl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;font-size:12px;color:var(--text)}
+.wm .lp-tl li{display:flex;gap:8px}
+.wm .lp-tl i{width:8px;height:8px;border-radius:50%;background:var(--tint-2);margin-top:5px;flex:0 0 auto}
+.wm .lp-tl small{display:block;color:var(--muted);font-size:11px}
+.wm .lp-link{font-size:11px;color:var(--muted);line-height:1.45;padding:8px 10px;border-radius:8px;background:var(--pane)}
+.wm .lpanel.collapsed{width:44px;flex-basis:44px}
+.wm .lpanel.collapsed .lp-head h3{display:none}
+.wm .lpanel.collapsed .lp-head{flex-direction:column;padding:10px 6px}
+.wm .lpanel.collapsed .lp-toggle{transform:rotate(180deg)}
+.wm .lp-rail{writing-mode:vertical-rl;transform:rotate(180deg);font-size:11.5px;font-weight:700;color:var(--purple);margin:10px auto;letter-spacing:.04em;border:0;background:none;padding:6px 0;cursor:pointer}
 .mail-loop{display:flex;gap:6px 14px;flex-wrap:wrap}
 .mail-loop .sw{font-size:12.5px}.mail-loop .dim{color:var(--muted)}
 .mail-context{font-size:12.5px;color:var(--body);padding-top:9px}
 @media (max-width:760px){
   .msglist{max-width:none;flex-basis:100%;border-right:0}
-  .mailside{flex-basis:100%;border-left:0;border-top:1px solid var(--line)}
 }
 /* 761–1099 px (review M-5): folders, list and reader share the first row (the reader may narrow to 280 px) and
-   Linked records takes its own row under them, instead of four squeezed columns. */
-@media (min-width:761px) and (max-width:1099.98px){.wm .rpane{flex-basis:280px}.msglist{max-width:none}.mailside{flex:1 1 100%;border-left:0;border-top:1px solid var(--line)}}
+   the lead panel takes its own row under them, instead of four squeezed columns. Below 1100 px the panel is a full-width
+   block; folded, it is one line with the rail written across. */
+@media (min-width:761px) and (max-width:1099.98px){.wm .rpane{flex-basis:280px}.msglist{max-width:none}}
+@media (max-width:1099.98px){
+  .wm .lpanel,.wm .lpanel.collapsed{width:auto;flex:1 1 100%;border-left:0;border-top:1px solid var(--line)}
+  .wm .lpanel.collapsed .lp-head{flex-direction:row-reverse;justify-content:flex-end;padding:8px 10px 8px 16px}
+  .wm .lp-rail{writing-mode:horizontal-tb;transform:none;margin:0}
+  .wm .lp-toggle{transform:rotate(-90deg)}
+  .wm .lpanel.collapsed .lp-toggle{transform:rotate(90deg)}
+}
 /* Message list (web-mail release 2, mockup "Message list"): header with the view's name, Conversation view and sort,
    the quick filter chips, the bulk bar, date groups, and rows in the stretched-link pattern (the row's link covers it;
    the avatar's checkbox and the hover actions sit above). */

@@ -311,34 +311,31 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     await waitFor(() => expect(new URL(lastListUrl(), 'http://x').searchParams.has('project')).toBe(false));
   });
 
-  it('an unlinked message: the side panel says no contact or lead matches', async () => {
+  it('an unlinked message: the lead panel (folded below 1400 px) says No lead linked', async () => {
+    const u = userEvent.setup();
     const a = item();
     stub([a], { 1: detail(a) });
     show('/email/1');
-    expect(await screen.findByText('No matching contact or lead. Link it to an existing lead or create one.')).toBeTruthy();
+    const panel = await screen.findByRole('complementary', { name: 'Lead' });
+    await u.click(within(panel).getByRole('button', { name: 'Lead' }));
+    expect(await within(panel).findByText('No lead linked')).toBeTruthy();
   });
 
-  it('a linked message shows its records in the side panel', async () => {
+  it('a linked message shows its lead in the lead panel', async () => {
+    const u = userEvent.setup();
     const a = item({ leadId: 5, leadNumber: 'LD-1005' });
     stub([a], {
       1: detail(a, {
         lead: { id: 5, number: 'LD-1005', status: 'Contacted', priority: 'High', nextFollowUp: '2026-11-25', companyId: 4 },
         contact: { id: 9, name: 'Ana Ruiz' }, company: { id: 4, name: 'Acme' },
-        thread: [{ id: 8, occurredAt: '2026-11-19T10:00:00.000Z', direction: 'out', who: 'ana@acme.com', subject: 'Proposal', kind: 'sent', by: 'Arjun', unmatched: false }],
       }),
     });
     show('/email/1');
-    expect(await screen.findByRole('link', { name: /Lead\s*LD-1005/ })).toBeTruthy();
-    expect(screen.getByRole('link', { name: /Company\s*Acme/ })).toBeTruthy();
-    expect(screen.getByText(/Next follow-up on this lead/)).toBeTruthy();
-  });
-
-  it("the lead's next follow-up (a calendar date from the API) shows as a date in the Follow-up section", async () => {
-    const a = item({ leadId: 5, leadNumber: 'LD-1005' });
-    stub([a], { 1: detail(a, { lead: { id: 5, number: 'LD-1005', status: 'Contacted', priority: 'High', nextFollowUp: '2026-11-25', companyId: 4 } }) });
-    show('/email/1');
-    const line = await screen.findByText(/Next follow-up on this lead/);
-    expect(line.querySelector('strong')?.textContent).toMatch(/25.*2026|2026.*25/);
+    const panel = await screen.findByRole('complementary', { name: 'Lead' });
+    await u.click(await within(panel).findByRole('button', { name: 'Lead · LD-1005' }));
+    expect(await within(panel).findByText('Acme')).toBeTruthy();
+    expect(within(panel).getByText('LD-1005')).toBeTruthy();
+    expect(within(panel).getByRole('link', { name: 'Open lead' }).getAttribute('href')).toBe('/leads/5');
   });
 
   it('without a connected mailbox the header says so and links to Settings', async () => {
@@ -802,70 +799,18 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     await waitFor(() => expect(posts).toEqual([{ url: '/api/mail/1/link', body: { leadId: 2 } }]));
   });
 
-  it('a linked message without a contact still shows the Contact card with a dash', async () => {
+  it('a linked message without a contact shows Contact "—" and keeps Add contact (the company\'s Contacts tab)', async () => {
+    const u = userEvent.setup();
     const a = item({ leadId: 5, leadNumber: 'LD-1005' });
     stub([a], {
       1: detail(a, { lead: { id: 5, number: 'LD-1005', status: 'New', priority: 'Medium', nextFollowUp: null, companyId: 4 }, contact: null, company: { id: 4, name: 'Acme' } }),
     });
     show('/email/1');
-    const side = await screen.findByRole('complementary', { name: 'Linked records' });
-    expect(await within(side).findByRole('link', { name: /Lead\s*LD-1005/ })).toBeTruthy();
-    const contact = within(side).getByRole('link', { name: /Contact\s*—/ });
-    expect(contact.getAttribute('href')).toBe('/companies/4?tab=contacts');
-    expect(within(side).getByRole('link', { name: /Company\s*Acme/ })).toBeTruthy();
-  });
-
-  it('thread history lists the open message too, newest first, in the prototype wording', async () => {
-    at1200();
-    const a = item({ id: 1, leadId: 5, leadNumber: 'LD-1005', occurredAt: '2026-11-18T11:14:00.000Z' });
-    stub([a], {
-      1: detail(a, {
-        lead: { id: 5, number: 'LD-1005', status: 'Contacted', priority: 'High', nextFollowUp: null, companyId: 4 },
-        thread: [
-          { id: 1, occurredAt: '2026-11-18T11:14:00.000Z', direction: 'in', who: 'Ana Ruiz', subject: 'Re: Proposal', kind: 'reply', by: null, unmatched: false },
-          { id: 8, occurredAt: '2026-11-07T10:20:00.000Z', direction: 'out', who: 'ana@acme.com', subject: 'Proposal', kind: 'sent', by: 'Arjun', unmatched: false },
-        ],
-      }),
-    }, META, (url) => (url === '/api/me' ? london : undefined));
-    show('/email/1', london);
-    const side = await screen.findByRole('complementary', { name: 'Linked records' });
-    expect(await within(side).findByText('18 Nov 11:14 · reply received')).toBeTruthy();
-    expect(within(side).getByText('07 Nov 10:20 · sent by Arjun')).toBeTruthy();
-    expect(within(side).queryByText('No earlier messages.')).toBeNull();
-  });
-
-  it('your own open message reads plain "sent" (prototype E-6)', async () => {
-    at1200();
-    const a = item({ id: 1, folder: 'sent', status: 'sent', occurredAt: '2026-11-18T10:20:00.000Z' });
-    stub([a], {
-      1: detail(a, { thread: [{ id: 1, occurredAt: '2026-11-18T10:20:00.000Z', direction: 'out', who: 'ana@acme.com', subject: 'Proposal', kind: 'sent', by: null, unmatched: false }] }),
-    }, META, (url) => (url === '/api/me' ? london : undefined));
-    show('/email/1', london);
-    const side = await screen.findByRole('complementary', { name: 'Linked records' });
-    expect(await within(side).findByText('18 Nov 10:20 · sent')).toBeTruthy();
-  });
-
-  it('a single unmatched message shows its own history entry', async () => {
-    at1200();
-    const a = item({ id: 1, occurredAt: '2026-11-16T09:30:00.000Z' });
-    stub([a], {
-      1: detail(a, { thread: [{ id: 1, occurredAt: '2026-11-16T09:30:00.000Z', direction: 'in', who: 'Ana Ruiz', subject: 'Proposal', kind: 'received', by: null, unmatched: true }] }),
-    }, META, (url) => (url === '/api/me' ? london : undefined));
-    show('/email/1', london);
-    const side = await screen.findByRole('complementary', { name: 'Linked records' });
-    expect(await within(side).findByText('16 Nov 09:30 · received · no matching contact')).toBeTruthy();
-  });
-
-  it('thread history words are translated', async () => {
-    at1200();
-    const spanish: Me = { ...london, language: 'es' };
-    const a = item({ id: 1, occurredAt: '2026-11-16T09:30:00.000Z' });
-    stub([a], {
-      1: detail(a, { thread: [{ id: 1, occurredAt: '2026-11-16T09:30:00.000Z', direction: 'out', who: 'ana@acme.com', subject: 'Proposal', kind: 'sent', by: 'Arjun', unmatched: true }] }),
-    }, META, (url) => (url === '/api/me' ? spanish : undefined));
-    show('/email/1', spanish);
-    const side = await screen.findByRole('complementary', { name: es['Linked records'] });
-    expect(await within(side).findByText(`16 nov 09:30 · ${es['sent by {who}'].replace('{who}', 'Arjun')}`)).toBeTruthy();
+    const panel = await screen.findByRole('complementary', { name: 'Lead' });
+    await u.click(await within(panel).findByRole('button', { name: 'Lead · LD-1005' }));
+    const contact = (await within(panel).findByText('Contact', { selector: 'dt' })).nextElementSibling;
+    expect(contact?.textContent).toBe('—');
+    expect(within(panel).getByRole('link', { name: 'Add contact' }).getAttribute('href')).toBe('/companies/4?tab=contacts');
   });
 
   it('compose opens with the form visible: no field takes focus, the chosen client shows at once', async () => {
@@ -968,19 +913,19 @@ describe('Email screen: team view (web-mail release 1, mockup state 5)', () => {
     expect(asked.filter((x) => x.includes('mailOf'))).toEqual([]);
   });
 
-  it("a message on another owner's lead: chip 'LD-1005 · another owner's lead', side panel company name only, no lead link", async () => {
+  it("a message on another owner's lead: chip 'LD-1005 · another owner's lead', lead panel company name only, no lead link", async () => {
     const a = item({ leadRestricted: true, leadNumber: 'LD-1005' });
     stub([a], { 1: detail(a, { restrictedLead: { number: 'LD-1005', companyName: 'Acme' } }) });
     show('/email/1');
     const list = screen.getByRole('region', { name: 'Message list' });
     expect(await within(list).findByText("LD-1005 · another owner's lead")).toBeInTheDocument();
     expect(within(list).queryByText('Unlinked · create lead?')).toBeNull();
-    const side = await screen.findByRole('complementary', { name: 'Linked records' });
-    expect(await within(side).findByText("LD-1005 · another owner's lead")).toBeInTheDocument();
-    expect(within(side).getByText('Acme')).toBeInTheDocument();
-    expect(within(side).queryByRole('link', { name: /Lead/ })).toBeNull();
-    expect(within(side).queryByRole('link', { name: /Company/ })).toBeNull();
-    expect(within(side).queryByText(/No matching contact or lead/)).toBeNull();
+    const panel = await screen.findByRole('complementary', { name: 'Lead' });
+    await userEvent.setup().click(within(panel).getByRole('button', { name: 'Lead · LD-1005' }));
+    expect(await within(panel).findByText("LD-1005 · another owner's lead")).toBeInTheDocument();
+    expect(within(panel).getByText('Acme')).toBeInTheDocument();
+    expect(within(panel).queryAllByRole('link')).toEqual([]);
+    expect(within(panel).queryByText('No lead linked')).toBeNull();
   });
 
   it('Deleted items folder; footer note with a Why? popover', async () => {

@@ -8,8 +8,8 @@ import { useT } from '../../i18n/useT';
 import { ComposeModal, type ComposeStart } from './ComposeModal';
 import { FolderPane, viewLabel } from './FolderPane';
 import { MailTopBar, type MailSearch } from './MailTopBar';
+import { LeadPanel } from './LeadPanel';
 import { MessageList } from './MessageList';
-import { MailSide } from './MailSide';
 import { ReadingPane } from './ReadingPane';
 import { CommandBar } from './CommandBar';
 import { rowTarget, useMailCommands, type MailTarget } from './useMailCommands';
@@ -52,7 +52,7 @@ function filterFrom(params: URLSearchParams, mailOf: 'all' | number | undefined)
 
 /**
  * The Email screen (web-mail release 2, mockup 2026-11-26-outlook-mail): the top bar with the lead-mail search and its
- * Filters panel, the command bar, and the panes (folders, the message list, the reading pane). Your own mailbox, synced
+ * Filters panel, the command bar, and the panes (folders, the message list, the reading pane, the lead panel). Your own mailbox, synced
  * every 5 minutes; Administrators and Managers pick "Mail of:" Me / Everyone / one user to read the team's lead mail,
  * view only (web-mail release 1). A link's `company`, `lead` or `project` narrows the list and shows as a removable chip.
  * `?compose=1` (with `company`, `lead`, `project`) opens Compose preset (the Projects list's Email buttons).
@@ -77,7 +77,7 @@ export function EmailPage() {
   // The message opened from a link (the reading pane's own query): a list answered before the open marked it read
   // still shows its row as read.
   const { data: opened } = useMailMessage(num(id ?? null) ?? null);
-  // The reading pane's message (its own query, shared): the side panel shows its linked records.
+  // The reading pane's message (its own query, shared): the lead panel shows its lead.
   const peek = num(id ?? null) === undefined;
   const { data: shown } = useMailMessage(selectedId, peek);
   const mailbox = meta?.mailbox ?? null;
@@ -220,7 +220,9 @@ export function EmailPage() {
         {selectedId !== null ? (
           <>
             <ReadingPane key={selectedId} id={selectedId} peek={peek} teamView={teamView} commands={commands} />
-            {shown && shown.id === selectedId ? <MailSide m={shown} /> : null}
+            {shown && shown.id === selectedId ? (
+              <LeadPanel m={shown} commands={commands} collapsed={leadPanelClosed} onToggle={() => setLeadPanelClosed(!leadPanelClosed)} />
+            ) : null}
           </>
         ) : (
           <section className="rpane empty" aria-label={t('Reading pane')}>{t('Select a message.')}</section>
