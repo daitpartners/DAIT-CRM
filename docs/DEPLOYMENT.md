@@ -445,8 +445,8 @@ All of these have already been run on live; they are kept for reference and for 
 - **Outreach language:** the live allocation rules were set in Settings → Lead allocation rules ("Spanish market
   (Español)", any country + es → Carlos and Sebastian, priority 1; "English market (US and Canada)", US/CA + en →
   Deepak and Lakshita, priority 2).
-- **Web mail release 1 — clean-up** (dry run done on live 27 Nov 2026: 684 checked, 320 kept, 364 to remove; the
-  `--apply` run waits for the owner's OK. Run after the release is live, so sync no longer stores
+- **Web mail release 1 — clean-up** (done on live 27 Nov 2026 with the owner's OK: 916 checked, 557 kept, 359
+  removed; a re-run removes 0. Dump before it: `dait_crm-pre-mail-cleanup.dump`. Run after the release is live, so sync no longer stores
   non-lead mail): remove the stored mail that is not lead mail, for every user. First
   `cd ~/live/current/apps/api && node --env-file=$HOME/live/shared/.env dist/cli/mail-cleanup.js` (no flag, or
   `--dry-run`: a dry run, nothing changes) and check the per-user counts (`checked, kept, removed`) look sane; it prints

@@ -5,8 +5,8 @@ in the git history).
 
 ## Where things stand (27 Nov 2026)
 
-- **Live** at crm.daitpartners.com: release `2f981c2`, web-mail release 1 (live since 27 Nov 2026). Its backfill has
-  finished; **its clean-up is waiting for your OK** (see "Live: web-mail release 1" below).
+- **Live** at crm.daitpartners.com: release `2f981c2`, web-mail release 1 (live since 27 Nov 2026). Its backfill and
+  clean-up have finished (see "Live: web-mail release 1" below).
 - **Ready, waiting for "deploy":** branch `web-mail-r2` — web-mail release 2 (the Microsoft 365-style Email screen;
   Delete, Archive, Move, Flag and Read change Outlook too). See "Ready, waiting for deploy: web-mail release 2" below.
 - **There is no test copy on the server.** Each release was checked on the developer's machine (automatic tests and
@@ -38,7 +38,7 @@ in the git history).
 | Claude Code engine | Claude through the server's Claude Code, monthly run cap | `08ee5da` |
 | Minor fixes | 26 review follow-ups (time zones, mail linking, Mailer wizard, quotations, keyboard) + handover docs | `79b9415` |
 | Leads delete, import follow-ups | Delete leads with their company (Administrators), Download all leads, update rows through Import leads, Do not email list | `7d1d8c2` (live 26 Nov) |
-| Web-mail release 1 | Lead mail only, 12-month backfill, team view (view only) for Administrators and Managers | `2f981c2` (live 27 Nov; clean-up waiting for your OK) |
+| Web-mail release 1 | Lead mail only, 12-month backfill, team view (view only) for Administrators and Managers | `2f981c2` (live 27 Nov; clean-up done 27 Nov) |
 
 ## Ready, waiting for deploy: web-mail release 2 (branch `web-mail-r2`)
 
@@ -104,9 +104,9 @@ check on live of how Outlook writes a flag's due date (it decides whether users 
 ## Live: web-mail release 1 (`2f981c2`, since 27 Nov 2026)
 
 **Status on live:** migration 26 applied. The backfill has finished: 561 searches done, 220 emails stored, no
-failures. **The clean-up is waiting for your OK:** the dry run checked 684 stored messages, keeps 320 and would remove
-364 (the non-lead mail; it stays in Outlook). Say OK and the real run follows, with a fresh copy of the mail table
-taken just before it (step 4 of the runbook).
+failures. **Clean-up done 27 Nov 2026** (owner OK): checked 916 stored messages, kept 557, removed 359 non-lead
+messages (they stay in Outlook); a second run removes 0. Copy of the mail table taken just before:
+`/home/daitcrm/backups/dait_crm-pre-mail-cleanup.dump` (restore rows by id from it if any were removed wrongly).
 
 Design: `docs/superpowers/specs/2026-11-26-web-mail-email-design.md`.
 
