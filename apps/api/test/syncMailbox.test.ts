@@ -653,3 +653,59 @@ describe('Outlook flags, size and attachment names (web-mail release 2)', () => 
     expect(await prisma.emailMessage.findFirstOrThrow({ where: { graphId: nameless.id } })).toMatchObject({ attachmentNames: ['notes.txt'], sizeBytes: 64 });
   });
 });
+
+describe('the CRM’s own drafts and their sends (web-mail release 3)', () => {
+  test('the CRM draft read back from Outlook Drafts keeps its row; while queued it is left alone; the Sent Items copy claims the sent row (Review Focus 4)', async () => {
+    const { user, account } = await mailbox();
+    const draft = await prisma.emailMessage.create({
+      data: {
+        userId: user.id, accountId: account.id, folder: 'drafts', status: 'draft', source: 'crm', graphId: 'D1', fromAddress: ADDRESS,
+        toAddresses: ['ana@acme.com'], subject: 'Proposal', bodyText: '', bodyHtml: '<p>Hi Ana</p>', leadId: acme.lead.id,
+      },
+    });
+    const inDrafts = (over: Partial<GraphMessage> = {}) => msg({
+      id: 'D1', isDraft: true, from: { name: 'Maya', address: ADDRESS }, to: ['ana@acme.com'], subject: 'Proposal', ...over,
+    });
+    const rows = () => prisma.emailMessage.findMany({ where: { userId: user.id } });
+
+    // Read back while a draft: the same row, still a CRM draft in Drafts.
+    await syncMailboxHandler(job(account.id), { graph: scripted({ 'start:drafts': final('drafts', [inDrafts()]) }).graph });
+    expect((await rows()).map((r) => [r.id, r.folder, r.status, r.source])).toEqual([[draft.id, 'drafts', 'draft', 'crm']]);
+
+    // Queued (Undo window or scheduled): whatever Outlook says, the row is not touched.
+    await prisma.emailMessage.update({ where: { id: draft.id }, data: { status: 'queued', isRead: false } });
+    const queued = await prisma.emailMessage.findUniqueOrThrow({ where: { id: draft.id } });
+    const flagged = inDrafts({ flag: { status: 'flagged', due: null }, isRead: true });
+    await syncMailboxHandler(job(account.id), { graph: scripted({ [`https://graph.microsoft.com/v1.0/delta/drafts/1`]: final('drafts', [flagged]) }).graph });
+    expect(await prisma.emailMessage.findUniqueOrThrow({ where: { id: draft.id } })).toEqual(queued);
+    expect(await rows()).toHaveLength(1);
+
+    // Sent: the worker dropped the draft id; the Sent Items copy (a new id) claims the row, and Drafts reports D1 gone.
+    const sentAt = new Date();
+    await prisma.emailMessage.update({ where: { id: draft.id }, data: { status: 'sent', folder: 'sent', graphId: null, occurredAt: sentAt } });
+    const copy = msg({
+      id: 'S1', from: { name: 'Maya', address: ADDRESS }, to: ['ana@acme.com'], subject: 'Proposal', sentAt: sentAt.toISOString(), receivedAt: sentAt.toISOString(),
+    });
+    await prisma.emailAccount.update({ where: { id: account.id }, data: { syncState: {} } });
+    await syncMailboxHandler(job(account.id), {
+      graph: scripted({ 'start:sentitems': final('sentitems', [copy]), 'start:drafts': final('drafts', [], ['D1']) }).graph,
+    });
+    const after = await rows();
+    expect(after.map((r) => [r.id, r.folder, r.status, r.source, r.graphId])).toEqual([[draft.id, 'sent', 'sent', 'crm', 'S1']]);
+    expect(after[0]).toMatchObject({ threadId: copy.conversationId, messageId: copy.internetMessageId });
+  });
+
+  test('a CRM send with Bcc recipients only is claimed by its Sent Items copy too', async () => {
+    const { user, account } = await mailbox();
+    const sentAt = new Date();
+    const row = await prisma.emailMessage.create({
+      data: {
+        userId: user.id, accountId: account.id, folder: 'sent', status: 'sent', source: 'crm', graphId: null, fromAddress: ADDRESS,
+        toAddresses: [], bccAddresses: ['ana@acme.com'], subject: 'Proposal', bodyText: '', occurredAt: sentAt,
+      },
+    });
+    const copy = msg({ id: 'S2', from: { name: 'Maya', address: ADDRESS }, to: [], bcc: ['ana@acme.com'], subject: 'Proposal', sentAt: sentAt.toISOString() });
+    await syncMailboxHandler(job(account.id), { graph: scripted({ 'start:sentitems': final('sentitems', [copy]) }).graph });
+    expect((await prisma.emailMessage.findMany({ where: { userId: user.id } })).map((r) => [r.id, r.graphId])).toEqual([[row.id, 'S2']]);
+  });
+});

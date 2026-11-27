@@ -28,7 +28,8 @@ import { assertProjectFor } from './outgoing.js';
 /** A draft request refused, answered as `{ error: code }` with `status` (app.ts error handler). */
 export class DraftError extends Error {
   constructor(
-    readonly code: 'no_mailbox' | 'draft_gone' | 'not_draft' | 'no_recipients' | 'schedule_time' | 'follow_up_time' | 'already_sent',
+    readonly code:
+      | 'no_mailbox' | 'draft_gone' | 'not_draft' | 'no_recipients' | 'schedule_time' | 'follow_up_time' | 'already_sent' | 'mailbox_changed',
     readonly status: 400 | 409,
   ) {
     super(code);
@@ -154,6 +155,34 @@ export async function draftFor(user: AuthUser, rawId: string): Promise<EmailMess
     }
     throw err;
   }
+}
+
+const draftLocks = new Map<string, Promise<unknown>>();
+
+/**
+ * Runs `fn` alone for draft `id` (web-mail release 3, Task 6 review Minor 3): every route that changes a draft or its
+ * Outlook copy (save, files, template, discard, send, undo, send now) waits for the one before it on the same draft,
+ * so a save can never PATCH Outlook after Send queued the draft (it then reads the queued row and answers 409
+ * not_draft), and Send never queues while a save is in flight. In-process: the API runs as one process (PM2 fork
+ * mode, deploy/ecosystem.config.cjs); the guarded row updates (status draft/failed) stay as the database's own check.
+ */
+export async function withDraftLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  const before = draftLocks.get(id) ?? Promise.resolve();
+  const run = before.then(fn, fn);
+  const settled = run.then(() => undefined, () => undefined);
+  draftLocks.set(id, settled);
+  try {
+    return await run;
+  } finally {
+    if (draftLocks.get(id) === settled) draftLocks.delete(id);
+  }
+}
+
+/** The draft's own mailbox, which must be the caller's connected one now: a draft of a mailbox since replaced is 409 mailbox_changed. */
+export async function draftAccount(user: AuthUser, m: EmailMessage): Promise<EmailAccount> {
+  const account = await myAccount(user.id);
+  if (m.accountId !== account.id) throw new DraftError('mailbox_changed', 409);
+  return account;
 }
 
 /** A draft the editor may open or save (folder drafts, status draft or failed), else 409 not_draft. */
@@ -333,11 +362,12 @@ async function userPartOf(bodyHtml: string, cids: string[]): Promise<{ html: str
 /**
  * Saves the caller's own draft (auto-save; last save wins): the user part sanitised, Outlook updated with it and the
  * folded quote, then the row (a failed send becomes a draft again). The lead and project are checked again when they
- * change. Gone in Outlook → draft_gone, and the row is left as it was.
+ * change. Gone in Outlook → draft_gone, and the row is left as it was. A draft of a mailbox since replaced (reconnected
+ * as another account) is 409 mailbox_changed: it is never written, or sent, through the new one.
  */
 export async function saveDraft(graph: GraphClient, user: AuthUser, m: EmailMessage, body: DraftSave): Promise<{ savedAt: string }> {
   assertEditable(m);
-  const account = await myAccount(user.id);
+  const account = await draftAccount(user, m);
   if (!m.graphId) throw new DraftError('draft_gone', 409);
   const graphId = m.graphId;
 

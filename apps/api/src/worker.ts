@@ -17,6 +17,7 @@ import { mailBackfillHandler } from './jobs/handlers/mailBackfill.js';
 import { scheduleCampaigns } from './mailer/schedule.js';
 import { scheduleMailSync } from './mail/schedule.js';
 import { sweepMailBackfill } from './mail/backfill.js';
+import { sweepInterruptedSends } from './mail/send.js';
 import { scheduleCalendarSync } from './calendar/schedule.js';
 import { scheduleQuotationExpiry } from './jobs/quotationExpiry.js';
 import { sweepStuckRuns } from './research/service.js';
@@ -39,10 +40,13 @@ const HANDLERS: Partial<Record<JobType, JobHandler>> = {
  * run can take minutes (website read + Claude), so it has its own lane, shared with Import leads research (one staged
  * row per job, so company research waits for one row at most); Import leads also has its own lane (reading a 20 MB
  * file, importing a batch row by row), so a big import never holds up mail or research. The mail backfill stays on the
- * mail lane: each job is capped at about 20 s (5 pages) with a 10 s gap, so a send waits one short job at most (F13).
+ * mail lane: each job is capped at about 20 s (5 pages) with a 10 s gap. A user's own send has a lane of its own.
  */
 export const WORKER_LANES: readonly { name: string; types: readonly JobType[] }[] = [
-  { name: 'mail', types: ['send_email', 'send_user_email', 'sync_mailbox', 'mail_action', 'campaign_step', 'sync_calendar', 'mail_backfill'] },
+  { name: 'mail', types: ['send_email', 'sync_mailbox', 'mail_action', 'campaign_step', 'sync_calendar', 'mail_backfill'] },
+  // Web-mail release 3 (plan decision 10): a user's send (the end of an Undo window, a scheduled time) never waits
+  // behind a mailbox sync or backfill job.
+  { name: 'send', types: ['send_user_email'] },
   { name: 'research', types: ['research_company', 'import_research'] },
   { name: 'import', types: ['import_read_file', 'import_commit'] },
 ];
@@ -88,6 +92,8 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<void> 
     scheduleCampaigns().catch(warn('mailer schedule')),
     scheduleCalendarSync().catch(warn('calendar schedule')),
     scheduleQuotationExpiry().catch(warn('quotation expiry')),
+    // Web-mail release 3: a draft send whose job was lost is queued again (sent if it never left, else Failed).
+    sweepInterruptedSends().catch(warn('send sweep')),
     // AI research (release 4): runs a worker will never finish become Failed "Interrupted".
     sweepStuckRuns().catch(warn('research sweep')),
     // Import leads: files left Reading after their job was lost become Failed "Reading was interrupted".
@@ -99,6 +105,7 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<void> 
   ]);
   // At startup no research job is running yet, so every Processing run was interrupted.
   await sweepStuckRuns({ startup: true }).catch(warn('research startup sweep'));
+  await sweepInterruptedSends({ startup: true }).catch(warn('send startup sweep'));
   await sweepImportFiles().catch(warn('import startup sweep'));
   await sweepImportResearch({ startup: true }).catch(warn('import research startup sweep'));
   await sweepImportCommit({ startup: true }).catch(warn('import commit startup sweep'));

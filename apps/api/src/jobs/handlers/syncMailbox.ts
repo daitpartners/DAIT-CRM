@@ -54,7 +54,10 @@ async function claimCrmCopy(userId: number, m: GraphMessage): Promise<boolean> {
     orderBy: { occurredAt: 'asc' },
   });
   const subject = baseSubject(m.subject);
-  const hit = candidates.find((c) => baseSubject(c.subject) === subject && (c.toAddresses as string[]).some((a) => m.to.includes(a.toLowerCase())));
+  // Any recipient in common (a draft sent from the CRM may have only Cc or Bcc recipients).
+  const copyTo = [...m.to, ...m.cc, ...m.bcc];
+  const recipients = (c: (typeof candidates)[number]) => [c.toAddresses, c.ccAddresses, c.bccAddresses].flatMap((list) => list as string[]);
+  const hit = candidates.find((c) => baseSubject(c.subject) === subject && recipients(c).some((a) => copyTo.includes(a.toLowerCase())));
   if (!hit) return false;
   await prisma.emailMessage.update({ where: { id: hit.id }, data: { graphId: m.id, threadId: m.conversationId, messageId: m.internetMessageId } });
   return true;
@@ -135,6 +138,7 @@ export type StoreResult = 'stored' | 'updated' | 'claimed' | 'skipped';
  * participants are now; a Sent Items copy of a CRM-sent message claims the CRM row; any other message is stored only
  * when it is lead mail (a participant is a lead/contact address or at a lead company's domain) or joins a
  * conversation where the user already keeps lead-linked mail. A skipped message writes and fetches nothing.
+ * Web-mail release 3: the CRM's own draft while queued or sending is left untouched (it leaves Drafts when it is sent).
  * Web-mail release 2: a new row keeps Outlook's flag (the due date as the owner's own day), its non-inline attachment
  * names and its size (body plus attachments); an existing row takes the flag along with the folder and read state, so
  * a flag set or cleared in Outlook shows on the next sync.
@@ -146,6 +150,8 @@ export async function storeMessage(
   const outbound = m.isDraft || folder === 'sent' || folder === 'drafts' || isOwn(account, m.from?.address);
   const occurredAt = new Date(outbound ? (m.sentAt ?? m.receivedAt) : m.receivedAt);
   if (existing) {
+    // Web-mail release 3: the CRM's own draft while it is being sent (queued or sending) stays exactly as the CRM has it.
+    if (existing.source === 'crm' && (existing.status === 'queued' || existing.status === 'sending')) return 'skipped';
     // Links the user (or matching) set are kept; only Outlook's state follows. A draft sent from Outlook becomes Sent.
     const sentDraft = existing.status === 'draft' && !m.isDraft ? { status: outbound ? 'sent' : 'received', occurredAt } : {};
     // A row stored before bodies came as HTML takes the HTML (and the cleaner text) now that it is here anyway.

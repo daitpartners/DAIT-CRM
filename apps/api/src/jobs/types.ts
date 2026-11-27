@@ -1,3 +1,4 @@
+import type { SendFollowUp } from '@dait-crm/shared';
 import type { MailAttachment } from '../graph/client.js';
 import type { QuotationSnapshot } from '../quotations/service.js';
 
@@ -31,6 +32,13 @@ export interface SendUserEmailPayload {
   quotation?: { id: number; snapshot: QuotationSnapshot };
   /** Web-mail release 2: how it answers its original (`replyToId`); absent = a reply. */
   replyMode?: 'replyAll' | 'forward';
+  /**
+   * Web-mail release 3: the message is an Outlook draft in the sender's mailbox (folder drafts, status queued), sent
+   * with Graph send on the draft; Undo, Cancel and Send now find the job by `emailMessageId`.
+   */
+  draft?: true;
+  /** Web-mail release 3: the follow-up task filed on `leadId` when the draft leaves (not before: plan decision 3). */
+  followUp?: SendFollowUp & { leadId: number };
 }
 
 /** `sync_mailbox` (release 2B-2): read new mail from a personal mailbox. */

@@ -1,19 +1,22 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { DraftAttachmentUpload, DraftCreate, DraftSave, DraftTemplateApply, RecipientQuery, RecipientResolve } from '@dait-crm/shared';
+import { DraftAttachmentUpload, DraftCreate, DraftSave, DraftSend, DraftTemplateApply, RecipientQuery, RecipientResolve } from '@dait-crm/shared';
 import { requireRight } from '../plugins/auth.js';
 import { NotFoundError, parseBody, parseQuery } from '../validate.js';
 import { FORMATTED_BODY_LIMIT, perUser } from '../mail/formatted.js';
 import {
-  createDraft, discardDraft, draftFor, draftView, openDraft, resolveRecipients, saveDraft, suggestRecipients,
+  createDraft, discardDraft, draftFor, draftView, openDraft, resolveRecipients, saveDraft, suggestRecipients, withDraftLock,
 } from '../mail/drafts.js';
+import { queueDraftSend, sendNow, unsend } from '../mail/send.js';
 import { addDraftFile, applyTemplateFiles, removeDraftFile } from '../mail/draftFiles.js';
 import { guard } from './leads.js';
 
 /**
  * Drafts in the user's own Outlook (web-mail release 3, mail/drafts.ts): start one (new, reply, reply all, forward),
  * open, auto-save and discard it, its files (attachments, inline pictures, a template's files: straight onto the Outlook
- * draft), and the To / Cc / Bcc suggestions. Only the caller's own connected mailbox and own
- * drafts: another user's message or draft is 403 view_only (team view) or 404, enforced on every route.
+ * draft), send it (after the Undo window, or scheduled; mail/send.ts), take a send back (Undo, Cancel, Edit) or send a
+ * scheduled one now, and the To / Cc / Bcc suggestions. Only the caller's own connected mailbox and own
+ * drafts: another user's message or draft is 403 view_only (team view) or 404, enforced on every route. Every route
+ * that changes a draft runs alone for that draft (withDraftLock), reading the row only once it holds the lock.
  */
 const FILE_ID = /^[A-Za-z0-9+/=_-]{1,1024}$/;
 
@@ -38,13 +41,15 @@ export const mailDraftRoutes: FastifyPluginAsync = async (app) => {
   app.patch<{ Params: { id: string } }>('/mail/drafts/:id', { ...pre, bodyLimit: FORMATTED_BODY_LIMIT, config: perUser(120) }, async (request, reply) => {
     const body = parseBody(DraftSave, request.body);
     const user = request.user!;
-    return guard(reply, async () => saveDraft(app.graph, user, await draftFor(user, request.params.id), body));
+    const { id } = request.params;
+    return guard(reply, () => withDraftLock(id, async () => saveDraft(app.graph, user, await draftFor(user, id), body)));
   });
 
   app.delete<{ Params: { id: string } }>('/mail/drafts/:id', pre, async (request, reply) => {
     const user = request.user!;
+    const { id } = request.params;
     return guard(reply, async () => {
-      await discardDraft(app.graph, user, await draftFor(user, request.params.id));
+      await withDraftLock(id, async () => discardDraft(app.graph, user, await draftFor(user, id)));
       return reply.code(204).send();
     });
   });
@@ -53,16 +58,20 @@ export const mailDraftRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Params: { id: string } }>('/mail/drafts/:id/files', { ...pre, bodyLimit: FORMATTED_BODY_LIMIT, config: perUser(60) }, async (request, reply) => {
     const body = parseBody(DraftAttachmentUpload, request.body);
     const user = request.user!;
-    return guard(reply, async () => reply.code(201).send(await addDraftFile(app.graph, user, await draftFor(user, request.params.id), body)));
+    const { id } = request.params;
+    return guard(reply, async () => reply.code(201).send(await withDraftLock(id, async () => addDraftFile(app.graph, user, await draftFor(user, id), body))));
   });
 
   app.delete<{ Params: { id: string; fileId: string } }>('/mail/drafts/:id/files/:fileId', pre, async (request, reply) => {
     const user = request.user!;
+    const { id, fileId } = request.params;
     return guard(reply, async () => {
-      const m = await draftFor(user, request.params.id);
-      // A Graph attachment id (base64, URL-safe or not); anything else names no file.
-      if (!FILE_ID.test(request.params.fileId)) throw new NotFoundError();
-      await removeDraftFile(app.graph, user, m, request.params.fileId);
+      await withDraftLock(id, async () => {
+        const m = await draftFor(user, id);
+        // A Graph attachment id (base64, URL-safe or not); anything else names no file.
+        if (!FILE_ID.test(fileId)) throw new NotFoundError();
+        await removeDraftFile(app.graph, user, m, fileId);
+      });
       return reply.code(204).send();
     });
   });
@@ -70,7 +79,32 @@ export const mailDraftRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Params: { id: string } }>('/mail/drafts/:id/template', pre, async (request, reply) => {
     const body = parseBody(DraftTemplateApply, request.body);
     const user = request.user!;
-    return guard(reply, async () => ({ files: await applyTemplateFiles(app.graph, user, await draftFor(user, request.params.id), body) }));
+    const { id } = request.params;
+    return guard(reply, async () => ({ files: await withDraftLock(id, async () => applyTemplateFiles(app.graph, user, await draftFor(user, id), body)) }));
+  });
+
+  // Send (Undo window) or Schedule send: the draft as the editor holds it (saved first), formatted, at most 30 a minute.
+  app.post<{ Params: { id: string } }>('/mail/drafts/:id/send', { ...pre, bodyLimit: FORMATTED_BODY_LIMIT, config: perUser(30) }, async (request, reply) => {
+    const body = parseBody(DraftSend, request.body);
+    const user = request.user!;
+    const { id } = request.params;
+    return guard(reply, async () => reply.code(202).send(await withDraftLock(id, async () => queueDraftSend(app.graph, user, await draftFor(user, id), body))));
+  });
+
+  // Undo, a scheduled send's Cancel, and Edit (Cancel, then the editor): the draft back in Drafts, as the editor opens it.
+  app.post<{ Params: { id: string } }>('/mail/:id/unsend', pre, async (request, reply) => {
+    const user = request.user!;
+    const { id } = request.params;
+    return guard(reply, () => withDraftLock(id, async () => unsend(app.graph, user, await draftFor(user, id))));
+  });
+
+  app.post<{ Params: { id: string } }>('/mail/:id/send-now', pre, async (request, reply) => {
+    const user = request.user!;
+    const { id } = request.params;
+    return guard(reply, async () => {
+      await withDraftLock(id, async () => sendNow(user, await draftFor(user, id)));
+      return reply.code(204).send();
+    });
   });
 
   app.get('/mail/recipients', pre, async (request) => {

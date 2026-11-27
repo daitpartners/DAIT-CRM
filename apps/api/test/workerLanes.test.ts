@@ -21,6 +21,23 @@ describe('worker lanes', () => {
     expect([...all].sort()).toEqual([...JOB_TYPES].sort());
   });
 
+  it('send_user_email has its own lane', async () => {
+    expect(lane('send').types).toEqual(['send_user_email']);
+    expect(lane('mail').types).not.toContain('send_user_email');
+    // A user's send is claimed while a mail job (a sync) waits, and the mail lane never takes the send.
+    const sync = await enqueue(prisma, 'sync_mailbox', { accountId: 1 });
+    const send = await enqueue(prisma, 'send_user_email', { emailMessageId: 1 });
+    const seen: string[] = [];
+    const handlers = { sync_mailbox: async () => { seen.push('sync'); }, send_user_email: async () => { seen.push('send'); } };
+    const graph = fakeGraph();
+    expect(await runOnce({ types: [...lane('mail').types], handlers, graph })).toBe(true);
+    expect(await runOnce({ types: [...lane('mail').types], handlers, graph })).toBe(false);
+    expect((await prisma.job.findUniqueOrThrow({ where: { id: send.id } })).status).toBe('queued');
+    expect(await runOnce({ types: [...lane('send').types], handlers, graph })).toBe(true);
+    expect(seen).toEqual(['sync', 'send']);
+    expect((await prisma.job.findUniqueOrThrow({ where: { id: sync.id } })).status).toBe('done');
+  });
+
   it('the mail lane never claims a research job and the research lane never claims a mail job', async () => {
     const research = await enqueue(prisma, 'research_company', { runId: 1 });
     const mail = await enqueue(prisma, 'send_email', { to: ['a@b.c'], subject: 's', html: '', text: '' });

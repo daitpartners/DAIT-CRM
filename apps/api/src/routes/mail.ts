@@ -63,7 +63,7 @@ function listItem(m: WithLead, viewerId: number, shown: { replied: boolean; conv
   return {
     owner: { id: m.user.id, name: m.user.name }, viewOnly: m.userId !== viewerId,
     id: m.id, folder: m.folder, status: m.status, fromAddress: m.fromAddress, fromName: m.fromName, toAddresses: m.toAddresses as string[],
-    subject: m.subject, preview: previewOf(m), occurredAt: m.occurredAt, isRead: m.isRead,
+    subject: m.subject, preview: previewOf(m), occurredAt: m.occurredAt, isRead: m.isRead, scheduledAt: m.scheduledAt?.toISOString() ?? null,
     leadId: restricted ? null : m.leadId, leadNumber: m.lead?.number ?? null, companyId: restricted ? null : m.companyId, leadRestricted: restricted,
     hasAttachments: (m.attachmentNames as string[]).length > 0,
     projectId: m.project?.id ?? null, projectNumber: m.project?.number ?? null,

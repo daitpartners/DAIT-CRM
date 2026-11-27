@@ -269,6 +269,30 @@ describe('GET /mail (web-mail release 2)', () => {
     expect(await subjects(`/api/mail?mailOf=${f.admin.id}&view=mine`, admin)).toEqual([]);
   });
 
+  it('Drafts lists drafts and failed sends, not queued ones; Scheduled lists queued with scheduledAt', async () => {
+    const f = await setup();
+    const crm = { folder: 'drafts', source: 'crm', fromAddress: 'maya@daitpartners.com' } as const;
+    const at = new Date('2026-12-01T08:00:00Z');
+    await msg(f.rep.id, { ...crm, subject: 'Draft', status: 'draft' });
+    await msg(f.rep.id, { ...crm, subject: 'Failed send', status: 'failed', lastError: 'draft_gone' });
+    await msg(f.rep.id, { ...crm, subject: 'Undo window', status: 'queued' });
+    await msg(f.rep.id, { ...crm, subject: 'Scheduled', status: 'queued', scheduledAt: at });
+    await msg(f.rep.id, { ...crm, subject: 'Leaving', status: 'sending' });
+    await msg(f.rep.id, { subject: 'Outlook draft', folder: 'drafts', status: 'draft', fromAddress: 'maya@daitpartners.com' });
+    await msg(f.carlos.id, { ...crm, subject: 'Carlos draft', status: 'draft' });
+    const view = (v: string) => items(`/api/mail?view=${v}&conv=0`, f.repCookie);
+    expect((await view('drafts')).map((i) => i.subject).sort()).toEqual(['Draft', 'Failed send', 'Outlook draft']);
+    const scheduled = await view('scheduled');
+    expect(scheduled.map((i) => [i.subject, i.scheduledAt]).sort()).toEqual([['Leaving', null], ['Scheduled', at.toISOString()], ['Undo window', null]]);
+    // Team view never shows another user's unsent mail (drafts are not team-readable).
+    const admin = await signIn(app, f.admin);
+    expect(await subjects(`/api/mail?mailOf=${f.rep.id}&view=scheduled&conv=0`, admin)).toEqual([]);
+    expect(await subjects(`/api/mail?mailOf=${f.rep.id}&view=drafts&conv=0`, admin)).toEqual([]);
+    // The folder counts follow the views.
+    const meta = (await call('/api/mail/meta', f.repCookie)).json();
+    expect(meta.counts).toMatchObject({ drafts: 3, scheduled: 3 });
+  });
+
   it('items carry replied, flag, conversation count and lead status; restricted leads give no status', async () => {
     const f = await setup();
     const c = await conversation(f);

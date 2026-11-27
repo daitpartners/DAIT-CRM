@@ -102,8 +102,10 @@ const CHIP_WHERE: Record<Chip, Prisma.EmailMessageWhereInput | null> = {
 
 async function viewWhere(user: AuthUser, scope: Scope, view: MailView, now: Date): Promise<Prisma.EmailMessageWhereInput> {
   switch (view) {
-    // Release 2 lists the CRM's outbox here; Schedule send is release 3.
+    // The CRM's outbox: drafts waiting out the Undo window or their scheduled time, and sends on their way.
     case 'scheduled': return { source: 'crm', status: { in: ['queued', 'sending'] } };
+    // Drafts and failed sends; a draft being sent stays in folder drafts until it leaves but is listed under Scheduled.
+    case 'drafts': return { folder: 'drafts', status: { in: ['draft', 'failed'] } };
     case 'flagged': return { flagStatus: 'flagged', folder: { not: 'deleted' } };
     case 'awaiting': return { id: { in: await awaitingIds(scope.ownerId) } };
     case 'due':
