@@ -375,19 +375,19 @@ describe('reading mail on the Email screen (2B-2)', () => {
     await synced(rep.id, box.id, { subject: 'Old', folder: 'archive' });
     await synced(admin.id, null, { subject: 'Not yours' });
     const cookie = await signIn(app, rep);
-    const view = async (q: string) => (await call('GET', `/api/mail?${q}`, cookie)).json().items.map((i: { subject: string }) => i.subject);
+    // One row per message (conv=0): most of these share one conversation.
+    const view = async (q: string) => (await call('GET', `/api/mail?${q}&conv=0`, cookie)).json().items.map((i: { subject: string }) => i.subject);
     expect(await view('view=inbox')).toEqual(['Loose', 'Linked']);
     expect(await view('view=sent')).toEqual(['Mine out']);
     expect(await view('view=drafts')).toEqual(['Draft']);
     expect(await view('view=archive')).toEqual(['Old']);
-    expect(await view('view=unlinked')).toEqual(['Loose', 'Old']);
     expect(await view('view=mine')).toEqual(['Mine out', 'Linked']);
     expect(await view('view=awaiting')).toEqual(['Mine out']);
     expect(await view(`view=inbox&company=${company.id}`)).toEqual(['Linked']);
     expect(await view(`view=sent&lead=${lead.id}`)).toEqual(['Mine out']);
     expect(await view('view=inbox&s=LOOSE')).toEqual(['Loose']);
     expect(await view('view=sent&s=ana@acme')).toEqual(['Mine out']);
-    const item = (await call('GET', '/api/mail?view=inbox', cookie)).json().items[1];
+    const item = (await call('GET', '/api/mail?view=inbox&conv=0', cookie)).json().items[1];
     expect(item).toMatchObject({ id: a.id, fromName: 'Ana Ruiz', fromAddress: 'ana@acme.com', isRead: false, leadId: lead.id, leadNumber: lead.number, preview: 'Line one line two' });
     expect(item.bodyText).toBeUndefined();
     expect((await call('GET', '/api/mail?view=inbox', await signIn(app, admin))).json().items.map((i: { subject: string }) => i.subject)).toEqual(['Not yours']);
@@ -407,7 +407,7 @@ describe('reading mail on the Email screen (2B-2)', () => {
     const m = await synced(rep.id, box.id, { leadId: lead.id, companyId: company.id });
     const mine = await synced(rep.id, box.id, { subject: 'Mine', leadId: null, occurredAt: new Date('2026-11-19T10:00:00Z') });
     await prisma.lead.update({ where: { id: lead.id }, data: { assignedToId: other.id } });
-    const items = (await call('GET', '/api/mail?view=inbox', await signIn(app, rep))).json().items;
+    const items = (await call('GET', '/api/mail?view=inbox&conv=0', await signIn(app, rep))).json().items;
     expect(items.map((i: { id: number }) => i.id)).toEqual([m.id, mine.id]);
     const item = items[0];
     expect(item).toMatchObject({ leadId: null, leadNumber: lead.number, companyId: null, leadRestricted: true });
@@ -435,24 +435,6 @@ describe('reading mail on the Email screen (2B-2)', () => {
     await prisma.lead.update({ where: { id: lead.id }, data: { assignedToId: rep.id } });
     const open = (await call('GET', `/api/mail/${m.id}`, await signIn(app, rep))).json();
     expect(open).toMatchObject({ restrictedLead: null, lead: { id: lead.id }, contact: { id: contact.id }, company: { id: company.id, name: 'Acme' }, leadRestricted: false });
-  });
-
-  it("mail on another owner's lead is not counted or listed as Unlinked", async () => {
-    const { rep, box, lead, company } = await setup();
-    const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
-    await synced(rep.id, box.id, { leadId: lead.id, companyId: company.id });
-    const loose = await synced(rep.id, box.id, { subject: 'Loose', leadId: null });
-    await synced(rep.id, box.id, { subject: 'Draft', folder: 'drafts', status: 'draft', leadId: null });
-    await prisma.lead.update({ where: { id: lead.id }, data: { assignedToId: other.id } });
-    const cookie = await signIn(app, rep);
-    expect((await call('GET', '/api/mail?view=unlinked', cookie)).json().items.map((i: { id: number }) => i.id)).toEqual([loose.id]);
-    expect((await call('GET', '/api/mail/meta', cookie)).json().unlinked).toBe(1);
-    // Someone who sees every lead keeps their linked mail off Unlinked.
-    const admin = await makeUser({ role: 'ADMINISTRATOR' });
-    await synced(admin.id, null, { subject: 'Admin linked', leadId: lead.id });
-    const adminCookie = await signIn(app, admin);
-    expect((await call('GET', '/api/mail?view=unlinked', adminCookie)).json().items).toEqual([]);
-    expect((await call('GET', '/api/mail/meta', adminCookie)).json().unlinked).toBe(0);
   });
 
   it('Log as activity on it is 409 no_lead (already passes)', async () => {
@@ -530,7 +512,7 @@ describe('reading mail on the Email screen (2B-2)', () => {
 
   it('count=0 (a later batch of the scrolling list) skips the total; the rows are the same', async () => {
     const { rep, box } = await setup();
-    for (let i = 0; i < 60; i++) await synced(rep.id, box.id, { subject: `M ${i}`, occurredAt: new Date(Date.UTC(2026, 10, 1, 0, i)) });
+    for (let i = 0; i < 60; i++) await synced(rep.id, box.id, { subject: `M ${i}`, threadId: null, occurredAt: new Date(Date.UTC(2026, 10, 1, 0, i)) });
     const cookie = await signIn(app, rep);
     const counted = (await call('GET', '/api/mail?view=inbox&page=2&pageSize=50', cookie)).json();
     const res = (await call('GET', '/api/mail?view=inbox&page=2&pageSize=50&count=0', cookie)).json();
@@ -547,7 +529,7 @@ describe('reading mail on the Email screen (2B-2)', () => {
     expect((await call('GET', '/api/mail?view=inbox&pageSize=100', cookie)).json()).toMatchObject({ items: [], total: 0, page: 1, pageSize: 100 });
   });
 
-  it('meta gives the mailbox, unread and unlinked counts, and the clients and leads in your mail', async () => {
+  it('meta gives the mailbox, the unread count, and the clients and leads in your mail (no Unlinked count)', async () => {
     const { rep, box, lead, company } = await setup();
     await synced(rep.id, box.id, { leadId: lead.id, companyId: company.id });
     await synced(rep.id, box.id, { isRead: true });
@@ -555,10 +537,11 @@ describe('reading mail on the Email screen (2B-2)', () => {
     const meta = (await call('GET', '/api/mail/meta', await signIn(app, rep))).json();
     expect(meta).toMatchObject({
       mailbox: { address: 'maya@daitpartners.com', status: 'connected', lastSyncAt: null },
-      unread: 1, unlinked: 1,
+      unread: 1,
       companies: [{ id: company.id, name: 'Acme', legalName: null, isClient: false }],
       leads: [{ id: lead.id, number: lead.number, companyId: company.id, companyName: lead.companyName, status: 'New' }],
     });
+    expect(meta).not.toHaveProperty('unlinked');
   });
 
   it('opening a message gives its links and conversation, marks it read and tells the mailbox', async () => {
