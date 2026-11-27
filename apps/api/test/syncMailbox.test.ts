@@ -571,3 +571,85 @@ describe('project tag on synced replies (3B)', () => {
     expect((await prisma.emailMessage.findFirstOrThrow({ where: { graphId: unrelated.id, userId: user.id } })).projectId).toBeNull();
   });
 });
+
+describe('Outlook flags, size and attachment names (web-mail release 2)', () => {
+  const ymd = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+  const att = (name: string, size: number, isInline: boolean) => ({ id: `A-${name}`, name, contentType: 'application/octet-stream', size, isInline, kind: 'file' as const });
+
+  test('a new message keeps its flag, its non-inline attachment names and its size', async () => {
+    const { account } = await mailbox();
+    const m = msg({
+      hasAttachments: true, flag: { status: 'flagged', due: { dateTime: '2026-11-27T00:00:00.0000000', timeZone: 'UTC' } },
+      body: { contentType: 'text', content: 'x'.repeat(1000) },
+    });
+    const { graph } = scripted({ 'start:inbox': final('inbox', [m]) }, {
+      async listAttachments() { return [att('RFP.pdf', 2000, false), att('logo.png', 300, true)]; },
+    });
+    await syncMailboxHandler(job(account.id), { graph });
+    const row = await prisma.emailMessage.findFirstOrThrow({ where: { graphId: m.id } });
+    expect(row).toMatchObject({ flagStatus: 'flagged', attachmentNames: ['RFP.pdf'], sizeBytes: 3300 });
+    expect(ymd(row.flagDue)).toBe('2026-11-27');
+  });
+
+  test('a due date Graph sends in UTC is stored as the mailbox owner’s own day (Asia/Kolkata, east of UTC)', async () => {
+    const { user, account } = await mailbox();
+    await prisma.user.update({ where: { id: user.id }, data: { timezone: 'Asia/Kolkata' } });
+    // 27 Nov at midnight in Kolkata is 26 Nov 18:30 UTC.
+    const m = msg({ flag: { status: 'flagged', due: { dateTime: '2026-11-26T18:30:00.0000000', timeZone: 'UTC' } } });
+    const { graph } = scripted({ 'start:inbox': final('inbox', [m]) });
+    await syncMailboxHandler(job(account.id), { graph });
+    expect(ymd((await prisma.emailMessage.findFirstOrThrow({ where: { graphId: m.id } })).flagDue)).toBe('2026-11-27');
+  });
+
+  test('a due date in a named zone, or in a zone the CRM cannot read, keeps its own day', async () => {
+    const { user, account } = await mailbox();
+    await prisma.user.update({ where: { id: user.id }, data: { timezone: 'Asia/Kolkata' } });
+    const named = msg({ flag: { status: 'flagged', due: { dateTime: '2026-11-27T00:00:00.0000000', timeZone: 'Asia/Kolkata' } } });
+    const windows = msg({ flag: { status: 'flagged', due: { dateTime: '2026-11-28T00:00:00.0000000', timeZone: 'India Standard Time' } } });
+    const { graph } = scripted({ 'start:inbox': final('inbox', [named, windows]) });
+    await syncMailboxHandler(job(account.id), { graph });
+    expect(ymd((await prisma.emailMessage.findFirstOrThrow({ where: { graphId: named.id } })).flagDue)).toBe('2026-11-27');
+    expect(ymd((await prisma.emailMessage.findFirstOrThrow({ where: { graphId: windows.id } })).flagDue)).toBe('2026-11-28');
+  });
+
+  test('a flag cleared in Outlook clears it on the stored row at the next sync; one set there shows too', async () => {
+    const { user, account } = await mailbox();
+    const cleared = msg();
+    const set = msg({ flag: { status: 'flagged', due: { dateTime: '2026-12-01T00:00:00.0000000', timeZone: 'UTC' } } });
+    const base = { userId: user.id, accountId: account.id, folder: 'inbox', status: 'received', source: 'sync', fromAddress: 'ana@acme.com', subject: 'Hello' };
+    await prisma.emailMessage.create({ data: { ...base, graphId: cleared.id, flagStatus: 'flagged', flagDue: new Date('2026-11-27T00:00:00.000Z') } });
+    await prisma.emailMessage.create({ data: { ...base, graphId: set.id } });
+    const { graph } = scripted({ 'start:inbox': final('inbox', [cleared, set]) });
+    await syncMailboxHandler(job(account.id), { graph });
+    expect(await prisma.emailMessage.findFirstOrThrow({ where: { graphId: cleared.id } })).toMatchObject({ flagStatus: 'notFlagged', flagDue: null });
+    const row = await prisma.emailMessage.findFirstOrThrow({ where: { graphId: set.id } });
+    expect(row.flagStatus).toBe('flagged');
+    expect(ymd(row.flagDue)).toBe('2026-12-01');
+  });
+
+  test('a message without attachments costs no attachment call', async () => {
+    const { account } = await mailbox();
+    let calls = 0;
+    const m = msg({ body: { contentType: 'text', content: 'héllo' } });
+    const { graph } = scripted({ 'start:inbox': final('inbox', [m]) }, { async listAttachments() { calls += 1; return []; } });
+    await syncMailboxHandler(job(account.id), { graph });
+    expect(calls).toBe(0);
+    // UTF-8 bytes, not characters: é is two bytes.
+    expect(await prisma.emailMessage.findFirstOrThrow({ where: { graphId: m.id } })).toMatchObject({ attachmentNames: [], sizeBytes: 6 });
+  });
+
+  test('a failed attachment list stores no names and the body size only; a nameless attachment adds its size but no name', async () => {
+    const { account } = await mailbox();
+    const failed = msg({ hasAttachments: true, body: { contentType: 'text', content: 'abc' } });
+    const nameless = msg({ hasAttachments: true, body: { contentType: 'text', content: 'abcd' } });
+    const { graph } = scripted({ 'start:inbox': final('inbox', [failed, nameless]) }, {
+      async listAttachments(_account, graphId) {
+        if (graphId === failed.id) throw new GraphError('graph_request_failed', 500);
+        return [att('', 50, false), att('notes.txt', 10, false)];
+      },
+    });
+    await syncMailboxHandler(job(account.id), { graph });
+    expect(await prisma.emailMessage.findFirstOrThrow({ where: { graphId: failed.id } })).toMatchObject({ attachmentNames: [], sizeBytes: 3 });
+    expect(await prisma.emailMessage.findFirstOrThrow({ where: { graphId: nameless.id } })).toMatchObject({ attachmentNames: ['notes.txt'], sizeBytes: 64 });
+  });
+});

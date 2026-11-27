@@ -6,6 +6,7 @@ import { isForeignKeyViolation, isUniqueViolation } from '../../prismaErrors.js'
 import { mailUser, matchMail } from '../../mail/match.js';
 import { inLeadConversation, isLeadMail, loadLeadMailRules, participantsOf, type LeadMailRules } from '../../mail/leadMail.js';
 import { processEmailBody, storedColumns } from '../../mail/bodies.js';
+import { dateOnly, startOfDayIn, todayIn } from '../../leads/dates.js';
 import type { AuthUser } from '../../plugins/auth.js';
 import type { SyncMailboxPayload } from '../types.js';
 import type { JobContext } from '../runner.js';
@@ -82,6 +83,50 @@ async function bodyColumns(userId: number, m: GraphMessage, emailMessageId: numb
   return storedColumns(result);
 }
 
+const DUE_WALL = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/;
+
+const knownZone = (timeZone: string) => {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * An Outlook flag's due date as the mailbox owner's own day (`YYYY-MM-DD`). Graph sends it in UTC (27 Nov set in
+ * Asia/Kolkata arrives as `2026-11-26T18:30:00`), so the time is read in its zone and the day taken in `timezone`. A
+ * zone the CRM cannot read (a Windows name such as "India Standard Time") keeps the day as Outlook wrote it.
+ */
+export function flagDueDay(due: GraphMessage['flag']['due'], timezone: string): string | null {
+  const wall = due ? DUE_WALL.exec(due.dateTime) : null;
+  if (!due || !wall) return null;
+  const [, day, hh, mm, ss = '00'] = wall;
+  if (!knownZone(due.timeZone)) return day!;
+  const at = startOfDayIn(day!, due.timeZone).getTime() + ((Number(hh) * 60 + Number(mm)) * 60 + Number(ss)) * 1000;
+  return Number.isFinite(at) ? todayIn(timezone, new Date(at)) : null;
+}
+
+/** The flag columns of a synced message. */
+function flagColumns(m: GraphMessage, timezone: string) {
+  const day = m.flag.status === 'flagged' ? flagDueDay(m.flag.due, timezone) : null;
+  return { flagStatus: m.flag.status, flagDue: day ? dateOnly(day) : null };
+}
+
+/**
+ * A message's attachment names (non-inline, nameless ones left out) and its size: the body's UTF-8 bytes plus every
+ * attachment, inline ones included. Graph is asked only when the message has attachments; a failed list counts the
+ * body alone.
+ */
+async function attachmentColumns(account: EmailAccount, m: GraphMessage, ctx: JobContext) {
+  const list = m.hasAttachments ? await ctx.graph.listAttachments(account, m.id).catch(() => []) : [];
+  return {
+    attachmentNames: list.filter((a) => !a.isInline && a.name.trim() !== '').map((a) => a.name),
+    sizeBytes: list.reduce((sum, a) => sum + a.size, Buffer.byteLength(m.body.content)),
+  };
+}
+
 /** What `storeMessage` did with a message. */
 export type StoreResult = 'stored' | 'updated' | 'claimed' | 'skipped';
 
@@ -90,6 +135,9 @@ export type StoreResult = 'stored' | 'updated' | 'claimed' | 'skipped';
  * participants are now; a Sent Items copy of a CRM-sent message claims the CRM row; any other message is stored only
  * when it is lead mail (a participant is a lead/contact address or at a lead company's domain) or joins a
  * conversation where the user already keeps lead-linked mail. A skipped message writes and fetches nothing.
+ * Web-mail release 2: a new row keeps Outlook's flag (the due date as the owner's own day), its non-inline attachment
+ * names and its size (body plus attachments); an existing row takes the flag along with the folder and read state, so
+ * a flag set or cleared in Outlook shows on the next sync.
  */
 export async function storeMessage(
   account: EmailAccount, user: AuthUser, folder: string, m: GraphMessage, ctx: JobContext, rules: LeadMailRules,
@@ -102,7 +150,8 @@ export async function storeMessage(
     const sentDraft = existing.status === 'draft' && !m.isDraft ? { status: outbound ? 'sent' : 'received', occurredAt } : {};
     // A row stored before bodies came as HTML takes the HTML (and the cleaner text) now that it is here anyway.
     const bodies = existing.bodyHtml === null && m.body.contentType === 'html' ? await bodyColumns(user.id, m, existing.id) : {};
-    await prisma.emailMessage.update({ where: { id: existing.id }, data: { folder, isRead: outbound ? true : m.isRead, ...sentDraft, ...bodies } });
+    const flag = flagColumns(m, user.timezone);
+    await prisma.emailMessage.update({ where: { id: existing.id }, data: { folder, isRead: outbound ? true : m.isRead, ...flag, ...sentDraft, ...bodies } });
     return 'updated';
   }
   if (outbound && !m.isDraft && (await claimCrmCopy(user.id, m))) return 'claimed';
@@ -116,7 +165,7 @@ export async function storeMessage(
     ownAddress: account.address,
   });
   const threadId = m.conversationId?.slice(0, 255) ?? null;
-  const attachmentNames = m.hasAttachments ? await ctx.graph.listAttachments(account, m.id).then((a) => a.map((x) => x.name)).catch(() => []) : [];
+  const attachments = await attachmentColumns(account, m, ctx);
   const projectId = await inheritedProject(user.id, threadId);
   // In a worker thread with a time limit: no email can hold up the sync (or the jobs that share its process).
   const result = await processEmailBody(m.body, BODY_MAX, { retryKey: `${user.id}:${m.id}` });
@@ -129,7 +178,7 @@ export async function storeMessage(
       toAddresses: m.to, ccAddresses: m.cc, bccAddresses: m.bcc, subject: m.subject.slice(0, 500), bodyText, bodyHtml,
       messageId: m.internetMessageId?.slice(0, 255) ?? null, threadId,
       isRead: outbound ? true : m.isRead, occurredAt,
-      attachmentNames, projectId, ...linked,
+      ...attachments, ...flagColumns(m, user.timezone), projectId, ...linked,
     },
   });
   try {

@@ -349,6 +349,28 @@ Only after the owner says "deploy". Follow "Deploying a release to live" with th
    (failed or skipped, every mailbox); it does nothing for a mailbox that got no rows. When Sebastian (user 4) connects
    his mailbox, run `--mailbox` with its id.
 
+## Web mail release 2: deploy runbook
+
+Only after the owner says "deploy". Follow "Deploying a release to live" (backup first), then:
+
+1. **Re-read the mailboxes once, so flags already set in Outlook show** (sync stores Outlook flags from release 2 on,
+   but a delta link only returns messages changed since it was taken, so flags set before the release would never
+   reach rows already stored). **Only after the web mail release 1 backfill has finished** (`mail-backfill.js
+   --status` shows `queued` and `running` at 0; see "One-time steps"), clear the stored delta links (as root):
+
+   ```
+   sudo -u postgres psql -d dait_crm -c "UPDATE email_accounts SET sync_state = '{}' WHERE kind = 'personal';"
+   ```
+
+   The next sync of each mailbox then reads its 12 months again (lead mail only, at most 20 pages per folder per run,
+   the rest a minute later, so it can take a while) and every stored row takes its Outlook flag and due date. Nothing
+   is lost: storing is idempotent and rows the user linked keep their links. It is finished when no sync run is left
+   failing or waiting beyond the regular schedule (counts only):
+   `sudo -u postgres psql -d dait_crm -c "SELECT status, count(*) FROM jobs WHERE type = 'sync_mailbox' GROUP BY status;"`
+   (only the regular scheduled runs remain queued).
+2. **Check one flag due date against Outlook:** flag a lead message in Outlook with a due date (as a user in
+   Asia/Kolkata if possible), wait for the next sync, and check the CRM shows the same day (not the day before).
+
 ## One-time steps after a release
 
 All of these have already been run on live; they are kept for reference and for a rebuild.
