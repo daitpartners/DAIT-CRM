@@ -107,7 +107,11 @@ async function viewWhere(user: AuthUser, scope: Scope, view: MailView, now: Date
     case 'flagged': return { flagStatus: 'flagged', folder: { not: 'deleted' } };
     case 'awaiting': return { id: { in: await awaitingIds(scope.ownerId) } };
     case 'due':
-      return { ...NOT_DRAFT_OR_DELETED, lead: { status: { notIn: [...CLOSED_STATUSES] }, nextFollowUp: { lte: dateOnly(todayIn(user.timezone, now)) } } };
+      // Only leads the viewer can see: a hidden lead's status and follow-up are not shown, so they never place mail here.
+      return {
+        ...NOT_DRAFT_OR_DELETED,
+        lead: { AND: [{ status: { notIn: [...CLOSED_STATUSES] }, nextFollowUp: { lte: dateOnly(todayIn(user.timezone, now)) } }, leadWhere(user, { includeArchived: true })] },
+      };
     // My leads in your own scope; Team leads (Everyone, or another user's mailbox): any lead mail in the scope (F25).
     case 'mine':
       return scope.ownerId === user.id ? { ...NOT_DRAFT_OR_DELETED, lead: { assignedToId: user.id } } : { ...NOT_DRAFT_OR_DELETED, leadId: { not: null } };
@@ -140,7 +144,8 @@ export async function listWhere(user: AuthUser, scope: Scope, q: MailListQuery, 
   if (text.from || text.to || text.subject) and.push({ id: { in: await filterTextIds(scope.ownerId, text) } });
   const leadQ = q.leadQ?.trim();
   if (leadQ) and.push({ leadId: { in: await leadFilterIds(user, leadQ) } });
-  if (q.owner) and.push({ lead: { assignedToId: q.owner === 'me' ? user.id : Number(q.owner) } });
+  // The lead's assignee, of leads the viewer can see only (a hidden lead's owner is not shown).
+  if (q.owner) and.push({ lead: { AND: [{ assignedToId: q.owner === 'me' ? user.id : Number(q.owner) }, leadWhere(user, { includeArchived: true })] } });
   if (q.date === 'custom') {
     if (q.since) and.push({ occurredAt: { gte: startOfDayIn(q.since, user.timezone) } });
     if (q.until) and.push({ occurredAt: { lt: startOfDayIn(shiftDay(q.until, 1), user.timezone) } });
@@ -169,14 +174,22 @@ function sortKey(r: Candidate, sort: ListSort): string | number | null {
   }
 }
 
+const newestFirst = (a: Candidate, b: Candidate) => b.occurredAt.getTime() - a.occurredAt.getTime() || b.id - a.id;
+
 /**
  * The list order: by the sort key (stage = the lead_status lookup order; lead numbers compare as numbers; a missing key
- * is last in either direction), ties newest first then id desc. In conversation view only the first row of each
- * conversation is kept (the newest, sorting by date descending).
+ * is last in either direction), ties newest first then id desc. In conversation view each conversation is one row, its
+ * newest message (Outlook; R2 T7 ruling), whatever the sort and direction; those rows are then sorted by the key.
  */
 export function orderCandidates(rows: Candidate[], sort: ListSort, dir: 'asc' | 'desc', conversation: boolean): Candidate[] {
   const sign = dir === 'asc' ? 1 : -1;
-  const sorted = [...rows].sort((a, b) => {
+  let pool = rows;
+  if (conversation) {
+    const newest = new Map<string, Candidate>();
+    for (const r of [...rows].sort(newestFirst)) if (!newest.has(conversationKey(r))) newest.set(conversationKey(r), r);
+    pool = [...newest.values()];
+  }
+  return [...pool].sort((a, b) => {
     const ka = sortKey(a, sort);
     const kb = sortKey(b, sort);
     if (ka !== kb) {
@@ -185,15 +198,7 @@ export function orderCandidates(rows: Candidate[], sort: ListSort, dir: 'asc' | 
       const c = typeof ka === 'string' ? collator.compare(ka, kb as string) : ka - (kb as number);
       if (c !== 0) return sign * c;
     }
-    return b.occurredAt.getTime() - a.occurredAt.getTime() || b.id - a.id;
-  });
-  if (!conversation) return sorted;
-  const seen = new Set<string>();
-  return sorted.filter((r) => {
-    const key = conversationKey(r);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
+    return newestFirst(a, b);
   });
 }
 

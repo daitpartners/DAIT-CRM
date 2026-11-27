@@ -48,10 +48,14 @@ describe('orderCandidates', () => {
     expect(rows.map((r) => r.id)).toEqual([1, 2, 3, 4]);
   });
 
-  test('conversation grouping keeps the first row of each conversation in the sorted order', () => {
+  test('a conversation row is always its newest message, whatever the sort and direction; rows are then sorted by the key (R2 T7 ruling)', () => {
     const rows = [cand({ id: 1, threadId: 't', sizeBytes: 900 }), cand({ id: 2, threadId: 't', sizeBytes: 100 }), cand({ id: 3, sizeBytes: 500 })];
-    expect(orderCandidates(rows, 'size', 'desc', true).map((r) => r.id)).toEqual([1, 3]);
-    expect(orderCandidates(rows, 'size', 'asc', true).map((r) => r.id)).toEqual([2, 3]);
+    const ids = (sort: Parameters<typeof orderCandidates>[1], dir: 'asc' | 'desc') => orderCandidates(rows, sort, dir, true).map((r) => r.id);
+    // Message 2 is the newest of conversation t (message 1 is older and larger).
+    expect(ids('size', 'desc')).toEqual([3, 2]);
+    expect(ids('size', 'asc')).toEqual([2, 3]);
+    expect(ids('date', 'asc')).toEqual([2, 3]);
+    expect(ids('date', 'desc')).toEqual([3, 2]);
   });
 });
 
@@ -145,6 +149,10 @@ describe('GET /mail (web-mail release 2)', () => {
     const p2 = (await call('/api/mail?view=inbox&pageSize=1&page=2', repCookie)).json();
     expect([p2.total, p2.items.map((i: Item) => i.id)]).toEqual([2, [c.lone.id]]);
     expect((await call('/api/mail?view=inbox&pageSize=1&page=3', repCookie)).json().items).toEqual([]);
+    // Oldest first or by size: the conversation's row is still its newest message.
+    expect((await items('/api/mail?view=inbox&sort=date&dir=asc', repCookie)).map((i) => i.id)).toEqual([c.lone.id, c.latest.id]);
+    await prisma.emailMessage.update({ where: { id: c.first.id }, data: { sizeBytes: 9000 } });
+    expect((await items('/api/mail?view=inbox&sort=size&dir=desc', repCookie)).map((i) => i.id)).toEqual([c.latest.id, c.lone.id]);
     // count=0 (later batches): no total.
     expect((await call('/api/mail?view=inbox&count=0', repCookie)).json().total).toBeNull();
     // Message view: each message its own row, with its own id only.
@@ -214,7 +222,10 @@ describe('GET /mail (web-mail release 2)', () => {
     expect(await q(`leadQ=${f.leadB.number}`)).toEqual(['Yesterday news']);
     expect(await q('leadQ=beta')).toEqual([]);
     expect(await q('owner=me')).toEqual(['Plan 50%_off']);
-    expect(await q(`owner=${f.carlos.id}`)).toEqual(['Yesterday news']);
+    // Carlos's lead is hidden from Maya: its owner never filters her mail (no restricted-lead leak).
+    expect(await q(`owner=${f.carlos.id}`)).toEqual([]);
+    // An Administrator, who sees the lead, finds Maya's mail on it by its owner.
+    expect(await subjects(`/api/mail?mailOf=all&view=inbox&owner=${f.carlos.id}`, await signIn(app, f.admin))).toEqual(['Yesterday news']);
     expect(await q('date=today')).toEqual(['Plan 50%_off']);
     expect(await q('date=7d')).toEqual(['Plan 50%_off', 'Yesterday news', 'Plain']);
     const today = todayIn('Asia/Kolkata');
@@ -229,6 +240,8 @@ describe('GET /mail (web-mail release 2)', () => {
     const today = todayIn('Europe/London');
     await prisma.lead.update({ where: { id: f.leadA.id }, data: { nextFollowUp: new Date(`${today}T00:00:00Z`) } });
     const closed = await makeLead({ companyId: f.acme.id, assignedToId: f.rep.id, status: 'Won', nextFollowUp: new Date('2026-01-01T00:00:00Z') });
+    // Carlos's lead is due too, but hidden from Maya: her mail on it is not "due" for her.
+    await prisma.lead.update({ where: { id: f.leadB.id }, data: { nextFollowUp: new Date(`${today}T00:00:00Z`) } });
     const later = await makeLead({ companyId: f.acme.id, assignedToId: f.rep.id, status: 'New', nextFollowUp: new Date('2099-01-01T00:00:00Z') });
     const sent = { folder: 'sent', status: 'sent', fromAddress: 'maya@daitpartners.com' } as const;
     await msg(f.rep.id, { ...sent, subject: 'Queued', source: 'crm', status: 'queued' });
@@ -249,6 +262,7 @@ describe('GET /mail (web-mail release 2)', () => {
     expect((await v('mine')).sort()).toEqual(['Closed lead', 'Flag', 'Later lead']);
     // Team leads: any lead mail in the team scope (not drafts or deleted).
     const admin = await signIn(app, f.admin);
+    expect((await subjects('/api/mail?mailOf=all&view=due&conv=0', admin)).sort()).toEqual(['Carlos lead', 'Carlos own', 'Flag']);
     const team = await subjects('/api/mail?mailOf=all&view=mine&conv=0', admin);
     expect(team.sort()).toEqual(['Carlos lead', 'Carlos own', 'Closed lead', 'Flag', 'Later lead']);
     // Mail of the Administrator's own id is their own scope: My leads (none assigned to them).
@@ -296,6 +310,9 @@ describe('GET /mail (web-mail release 2)', () => {
     await msg(f.rep.id, { subject: 'Draft', folder: 'drafts', status: 'draft' });
     await msg(f.rep.id, { subject: 'Queued', folder: 'sent', status: 'queued', source: 'crm', fromAddress: 'maya@daitpartners.com', leadId: f.leadA.id, threadId: 'q' });
     await msg(f.carlos.id, { subject: 'Not mine', isRead: false, leadId: f.leadB.id });
+    // Maya's mail on Carlos's due lead, which she cannot see: not counted as due for her.
+    await prisma.lead.update({ where: { id: f.leadB.id }, data: { nextFollowUp: new Date(`${today}T00:00:00Z`) } });
+    await msg(f.rep.id, { subject: 'On hidden lead', leadId: f.leadB.id });
     const meta = (await call('/api/mail/meta', f.repCookie)).json();
     expect(meta.counts).toEqual({ inbox: 1, drafts: 1, scheduled: 1, flagged: 1, awaiting: 1, due: 1, leads: 2 });
     expect(meta).not.toHaveProperty('unlinked');
@@ -305,7 +322,7 @@ describe('GET /mail (web-mail release 2)', () => {
     ]);
     // Team scope: Team leads counts every lead with mail in it.
     const all = (await call('/api/mail/meta?mailOf=all', await signIn(app, f.admin))).json();
-    expect(all.counts).toMatchObject({ inbox: 2, drafts: 0, leads: 3 });
+    expect(all.counts).toMatchObject({ inbox: 2, drafts: 0, due: 2, leads: 3 });
   });
 
   it('?view=unlinked falls back to Inbox', async () => {
