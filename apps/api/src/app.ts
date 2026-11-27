@@ -4,6 +4,7 @@ import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import { FormattedBodyError } from './mail/formatted.js';
 import { AttachmentError } from './mail/files.js';
+import { AttachmentTooLargeError } from './mail/attachments.js';
 import { healthRoutes } from './routes/health.js';
 import { authRoutes } from './routes/auth.js';
 import { meRoutes } from './routes/me.js';
@@ -146,7 +147,9 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
       }
       return reply.code(error.status).send({ error: error.code });
     }
-    if (error instanceof FormattedBodyError || error instanceof AttachmentError) return reply.code(error.status).send({ error: error.code });
+    if (error instanceof FormattedBodyError || error instanceof AttachmentError || error instanceof AttachmentTooLargeError) {
+      return reply.code(error.status).send({ error: error.code });
+    }
     // A server error is logged in full and answered without its message (which can name server paths; review I4).
     const status = (error as { statusCode?: number }).statusCode ?? 500;
     if (status >= 500) {

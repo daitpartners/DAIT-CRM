@@ -51,14 +51,16 @@ function stub(items: MailItem[], opts: { user?: Me; templates?: EmailTemplate[] 
     if (init?.method === 'POST') {
       const body = init.body ? JSON.parse(String(init.body)) : undefined;
       posts.push({ url, body });
+      const changed = (id: number, c: { type: string; folder?: string; isRead?: boolean }) => {
+        const m = items.find((x) => x.id === id)!;
+        return {
+          id: m.id, removed: false, folder: c.type === 'move' ? c.folder : c.type === 'delete' ? 'deleted' : m.folder,
+          isRead: c.type === 'read' ? c.isRead : m.isRead, flagStatus: c.type === 'flag' ? 'flagged' : m.flagStatus, flagDue: null,
+        };
+      };
       const one = /^\/api\/mail\/(\d+)\/change$/.exec(url);
-      if (one) {
-        const m = items.find((x) => x.id === Number(one[1]))!;
-        return Response.json({
-          id: m.id, removed: false, folder: body.type === 'move' ? body.folder : body.type === 'delete' ? 'deleted' : m.folder,
-          isRead: body.type === 'read' ? body.isRead : m.isRead, flagStatus: body.type === 'flag' ? 'flagged' : m.flagStatus, flagDue: null,
-        });
-      }
+      if (one) return Response.json(changed(Number(one[1]), body));
+      if (url === '/api/mail/bulk') return Response.json({ done: body.ids.map((id: number) => changed(id, body.change)), failed: [] });
       if (url.endsWith('/follow-up')) return Response.json({ leadId: 5, nextFollowUp: body.date ?? null, taskId: 3 });
       if (url.endsWith('/unlink')) return Response.json({ id: 1, leadId: null });
       return Response.json({ id: 1, leadId: 5 });
@@ -330,6 +332,57 @@ describe('Email command bar, menus and shortcuts (web-mail release 2, Task 14)',
       expect(screen.queryAllByRole('dialog'), where).toHaveLength(dialogs);
       await user.keyboard('{Escape}');
     }
+  });
+
+  it('a focused menu keeps its keys: with row 2’s right-click menu open over message 1, Delete and E change nothing (final review I1)', async () => {
+    const user = userEvent.setup();
+    const { posts } = stub([item(), item({ id: 2, subject: 'Second', occurredAt: '2026-11-25T10:00:00.000Z' })]);
+    show();
+    await ready();
+    const second = (await screen.findByRole('link', { name: /Second/ })).closest('.mrow') as HTMLElement;
+    await user.pointer({ keys: '[MouseRight]', target: within(second).getByRole('link') });
+    const menu = screen.getByRole('menu', { name: 'Message actions' });
+    expect(within(menu).getByRole('menuitem', { name: 'Reply' })).toHaveFocus();
+    await user.keyboard('{Delete}');
+    await user.keyboard('e');
+    await user.keyboard('{Control>}u{/Control}');
+    expect(posts).toEqual([]);
+    expect(screen.getByRole('menu', { name: 'Message actions' })).toBeInTheDocument();
+    // Moved to Move to ▾ on the command bar: its keys are its own too.
+    await user.keyboard('{Escape}');
+    await user.click(cmd('Move to'));
+    expect(within(screen.getByRole('menu', { name: 'Move to' })).getAllByRole('menuitem')[0]).toHaveFocus();
+    await user.keyboard('e');
+    await user.keyboard('{Delete}');
+    expect(posts).toEqual([]);
+  });
+
+  it('while rows are checked, the command bar and the shortcuts act on them, not on the open message (final review I1)', async () => {
+    const user = userEvent.setup();
+    const { posts } = stub([
+      item(), item({ id: 2, subject: 'Second', occurredAt: '2026-11-25T10:00:00.000Z' }), item({ id: 3, subject: 'Third', occurredAt: '2026-11-24T10:00:00.000Z' }),
+    ]);
+    show();
+    await ready();
+    const rowOf = async (name: RegExp) => (await screen.findByRole('link', { name })).closest('.mrow') as HTMLElement;
+    await user.click(within(await rowOf(/Second/)).getByRole('checkbox', { name: 'Select message' }));
+    await user.click(within(await rowOf(/Third/)).getByRole('checkbox', { name: 'Select message' }));
+    // A selection: only Delete, Archive, Move, Flag and Mark as read.
+    await waitFor(() => expect(cmd('Reply')).toBeDisabled());
+    expect(cmd('Forward')).toBeDisabled();
+    expect(cmd('Mark as read')).toBeEnabled();
+    await user.click(cmd('Flag'));
+    await user.click(within(screen.getByRole('menu', { name: 'Flag' })).getByRole('menuitem', { name: /^Tomorrow/ }));
+    await waitFor(() => expect(posts.at(-1)).toEqual({ url: '/api/mail/bulk', body: { ids: [2, 3], change: { type: 'flag', flag: 'tomorrow' } } }));
+    await user.keyboard('{Control>}u{/Control}');
+    await waitFor(() => expect(posts.at(-1)).toEqual({ url: '/api/mail/bulk', body: { ids: [2, 3], change: { type: 'read', isRead: false } } }));
+    await user.keyboard('e');
+    await waitFor(() => expect(posts.at(-1)).toEqual({ url: '/api/mail/bulk', body: { ids: [2, 3], change: { type: 'move', folder: 'archive' } } }));
+    expect(posts.some((p) => p.url === '/api/mail/1/change')).toBe(false);
+    // The checked rows left the Inbox: the bar acts on the open message again.
+    await waitFor(() => expect(cmd('Reply')).toBeEnabled());
+    await user.click(cmd('Delete'));
+    await waitFor(() => expect(posts.at(-1)).toEqual({ url: '/api/mail/1/change', body: { type: 'delete' } }));
   });
 
   it('shortcutFor maps the keys (letters with Ctrl/⌘/Alt stay the browser’s)', () => {

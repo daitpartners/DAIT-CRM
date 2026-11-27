@@ -265,6 +265,18 @@ describe('Reply all and Forward (web-mail release 2)', () => {
     expect(await prisma.emailMessage.count({ where: { status: 'sent' } })).toBe(2);
   });
 
+  it('a queued reply whose payload names another Graph call fails it and Microsoft is never asked', async () => {
+    const { rep, box } = await setup();
+    const original = await synced(rep.id, box.id, { graphId: 'orig-2', ...toAll });
+    await call('POST', `/api/mail/${original.id}/reply`, await signIn(app, rep), { mode: 'replyAll', cc: [], body: 'Thanks' });
+    const job = await prisma.job.findFirstOrThrow({ where: { type: 'send_user_email' } });
+    await prisma.job.update({ where: { id: job.id }, data: { payload: { ...(job.payload as object), replyMode: 'deleteMessage' } } });
+    // fakeGraph throws on any call it was not given.
+    await runJobs(fakeGraph());
+    const sent = await prisma.emailMessage.findFirstOrThrow({ where: { source: 'crm', replyToId: original.id } });
+    expect(sent).toMatchObject({ status: 'failed', lastError: 'invalid_reply_mode' });
+  });
+
   it('a forward of a CRM-only original (no Graph id) goes out with sendMail, carrying the original', async () => {
     const { rep, box } = await setup();
     await prisma.user.update({ where: { id: rep.id }, data: { timezone: 'Asia/Kolkata' } });

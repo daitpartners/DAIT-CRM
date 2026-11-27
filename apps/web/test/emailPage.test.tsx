@@ -221,6 +221,8 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     expect(within(panel).getByLabelText('To')).toHaveAttribute('placeholder', 'Name or address');
     expect(within(panel).getByLabelText('Subject')).toHaveAttribute('placeholder', 'Words in the subject');
     expect(within(panel).getByLabelText('Lead')).toHaveAttribute('placeholder', 'LD number or company');
+    // The list API refuses more than 200 characters in each text field.
+    for (const name of ['From', 'To', 'Subject', 'Lead']) expect(within(panel).getByLabelText(name)).toHaveAttribute('maxLength', '200');
     // Owner = the lead's owner: Anyone, Me, then the other users.
     await waitFor(() => expect(within(within(panel).getByLabelText('Owner')).getAllByRole('option').map((o) => o.textContent)).toEqual(['Anyone', 'Me', 'Carlos Torres', 'Lakshita Singh']));
     expect(within(within(panel).getByLabelText('Date')).getAllByRole('option').map((o) => o.textContent)).toEqual(['Any time', 'Today', 'Last 7 days', 'Last 30 days', 'Last 12 months', 'Custom range…']);

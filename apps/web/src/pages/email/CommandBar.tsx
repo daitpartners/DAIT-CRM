@@ -26,7 +26,7 @@ export type CommandBarView = {
 };
 
 type Props = {
-  /** The open message (in conversation view its row's conversation, F24), or null. */
+  /** The checked rows while any are checked, else the open message (in conversation view its row's conversation, F24), or null. */
   target: MailTarget | null;
   commands: ReturnType<typeof useMailCommands>;
   view: CommandBarView;
@@ -68,7 +68,8 @@ export function CommandBar({ target, commands, view, onCompose }: Props) {
   const rowRef = useRef<HTMLDivElement>(null);
   const itemsRef = useRef<HTMLDivElement>(null);
 
-  // Shortcuts run the same commands on the same target, so view only and the other rules hold (Ctrl/⌘+U marks unread, F31).
+  // Shortcuts run the same commands on the same target (the checked rows, else the open message), so view only and the
+  // other rules hold (Ctrl/⌘+U marks unread, F31).
   useMailShortcuts((id) => {
     if (id === 'toggleRead') {
       if (target?.item && !target.item.isRead) return;

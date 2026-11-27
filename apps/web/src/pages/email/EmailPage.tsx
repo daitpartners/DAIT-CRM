@@ -12,7 +12,7 @@ import { LeadPanel } from './LeadPanel';
 import { MessageList } from './MessageList';
 import { ReadingPane } from './ReadingPane';
 import { CommandBar } from './CommandBar';
-import { rowTarget, useMailCommands, type MailTarget } from './useMailCommands';
+import { rowTarget, selectionTarget, useMailCommands, type MailTarget } from './useMailCommands';
 
 const num = (v: string | null) => (v && /^\d+$/.test(v) ? Number(v) : undefined);
 const oneOf = <T extends string>(list: readonly T[], v: string | null): T | undefined => ((list as readonly string[]).includes(v ?? '') ? (v as T) : undefined);
@@ -72,6 +72,8 @@ export function EmailPage() {
   const list = useMailList(filter);
   const { items } = list;
   const [compose, setCompose] = useState<ComposeStart | null>(null);
+  /** The list's checked rows (MessageList resets them for another folder, filter or search). */
+  const [checked, setChecked] = useState<Set<number>>(() => new Set());
 
   const selectedId = num(id ?? null) ?? items[0]?.id ?? null;
   // The message opened from a link (the reading pane's own query): a list answered before the open marked it read
@@ -152,11 +154,14 @@ export function EmailPage() {
   const chipName = [companyName, leadNumber, metaProject ? `${metaProject.number} · ${metaProject.name}` : undefined].filter(Boolean).join(' · ');
   const teamView = mailOf !== undefined;
 
-  // What the command bar and the shortcuts act on: the open message (the fresher reading-pane copy when loaded), with
-  // its row's conversation in the view (F24).
+  // What the command bar and the shortcuts act on (Outlook): the checked rows while any are checked (rows that left the
+  // list are no longer checked); else the open message (the fresher reading-pane copy when loaded), with its row's
+  // conversation in the view (F24).
+  const selected = items.filter((m) => checked.has(m.id));
   const row = items.find((m) => m.id === selectedId);
   const openItem = opened && opened.id === selectedId ? opened : row;
-  const target: MailTarget | null = openItem ? { ids: row ? rowTarget(row).ids : [openItem.id], item: openItem } : null;
+  const openTarget: MailTarget | null = openItem ? { ids: row ? rowTarget(row).ids : [openItem.id], item: openItem } : null;
+  const target = selected.length ? selectionTarget(selected) : openTarget;
 
   return (
     <div className="wm">
@@ -208,6 +213,8 @@ export function EmailPage() {
           rowHref={(rowId) => `/email/${rowId}${params.toString() ? `?${params.toString()}` : ''}`}
           setQuery={setQuery}
           commands={commands}
+          checked={checked}
+          setChecked={setChecked}
           extra={linked ? (
             <div className="ml-row3">
               <Link className="chip wm-linkchip" to={href({ company: undefined, lead: undefined, project: undefined })} title={t('Clear')}>

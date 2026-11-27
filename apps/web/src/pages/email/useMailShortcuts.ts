@@ -3,6 +3,8 @@ import type { CommandId } from './useMailCommands';
 
 /** Focus in a field (typing there types, Review Focus 4). */
 const TYPING = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
+/** Focus in a menu or a dialog: its keys are its own (a row's right-click menu, Move to ▾, Flag ▾). */
+const OWN_KEYS = '[role="menu"], [role="menubar"], [role="dialog"], [role="alertdialog"]';
 
 /**
  * The command a key stands for (web-mail release 2, Outlook): Delete → delete, E → archive, Ctrl/⌘+U → mark unread
@@ -26,9 +28,11 @@ export function shortcutFor(e: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey'
 
 /**
  * The Email screen's keyboard shortcuts (shortcutFor), and Escape → `onEscape`. `run` is the screen's command runner
- * (useMailCommands' `run` on the open message), so a disabled command (view only, a draft, still sending) does nothing.
- * Nothing fires while focus is in an input, textarea, select or contenteditable element, or while a dialog is open
- * (Compose, Link email to a lead, a confirmation), so typing there types (Review Focus 4).
+ * (useMailCommands' `run` on the command bar's target: the checked rows, else the open message), so a disabled
+ * command (view only, a draft, still sending) does nothing.
+ * Nothing fires while focus is in an input, textarea, select or contenteditable element, inside a menu (a row's
+ * right-click menu acts on its own row, not the open message), or while a dialog is open (Compose, Link email to a
+ * lead, a confirmation), so typing there types (Review Focus 4).
  */
 export function useMailShortcuts(run: (id: CommandId) => void, opts: { enabled: boolean; onEscape: () => void }) {
   // The latest callbacks, without binding the listener again on every render.
@@ -39,7 +43,7 @@ export function useMailShortcuts(run: (id: CommandId) => void, opts: { enabled: 
     if (!opts.enabled) return;
     const down = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing) return;
-      if (e.target instanceof Element && e.target.closest(TYPING)) return;
+      if (e.target instanceof Element && (e.target.closest(TYPING) || e.target.closest(OWN_KEYS))) return;
       if (document.querySelector('[role="dialog"]')) return;
       if (e.key === 'Escape') {
         latest.current.onEscape();

@@ -232,6 +232,14 @@ describe('mail attachments (web-mail release 2)', () => {
     expect(ATTACHMENT_PROXY_MAX_BYTES).toBe(25_000_000);
   });
 
+  it('a Graph 413 on the listing is 413 attachment_too_large, not a server error', async () => {
+    const { m, repCookie } = await setup();
+    g.fail = new GraphError('attachment_too_large', 413);
+    const res = await get(`/api/mail/${m.id}/attachments`, repCookie);
+    expect(res.statusCode).toBe(413);
+    expect(res.json()).toEqual({ error: 'attachment_too_large' });
+  });
+
   it('other Graph failures: 502 outlook_refused, 503 outlook_busy, 409 mailbox_not_connected (mailbox put in error)', async () => {
     const { m, repBox, repCookie } = await setup();
     g.fail = new GraphError('bad request', 400);

@@ -313,7 +313,9 @@ describe('Email message list (web-mail release 2, mockup states 1, 4, 5)', () =>
       'Reply', 'Reply all', 'Forward', 'DeleteDel', 'ArchiveE', 'Move to›', 'Flag›', 'Mark as unreadCtrl+U',
       'Link to lead', 'Log as activity', 'Create task', 'Open lead',
     ]);
-    expect(row).toHaveClass('hov');
+    // Highlighted without its hover actions (mockup state 4): `ctx`, not the hover class.
+    expect(row).toHaveClass('ctx');
+    expect(row).not.toHaveClass('hov');
     // The keyboard starts on the first item; ↓ moves on.
     expect(within(menu).getByRole('menuitem', { name: 'Reply' })).toHaveFocus();
     await u.keyboard('{ArrowDown}');

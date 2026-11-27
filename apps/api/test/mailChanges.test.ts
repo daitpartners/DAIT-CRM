@@ -286,6 +286,22 @@ describe('mailbox changes (web-mail release 2)', () => {
     expect(ok.json().done.map((x: { id: number }) => x.id)).toEqual([c.id, d.id]);
   });
 
+  it('bulk is limited per user: 30 a minute, the 31st is 429 (as sending)', async () => {
+    // Its own app: the limiter's counts live in the app, and user ids repeat after each test's database reset.
+    const fresh = await buildApp({ graph: fakeGraph({ markRead: async () => undefined }) });
+    try {
+      const cookie = await signIn(fresh, await makeUser({ role: 'SALES_REPRESENTATIVE' }));
+      const codes: number[] = [];
+      for (let i = 0; i < 31; i++) {
+        codes.push((await fresh.inject({ method: 'POST', url: '/api/mail/bulk', headers: { cookie }, payload: { ids: [999999], change: { type: 'read', isRead: true } } })).statusCode);
+      }
+      expect(codes.slice(0, 30)).toEqual(Array(30).fill(200));
+      expect(codes[30]).toBe(429);
+    } finally {
+      await fresh.close();
+    }
+  });
+
   it(`bulk runs at most ${BULK_CONCURRENCY} Graph calls at once, and a conversation's 50 messages all change`, async () => {
     const { rep, repBox, repCookie } = await setup();
     const ids: number[] = [];

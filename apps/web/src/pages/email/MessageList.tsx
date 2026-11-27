@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type Dispatch, type MouseEvent, type ReactNode, type SetStateAction } from 'react';
 import { MAIL_CHIPS, type ListSort, type MailChip, type MailDetail, type MailFilter, type MailItem, type MailView } from '../../api/mail';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Icons } from '../../components/Icons';
@@ -32,6 +32,9 @@ type Props = {
   /** Under the chips: the link's client / lead / project chip. */
   extra?: ReactNode;
   commands: ReturnType<typeof useMailCommands>;
+  /** The checked rows' ids (kept by the page: while rows are checked, the command bar and shortcuts act on them). */
+  checked: Set<number>;
+  setChecked: Dispatch<SetStateAction<Set<number>>>;
 };
 
 const groupText = (t: TFn, g: DateGroup) => ({
@@ -61,13 +64,12 @@ const below = (el: HTMLElement): Point => {
  * with their hover actions and right-click menu, and the bulk bar that replaces the header once rows are checked. The
  * next 50 load when the list's foot comes near (owner, 23 Nov 2026: no page numbers).
  */
-export function MessageList({ view, teamView, filter, unread, list, selectedId, opened, rowHref, setQuery, extra, commands }: Props) {
+export function MessageList({ view, teamView, filter, unread, list, selectedId, opened, rowHref, setQuery, extra, commands, checked, setChecked }: Props) {
   const t = useT();
   const me = useCurrentUser();
   const { items, total, isLoading, hasNextPage, isFetchingNextPage, isPlaceholderData, fetchNextPage } = list;
   const rowsRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
-  const [checked, setChecked] = useState<Set<number>>(new Set());
   const [rowMenu, setRowMenu] = useState<{ id: number; at: Point } | null>(null);
   const [menu, setMenu] = useState<{ kind: 'sort' | 'move' | 'flag'; at: Point } | null>(null);
 

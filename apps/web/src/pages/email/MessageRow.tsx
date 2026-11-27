@@ -18,7 +18,7 @@ type Props = {
   checked: boolean;
   /** Some row is checked: every avatar shows its checkbox. */
   selecting: boolean;
-  /** Its right-click menu is open (the row stays highlighted). */
+  /** Its right-click menu is open: the row stays highlighted, without its hover actions (mockup state 4). */
   menuOpen: boolean;
   onCheck: (checked: boolean) => void;
   onMenu: (e: MouseEvent) => void;
@@ -39,7 +39,7 @@ export function MessageRow({ m, on, to, team, checked, selecting, menuOpen, onCh
   const subject = m.subject || t('(no subject)');
   const mailbox = m.viewOnly ? t("{name}'s mailbox", { name: firstName(m.owner.name) }) : t('Your mailbox');
   const target = rowTarget(m);
-  const cls = ['mrow', m.isRead ? '' : 'unread', on ? 'sel' : '', checked ? 'checked' : '', selecting ? 'selecting' : '', menuOpen ? 'hov' : '']
+  const cls = ['mrow', m.isRead ? '' : 'unread', on ? 'sel' : '', checked ? 'checked' : '', selecting ? 'selecting' : '', menuOpen ? 'ctx' : '']
     .filter(Boolean).join(' ');
 
   const act = (id: CommandId, icon: ReactNode, label: string) => {
@@ -59,7 +59,7 @@ export function MessageRow({ m, on, to, team, checked, selecting, menuOpen, onCh
         <span className="ck">
           <input type="checkbox" aria-label={t('Select message')} checked={checked} onChange={(e) => onCheck(e.target.checked)} />
         </span>
-        {team ? <span className={`ownr${m.viewOnly ? '' : ' me'}`} title={mailbox} aria-hidden="true">{initials(m.owner.name)}</span> : null}
+        {team ? <span className={`ownr${m.viewOnly ? '' : ' self'}`} title={mailbox} aria-hidden="true">{initials(m.owner.name)}</span> : null}
       </div>
       <Link className="mrow-link" to={to} aria-label={`${who}, ${subject}`} aria-current={on ? 'true' : undefined}>
         <span className="rl1">

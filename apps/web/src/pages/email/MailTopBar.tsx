@@ -8,6 +8,9 @@ import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
 import { useT } from '../../i18n/useT';
 
+/** The Filters panel's text fields: the list API refuses more than 200 characters (MailListQuery). */
+const FIELD_MAX = 200;
+
 /** The search box and the Filters panel's fields, for the address (`owner`: `me` or a user id). */
 export type MailSearch = {
   s: string; from: string; to: string; subject: string; leadq: string; owner: string;
@@ -158,13 +161,13 @@ export function MailTopBar({ meta, mailOf, filter, onSearch, onFilters }: MailTo
           }}
         >
           <label htmlFor="sf-from">{t('From')}</label>
-          <input ref={firstRef} id="sf-from" className="in" placeholder={t('Name or address')} value={draft.from} onChange={(e) => set('from', e.target.value)} />
+          <input ref={firstRef} id="sf-from" className="in" maxLength={FIELD_MAX} placeholder={t('Name or address')} value={draft.from} onChange={(e) => set('from', e.target.value)} />
           <label htmlFor="sf-to">{t('To')}</label>
-          <input id="sf-to" className="in" placeholder={t('Name or address')} value={draft.to} onChange={(e) => set('to', e.target.value)} />
+          <input id="sf-to" className="in" maxLength={FIELD_MAX} placeholder={t('Name or address')} value={draft.to} onChange={(e) => set('to', e.target.value)} />
           <label htmlFor="sf-subject">{t('Subject')}</label>
-          <input id="sf-subject" className="in" placeholder={t('Words in the subject')} value={draft.subject} onChange={(e) => set('subject', e.target.value)} />
+          <input id="sf-subject" className="in" maxLength={FIELD_MAX} placeholder={t('Words in the subject')} value={draft.subject} onChange={(e) => set('subject', e.target.value)} />
           <label htmlFor="sf-lead">{t('Lead')}</label>
-          <input id="sf-lead" className="in" placeholder={t('LD number or company')} value={draft.leadq} onChange={(e) => set('leadq', e.target.value)} />
+          <input id="sf-lead" className="in" maxLength={FIELD_MAX} placeholder={t('LD number or company')} value={draft.leadq} onChange={(e) => set('leadq', e.target.value)} />
           <label htmlFor="sf-owner">{t('Owner')}</label>
           <select id="sf-owner" className="in" value={draft.owner} onChange={(e) => set('owner', e.target.value)}>
             <option value="">{t('Anyone')}</option>

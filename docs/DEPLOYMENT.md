@@ -356,7 +356,7 @@ Only after the owner says "deploy". Web mail release 2 (branch `web-mail-r2`) bu
 `dait_crm-pre-web-mail-r2.dump`). Before installing, `migrate status` (as in release 1's step 2) must list only
 `20261213100000_web_mail_screen` (number 27) as not yet applied: it adds `flag_status`, `flag_due` and `size_bytes` to
 `email_messages` and fills `size_bytes` from the stored bodies (one UPDATE over the mail table).
-Anything else means stop and ask. There is one one-time step (1) and one read-only check (2):
+Anything else means stop and ask. There is one one-time step (1), one read-only check (2) and one live check (3):
 
 1. **Re-read the mailboxes once, so flags already set in Outlook show** (sync stores Outlook flags from release 2 on,
    but a delta link only returns messages changed since it was taken, so flags set before the release would never
@@ -396,6 +396,38 @@ Anything else means stop and ask. There is one one-time step (1) and one read-on
      `flagDueDay` (sync).
    - Any other value (a Windows zone name such as "India Standard Time", or another time of day): send it to the
      developer as well.
+3. **Live check of the new Outlook changes, on Deepak's own mailbox (right after step 5 "Check from outside").** Until
+   now every new Outlook write (flag with a due date, clear flag, move, delete and restore, Reply all, Forward with Cc,
+   attachment preview and download) has only met test fakes. Do each once, signed in to the CRM as Deepak, on a
+   throw-away lead email in his Inbox (send one to himself from a lead address first if needed), with Outlook on the
+   web open beside it:
+   - **Flag with a due date:** the message's Flag ▾ → Tomorrow. In Outlook the message is flagged, due tomorrow. This
+     proves Outlook accepts the CRM's IANA time zone name (`Asia/Kolkata`) on a dated flag; if it refused, every dated
+     flag (Today, Tomorrow, This week, Next week) would fail for everyone while "No date" and Clear still worked.
+   - **Clear flag:** Flag ▾ → Clear flag. The flag is gone in Outlook.
+   - **Archive and back:** Archive. It is in Outlook's Archive folder; then in the CRM's Archive, Move to ▾ → Inbox. It is
+     back in Outlook's Inbox.
+   - **Delete and restore:** Delete. It is in Outlook's Deleted Items; restore it **in Outlook** (Restore, or move it to
+     the Inbox). After the next sync (at most 5 minutes, or Sync now) it is back in the CRM's Inbox.
+   - **Reply all:** Reply all with a short text to a message that has another recipient. It arrives at every recipient
+     and sits in the same conversation in Outlook's Sent Items.
+   - **Forward with Cc:** Forward to an internal address with a second internal address in Cc. Both arrive, and the
+     original's attachments come with it.
+   - **Attachment:** on a message with a PDF, Preview it (opens in the browser) and Download it (the file opens).
+
+   **Any "Outlook refused the change", "Outlook is busy" that does not clear on a second try, a send that ends Failed,
+   or a 502 / 500 answer (browser developer tools, Network): stop and roll back** to release 1 (`2f981c2`) as in "Rolling back", as `daitcrm`:
+
+   ```
+   sudo -iu daitcrm
+   ln -sfn ~/live/releases/2f981c2 ~/live/current
+   pm2 startOrReload ~/live/current/deploy/ecosystem.config.cjs --only crm-live,crm-live-worker --update-env
+   curl -s http://127.0.0.1:3090/api/health      # shows 2f981c2
+   ```
+
+   Migration 27 stays (release 1 runs against it). Then send the developer which step failed and the time, and the
+   API log lines from that minute (`pm2 logs crm-live --lines 200 --nostream`; they carry the reason and Graph's status,
+   never the message itself).
 
 ## One-time steps after a release
 

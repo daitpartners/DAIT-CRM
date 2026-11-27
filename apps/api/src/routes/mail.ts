@@ -21,7 +21,7 @@ import { assertCompanyVisible } from '../companies/visibility.js';
 import { matchMail } from '../mail/match.js';
 import { canSeeTeamMail, mailScope, messageFor, teamReadableWhere } from '../mail/access.js';
 import { changeMany, changeMessage } from '../mail/changes.js';
-import { AttachmentTooLargeError, attachmentFile, attachmentHeaders, attachmentsOf } from '../mail/attachments.js';
+import { attachmentFile, attachmentHeaders, attachmentsOf } from '../mail/attachments.js';
 import { LIST_CANDIDATES_MAX, conversationKey, countKey, decorate, listWhere, orderCandidates, type Candidate } from '../mail/list.js';
 import { assertProjectFor, queueOutgoing } from '../mail/outgoing.js';
 import { leadPanel } from '../mail/leadPanel.js';
@@ -499,13 +499,9 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
       const { m, viewOnly } = await messageFor(prisma, user, request.params.id, 'read');
       // Recorded before Outlook is asked, so a download is audited even when Microsoft fails.
       if (viewOnly) await audit(prisma, { entityType: 'email_message', entityId: m.id, action: 'view', userId: user.id, after: { ownerId: m.userId, attachment: true } });
-      try {
-        const file = await attachmentFile(app.graph, m, att);
-        return reply.headers(attachmentHeaders(file.name, file.previewType, inline === '1')).send(file.data);
-      } catch (err) {
-        if (err instanceof AttachmentTooLargeError) return reply.code(err.status).send({ error: err.code });
-        throw err;
-      }
+      // Over the cap (or a Graph 413, on the listing too) is 413 attachment_too_large (app error handler).
+      const file = await attachmentFile(app.graph, m, att);
+      return reply.headers(attachmentHeaders(file.name, file.previewType, inline === '1')).send(file.data);
     });
   });
 
@@ -524,7 +520,8 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
 
   // The same change to a selection or a conversation's messages (at most BULK_MAX): always 200, each id done or failed
   // with its reason (view_only, not_found or a change error). The log carries counts and reasons only.
-  app.post('/mail/bulk', pre, async (request) => {
+  // At most 30 a minute per user (as sending): each one can make up to BULK_MAX Outlook calls.
+  app.post('/mail/bulk', { ...pre, config: perUser(30) }, async (request) => {
     const { ids, change } = parseBody(MailBulk, request.body);
     const result = await changeMany(app.graph, request.user!, ids, change);
     if (result.failed.length) {

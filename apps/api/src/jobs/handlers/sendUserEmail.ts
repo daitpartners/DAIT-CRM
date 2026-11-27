@@ -22,6 +22,9 @@ async function failMessage(id: number, lastError: string): Promise<void> {
 
 const INTERRUPTED = 'interrupted_may_have_sent';
 
+/** A queued reply's Graph call besides a plain reply (SendUserEmailPayload.replyMode). */
+const REPLY_MODES: readonly unknown[] = ['replyAll', 'forward'];
+
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /** "26 Nov 2026, 14:05": 24-hour, in the sender's time zone (UTC for an unknown zone). */
@@ -79,6 +82,9 @@ export async function sendUserEmailHandler(job: Job, ctx: JobContext): Promise<v
   // Sent, but the quotation's effects did not go through on that run (settleQuotation): apply them now.
   if (msg.status === 'sent' && quotation) return settleQuotation(msg, quotation, lastAttempt);
   if (msg.status !== 'queued') return; // already sent or failed
+  // Only the Graph calls a reply can be (the payload names the call, ctx.graph[replyMode]): anything else fails the
+  // message and Microsoft is never asked.
+  if (replyMode !== undefined && !REPLY_MODES.includes(replyMode)) return failMessage(msg.id, 'invalid_reply_mode');
   const account = msg.account;
   // Only the sender's own, connected personal mailbox.
   if (!account || account.kind !== 'personal' || account.status !== 'connected' || account.userId !== msg.userId) {
