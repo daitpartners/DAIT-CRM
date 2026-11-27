@@ -329,11 +329,14 @@ export function useDraftFile(id: number | null) {
   return { add, remove, busy: adding.isPending || removing.isPending };
 }
 
-/** Copies a template's files (its inline pictures, the attachments kept) onto draft `id`, replacing a template's before. */
+/**
+ * Copies a template's files (its inline pictures, the attachments kept) onto draft `id`, replacing a template's before.
+ * `draftId` names the draft instead, for a screen that makes the draft just before (the lead page's Send).
+ */
 export function useApplyTemplateFiles(id: number | null) {
   return useMutation({
-    mutationFn: async (v: { templateId: number; attachmentIds: number[] }) =>
-      api<{ files: DraftFileView[] }>(`/api/mail/drafts/${draftPath(id)}/template`, { method: 'POST', body: v }).then((r) => r.files),
+    mutationFn: async ({ draftId, ...v }: { templateId: number; attachmentIds: number[]; draftId?: number }) =>
+      api<{ files: DraftFileView[] }>(`/api/mail/drafts/${draftPath(draftId ?? id)}/template`, { method: 'POST', body: v }).then((r) => r.files),
   });
 }
 

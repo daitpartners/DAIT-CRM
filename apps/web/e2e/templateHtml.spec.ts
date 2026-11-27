@@ -6,7 +6,7 @@ import { captureParity } from './parity/_shared';
 const DB = process.env.E2E_DATABASE_URL ?? 'postgresql://mac@localhost:5432/dait_crm_e2e';
 
 /** Runs the queued sends against the fake Microsoft Graph (apps/api/test/e2e-send-jobs.ts) and returns what it was given. */
-function runSends(): { to: string[]; subject: string; html: string; text: string }[] {
+function runSends(): { kind?: string; to: string[]; subject: string; html: string }[] {
   const out = execFileSync('npx', ['tsx', 'test/e2e-send-jobs.ts'], { cwd: new URL('../../api/', import.meta.url), env: { ...process.env, DATABASE_URL: DB }, encoding: 'utf8' });
   return out.split('\n').filter((l) => l.startsWith('e2e-sent: ')).map((l) => JSON.parse(l.slice('e2e-sent: '.length)));
 }
@@ -74,18 +74,17 @@ test('lead page Email tab: a formatted .oft template fills the editor formatted 
     await email.getByLabel('To', { exact: true }).fill('client@example.com');
     await captureParity(page, 'template-html-lead-email-en');
 
-    await email.getByRole('button', { name: 'Send email' }).click();
-    await expect(page.getByRole('status').filter({ hasText: 'Email queued — it is sent from neha.kapoor@daitpartners.com' })).toBeVisible();
-    const sent = runSends().filter((m) => m.subject === `Next steps for ${company}`);
+    await email.getByRole('button', { name: 'Send', exact: true }).click();
+    await page.getByRole('dialog', { name: 'Set the next follow-up' }).getByRole('button', { name: 'Send without follow-up' }).click();
+    await expect(page.locator('.utoast')).toContainText('Sent');
+    // Web-mail release 3: sent as an Outlook draft (Outlook makes its plain-text alternative).
+    const sent = runSends().filter((m) => m.kind === 'draft' && m.subject === `Next steps for ${company}`);
     expect(sent).toHaveLength(1);
     expect(sent[0]!.html).toContain(`Hi <b>${company}</b>,`);
     expect(sent[0]!.html).toContain('<li>Discovery call</li>');
     expect(sent[0]!.html).toContain('href="https://daitpartners.com"');
     expect(sent[0]!.html).toContain('<b>DAIT)</b>');
     for (const bad of ['onerror', '<script', 'onclick', 'alert(']) expect(sent[0]!.html).not.toContain(bad);
-    // The plain-text alternative.
-    expect(sent[0]!.text).toContain(`Hi ${company},`);
-    expect(sent[0]!.text).toContain('Discovery call');
     const panel = page.getByRole('region', { name: 'Follow-up and history' });
     await panel.getByRole('tab', { name: /^Emails/ }).click();
     await expect(panel.getByRole('listitem').filter({ hasText: `Next steps for ${company}` })).toBeVisible();

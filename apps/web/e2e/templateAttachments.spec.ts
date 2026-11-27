@@ -6,9 +6,10 @@ import { syntheticTemplate } from '../test/oftFixture';
 
 const DB = process.env.E2E_DATABASE_URL ?? 'postgresql://mac@localhost:5432/dait_crm_e2e';
 
+/** A draft the fake Graph sent (web-mail release 3: the lead page sends through a draft), with the files on it. */
 type Sent = {
-  to: string[]; subject: string; html: string; text: string;
-  attachments: { name: string; contentType: string; isInline: boolean; contentId: string | null; size: number }[];
+  kind?: string; to: string[]; subject: string; html: string;
+  draftFiles?: { name: string; inline: boolean; contentId: string | null; size: number }[];
 };
 
 /** Runs the queued sends against the fake Microsoft Graph (apps/api/test/e2e-send-jobs.ts) and returns what it was given. */
@@ -38,7 +39,7 @@ async function expectPictures(frame: FrameLocator) {
 /**
  * Template pictures and attachments (owner, 24 Nov 2026: "it does not look good in plain text, how can be fixed with
  * images and everything similar to outlook"). A synthetic .oft (two inline logos and a PDF; no real content) is
- * uploaded, used on the lead page Email tab, and sent: the fake Graph gets the pictures inline and the PDF attached.
+ * uploaded, used on the lead page Email tab, and sent: the Outlook draft gets the pictures inline and the PDF attached.
  */
 test('an .oft with inline pictures and a PDF: uploaded, shown in the lead Email tab, sent with its files', async ({ page }) => {
   test.setTimeout(90_000);
@@ -96,18 +97,20 @@ test('an .oft with inline pictures and a PDF: uploaded, shown in the lead Email 
     await email.getByLabel('To', { exact: true }).fill('client@example.com');
     await captureParity(page, 'template-attachments-lead-email-en');
 
-    await email.getByRole('button', { name: 'Send email' }).click();
-    await expect(page.getByRole('status').filter({ hasText: 'Email queued — it is sent from neha.kapoor@daitpartners.com' })).toBeVisible();
-    const sent = runSends().filter((m) => m.to.includes('client@example.com') && m.html.includes(company));
+    await email.getByRole('button', { name: 'Send', exact: true }).click();
+    await page.getByRole('dialog', { name: 'Set the next follow-up' }).getByRole('button', { name: 'Send without follow-up' }).click();
+    await expect(page.locator('.utoast')).toContainText('Sent');
+    const sent = runSends().filter((m) => m.kind === 'draft' && m.to.includes('client@example.com') && m.html.includes(company));
     expect(sent).toHaveLength(1);
     const msg = sent[0]!;
     expect(msg.html).toContain('src="cid:test-logo.png"');
     expect(msg.html).toContain('src="cid:test-signature.png"');
     expect(msg.html).not.toContain('data:image');
-    expect(msg.attachments).toEqual([
-      { name: 'test-logo.png', contentType: 'image/png', isInline: true, contentId: 'test-logo.png', size: logo.length },
-      { name: 'test-signature.png', contentType: 'image/png', isInline: true, contentId: 'test-signature.png', size: signature.length },
-      { name: 'Season-brochure.pdf', contentType: 'application/pdf', isInline: false, contentId: null, size: pdf.length },
+    // The template's files were copied onto the Outlook draft before it was sent.
+    expect(msg.draftFiles).toEqual([
+      { name: 'test-logo.png', inline: true, contentId: 'test-logo.png', size: logo.length },
+      { name: 'test-signature.png', inline: true, contentId: 'test-signature.png', size: signature.length },
+      { name: 'Season-brochure.pdf', inline: false, contentId: null, size: pdf.length },
     ]);
 
     // The same in Spanish (screenshot).

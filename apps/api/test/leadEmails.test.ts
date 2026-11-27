@@ -4,22 +4,38 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app';
 import { prisma } from '../src/db';
 import { encrypt } from '../src/crypto/tokens';
-import type { GraphClient, MailMessage } from '../src/graph/client';
+import { localNow } from '@dait-crm/shared';
+import type { GraphClient, GraphDraft, MailMessage } from '../src/graph/client';
 import { GraphError } from '../src/graph/client';
 import { runOnce } from '../src/jobs/runner';
 import { sendUserEmailHandler } from '../src/jobs/handlers/sendUserEmail';
-import { todayIn } from '../src/leads/dates';
+import { ymd } from '../src/leads/dates';
 import { fakeGraph, resetDb, seedLookups } from './helpers';
 import { setBodyWorkerMemoryForTests } from '../src/mail/bodies';
 import { makeCompany, makeContact, makeLead, makeProject, makeUser, signIn } from './factory';
 
+/** Outlook for the drafts path: a new draft is D1, saves and sends are taken (and sends recorded). */
+const draftGraph: GraphClient & { sent: string[] } = {
+  ...fakeGraph({
+    async createDraft(_account, d): Promise<GraphDraft> {
+      return { id: 'D1', conversationId: null, subject: d.subject, html: d.html, to: d.to, cc: d.cc, bcc: d.bcc, lastModified: '2026-11-27T10:00:00Z', attachments: [] };
+    },
+    async updateDraft() {},
+    async sendDraft(_account, id) {
+      draftGraph.sent.push(id);
+    },
+  }),
+  sent: [],
+};
+
 let app: FastifyInstance;
 beforeAll(async () => {
   process.env.TEST_LOGIN = '1';
-  app = await buildApp();
+  app = await buildApp({ graph: draftGraph });
 });
 afterAll(() => app.close());
 beforeEach(async () => {
+  draftGraph.sent = [];
   await resetDb();
   await seedLookups();
 });
@@ -42,30 +58,54 @@ async function setup() {
   return { rep, admin, company, contact, lead };
 }
 
-const body = (updatedAt: Date, extra: Record<string, unknown> = {}) => ({
-  to: 'ana@andino.cl', cc: ['carlos@daitpartners.com'], subject: '¿Una llamada esta semana?', body: 'Hola Ana:\n\nSaludos', updatedAt: updatedAt.toISOString(), ...extra,
+const body = (leadId: number, extra: Record<string, unknown> = {}) => ({
+  to: 'ana@andino.cl', cc: ['carlos@daitpartners.com'], subject: '¿Una llamada esta semana?', body: 'Hola Ana:\n\nSaludos', leadId, ...extra,
 });
 
 function recordingGraph(error?: Error): GraphClient & { calls: { account: EmailAccount; msg: MailMessage }[] } {
   const calls: { account: EmailAccount; msg: MailMessage }[] = [];
   return { ...fakeGraph(), calls, async sendMail(account, msg) { calls.push({ account, msg }); if (error) throw error; } };
 }
+/** `days` after today in `zone`. */
+const dayAhead = (zone: string, days: number) => ymd(new Date(Date.parse(`${localNow(zone).day}T00:00:00Z`) + days * 86_400_000))!;
+
+/** The lead page's Send: a new draft with the lead (and project), then sent as the form holds it, after the Undo window. */
+async function sendFromLeadPage(cookie: string, leadId: number, opts: { projectId?: number; followUp?: Record<string, unknown> } = {}) {
+  const made = await call('POST', '/api/mail/drafts', cookie, { kind: 'new', leadId, ...(opts.projectId ? { projectId: opts.projectId } : {}) });
+  expect(made.statusCode, made.body).toBe(201);
+  return call('POST', `/api/mail/drafts/${made.json().id}/send`, cookie, {
+    to: ['ana@andino.cl'], cc: ['carlos@daitpartners.com'], bcc: [], subject: '¿Una llamada esta semana?', bodyHtml: '<p>Hola Ana</p>',
+    leadId, projectId: opts.projectId ?? null, at: null, followUp: opts.followUp ?? null,
+  });
+}
+
 const run = (graph: GraphClient) => runOnce({ types: ['send_user_email'], handlers: { send_user_email: sendUserEmailHandler }, graph });
 
-describe('sending email from a lead (release 2B-1)', () => {
+/*
+ * The lead page sends through the drafts path since web-mail release 3 (`POST /leads/:id/emails` is gone, see below).
+ * A message queued on a lead with `POST /mail` goes through the same queue, worker and lead effects the lead page used
+ * before, so those are checked here.
+ */
+/** Every queued send made due now (the Undo window passed), then run with the drafts Outlook. */
+async function sendsDue() {
+  await prisma.job.updateMany({ where: { type: 'send_user_email', status: 'queued' }, data: { runAt: new Date(Date.now() - 1000) } });
+  while (await run(draftGraph));
+}
+
+describe('a message queued on a lead (POST /mail with the lead): queue, worker, lead effects', () => {
   it('without a connected personal mailbox: 409 no_mailbox and nothing queued', async () => {
     const { rep, lead } = await setup();
-    const res = await call('POST', `/api/leads/${lead.id}/emails`, await signIn(app, rep), body(lead.updatedAt));
+    const res = await call('POST', '/api/mail', await signIn(app, rep), body(lead.id));
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toBe('no_mailbox');
     expect(await prisma.emailMessage.count()).toBe(0);
     expect(await prisma.job.count()).toBe(0);
   });
 
-  it('queues the message from the user\'s mailbox, logs the activity and sets the follow-up', async () => {
+  it('queues the message from the user\'s mailbox and logs the activity', async () => {
     const { rep, lead, contact, company } = await setup();
     const box = await personal(rep.id, 'seba@daitpartners.com');
-    const res = await call('POST', `/api/leads/${lead.id}/emails`, await signIn(app, rep), body(lead.updatedAt, { followUpDays: 3 }));
+    const res = await call('POST', '/api/mail', await signIn(app, rep), body(lead.id));
     expect(res.statusCode).toBe(201);
     const msg = await prisma.emailMessage.findFirstOrThrow();
     expect(msg).toMatchObject({
@@ -79,26 +119,14 @@ describe('sending email from a lead (release 2B-1)', () => {
     expect(job.payload).toEqual({ emailMessageId: msg.id });
     const act = await prisma.leadActivity.findFirstOrThrow({ where: { activityType: 'email' } });
     expect(act).toMatchObject({ title: 'Email sent · ¿Una llamada esta semana?', relatedType: 'email_message', relatedId: msg.id, byUserId: rep.id });
-    const after = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
-    const today = todayIn('Europe/London');
-    const expected = new Date(new Date(`${today}T00:00:00Z`).getTime() + 3 * 86_400_000).toISOString().slice(0, 10);
-    expect(after.nextFollowUp?.toISOString().slice(0, 10)).toBe(expected);
-  });
-
-  it('a closed lead can be emailed but gets no follow-up', async () => {
-    const { rep, lead } = await setup();
-    await prisma.lead.update({ where: { id: lead.id }, data: { status: 'Lost', nextFollowUp: null } });
-    const fresh = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
-    await personal(rep.id, 'seba@daitpartners.com');
-    const res = await call('POST', `/api/leads/${lead.id}/emails`, await signIn(app, rep), body(fresh.updatedAt, { followUpDays: 3 }));
-    expect(res.statusCode).toBe(201);
+    // No follow-up from a send: the lead page's follow-up is the send dialog's task now (drafts path).
     expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).nextFollowUp).toBeNull();
   });
 
   it('the worker sends through the user\'s mailbox and marks the message sent', async () => {
     const { rep, lead } = await setup();
     const box = await personal(rep.id, 'seba@daitpartners.com');
-    await call('POST', `/api/leads/${lead.id}/emails`, await signIn(app, rep), body(lead.updatedAt));
+    await call('POST', '/api/mail', await signIn(app, rep), body(lead.id));
     const graph = recordingGraph();
     expect(await run(graph)).toBe(true);
     expect(graph.calls).toHaveLength(1);
@@ -113,7 +141,7 @@ describe('sending email from a lead (release 2B-1)', () => {
     await personal(rep.id, 'seba@daitpartners.com');
     const html = '<p>Hola <b>Ana</b>:</p><ul><li>Uno</li></ul><p><a href="https://dait.example/x" onclick="steal()">Web</a>'
       + ' <a href="javascript:alert(1)">bad</a> <a href="tel:+34600">call</a></p><img src=x onerror="alert(1)"><script>alert(1)</script>';
-    const res = await call('POST', `/api/leads/${lead.id}/emails`, await signIn(app, rep), body(lead.updatedAt, { body: 'Hola Ana: Uno Web', bodyHtml: html }));
+    const res = await call('POST', '/api/mail', await signIn(app, rep), body(lead.id, { body: 'Hola Ana: Uno Web', bodyHtml: html }));
     expect(res.statusCode).toBe(201);
     const msg = await prisma.emailMessage.findFirstOrThrow();
     expect(msg.bodyHtml).toContain('<b>Ana</b>');
@@ -134,11 +162,11 @@ describe('sending email from a lead (release 2B-1)', () => {
     await personal(rep.id, 'seba@daitpartners.com');
     const cookie = await signIn(app, rep);
     const big = '<p>' + 'x'.repeat(200_001) + '</p><p>tail</p>';
-    const res = await call('POST', `/api/leads/${lead.id}/emails`, cookie, body(lead.updatedAt, { body: '', bodyHtml: big }));
+    const res = await call('POST', '/api/mail', cookie, body(lead.id, { body: '', bodyHtml: big }));
     expect(res.statusCode).toBe(413);
     expect(res.json()).toEqual({ error: 'message_too_long' });
     expect(await prisma.emailMessage.count()).toBe(0);
-    const ok = await call('POST', `/api/leads/${lead.id}/emails`, cookie, body(lead.updatedAt, { body: '', bodyHtml: '<p>Hola <b>Ana</b></p>' }));
+    const ok = await call('POST', '/api/mail', cookie, body(lead.id, { body: '', bodyHtml: '<p>Hola <b>Ana</b></p>' }));
     expect(ok.statusCode).toBe(201);
     expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ bodyText: 'Hola Ana', bodyHtml: '<p>Hola <b>Ana</b></p>' });
   });
@@ -147,12 +175,12 @@ describe('sending email from a lead (release 2B-1)', () => {
     const { rep, lead } = await setup();
     const cookie = await signIn(app, rep);
     // No mailbox: refused before any sanitising.
-    expect((await call('POST', `/api/leads/${lead.id}/emails`, cookie, body(lead.updatedAt, { bodyHtml: '<p>x</p>' }))).json()).toEqual({ error: 'no_mailbox' });
+    expect((await call('POST', '/api/mail', cookie, body(lead.id, { bodyHtml: '<p>x</p>' }))).json()).toEqual({ error: 'no_mailbox' });
     await personal(rep.id, 'seba@daitpartners.com');
-    const res = await call('POST', `/api/leads/${lead.id}/emails`, cookie, body(lead.updatedAt, { body: '', bodyHtml: '<script>x()</script>' }));
+    const res = await call('POST', '/api/mail', cookie, body(lead.id, { body: '', bodyHtml: '<script>x()</script>' }));
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({ error: 'validation', issues: [{ path: ['body'] }] });
-    expect((await call('POST', `/api/leads/${lead.id}/emails`, cookie, body(lead.updatedAt, { body: '' }))).statusCode).toBe(400);
+    expect((await call('POST', '/api/mail', cookie, body(lead.id, { body: '' }))).statusCode).toBe(400);
   });
 
   it('when the sanitiser worker gives up on send, the plain body the user sent goes out (re-review R2)', async () => {
@@ -160,7 +188,7 @@ describe('sending email from a lead (release 2B-1)', () => {
     await personal(rep.id, 'seba@daitpartners.com');
     setBodyWorkerMemoryForTests(16);
     try {
-      const res = await call('POST', `/api/leads/${lead.id}/emails`, await signIn(app, rep), body(lead.updatedAt, { body: 'Hola Ana, plain', bodyHtml: '<p>big</p>'.repeat(90_000) }));
+      const res = await call('POST', '/api/mail', await signIn(app, rep), body(lead.id, { body: 'Hola Ana, plain', bodyHtml: '<p>big</p>'.repeat(90_000) }));
       expect(res.statusCode).toBe(201);
     } finally {
       setBodyWorkerMemoryForTests(null);
@@ -171,7 +199,7 @@ describe('sending email from a lead (release 2B-1)', () => {
   it('a plain message is unchanged: its text as simple HTML', async () => {
     const { rep, lead } = await setup();
     await personal(rep.id, 'seba@daitpartners.com');
-    await call('POST', `/api/leads/${lead.id}/emails`, await signIn(app, rep), body(lead.updatedAt, { bodyHtml: null }));
+    await call('POST', '/api/mail', await signIn(app, rep), body(lead.id, { bodyHtml: null }));
     const msg = await prisma.emailMessage.findFirstOrThrow();
     expect(msg).toMatchObject({ bodyText: 'Hola Ana:\n\nSaludos', bodyHtml: '<div>Hola Ana:<br><br>Saludos</div>' });
     const graph = recordingGraph();
@@ -182,7 +210,7 @@ describe('sending email from a lead (release 2B-1)', () => {
   it('a temporary failure retries; the last failure marks the message failed', async () => {
     const { rep, lead } = await setup();
     await personal(rep.id, 'seba@daitpartners.com');
-    await call('POST', `/api/leads/${lead.id}/emails`, await signIn(app, rep), body(lead.updatedAt));
+    await call('POST', '/api/mail', await signIn(app, rep), body(lead.id));
     await run(recordingGraph(new GraphError('unavailable', 503)));
     expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ status: 'queued' });
     const job = await prisma.job.findFirstOrThrow();
@@ -196,7 +224,7 @@ describe('sending email from a lead (release 2B-1)', () => {
   it('a revoked mailbox marks the message failed at once and the mailbox in error', async () => {
     const { rep, lead } = await setup();
     const box = await personal(rep.id, 'seba@daitpartners.com');
-    await call('POST', `/api/leads/${lead.id}/emails`, await signIn(app, rep), body(lead.updatedAt));
+    await call('POST', '/api/mail', await signIn(app, rep), body(lead.id));
     await run(recordingGraph(new GraphError('InvalidAuthenticationToken', 401)));
     expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ status: 'failed' });
     expect((await prisma.emailAccount.findUniqueOrThrow({ where: { id: box.id } })).status).toBe('error');
@@ -206,7 +234,7 @@ describe('sending email from a lead (release 2B-1)', () => {
   it('a final failure removes the "Email sent" history line (the sender sees Failed in the Emails tab)', async () => {
     const { rep, lead } = await setup();
     await personal(rep.id, 'seba@daitpartners.com');
-    await call('POST', `/api/leads/${lead.id}/emails`, await signIn(app, rep), body(lead.updatedAt));
+    await call('POST', '/api/mail', await signIn(app, rep), body(lead.id));
     const job = await prisma.job.findFirstOrThrow();
     await prisma.job.update({ where: { id: job.id }, data: { attempts: job.maxAttempts - 1 } });
     await run(recordingGraph(new GraphError('unavailable', 503)));
@@ -217,7 +245,7 @@ describe('sending email from a lead (release 2B-1)', () => {
   it('a revoked send does not turn a since-disconnected mailbox into an error', async () => {
     const { rep, lead } = await setup();
     const box = await personal(rep.id, 'seba@daitpartners.com');
-    await call('POST', `/api/leads/${lead.id}/emails`, await signIn(app, rep), body(lead.updatedAt));
+    await call('POST', '/api/mail', await signIn(app, rep), body(lead.id));
     const graph: GraphClient = {
       ...fakeGraph(),
       async sendMail() {
@@ -234,7 +262,7 @@ describe('sending email from a lead (release 2B-1)', () => {
   it('an interrupted send is never handed to Microsoft twice', async () => {
     const { rep, lead } = await setup();
     await personal(rep.id, 'seba@daitpartners.com');
-    await call('POST', `/api/leads/${lead.id}/emails`, await signIn(app, rep), body(lead.updatedAt));
+    await call('POST', '/api/mail', await signIn(app, rep), body(lead.id));
     // A previous attempt claimed the message and then died before recording the result.
     await prisma.emailMessage.updateMany({ data: { status: 'sending' } });
     const graph = recordingGraph();
@@ -246,7 +274,7 @@ describe('sending email from a lead (release 2B-1)', () => {
   it('a queued message never goes out through a mailbox that now belongs to someone else', async () => {
     const { rep, lead } = await setup();
     const box = await personal(rep.id, 'seba@daitpartners.com');
-    await call('POST', `/api/leads/${lead.id}/emails`, await signIn(app, rep), body(lead.updatedAt));
+    await call('POST', '/api/mail', await signIn(app, rep), body(lead.id));
     const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
     await prisma.emailAccount.update({ where: { id: box.id }, data: { userId: other.id } });
     const graph = recordingGraph();
@@ -261,7 +289,7 @@ describe('sending email from a lead (release 2B-1)', () => {
     const cookie = await signIn(app, rep);
     await prisma.lead.update({ where: { id: lead.id }, data: { status: 'New' } });
     let fresh = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
-    expect((await call('POST', `/api/leads/${lead.id}/emails`, cookie, body(fresh.updatedAt))).statusCode).toBe(201);
+    expect((await call('POST', '/api/mail', cookie, body(lead.id))).statusCode).toBe(201);
     fresh = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
     expect(fresh.status).toBe('Contacted');
     const change = await prisma.leadActivity.findFirstOrThrow({ where: { activityType: 'status' } });
@@ -269,7 +297,7 @@ describe('sending email from a lead (release 2B-1)', () => {
 
     await prisma.lead.update({ where: { id: lead.id }, data: { status: 'Interested' } });
     fresh = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
-    await call('POST', `/api/leads/${lead.id}/emails`, cookie, body(fresh.updatedAt));
+    await call('POST', '/api/mail', cookie, body(lead.id));
     expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).status).toBe('Interested');
   });
 });
@@ -404,10 +432,77 @@ describe('lead Emails tab and timeline: Administrators and Managers see the team
     const { rep, lead } = await setup();
     await personal(rep.id, 'seba@daitpartners.com');
     const repCookie = await signIn(app, rep);
-    const sent = await call('POST', `/api/leads/${lead.id}/emails`, repCookie, body(lead.updatedAt));
-    expect(sent.json()).toMatchObject({ subject: '¿Una llamada esta semana?', ownerName: null });
+    const sent = await sendFromLeadPage(repCookie, lead.id);
+    expect(sent.statusCode, sent.body).toBe(202);
+    await sendsDue();
     expect(await tab(lead.id, repCookie)).toMatchObject([{ subject: '¿Una llamada esta semana?', ownerName: null }]);
     expect(await emailLines(lead.id, repCookie)).toMatchObject([{ title: 'Email sent · ¿Una llamada esta semana?' }]);
+  });
+});
+
+describe('the lead page sends through the drafts path (web-mail release 3)', () => {
+  it('POST /leads/:id/emails is gone (404); GET still lists the lead mail', async () => {
+    const { rep, lead } = await setup();
+    await personal(rep.id, 'seba@daitpartners.com');
+    const cookie = await signIn(app, rep);
+    const old = await call('POST', `/api/leads/${lead.id}/emails`, cookie, { ...body(lead.id), followUpDays: 3, updatedAt: lead.updatedAt.toISOString() });
+    expect(old.statusCode).toBe(404);
+    expect(await prisma.emailMessage.count()).toBe(0);
+    expect(await prisma.job.count()).toBe(0);
+    expect((await call('GET', `/api/leads/${lead.id}/emails`, cookie)).statusCode).toBe(200);
+  });
+
+  it("the Emails tab: a plain draft, a scheduled send and someone else's queued send stay out; your failed send is listed", async () => {
+    const { rep, admin, lead } = await setup();
+    const box = await personal(rep.id, 'seba@daitpartners.com');
+    const adminBox = await personal(admin.id, 'deepak@daitpartners.com');
+    const row = (userId: number, accountId: number, subject: string, data: Record<string, unknown>) => prisma.emailMessage.create({
+      data: { userId, accountId, leadId: lead.id, folder: 'drafts', source: 'crm', fromAddress: 'x@daitpartners.com', toAddresses: ['ana@andino.cl'], subject, bodyText: '', status: 'draft', ...data },
+    });
+    await row(rep.id, box.id, 'Plain draft', {});
+    await row(rep.id, box.id, 'Scheduled', { status: 'queued', scheduledAt: new Date(Date.now() + 86_400_000) });
+    await row(rep.id, box.id, 'Failed', { status: 'failed', lastError: 'draft_gone' });
+    await row(admin.id, adminBox.id, 'Admin sending', { status: 'queued' });
+    const subjects = async (cookie: string) => ((await call('GET', `/api/leads/${lead.id}/emails`, cookie)).json().items as { subject: string }[]).map((m) => m.subject);
+    expect(await subjects(await signIn(app, rep))).toEqual(['Failed']);
+    expect(await subjects(await signIn(app, admin))).toEqual(['Admin sending']);
+  });
+
+  it('without a connected personal mailbox: the draft is 409 no_mailbox and nothing is made', async () => {
+    const { rep, lead } = await setup();
+    const res = await call('POST', '/api/mail/drafts', await signIn(app, rep), { kind: 'new', leadId: lead.id });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('no_mailbox');
+    expect(await prisma.emailMessage.count()).toBe(0);
+  });
+
+  it('a draft made with the lead, sent with a follow-up: when the mail leaves, the "Email sent" line, Contacted and the follow-up task', async () => {
+    const { rep, lead } = await setup();
+    await prisma.lead.update({ where: { id: lead.id }, data: { status: 'New' } });
+    await personal(rep.id, 'seba@daitpartners.com');
+    const cookie = await signIn(app, rep);
+    const day = dayAhead(rep.timezone, 3);
+    const res = await sendFromLeadPage(cookie, lead.id, {
+      followUp: { date: day, time: '09:00', title: 'Follow up: ¿Una llamada esta semana?', assignedToId: rep.id, kind: 'followup', priority: 'normal', updateLead: true },
+    });
+    expect(res.statusCode, res.body).toBe(202);
+    expect(res.json()).toMatchObject({ undoUntil: expect.any(String), followUp: { date: day, time: '09:00' } });
+    // Nothing on the lead until the mail leaves; the Emails tab lists it as being sent (so the tab polls).
+    expect(await prisma.leadActivity.count({ where: { leadId: lead.id } })).toBe(0);
+    const listed = async () => ((await call('GET', `/api/leads/${lead.id}/emails`, cookie)).json().items as { status: string }[]).map((m) => m.status);
+    expect(await listed()).toEqual(['queued']);
+    await sendsDue();
+    expect(await listed()).toEqual(['sent']);
+    expect(draftGraph.sent).toHaveLength(1);
+    const msg = await prisma.emailMessage.findFirstOrThrow();
+    expect(msg).toMatchObject({ leadId: lead.id, status: 'sent', folder: 'sent', subject: '¿Una llamada esta semana?' });
+    expect(msg.toAddresses).toEqual(['ana@andino.cl']);
+    expect(msg.ccAddresses).toEqual(['carlos@daitpartners.com']);
+    const after = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
+    expect(after.status).toBe('Contacted');
+    expect(after.nextFollowUp?.toISOString().slice(0, 10)).toBe(day);
+    expect(await prisma.leadActivity.count({ where: { leadId: lead.id, activityType: 'email', title: 'Email sent · ¿Una llamada esta semana?' } })).toBe(1);
+    expect(await prisma.task.findFirstOrThrow({ where: { origin: 'email_follow_up' } })).toMatchObject({ leadId: lead.id, dueTime: '09:00', kind: 'followup' });
   });
 });
 
@@ -421,15 +516,14 @@ describe('project tag on lead page email (3B)', () => {
     const hidden = await makeProject({ companyId: other.id, leadId: (await makeLead({ companyId: other.id, assignedToId: admin.id })).id, managerId: admin.id });
     const cookie = await signIn(app, rep);
     for (const bad of [foreign.id, hidden.id]) {
-      const fresh = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
-      const res = await call('POST', `/api/leads/${lead.id}/emails`, cookie, body(fresh.updatedAt, { projectId: bad }));
+      const res = await call('POST', '/api/mail/drafts', cookie, { kind: 'new', leadId: lead.id, projectId: bad });
       expect(res.statusCode, res.body).toBe(400);
       expect(res.json().error).toBe('invalid_project');
     }
     expect(await prisma.emailMessage.count()).toBe(0);
-    const fresh = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
-    const res = await call('POST', `/api/leads/${lead.id}/emails`, cookie, body(fresh.updatedAt, { projectId: project.id }));
-    expect(res.statusCode, res.body).toBe(201);
-    expect((await prisma.emailMessage.findFirstOrThrow()).projectId).toBe(project.id);
+    const res = await sendFromLeadPage(cookie, lead.id, { projectId: project.id });
+    expect(res.statusCode, res.body).toBe(202);
+    await sendsDue();
+    expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ projectId: project.id, status: 'sent' });
   });
 });

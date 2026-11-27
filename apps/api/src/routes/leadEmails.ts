@@ -1,14 +1,9 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { EmailMessage } from '@prisma/client';
-import { LeadEmailSend } from '@dait-crm/shared';
 import { prisma } from '../db.js';
 import { requireRight } from '../plugins/auth.js';
-import { parseBody } from '../validate.js';
 import { assertLeadVisible } from '../leads/visibility.js';
-import { assertProjectFor, queueOutgoing } from '../mail/outgoing.js';
-import { guard, lockFresh } from './leads.js';
-import { FORMATTED_BODY_LIMIT, perUser } from '../mail/formatted.js';
-import { outgoingWithFiles } from '../mail/templateFiles.js';
+import { guard } from './leads.js';
 import { canSeeTeamMail, mailScope } from '../mail/access.js';
 import { audit } from '../audit.js';
 
@@ -41,44 +36,24 @@ async function auditedToday(viewerId: number, leadId: number): Promise<Set<numbe
 }
 
 /**
- * Email from the lead page (release 2B-1). Privacy (web-mail release 1): lead mail belongs to the mailbox owner.
+ * The lead page's Emails tab (release 2B-1). Sending from the lead page goes through the drafts path (web-mail release 3:
+ * routes/mailDrafts.ts, with the lead on the draft). Privacy (web-mail release 1): lead mail belongs to the mailbox owner.
  * Administrators and Managers can read every user's lead mail (view only, each opening audited); Sales representatives
  * and Data research users see only their own. Drafts stay with their owner.
  */
 export const leadEmailRoutes: FastifyPluginAsync = async (app) => {
-  app.post<{ Params: { id: string } }>('/leads/:id/emails', { preHandler: [requireRight('use_email')], bodyLimit: FORMATTED_BODY_LIMIT, config: perUser(30) }, async (request, reply) => {
-    const body = parseBody(LeadEmailSend, request.body);
-    const user = request.user!;
-    const id = Number(request.params.id);
-    return guard(reply, async () => {
-      const account = await prisma.emailAccount.findFirst({ where: { kind: 'personal', userId: user.id, status: 'connected' } });
-      if (!account) return reply.code(409).send({ error: 'no_mailbox' });
-      await assertLeadVisible(prisma, user, id, { includeArchived: true });
-      // A formatted message is sanitised again here, whatever the browser sent: after the cheap checks, before the
-      // transaction (the worker may take up to its time limit). A template's files go with it (inline pictures the
-      // HTML still shows, and the attachments the sender kept).
-      const message = await outgoingWithFiles(body.body, body.bodyHtml, body.templateId, body.attachmentIds);
-      const created = await prisma.$transaction(async (tx) => {
-        const { lead } = await lockFresh(tx, user, id, body.updatedAt);
-        if (body.projectId) await assertProjectFor(tx, user, body.projectId, lead.companyId);
-        return queueOutgoing(tx, user, account, {
-          lead, to: [body.to], cc: body.cc, subject: body.subject, ...message, followUpDays: body.followUpDays,
-          projectId: body.projectId ?? null,
-        });
-      });
-      return reply.code(201).send(emailView(created));
-    });
-  });
-
   app.get<{ Params: { id: string } }>('/leads/:id/emails', { preHandler: [requireRight('use_email')] }, async (request, reply) => {
     const user = request.user!;
     const id = Number(request.params.id);
     return guard(reply, async () => {
       await assertLeadVisible(prisma, user, id, { includeArchived: true });
       // Your own mail on the lead; with `view_team_mail`, every other user's team-readable mail too (Task 8's rule).
+      // Drafts stay out, except your own send in its Undo window or being sent (Sending, so the tab polls until it is
+      // Sent) and your own send that failed (Failed, back in your Drafts): the lead page sends through a draft.
       const scope = mailScope(user, canSeeTeamMail(user) ? 'all' : 'me');
+      const ownSend = { userId: user.id, OR: [{ status: { in: ['queued', 'sending'] }, scheduledAt: null }, { status: 'failed' }] };
       const rows = await prisma.emailMessage.findMany({
-        where: { AND: [scope.where, { leadId: id, folder: { not: 'drafts' } }] },
+        where: { AND: [scope.where, { leadId: id }, { OR: [{ folder: { not: 'drafts' } }, ownSend] }] },
         include: { user: { select: { name: true } } },
         orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: 200,
       });

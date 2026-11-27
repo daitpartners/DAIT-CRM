@@ -265,9 +265,9 @@ describe('sending a template with files', () => {
   it('lead email: inline pictures (isInline + contentId) and the kept attachment go to Graph; the message lists the attachment', async () => {
     const { lead, cookie, t } = await sender();
     const pdf = t.attachments.find((a) => !a.inline)!;
-    const res = await call('POST', `/api/leads/${lead.id}/emails`, cookie, {
+    const res = await call('POST', '/api/mail', cookie, {
       to: 'ana@andino.cl', cc: [], subject: 'Season’s greetings', body: 'Hi', bodyHtml: t.bodyHtml.replace('{first_name}', 'Ana'),
-      templateId: t.id, attachmentIds: [pdf.id], updatedAt: lead.updatedAt.toISOString(),
+      templateId: t.id, attachmentIds: [pdf.id], leadId: lead.id,
     });
     expect(res.statusCode).toBe(201);
     const graph = recordingGraph();
@@ -287,9 +287,9 @@ describe('sending a template with files', () => {
 
   it('a removed attachment and a picture taken out of the message are not sent; a cid: the template lacks is dropped', async () => {
     const { lead, cookie, t } = await sender();
-    const res = await call('POST', `/api/leads/${lead.id}/emails`, cookie, {
+    const res = await call('POST', '/api/mail', cookie, {
       to: 'ana@andino.cl', cc: [], subject: 'S', body: 'Hi', bodyHtml: '<p>Hi</p><img src="cid:dait-logo.png"><img src="cid:image009.png">',
-      templateId: t.id, attachmentIds: [], updatedAt: lead.updatedAt.toISOString(),
+      templateId: t.id, attachmentIds: [], leadId: lead.id,
     });
     expect(res.statusCode).toBe(201);
     const graph = recordingGraph();
@@ -301,15 +301,15 @@ describe('sending a template with files', () => {
   it('without a template no cid: picture survives; attachments no longer the template’s are 409 template_files_missing, without one a 400', async () => {
     const { lead, cookie, t } = await sender();
     const other = (await call('POST', '/api/email-templates', cookie, template({ name: 'Other' }))).json() as TemplateJson;
-    const base = { to: 'ana@andino.cl', cc: [], subject: 'S', body: 'Hi', updatedAt: lead.updatedAt.toISOString() };
-    const wrong = await call('POST', `/api/leads/${lead.id}/emails`, cookie, { ...base, templateId: t.id, attachmentIds: [other.attachments[2]!.id] });
+    const base = { to: 'ana@andino.cl', cc: [], subject: 'S', body: 'Hi', leadId: lead.id };
+    const wrong = await call('POST', '/api/mail', cookie, { ...base, templateId: t.id, attachmentIds: [other.attachments[2]!.id] });
     expect(wrong.statusCode).toBe(409);
     expect(wrong.json()).toEqual({ error: 'template_files_missing' });
     // An inline picture is not a "kept attachment" either.
-    expect((await call('POST', `/api/leads/${lead.id}/emails`, cookie, { ...base, templateId: t.id, attachmentIds: [t.attachments[0]!.id] })).statusCode).toBe(409);
-    expect((await call('POST', `/api/leads/${lead.id}/emails`, cookie, { ...base, attachmentIds: [t.attachments[2]!.id] })).statusCode).toBe(400);
-    expect((await call('POST', `/api/leads/${lead.id}/emails`, cookie, { ...base, templateId: 999999 })).statusCode).toBe(404);
-    const plain = await call('POST', `/api/leads/${lead.id}/emails`, cookie, { ...base, bodyHtml: '<p>Hi</p><img src="cid:dait-logo.png">' });
+    expect((await call('POST', '/api/mail', cookie, { ...base, templateId: t.id, attachmentIds: [t.attachments[0]!.id] })).statusCode).toBe(409);
+    expect((await call('POST', '/api/mail', cookie, { ...base, attachmentIds: [t.attachments[2]!.id] })).statusCode).toBe(400);
+    expect((await call('POST', '/api/mail', cookie, { ...base, templateId: 999999 })).statusCode).toBe(404);
+    const plain = await call('POST', '/api/mail', cookie, { ...base, bodyHtml: '<p>Hi</p><img src="cid:dait-logo.png">' });
     expect(plain.statusCode).toBe(201);
     const graph = recordingGraph();
     await runSends(graph);
@@ -320,8 +320,8 @@ describe('sending a template with files', () => {
   it('413 attachments_too_large when the files together are over the cap (a template stored before a lower cap)', async () => {
     const { lead, cookie, t } = await sender();
     await prisma.emailTemplateAttachment.updateMany({ where: { templateId: t.id, isInline: false }, data: { size: TEMPLATE_ATTACHMENTS_MAX_BYTES } });
-    const res = await call('POST', `/api/leads/${lead.id}/emails`, cookie, {
-      to: 'ana@andino.cl', cc: [], subject: 'S', body: 'Hi', bodyHtml: t.bodyHtml, templateId: t.id, attachmentIds: [t.attachments[2]!.id], updatedAt: lead.updatedAt.toISOString(),
+    const res = await call('POST', '/api/mail', cookie, {
+      to: 'ana@andino.cl', cc: [], subject: 'S', body: 'Hi', bodyHtml: t.bodyHtml, templateId: t.id, attachmentIds: [t.attachments[2]!.id], leadId: lead.id,
     });
     expect(res.statusCode).toBe(413);
     expect(res.json().error).toBe('attachments_too_large');
@@ -393,13 +393,13 @@ describe('security review fixes', () => {
     const big = Buffer.alloc(TEMPLATE_ATTACHMENTS_MAX_BYTES - PNG.length, 1);
     PDF.copy(big);
     const t = (await call('POST', '/api/email-templates', cookie, template({ name: 'Big', attachments: [FILES[0], { name: 'big.pdf', inline: false, data: b64(big) }] }))).json() as TemplateJson;
-    const base = { to: 'ana@andino.cl', cc: [], subject: 'S', body: 'Hi', templateId: t.id, attachmentIds: [t.attachments[1]!.id], updatedAt: lead.updatedAt.toISOString() };
-    const long = await call('POST', `/api/leads/${lead.id}/emails`, cookie, { ...base, bodyHtml: `<p>${'€'.repeat(190_000)}</p><img src="cid:dait-logo.png">` });
+    const base = { to: 'ana@andino.cl', cc: [], subject: 'S', body: 'Hi', templateId: t.id, attachmentIds: [t.attachments[1]!.id], leadId: lead.id };
+    const long = await call('POST', '/api/mail', cookie, { ...base, bodyHtml: `<p>${'€'.repeat(190_000)}</p><img src="cid:dait-logo.png">` });
     expect(long.statusCode).toBe(413);
     expect(long.json()).toEqual({ error: 'attachments_too_large' });
     expect(await prisma.emailMessage.count()).toBe(0);
     // The same files with an ordinary message go, and the request Graph gets is under its limit.
-    const ok = await call('POST', `/api/leads/${lead.id}/emails`, cookie, { ...base, bodyHtml: t.bodyHtml });
+    const ok = await call('POST', '/api/mail', cookie, { ...base, bodyHtml: t.bodyHtml });
     expect(ok.statusCode).toBe(201);
     const graph = recordingGraph();
     await runSends(graph);
@@ -416,8 +416,8 @@ describe('security review fixes', () => {
     }))).json() as TemplateJson;
     expect(t.bodyHtml).toContain(`src="cid:${cid}"`);
     // A browser or editor that lower-cased it: still sent as the file has it.
-    const res = await call('POST', `/api/leads/${lead.id}/emails`, cookie, {
-      to: 'ana@andino.cl', cc: [], subject: 'S', body: 'Hi', bodyHtml: `<p>Hi</p><img src="cid:${cid.toLowerCase()}">`, templateId: t.id, attachmentIds: [], updatedAt: lead.updatedAt.toISOString(),
+    const res = await call('POST', '/api/mail', cookie, {
+      to: 'ana@andino.cl', cc: [], subject: 'S', body: 'Hi', bodyHtml: `<p>Hi</p><img src="cid:${cid.toLowerCase()}">`, templateId: t.id, attachmentIds: [], leadId: lead.id,
     });
     expect(res.statusCode).toBe(201);
     const graph = recordingGraph();
@@ -443,8 +443,8 @@ describe('security review fixes', () => {
     const { lead, cookie, t } = await sender();
     const row = await prisma.emailTemplateAttachment.findFirstOrThrow({ where: { templateId: t.id, isInline: false } });
     await rm(path.join(storage, row.storagePath));
-    const lead1 = await call('POST', `/api/leads/${lead.id}/emails`, cookie, {
-      to: 'ana@andino.cl', cc: [], subject: 'S', body: 'Hi', bodyHtml: t.bodyHtml, templateId: t.id, attachmentIds: [row.id], updatedAt: lead.updatedAt.toISOString(),
+    const lead1 = await call('POST', '/api/mail', cookie, {
+      to: 'ana@andino.cl', cc: [], subject: 'S', body: 'Hi', bodyHtml: t.bodyHtml, templateId: t.id, attachmentIds: [row.id], leadId: lead.id,
     });
     expect(lead1.statusCode).toBe(409);
     expect(lead1.json()).toEqual({ error: 'template_files_missing' });

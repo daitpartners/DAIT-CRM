@@ -108,23 +108,6 @@ const templateFiles = {
   attachmentIds: z.array(z.number().int().positive()).max(TEMPLATE_ATTACHMENTS_MAX_COUNT).default([]),
 };
 
-/** `POST /leads/:id/emails` (release 2B-1): sent through the caller's own Microsoft 365 mailbox. */
-export const LeadEmailSend = z.object({
-  to: z.string().trim().toLowerCase().email(),
-  cc: z.array(z.string().trim().toLowerCase().email()).max(20).default([]),
-  subject: z.string().trim().min(1).max(500),
-  body: looseBody.default(''),
-  /** Formatted message: its HTML (sanitised again by the server, which derives the plain text from it). */
-  bodyHtml,
-  /** Set the lead's next follow-up this many days from today (prototype "Set follow-up in"); null = leave it. */
-  followUpDays: z.union([z.literal(2), z.literal(3), z.literal(7)]).nullish(),
-  /** Release 3B: tag it with one of the lead's company's projects (a project the sender can see). */
-  projectId: z.number().int().positive().nullish(),
-  ...templateFiles,
-  updatedAt: z.string().datetime(),
-}).superRefine(plainBodyRule(true));
-export type LeadEmailSend = z.infer<typeof LeadEmailSend>;
-
 const mailAddress = z.string().trim().toLowerCase().email();
 const mailCc = z.array(mailAddress).max(20).default([]);
 const mailBody = looseBody.default('');

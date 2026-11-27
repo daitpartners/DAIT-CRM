@@ -84,8 +84,8 @@ test('lead page: prototype sections in order, a contact without a profile, then 
   await expect(email.getByLabel('Subject')).toHaveValue('Intro call this week?');
   await expect(email.getByLabel('Message')).toHaveValue(/^Hi Priya,\n\nThanks for getting in touch with DAIT Partners\. I'd love to hear more about what you're working on at Northwind Logistics\./);
   await expect(email.getByLabel('Message')).toHaveValue(/Best regards,\nMaya Pillai$/);
-  await expect(email.getByRole('checkbox', { name: /Set follow-up in/ })).toBeChecked();
-  await expect(email.getByLabel('Follow-up in', { exact: true })).toHaveValue('3');
+  // Web-mail release 3: the follow-up is set in the box Send opens (the "Set follow-up in" choice is gone).
+  await expect(email.getByRole('checkbox', { name: /Set follow-up in/ })).toHaveCount(0);
   // Templates (release 2A): the library, your language first, others marked; picking one fills Subject and Message.
   const stamp = Date.now();
   const mk = (name: string, language: string, subject: string, body: string) =>
@@ -111,8 +111,9 @@ test('lead page: prototype sections in order, a contact without a profile, then 
   await email.getByRole('combobox', { name: 'Cc stakeholders' }).fill('ops@northwindlogistics.in');
   await email.getByRole('combobox', { name: 'Cc stakeholders' }).press('Enter');
   await expect(email.getByRole('button', { name: 'Remove ops@northwindlogistics.in' })).toBeVisible();
-  // Sending is covered by leadEmail.spec.ts (release 2B-1); here only that the button is in place.
-  await expect(email.getByRole('button', { name: 'Send email' })).toBeVisible();
+  // Sending is covered by leadEmail.spec.ts; here only that Send ▾ is in place.
+  await expect(email.getByRole('button', { name: 'Send', exact: true })).toBeVisible();
+  await expect(email.getByRole('button', { name: 'Send options' })).toBeVisible();
   await expect(email.getByLabel('Subject')).toHaveValue('Intro call this week?');
   // The topbar Email button opens the Email tab.
   await compose.getByRole('tab', { name: 'Meeting' }).click();
@@ -182,8 +183,8 @@ test('lead page: a prospect without a contact person', async ({ page }) => {
   await expect(email.getByLabel('To', { exact: true })).toHaveValue('');
   await expect(email.getByLabel('To', { exact: true })).toHaveAttribute('placeholder', 'No email on file – add a contact');
   await expect(email.getByLabel('Message')).toHaveValue(new RegExp(`^Hi ${helix.name},`));
-  // Sending is covered by leadEmail.spec.ts (release 2B-1); here only that the button is in place.
-  await expect(email.getByRole('button', { name: 'Send email' })).toBeVisible();
+  // Sending is covered by leadEmail.spec.ts; here only that the button is in place.
+  await expect(email.getByRole('button', { name: 'Send', exact: true })).toBeVisible();
 
   // Owner, 22 Nov: the Experience column shows on every lead; with nothing recorded, "—", the company, "—".
   const xp = page.getByRole('region', { name: 'Profile' }).getByRole('list', { name: 'Experience' });

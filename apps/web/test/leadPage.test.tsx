@@ -9,6 +9,8 @@ import { ToastProvider } from '../src/components/Toast';
 import { LeadModal } from '../src/pages/leads/LeadModal';
 import { LeadPage } from '../src/pages/leads/LeadPage';
 import { EmailForm } from '../src/pages/leads/EmailForm';
+import { UndoSendProvider } from '../src/components/send/UndoSend';
+import { draftView } from './draftFixture';
 import { Wrap, makeLead } from './leadFixture';
 
 const rep: Me = {
@@ -155,6 +157,79 @@ describe('lead page conflicts', () => {
   });
 });
 
+type Call = { url: string; method: string; body: Record<string, unknown> | undefined };
+
+/**
+ * The lead email form's server: the mailbox (connected unless `noMailbox`), templates, the company's projects, and the
+ * drafts path — a new draft is 9 (then 10…), a template's files copied onto it, Send answers the Undo window (or the
+ * scheduled time), Undo gives the draft back as it was sent. `sendError`: the first sends' refusal codes.
+ */
+function mailStub(opts: { templates?: unknown[]; projects?: { items: unknown[]; isClient: boolean }; noMailbox?: boolean; sendError?: string[] } = {}) {
+  const calls: Call[] = [];
+  const sent: Record<number, Record<string, unknown>> = {};
+  const sendErrors = [...(opts.sendError ?? [])];
+  let next = 9;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    const method = init?.method ?? 'GET';
+    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined;
+    if (method !== 'GET') calls.push({ url, method, body });
+    if (url === '/api/mail/drafts' && method === 'POST') {
+      return Response.json(draftView({ id: next++, replyToId: null, to: [], subject: '', bodyHtml: '', quotedHtml: null, leadId: 5, projectId: (body?.projectId as number | undefined) ?? null }), { status: 201 });
+    }
+    const tpl = /^\/api\/mail\/drafts\/(\d+)\/template$/.exec(url);
+    if (tpl) return Response.json({ files: [{ id: 'att-pdf', name: 'Brochure.pdf', contentType: 'application/pdf', size: 997_316, inline: false, contentId: null, dataUrl: null }] });
+    const send = /^\/api\/mail\/drafts\/(\d+)\/send$/.exec(url);
+    if (send) {
+      if (sendErrors.length) return Response.json({ error: sendErrors.shift() }, { status: 400 });
+      sent[Number(send[1])] = body!;
+      const at = body!.at as string | null;
+      const fu = body!.followUp as { date: string; time: string } | null;
+      return Response.json({
+        id: Number(send[1]), sendAt: at ?? new Date(Date.now() + 10_000).toISOString(), undoUntil: at ? null : new Date(Date.now() + 10_000).toISOString(),
+        followUp: fu ? { date: fu.date, time: fu.time } : null,
+      }, { status: 202 });
+    }
+    const unsend = /^\/api\/mail\/(\d+)\/unsend$/.exec(url);
+    if (unsend) {
+      const b = sent[Number(unsend[1])]!;
+      const r = (a: string) => ({ address: a, name: null, leadNumber: null });
+      return Response.json(draftView({
+        id: Number(unsend[1]), replyToId: null, to: (b.to as string[]).map(r), cc: (b.cc as string[]).map(r), subject: b.subject as string,
+        bodyHtml: b.bodyHtml as string, quotedHtml: null, leadId: 5, projectId: (b.projectId as number | null) ?? null,
+        files: [{ id: 'att-pdf', name: 'Brochure.pdf', contentType: 'application/pdf', size: 997_316, inline: false, contentId: null, dataUrl: null }],
+      }));
+    }
+    if (/^\/api\/mail\/drafts\/\d+\/files\//.test(url)) return new Response(null, { status: 204 });
+    if (url === '/api/me') return Response.json(rep);
+    if (url.startsWith('/api/email-templates/10/attachments/')) return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), { headers: { 'Content-Type': 'image/png' } });
+    if (url.startsWith('/api/email-templates')) return Response.json({ items: opts.templates ?? [] });
+    if (url === '/api/companies/4/projects') return Response.json(opts.projects ?? { items: [], isClient: false });
+    if (url === '/api/mailboxes') return Response.json({ mine: opts.noMailbox ? null : { id: 7, address: 'arjun@daitpartners.com', status: 'connected' } });
+    return Response.json({ items: [], total: 0, page: 1, pageSize: 100, isClient: false });
+  }));
+  return {
+    calls,
+    postPaths: () => calls.filter((c) => c.method === 'POST').map((c) => c.url),
+    of: (url: string) => calls.filter((c) => c.url === url).map((c) => c.body),
+  };
+}
+
+function renderEmailForm(lead: LeadFull) {
+  render(
+    <Wrap qc={setup()}>
+      <UndoSendProvider>
+        <EmailForm lead={lead} />
+      </UndoSendProvider>
+    </Wrap>,
+  );
+}
+
+/** Send, then the follow-up box's `choice` (an open lead). */
+async function sendWith(u: ReturnType<typeof userEvent.setup>, choice: 'Send and add follow-up' | 'Send without follow-up' = 'Send without follow-up') {
+  await u.click(screen.getByRole('button', { name: 'Send' }));
+  await u.click(within(await screen.findByRole('dialog', { name: 'Set the next follow-up' })).getByRole('button', { name: choice }));
+}
+
 describe('lead email form: Project picker (release 3B)', () => {
   const stakeholder = (id: number, name: string, email: string | null) => ({ id, name, email });
   const prj = (id: number, name: string, leadId: number | null, stakeholders: { id: number; name: string; email: string | null }[]) => ({
@@ -165,22 +240,9 @@ describe('lead email form: Project picker (release 3B)', () => {
   const client = { ...baseLead, contact: { ...makeLead().contact!, email: 'tom@meridian.in' }, company: { ...baseLead.company!, isClient: true } };
 
   function renderForm(lead: LeadFull, projects: { items: unknown[]; isClient: boolean }) {
-    const posts: { url: string; body: Record<string, unknown> }[] = [];
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (init?.method === 'POST') {
-        posts.push({ url, body: JSON.parse(String(init.body)) });
-        return Response.json({ id: 1, fromAddress: 'arjun@daitpartners.com' }, { status: 201 });
-      }
-      if (url === '/api/companies/4/projects') return Response.json(projects);
-      if (url === '/api/mailboxes') return Response.json({ mine: { id: 7, address: 'arjun@daitpartners.com', status: 'connected' } });
-      return Response.json({ items: [], total: 0, page: 1, pageSize: 100 });
-    }));
-    render(
-      <Wrap qc={setup()}>
-        <EmailForm lead={lead} />
-      </Wrap>,
-    );
-    return posts;
+    const api = mailStub({ projects });
+    renderEmailForm(lead);
+    return api;
   }
   const chips = () => [...document.querySelectorAll('.cchip')].map((x) => x.getAttribute('title'));
 
@@ -199,7 +261,7 @@ describe('lead email form: Project picker (release 3B)', () => {
 
   it("defaults to this lead's project with its stakeholders ticked; switching swaps them and keeps hand-added Cc; sends projectId", async () => {
     const u = userEvent.setup();
-    const posts = renderForm(client, {
+    const api = renderForm(client, {
       isClient: true,
       items: [
         prj(9, 'Other site', null, [stakeholder(31, 'Cleo', 'cleo@meridian.in'), stakeholder(32, 'Tom Hale', 'TOM@meridian.in')]),
@@ -221,32 +283,33 @@ describe('lead email form: Project picker (release 3B)', () => {
     await u.selectOptions(pick, '');
     expect(chips()).toEqual(['hand@meridian.in']);
     await u.selectOptions(pick, '9');
-    await u.click(screen.getByRole('button', { name: 'Send email' }));
-    await waitFor(() => expect(posts[0]).toMatchObject({ url: '/api/leads/5/emails', body: { projectId: 9, cc: ['hand@meridian.in', 'cleo@meridian.in'] } }));
+    await sendWith(u);
+    await waitFor(() => expect(api.of('/api/mail/drafts/9/send')).toHaveLength(1));
+    expect(api.of('/api/mail/drafts')).toEqual([{ kind: 'new', leadId: 5, projectId: 9 }]);
+    expect(api.of('/api/mail/drafts/9/send')[0]).toMatchObject({ projectId: 9, leadId: 5, to: ['tom@meridian.in'], cc: ['hand@meridian.in', 'cleo@meridian.in'], bcc: [] });
   });
 
-  it('an empty Subject is marked and focused instead of sending (review #12); a server field issue is marked too', async () => {
+  it('an empty Subject is marked and focused instead of sending (review #12); a server refusal is said in the follow-up box', async () => {
     const u = userEvent.setup();
-    const posts = renderForm(client, { items: [], isClient: true });
+    const api = mailStub({ projects: { items: [], isClient: true }, sendError: ['validation'] });
+    renderEmailForm(client);
     const subject = screen.getByRole('textbox', { name: 'Subject' });
     await u.clear(subject);
-    await u.click(screen.getByRole('button', { name: 'Send email' }));
+    await u.click(screen.getByRole('button', { name: 'Send' }));
     expect(subject).toHaveAttribute('aria-invalid', 'true');
     expect(subject).toHaveClass('err');
     expect(subject).toHaveFocus();
     expect(screen.getByText('Enter a subject')).toBeInTheDocument();
-    expect(posts).toEqual([]);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(api.calls).toEqual([]);
     await u.type(subject, 'Hello');
     expect(subject).not.toHaveAttribute('aria-invalid', 'true');
 
-    // The server rejects the message body: Message is marked, and the toast's "highlighted fields" is true.
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (init?.method === 'POST') return Response.json({ error: 'validation', issues: [{ path: ['body'], message: 'Too big' }] }, { status: 400 });
-      if (url === '/api/mailboxes') return Response.json({ mine: { id: 7, address: 'arjun@daitpartners.com', status: 'connected' } });
-      return Response.json({ items: [], total: 0, page: 1, pageSize: 100, isClient: true });
-    }));
-    await u.click(screen.getByRole('button', { name: 'Send email' }));
-    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAttribute('aria-invalid', 'true'));
+    // The server refuses the send: the box stays open with the reason, and the form keeps what was written.
+    await sendWith(u);
+    const box = screen.getByRole('dialog', { name: 'Set the next follow-up' });
+    expect(await within(box).findByText('This email could not be saved. Check that every recipient is a valid email address.')).toBeInTheDocument();
+    expect(subject).toHaveValue('Hello');
   });
 });
 
@@ -257,25 +320,20 @@ describe('lead email form: formatted templates (24 Nov 2026)', () => {
     createdBy: null, createdAt: '', updatedAt: '',
   };
   const PLAIN = { ...FORMATTED, id: 9, name: 'Plain', bodyHtml: null, sourceType: 'manual', body: 'Hi {first_name}, plain.' };
+  const WITH_FILES = {
+    ...FORMATTED, id: 10, name: 'Holiday', updatedAt: '2026-11-24T10:00:00.000Z',
+    bodyHtml: '<p>Hi {first_name}</p><img src="cid:logo.png" alt="Logo"><p>Bye</p>',
+    attachments: [
+      { id: 31, name: 'logo.png', contentType: 'image/png', size: 4, contentId: 'logo.png', inline: true },
+      { id: 32, name: 'Brochure.pdf', contentType: 'application/pdf', size: 997_316, contentId: null, inline: false },
+    ],
+  };
 
-  it('picking a formatted template fills the editor formatted (values escaped) and sends its HTML; a plain one stays plain', async () => {
+  it('picking a formatted template fills the editor formatted (values escaped) and sends its HTML; a plain one is sent as simple HTML', async () => {
     const u = userEvent.setup();
-    const posts: Record<string, unknown>[] = [];
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (init?.method === 'POST') {
-        posts.push(JSON.parse(String(init.body)));
-        return Response.json({ id: 1, fromAddress: 'arjun@daitpartners.com' }, { status: 201 });
-      }
-      if (url.startsWith('/api/email-templates')) return Response.json({ items: [FORMATTED, PLAIN] });
-      if (url === '/api/mailboxes') return Response.json({ mine: { id: 7, address: 'arjun@daitpartners.com', status: 'connected' } });
-      return Response.json({ items: [], total: 0, page: 1, pageSize: 100, isClient: false });
-    }));
+    const api = mailStub({ templates: [FORMATTED, PLAIN] });
     const lead = { ...baseLead, companyName: 'Meridian <Textiles> & Co', company: { ...baseLead.company!, name: 'Meridian <Textiles> & Co' }, contact: { ...makeLead().contact!, firstName: 'Tom', email: 'tom@meridian.in' } };
-    render(
-      <Wrap qc={setup()}>
-        <EmailForm lead={lead} />
-      </Wrap>,
-    );
+    renderEmailForm(lead);
     const pick = screen.getByRole('combobox', { name: 'Template' });
     await waitFor(() => expect(within(pick).getByRole('option', { name: 'Proposal · .oft' })).toBeTruthy());
     await u.selectOptions(pick, '8');
@@ -286,50 +344,27 @@ describe('lead email form: formatted templates (24 Nov 2026)', () => {
       return f;
     });
     expect(frame).toHaveAttribute('sandbox', 'allow-same-origin');
-    await u.click(screen.getByRole('button', { name: 'Send email' }));
-    await waitFor(() => expect(posts[0]).toMatchObject({
-      bodyHtml: '<p>Hi <b>Tom</b>,</p><ul><li>For Meridian &lt;Textiles&gt; &amp; Co</li></ul>', body: 'Hi Tom,\nThe proposal.',
+    await sendWith(u);
+    await waitFor(() => expect(api.of('/api/mail/drafts/9/send')[0]).toMatchObject({
+      bodyHtml: '<p>Hi <b>Tom</b>,</p><ul><li>For Meridian &lt;Textiles&gt; &amp; Co</li></ul>', subject: 'Proposal for Meridian <Textiles> & Co',
     }));
+    // A template without files: nothing to copy onto the draft.
+    expect(api.postPaths()).toEqual(['/api/mail/drafts', '/api/mail/drafts/9/send']);
 
-    // A plain template: the plain textarea, no HTML sent.
+    // A plain template: the plain textarea, sent as simple HTML.
     await u.selectOptions(pick, '9');
     expect(document.querySelector('iframe#em-body')).toBeNull();
     expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('Hi Tom, plain.');
     await u.type(screen.getByRole('textbox', { name: 'To' }), 'tom@meridian.in');
-    await u.click(screen.getByRole('button', { name: 'Send email' }));
-    await waitFor(() => expect(posts[1]).toMatchObject({ body: 'Hi Tom, plain.', bodyHtml: null }));
+    await sendWith(u);
+    await waitFor(() => expect(api.of('/api/mail/drafts/10/send')[0]).toMatchObject({ bodyHtml: '<p>Hi Tom, plain.</p>' }));
   });
-  it('a template with pictures and a PDF: pictures shown in the editor (data:), sent as cid:; the PDF listed and removable', async () => {
+
+  it('a template with pictures and a PDF: pictures shown in the editor (data:), sent as cid:; the files are copied to the draft before sending; the PDF removable', async () => {
     const u = userEvent.setup();
-    const posts: Record<string, unknown>[] = [];
-    const WITH_FILES = {
-      ...FORMATTED, id: 10, name: 'Holiday', updatedAt: '2026-11-24T10:00:00.000Z',
-      bodyHtml: '<p>Hi {first_name}</p><img src="cid:logo.png" alt="Logo"><p>Bye</p>',
-      attachments: [
-        { id: 31, name: 'logo.png', contentType: 'image/png', size: 4, contentId: 'logo.png', inline: true },
-        { id: 32, name: 'Brochure.pdf', contentType: 'application/pdf', size: 997_316, contentId: null, inline: false },
-      ],
-    };
-    const fetched: string[] = [];
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (init?.method === 'POST') {
-        posts.push(JSON.parse(String(init.body)));
-        return Response.json({ id: 1, fromAddress: 'arjun@daitpartners.com' }, { status: 201 });
-      }
-      if (url.startsWith('/api/email-templates/10/attachments/')) {
-        fetched.push(url);
-        return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), { headers: { 'Content-Type': 'image/png' } });
-      }
-      if (url.startsWith('/api/email-templates')) return Response.json({ items: [WITH_FILES] });
-      if (url === '/api/mailboxes') return Response.json({ mine: { id: 7, address: 'arjun@daitpartners.com', status: 'connected' } });
-      return Response.json({ items: [], total: 0, page: 1, pageSize: 100, isClient: false });
-    }));
+    const api = mailStub({ templates: [WITH_FILES] });
     const lead = { ...baseLead, contact: { ...makeLead().contact!, firstName: 'Tom', email: 'tom@meridian.in' } };
-    render(
-      <Wrap qc={setup()}>
-        <EmailForm lead={lead} />
-      </Wrap>,
-    );
+    renderEmailForm(lead);
     const pick = screen.getByRole('combobox', { name: 'Template' });
     await waitFor(() => expect(within(pick).getByRole('option', { name: 'Holiday · .oft' })).toBeTruthy());
     await u.selectOptions(pick, '10');
@@ -338,12 +373,12 @@ describe('lead email form: formatted templates (24 Nov 2026)', () => {
       const f = document.querySelector('iframe#em-body') as HTMLIFrameElement;
       expect(f.contentDocument!.body.querySelector('img')!.getAttribute('src')).toBe('data:image/png;base64,iVBORw==');
     });
-    expect(fetched).toEqual(['/api/email-templates/10/attachments/31']);
     const files = screen.getByRole('list', { name: 'Attachments' });
     expect(within(files).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Brochure.pdf · 974 KB×']);
-    await u.click(screen.getByRole('button', { name: 'Send email' }));
-    await waitFor(() => expect(posts[0]).toMatchObject({ templateId: 10, attachmentIds: [32] }));
-    expect(posts[0]!.bodyHtml).toBe('<p>Hi Tom</p><img src="cid:logo.png" alt="Logo"><p>Bye</p>');
+    await sendWith(u);
+    await waitFor(() => expect(api.postPaths()).toEqual(['/api/mail/drafts', '/api/mail/drafts/9/template', '/api/mail/drafts/9/send']));
+    expect(api.of('/api/mail/drafts/9/template')).toEqual([{ templateId: 10, attachmentIds: [32] }]);
+    expect(api.of('/api/mail/drafts/9/send')[0]!.bodyHtml).toBe('<p>Hi Tom</p><img src="cid:logo.png" alt="Logo"><p>Bye</p>');
 
     // After sending the form is blank again; picked again, the PDF can be removed before sending.
     await waitFor(() => expect(screen.queryByRole('list', { name: 'Attachments' })).toBeNull());
@@ -351,8 +386,95 @@ describe('lead email form: formatted templates (24 Nov 2026)', () => {
     await u.click(await screen.findByRole('button', { name: 'Remove Brochure.pdf' }));
     expect(screen.queryByRole('list', { name: 'Attachments' })).toBeNull();
     await u.type(screen.getByRole('textbox', { name: 'To' }), 'tom@meridian.in');
-    await u.click(screen.getByRole('button', { name: 'Send email' }));
-    await waitFor(() => expect(posts[1]).toMatchObject({ templateId: 10, attachmentIds: [] }));
+    await sendWith(u);
+    await waitFor(() => expect(api.of('/api/mail/drafts/10/template')).toEqual([{ templateId: 10, attachmentIds: [] }]));
+    await waitFor(() => expect(api.of('/api/mail/drafts/10/send')).toHaveLength(1));
   });
 });
 
+describe('lead email form: the one send path (web-mail release 3)', () => {
+  const lead = { ...baseLead, contact: { ...makeLead().contact!, firstName: 'Tom', email: 'tom@meridian.in' } };
+
+  it('lead page: Send opens the follow-up box (no follow-up-days control), then the Undo toast; the request goes through /api/mail/drafts', async () => {
+    const user = userEvent.setup();
+    const api = mailStub();
+    renderEmailForm(lead);
+    expect(screen.queryByLabelText(/Set follow-up in/)).toBeNull();
+    expect(screen.queryByLabelText('Follow-up in')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    await user.click(within(screen.getByRole('dialog', { name: 'Set the next follow-up' })).getByRole('button', { name: 'Send and add follow-up' }));
+    await waitFor(() => expect(api.postPaths()).toEqual(['/api/mail/drafts', '/api/mail/drafts/9/send']));
+    expect(api.of('/api/mail/drafts')).toEqual([{ kind: 'new', leadId: 5 }]);
+    expect(api.of('/api/mail/drafts/9/send')[0]).toMatchObject({
+      to: ['tom@meridian.in'], cc: [], bcc: [], subject: 'Intro call this week?', leadId: 5, projectId: null, at: null,
+      followUp: { title: 'Follow up: Intro call this week?', assignedToId: 2, time: '09:00' },
+    });
+    expect(api.of('/api/mail/drafts/9/send')[0]!.bodyHtml).toMatch(/^<p>Hi Tom,<\/p><p>Thanks for getting in touch/);
+    expect(await screen.findByText(/^Sent · follow-up added for/)).toBeInTheDocument();
+    // The form starts again.
+    expect(screen.getByRole('textbox', { name: 'To' })).toHaveValue('');
+  });
+
+  it('lead page: a closed lead sends without the follow-up box', async () => {
+    const user = userEvent.setup();
+    const api = mailStub();
+    renderEmailForm({ ...lead, status: 'Lost' });
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(api.postPaths()).toEqual(['/api/mail/drafts', '/api/mail/drafts/9/send']));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(api.of('/api/mail/drafts/9/send')[0]).toMatchObject({ followUp: null });
+    expect(await screen.findByText(/^Sent$/)).toBeInTheDocument();
+  });
+
+  it('lead page: Undo refills the form and the next Send reuses the draft', async () => {
+    const user = userEvent.setup();
+    const api = mailStub();
+    renderEmailForm(lead);
+    await user.clear(screen.getByRole('textbox', { name: 'Subject' }));
+    await user.type(screen.getByRole('textbox', { name: 'Subject' }), 'Pricing');
+    await sendWith(user);
+    const toast = (await screen.findByText(/^Sent$/)).closest('.utoast') as HTMLElement;
+    expect(screen.getByRole('textbox', { name: 'To' })).toHaveValue('');
+    await user.click(within(toast).getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'To' })).toHaveValue('tom@meridian.in'));
+    expect(screen.getByRole('textbox', { name: 'Subject' })).toHaveValue('Pricing');
+    await waitFor(() => {
+      const f = document.querySelector('iframe#em-body') as HTMLIFrameElement;
+      expect(f.contentDocument!.body.innerHTML).toMatch(/^<p>Hi Tom,<\/p>/);
+    });
+    // The draft's files come back listed (and removable on the draft itself).
+    expect(within(screen.getByRole('list', { name: 'Attachments' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Brochure.pdf · 974 KB×']);
+    await user.click(screen.getByRole('button', { name: 'Remove Brochure.pdf' }));
+    await waitFor(() => expect(screen.queryByRole('list', { name: 'Attachments' })).toBeNull());
+    await sendWith(user);
+    await waitFor(() => expect(api.postPaths()).toEqual(['/api/mail/drafts', '/api/mail/drafts/9/send', '/api/mail/9/unsend', '/api/mail/drafts/9/send']));
+    expect(api.calls.filter((c) => c.method === 'DELETE').map((c) => c.url)).toEqual(['/api/mail/drafts/9/files/att-pdf']);
+    expect(api.of('/api/mail/drafts/9/send')[1]).toMatchObject({ to: ['tom@meridian.in'], subject: 'Pricing', leadId: 5 });
+  });
+
+  it('lead page: Schedule send from Send ▾', async () => {
+    const user = userEvent.setup();
+    const api = mailStub();
+    renderEmailForm(lead);
+    await user.click(screen.getByRole('button', { name: 'Send options' }));
+    await user.click(within(screen.getByRole('menu', { name: 'Send options' })).getByRole('menuitem', { name: 'Schedule send…' }));
+    const pop = await screen.findByRole('dialog', { name: 'Schedule send' });
+    await user.click(within(pop).getByRole('button', { name: /Tomorrow morning/ }));
+    await user.click(within(pop).getByRole('button', { name: 'Schedule' }));
+    await user.click(within(await screen.findByRole('dialog', { name: 'Set the next follow-up' })).getByRole('button', { name: 'Send without follow-up' }));
+    await waitFor(() => expect(api.postPaths()).toEqual(['/api/mail/drafts', '/api/mail/drafts/9/send']));
+    const body = api.of('/api/mail/drafts/9/send')[0]!;
+    expect(typeof body.at).toBe('string');
+    expect(new Date(body.at as string).getUTCHours()).toBe(8);
+    expect(await screen.findByText(/^Scheduled for /)).toBeInTheDocument();
+  });
+
+  it('without a connected mailbox: the same guidance, and Send is off', async () => {
+    mailStub({ noMailbox: true });
+    renderEmailForm(lead);
+    expect(await screen.findByText(/Connect your Microsoft 365 mailbox in Settings/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open Settings' })).toHaveAttribute('href', '/settings/connections');
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Send options' })).toBeDisabled();
+  });
+});

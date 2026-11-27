@@ -1,7 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
+import { isClosedStatus } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
-import { useSendLeadEmail } from '../../api/leadEmails';
+import { useApplyTemplateFiles, useCreateDraft, useDraftFile, type DraftFileView, type DraftView } from '../../api/drafts';
 import type { LeadFull } from '../../api/leads';
 import { useMailboxes } from '../../api/mailboxes';
 import { useContacts } from '../../api/contacts';
@@ -10,12 +11,14 @@ import { useUsers } from '../../api/queries';
 import { useTemplateFiles, useTemplates } from '../../api/templates';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { AttachmentChips } from '../../components/AttachmentChips';
-import { Icons } from '../../components/Icons';
 import { MessageEditor, type MessageValue } from '../../components/MessageEditor';
+import { SendButton } from '../../components/send/SendButton';
+import { useSendFlow } from '../../components/send/useSendFlow';
 import { useToast } from '../../components/Toast';
 import { errorText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
 import { fillTemplate, fillTemplateHtml } from '../../lib/mergeFields';
+import { editorText, textToEditorHtml, toEditorHtml, toSendHtml } from '../../lib/richText';
 
 /**
  * The prototype's intro email (TPL.intro) per outreach language. Not run through t(): it follows the lead's language,
@@ -35,22 +38,38 @@ const INTRO: Record<'en' | 'es', (first: string, company: string, me: string) =>
 /** Id of the Subject field: "Focus on email" and the topbar Email button put the cursor here. */
 export const EMAIL_SUBJECT_ID = 'em-subject';
 
-const FOLLOW_DAYS = [2, 3, 7] as const;
 const EMAIL_RE = /^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]{2,}$/;
 
 type Person = { email: string; name: string; sub: string };
 
-/** Fields the form marks when they are empty or the server rejects them. */
-const EMAIL_FIELDS = ['to', 'subject', 'body'] as const;
-type EmailField = (typeof EMAIL_FIELDS)[number];
+/** Fields the form marks when they are empty. */
+type EmailField = 'to' | 'subject' | 'body';
 const FIELD_ID: Record<EmailField, string> = { to: 'em-to', subject: EMAIL_SUBJECT_ID, body: 'em-body' };
 
 /**
+ * The draft in the user's Outlook the next Send uses: made at the first Send (or given back by Undo). `synced`: its
+ * files are the form's (a template picked since, or never applied, is copied on at Send); `fileIds`: the files on it,
+ * all a template's (the lead page attaches nothing else).
+ */
+type HeldDraft = { id: number; synced: boolean; fileIds: string[] };
+
+/** The text a formatted message shows (what "Enter a message" checks). */
+function textOf(html: string): string {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  return editorText(tpl.content);
+}
+
+/**
  * The prototype's Email panel (views-lead-detail.js `data-cpanel="email"`, laid out by views-leads2.js):
- * To | Cc stakeholders, Project | Template, Subject, Message, "Set follow-up in", Send email.
+ * To | Cc stakeholders, Project | Template, Subject, Message, Send ▾.
  * Project (release 3B): offered once the company is a client, defaulting to the project from this lead. A project's
  * stakeholders (with an email, not the To address) are added to Cc; switching removes the previous project's and keeps
  * the addresses the user added by hand.
+ * Web-mail release 3 (plan decision 12): the form keeps its layout and sends through the one send path. Send makes a
+ * draft with the lead (and project) in the user's Outlook, copies on the template files kept, and hands it to the send
+ * flow: the "Set the next follow-up" box for an open lead, then the Undo toast; Send ▾ offers Schedule send. Undo fills
+ * the form again from the draft, and the next Send uses that draft.
  */
 export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boolean }) {
   const t = useT();
@@ -64,7 +83,6 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
   const opening = INTRO[leadLang](first, company, me.name);
   const [subject, setSubject] = useState(opening.subject);
   const [body, setBody] = useState<MessageValue>({ text: opening.body, html: null });
-  const [follow, setFollow] = useState(true);
   const [cc, setCc] = useState<string[]>([]);
   const { data: companyProjects } = useCompanyProjects(lead.companyId ?? NaN, lead.companyId !== null);
   const isClient = companyProjects?.isClient ?? lead.company?.isClient ?? false;
@@ -98,7 +116,6 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
     const own = projects.find((p) => p.lead?.id === lead.id);
     if (own) applyProject(own);
   }, [companyProjects]);
-  const send = useSendLeadEmail(lead.id);
   const { data: mailboxes } = useMailboxes();
   // Release 2B-1: sending goes through your own connected mailbox.
   const noMailbox = mailboxes !== undefined && mailboxes.mine?.status !== 'connected';
@@ -113,28 +130,6 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
   // The template's pictures (shown in the message) and attachments (listed under it; the sender may remove them).
   const files = useTemplateFiles();
 
-  /**
-   * Picking a template fills Subject and Message with the merge fields applied; "— blank —" restores the intro. A
-   * formatted template (an .oft with its HTML) fills the message formatted, its merge values HTML-escaped, with its
-   * inline pictures; its attachments are listed under the message.
-   */
-  async function pickTemplate(id: string) {
-    setTemplateId(id);
-    const tpl = templates?.find((x) => String(x.id) === id);
-    if (!tpl) {
-      files.clear();
-      setSubject(intro.subject);
-      setBody(intro.body);
-      return;
-    }
-    const ctx = { firstName: first, company, me: me.name, leadNumber: lead.number };
-    setSubject(fillTemplate(tpl.subject, ctx));
-    const html = await files.apply(tpl, tpl.bodyHtml ? fillTemplateHtml(tpl.bodyHtml, ctx) : null);
-    // Another template was picked while this one's pictures loaded.
-    if (html === undefined) return;
-    setBody({ text: fillTemplate(tpl.body, ctx), html });
-  }
-  const [days, setDays] = useState<number>(3);
   // Review #12: fields the user must fix are marked (red border, message, aria-invalid), not only named in a toast.
   const [bad, setBad] = useState<Partial<Record<EmailField, string>>>({});
   const fieldMsg = (f: EmailField) =>
@@ -154,45 +149,150 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
       </div>
     ) : null;
 
+  // The draft the next Send uses, and (after an Undo) the attachments already on it, listed instead of the template's.
+  const held = useRef<HeldDraft | null>(null);
+  const [heldId, setHeldId] = useState<number | null>(null);
+  const [kept, setKept] = useState<DraftFileView[] | null>(null);
+  const createDraft = useCreateDraft();
+  const applyFiles = useApplyTemplateFiles(heldId);
+  const draftFile = useDraftFile(heldId);
+  /** The template chosen when the last send went: the Template list shows it again after an Undo. */
+  const sentTemplate = useRef('');
+
+  /** A template's files change: the held draft takes them at the next Send, and its own list goes. */
+  function filesChanged() {
+    if (held.current) held.current.synced = false;
+    setKept(null);
+  }
+
+  /**
+   * Picking a template fills Subject and Message with the merge fields applied; "— blank —" restores the intro. A
+   * formatted template (an .oft with its HTML) fills the message formatted, its merge values HTML-escaped, with its
+   * inline pictures; its attachments are listed under the message.
+   */
+  async function pickTemplate(id: string) {
+    setTemplateId(id);
+    filesChanged();
+    const tpl = templates?.find((x) => String(x.id) === id);
+    if (!tpl) {
+      files.clear();
+      setSubject(intro.subject);
+      setBody(intro.body);
+      return;
+    }
+    const ctx = { firstName: first, company, me: me.name, leadNumber: lead.number };
+    setSubject(fillTemplate(tpl.subject, ctx));
+    const html = await files.apply(tpl, tpl.bodyHtml ? fillTemplateHtml(tpl.bodyHtml, ctx) : null);
+    // Another template was picked while this one's pictures loaded.
+    if (html === undefined) return;
+    setBody({ text: fillTemplate(tpl.body, ctx), html });
+  }
+
+  /** The message as it is sent: the template's pictures and those an Undo gave back as the draft's cid: pictures. */
+  function sendHtml(): string {
+    const html = files.send(body.html).bodyHtml;
+    return toSendHtml(html ?? textToEditorHtml(body.text));
+  }
+
+  /** The held draft, made now when there is none, with the template files the form keeps copied onto it. */
+  async function draftForSend(): Promise<number> {
+    if (!held.current) {
+      const v = await createDraft.mutateAsync({ kind: 'new', leadId: lead.id, ...(projectId ? { projectId } : {}) });
+      held.current = { id: v.id, synced: false, fileIds: v.files.map((f) => f.id) };
+    }
+    const d = held.current;
+    if (!d.synced) {
+      const { templateId: tplId, attachmentIds } = files.send(null);
+      const tpl = tplId ? templates?.find((x) => x.id === tplId) : undefined;
+      if (tpl && tpl.attachments.length) {
+        d.fileIds = (await applyFiles.mutateAsync({ draftId: d.id, templateId: tpl.id, attachmentIds })).map((f) => f.id);
+      } else {
+        for (const fileId of d.fileIds) await draftFile.remove(fileId);
+        d.fileIds = [];
+      }
+      d.synced = true;
+    }
+    return d.id;
+  }
+
+  /** Back to an empty form: no recipient, the intro text again, Cc from the chosen project, no template. */
+  function resetForm() {
+    held.current = null;
+    setHeldId(null);
+    setKept(null);
+    setTo('');
+    projectAdded.current = [];
+    applyProject(projects.find((p) => p.id === projectId), [], '');
+    setTemplateId('');
+    files.clear();
+    setSubject(intro.subject);
+    setBody(intro.body);
+  }
+
+  /** Undo gave the draft back: the form shows it again, and the next Send uses it. */
+  function refill(d: DraftView) {
+    held.current = { id: d.id, synced: true, fileIds: d.files.map((f) => f.id) };
+    setHeldId(d.id);
+    setKept(d.files.filter((f) => !f.inline));
+    files.clear();
+    setTemplateId(sentTemplate.current);
+    const toAddr = d.to[0]?.address ?? '';
+    setTo(toAddr);
+    const ccs = d.cc.map((r) => r.address);
+    const project = projects.find((p) => p.id === d.projectId);
+    const stakeholders = new Set((project?.stakeholders ?? []).flatMap((s) => (s.email ? [lc(s.email)] : [])));
+    projectAdded.current = ccs.filter((e) => stakeholders.has(lc(e)));
+    setProjectId(d.projectId ?? undefined);
+    setCc(ccs);
+    setSubject(d.subject);
+    setBody({ text: textOf(d.bodyHtml), html: toEditorHtml(d.bodyHtml, d.files) });
+    setBad({});
+  }
+
+  const flow = useSendFlow({
+    draftId: draftForSend,
+    fields: () => ({ to: [to.trim()], cc, bcc: [], subject, bodyHtml: sendHtml(), leadId: lead.id, projectId: projectId ?? null }),
+    lead: { id: lead.id, number: lead.number, company, status: lead.status, open: !lead.archivedAt && !isClosedStatus(lead.status) },
+    who: lead.contact?.name || to.trim(),
+    subject,
+    onSent: () => {
+      sentTemplate.current = templateId;
+      resetForm();
+    },
+    onUndone: refill,
+  });
+
+  /** Send now or at `at`: the empty fields are marked instead. */
+  function go(at: Date | null) {
+    if (noMailbox || flow.busy) return;
+    const empty = (['to', 'subject', 'body'] as const).filter((f) => !{ to, subject, body: body.text }[f].trim());
+    if (empty.length) return markBad(empty);
+    setBad({});
+    if (at) flow.schedule(at);
+    else flow.send();
+  }
+
+  async function removeKept(file: DraftFileView) {
+    try {
+      await draftFile.remove(file.id);
+      if (held.current) held.current.fileIds = held.current.fileIds.filter((id) => id !== file.id);
+      setKept((list) => list?.filter((f) => f.id !== file.id) ?? null);
+    } catch (err) {
+      toast(errorText(t, err instanceof ApiError ? err.code : 'try_again', {}, { context: 'draft' }), 'warn');
+    }
+  }
+
+  const chips = kept
+    ? kept.map((f) => ({ key: f.id, name: f.name, size: f.size }))
+    : files.attachments.map((a) => ({ key: String(a.id), name: a.name, size: a.size }));
+
   return (
     <form
       className="email-form"
       aria-label={t('Email')}
       noValidate
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (noMailbox || send.isPending) return;
-        const empty = (['to', 'subject', 'body'] as const).filter((f) => !{ to, subject, body: body.text }[f].trim());
-        if (empty.length) return markBad(empty);
-        setBad({});
-        send.mutate(
-          {
-            to: to.trim(), cc, subject, body: body.text, ...files.send(body.html), followUpDays: follow ? (days as 2 | 3 | 7) : null, projectId: projectId ?? null,
-            updatedAt: lead.updatedAt,
-          },
-          {
-            onSuccess: (sent) => {
-              toast(t('Email queued — it is sent from {address}', { address: sent.fromAddress }));
-              // Back to an empty draft: no recipient, the intro text again.
-              setTo('');
-              // Cc starts again from the chosen project's stakeholders.
-              projectAdded.current = [];
-              applyProject(projects.find((p) => p.id === projectId), [], '');
-              setTemplateId('');
-              files.clear();
-              setSubject(intro.subject);
-              setBody(intro.body);
-            },
-            onError: (err) => {
-              if (err instanceof ApiError) {
-                const fields = EMAIL_FIELDS.filter((f) => err.issues?.some((i) => i.path[0] === f));
-                markBad(fields);
-              }
-              toast(errorText(t, err instanceof ApiError ? err.code : 'unknown'), 'warn');
-            },
-          },
-        );
-      }}
+      // Sending is the Send button's alone (no submit button: Enter in a field, or in Schedule send's time, sends nothing).
+      onSubmit={(e) => e.preventDefault()}
     >
       <div className="grid2">
         <div>
@@ -281,7 +381,18 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
               clearBad('body');
             }}
           />
-          <AttachmentChips files={files.attachments.map((a) => ({ key: a.id, name: a.name, size: a.size }))} disabled={disabled} onRemove={(id) => files.remove(Number(id))} />
+          <AttachmentChips
+            files={chips}
+            disabled={disabled || flow.busy}
+            onRemove={(key) => {
+              const file = kept?.find((f) => f.id === key);
+              if (file) void removeKept(file);
+              else {
+                filesChanged();
+                files.remove(Number(key));
+              }
+            }}
+          />
           {errLine('body')}
         </div>
       </div>
@@ -292,23 +403,10 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
         </div>
       ) : null}
       <div className="email-foot">
-        <label className="sw">
-          <input type="checkbox" checked={follow} disabled={disabled} onChange={(e) => setFollow(e.target.checked)} />
-          {t('Set follow-up in')}
-        </label>
-        <select className="in email-days" aria-label={t('Follow-up in')} value={days} disabled={disabled || !follow} onChange={(e) => setDays(Number(e.target.value))}>
-          {FOLLOW_DAYS.map((d) => (
-            <option key={d} value={d}>
-              {d === 2 ? t('2 days') : d === 3 ? t('3 days') : t('1 week')}
-            </option>
-          ))}
-        </select>
         <div className="grow" />
-        <button type="submit" className="btn primary" disabled={disabled || noMailbox || send.isPending}>
-          {Icons.send}
-          {t('Send email')}
-        </button>
+        <SendButton options="menu" onSend={() => go(null)} onSchedule={(at) => go(at)} disabled={disabled || noMailbox || flow.busy} />
       </div>
+      {flow.dialog}
     </form>
   );
 }
