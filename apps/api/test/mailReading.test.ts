@@ -156,6 +156,18 @@ describe('GET /mail/:id — conversation and lead panel', () => {
     expect((await get(`/api/mail/${other.id}`, await signIn(app, f.rep))).json().leadPanel.linkReason).toBeNull();
   });
 
+  it("value is the newest quotation's last SENT total, even while a new revision is being edited", async () => {
+    const f = await setup();
+    // Sent as revision 1 for 48,000; now being revised: its lines (the unsent revision 2) total 99,000.
+    const q = await quotation({ companyId: f.acme.id, leadId: f.lead.id, ownerId: f.rep.id, status: 'Sent', date: '2026-11-10', lines: [[1, 99000]] });
+    await prisma.quotation.update({ where: { id: q.id }, data: { revision: 2, editingNewRevision: true } });
+    await prisma.quotationRevision.create({
+      data: { quotationId: q.id, revisionNo: 1, sentAt: new Date('2026-11-10T10:00:00Z'), sentTo: 'ana@acme.com', subtotal: 48000, discountTotal: 0, taxTotal: 0, grandTotal: 48000, snapshot: {} },
+    });
+    const m = await msg(f.rep.id, f.repBox.id, { leadId: f.lead.id });
+    expect((await get(`/api/mail/${m.id}`, await signIn(app, f.rep))).json().leadPanel.value).toEqual({ amount: 48000, currency: 'USD' });
+  });
+
   it('a Bcc address gives the link reason to the mailbox owner, never in team view', async () => {
     const f = await setup();
     const m = await msg(f.rep.id, f.repBox.id, {

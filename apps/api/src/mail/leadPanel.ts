@@ -23,13 +23,29 @@ export interface LeadPanel {
   linkReason: { kind: 'address' | 'domain'; value: string } | null;
 }
 
+type QuoteForValue = {
+  taxRate: Prisma.Decimal; overallDiscount: Prisma.Decimal; lines: { qty: Prisma.Decimal; unitPrice: Prisma.Decimal; discount: Prisma.Decimal }[];
+  revisions: { grandTotal: Prisma.Decimal }[];
+};
+
+/**
+ * A quotation's sent figure: its latest sent revision's grand total, so a quotation being revised (editingNewRevision,
+ * whose lines are the unsent n+1) still shows what the client received; `quoteTotals` of its lines only when it has no
+ * stored revision (marked sent without one).
+ */
+function sentTotal(q: QuoteForValue): number {
+  const sent = q.revisions[0];
+  if (sent) return Number(sent.grandTotal);
+  return quoteTotals({ lines: q.lines.map((l) => ({ qty: l.qty, price: l.unitPrice, discount: l.discount })), overallDiscount: q.overallDiscount, taxRate: q.taxRate }).total;
+}
+
 const placeOf = (city: string | null, country: string | null) => [city, country].map((s) => s?.trim()).filter(Boolean).join(', ') || null;
 
 /**
  * The lead panel for a lead the caller has already checked `user` may see (canSeeLead): a restricted lead never comes
  * here. `participants`: the open message's addresses (participantsOf). Follow-up: the open follow-up task's day and time,
- * else the lead's next follow-up, due when on or before today in the viewer's zone. Value: totals of the newest quotation
- * that is not a Draft. Recent: the newest activities, worded for the viewer (an email line's subject only for its mailbox
+ * else the lead's next follow-up, due when on or before today in the viewer's zone. Value: the sent total (sentTotal) of
+ * the newest quotation that is not a Draft. Recent: the newest activities, worded for the viewer (an email line's subject only for its mailbox
  * owner and team-mail readers). Link reason: a participant is the lead's or the contact's address, else at the
  * company's own domain (never free mail, shared hosts or our own domains).
  */
@@ -48,7 +64,10 @@ export async function leadPanel(db: Db, user: AuthUser, leadId: number, particip
     db.leadActivity.findMany({ where: { leadId }, include: activityInclude, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: RECENT }),
     db.quotation.findFirst({
       where: { leadId, status: { not: 'Draft' } }, orderBy: [{ quotationDate: 'desc' }, { id: 'desc' }],
-      select: { currency: true, taxRate: true, overallDiscount: true, lines: { select: { qty: true, unitPrice: true, discount: true } } },
+      select: {
+        currency: true, taxRate: true, overallDiscount: true, lines: { select: { qty: true, unitPrice: true, discount: true } },
+        revisions: { orderBy: { revisionNo: 'desc' }, take: 1, select: { grandTotal: true } },
+      },
     }),
     loadMailboxDomains(db),
   ]);
@@ -76,12 +95,7 @@ export async function leadPanel(db: Db, user: AuthUser, leadId: number, particip
     owner: lead.assignedTo?.name ?? null,
     followUp: followDate ? { date: followDate, time: task?.dueTime ?? null, due: followDate <= today } : null,
     lastActivity: recent[0] ? { title: recent[0].title, occurredAt: recent[0].occurredAt.toISOString() } : null,
-    value: quotation
-      ? {
-        amount: quoteTotals({ lines: quotation.lines.map((l) => ({ qty: l.qty, price: l.unitPrice, discount: l.discount })), overallDiscount: quotation.overallDiscount, taxRate: quotation.taxRate }).total,
-        currency: quotation.currency,
-      }
-      : null,
+    value: quotation ? { amount: sentTotal(quotation), currency: quotation.currency } : null,
     recent,
     linkReason: byAddress ? { kind: 'address', value: byAddress } : byDomain ? { kind: 'domain', value: site } : null,
   };
