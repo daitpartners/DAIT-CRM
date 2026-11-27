@@ -45,7 +45,7 @@ function msg(over: Partial<GraphMessage> = {}): GraphMessage {
   return {
     id: `g${n}`, subject: 'Hello', from: { name: 'Ana Ruiz', address: 'ana@acme.com' }, to: [ADDRESS], cc: [],
     receivedAt: '2026-11-20T10:00:00.000Z', sentAt: '2026-11-20T09:59:00.000Z', isRead: false, isDraft: false,
-    bcc: [], conversationId: `conv-${n}`, internetMessageId: `<m${n}@acme.com>`, hasAttachments: false, body: { contentType: 'text', content: 'Hi Maya' }, ...over,
+    bcc: [], conversationId: `conv-${n}`, internetMessageId: `<m${n}@acme.com>`, hasAttachments: false, body: { contentType: 'text', content: 'Hi Maya' }, flag: { status: 'notFlagged', due: null }, ...over,
   };
 }
 
@@ -60,8 +60,8 @@ function scripted(pages: Record<string, DeltaPage | Error>, extra: Partial<Retur
       if (page instanceof Error) throw page;
       return page ?? { messages: [], removed: [], deltaLink: `https://graph.microsoft.com/v1.0/delta/${folder ?? 'x'}/done` };
     },
-    async attachmentNames() {
-      return ['quote.pdf'];
+    async listAttachments() {
+      return [{ id: 'A1', name: 'quote.pdf', contentType: 'application/pdf', size: 1000, isInline: false, kind: 'file' as const }];
     },
     ...extra,
   });
@@ -388,9 +388,9 @@ describe('lead mail only (web-mail release 1)', () => {
     let attachmentCalls = 0;
     const m = msg({ from: { name: 'Friend', address: 'friend@gmail.com' }, to: [ADDRESS], hasAttachments: true, body: { contentType: 'html', content: '<p>Hi</p>' } });
     const { graph } = scripted({ 'start:inbox': final('inbox', [m]) }, {
-      async attachmentNames() {
+      async listAttachments() {
         attachmentCalls += 1;
-        return ['x.pdf'];
+        return [{ id: 'A1', name: 'x.pdf', contentType: 'application/pdf', size: 1000, isInline: false, kind: 'file' as const }];
       },
     });
     await syncMailboxHandler(job(account.id), { graph });

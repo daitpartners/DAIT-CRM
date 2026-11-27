@@ -30,7 +30,8 @@ const { researchCompanyHandler } = await import('../src/jobs/handlers/researchCo
 // Research never talks to Microsoft Graph.
 const refuse = () => Promise.reject(new Error('not used in e2e'));
 const graph: GraphClient = {
-  sendMail: refuse, deltaPage: refuse, attachmentNames: refuse, markRead: refuse, moveTo: refuse, reply: refuse, calendarDeltaPage: refuse, messageBody: refuse, searchPage: refuse, folderIds: refuse,
+  sendMail: refuse, deltaPage: refuse, listAttachments: refuse, attachmentContent: refuse, markRead: refuse, moveTo: refuse, setFlag: refuse, deleteMessage: refuse,
+  reply: refuse, replyAll: refuse, forward: refuse, calendarDeltaPage: refuse, messageBody: refuse, searchPage: refuse, folderIds: refuse,
 };
 
 try {

@@ -116,7 +116,7 @@ export async function storeMessage(
     ownAddress: account.address,
   });
   const threadId = m.conversationId?.slice(0, 255) ?? null;
-  const attachmentNames = m.hasAttachments ? await ctx.graph.attachmentNames(account, m.id).catch(() => []) : [];
+  const attachmentNames = m.hasAttachments ? await ctx.graph.listAttachments(account, m.id).then((a) => a.map((x) => x.name)).catch(() => []) : [];
   const projectId = await inheritedProject(user.id, threadId);
   // In a worker thread with a time limit: no email can hold up the sync (or the jobs that share its process).
   const result = await processEmailBody(m.body, BODY_MAX, { retryKey: `${user.id}:${m.id}` });

@@ -47,7 +47,7 @@ function msg(over: Partial<GraphMessage> = {}): GraphMessage {
   return {
     id: `g${n}`, subject: 'Hello', from: { name: 'Ana Ruiz', address: 'ana@acme.com' }, to: ['box1@daitpartners.com'], cc: [], bcc: [],
     receivedAt: '2026-06-20T10:00:00.000Z', sentAt: '2026-06-20T09:59:00.000Z', isRead: false, isDraft: false,
-    conversationId: `conv-${n}`, internetMessageId: `<m${n}@acme.com>`, hasAttachments: false, body: { contentType: 'text', content: 'Hi' }, ...over,
+    conversationId: `conv-${n}`, internetMessageId: `<m${n}@acme.com>`, hasAttachments: false, body: { contentType: 'text', content: 'Hi' }, flag: { status: 'notFlagged', due: null }, ...over,
   };
 }
 

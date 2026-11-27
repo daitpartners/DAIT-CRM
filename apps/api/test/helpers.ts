@@ -32,9 +32,10 @@ export function fakeGraph(impl: Partial<GraphClient> = {}): GraphClient {
     throw new Error(`unexpected graph.${name}`);
   };
   return {
-    sendMail: unexpected('sendMail'), deltaPage: unexpected('deltaPage'), attachmentNames: unexpected('attachmentNames'),
-    calendarDeltaPage: unexpected('calendarDeltaPage'), messageBody: unexpected('messageBody'),
-    markRead: unexpected('markRead'), moveTo: unexpected('moveTo'), reply: unexpected('reply'),
+    sendMail: unexpected('sendMail'), deltaPage: unexpected('deltaPage'), listAttachments: unexpected('listAttachments'),
+    attachmentContent: unexpected('attachmentContent'), calendarDeltaPage: unexpected('calendarDeltaPage'), messageBody: unexpected('messageBody'),
+    markRead: unexpected('markRead'), moveTo: unexpected('moveTo'), setFlag: unexpected('setFlag'), deleteMessage: unexpected('deleteMessage'),
+    reply: unexpected('reply'), replyAll: unexpected('replyAll'), forward: unexpected('forward'),
     searchPage: unexpected('searchPage'), folderIds: unexpected('folderIds'),
     ...impl,
   };

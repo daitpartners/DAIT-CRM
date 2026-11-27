@@ -208,6 +208,7 @@ describe('graph client — mail sync and actions (2B-2)', () => {
         id: 'g1', subject: 'Re: Proposal', from: { name: 'Ana Ruiz', address: 'ana@acme.com' }, to: ['maya@daitpartners.com'], cc: ['cc@acme.com'], bcc: [],
         receivedAt: '2026-11-20T10:00:00Z', sentAt: '2026-11-20T09:59:00Z', isRead: false, isDraft: false, conversationId: 'conv-1',
         internetMessageId: '<m1@acme.com>', hasAttachments: true, body: { contentType: 'html', content: '<p>Hello</p>' },
+        flag: { status: 'notFlagged', due: null },
       }],
       removed: ['g2'],
       nextLink: 'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages/delta?$skiptoken=abc',
@@ -388,16 +389,14 @@ describe('graph client — mail sync and actions (2B-2)', () => {
     expect((err as GraphError).message).toBe('graph_request_failed status=410 code=SyncStateNotFound');
   });
 
-  test('markRead, moveTo, reply and attachmentNames call the message endpoints', async () => {
-    const fetchMock = vi.fn(async (url: string) =>
-      url.endsWith('/attachments?$select=name') ? json({ value: [{ name: 'quote.pdf' }, { name: 'logo.png' }] }) : json({}, url.endsWith('/reply') ? 202 : 200));
+  test('markRead, moveTo and reply call the message endpoints', async () => {
+    const fetchMock = vi.fn(async (url: string) => json({}, url.endsWith('/reply') ? 202 : 200));
     vi.stubGlobal('fetch', fetchMock);
     const g = createGraphClient(env);
     const acc = await account();
     await g.markRead(acc, 'id/1', true);
     await g.moveTo(acc, 'id/1', 'archive');
     await g.reply(acc, 'id/1', { to: ['ana@acme.com'], cc: ['cc@acme.com'], html: '<div>Thanks</div>' });
-    expect(await g.attachmentNames(acc, 'id/1')).toEqual(['quote.pdf', 'logo.png']);
 
     expect(call(fetchMock, 0)[0]).toBe('https://graph.microsoft.com/v1.0/me/messages/id%2F1');
     expect(call(fetchMock, 0)[1].method).toBe('PATCH');
@@ -409,8 +408,211 @@ describe('graph client — mail sync and actions (2B-2)', () => {
       comment: '<div>Thanks</div>',
       message: { toRecipients: [{ emailAddress: { address: 'ana@acme.com' } }], ccRecipients: [{ emailAddress: { address: 'cc@acme.com' } }] },
     });
-    expect(call(fetchMock, 3)[0]).toBe('https://graph.microsoft.com/v1.0/me/messages/id%2F1/attachments?$select=name');
-    for (let i = 0; i < 4; i++) expect(headers(call(fetchMock, i)[1]).Prefer).toContain('IdType="ImmutableId"');
+    for (let i = 0; i < 3; i++) expect(headers(call(fetchMock, i)[1]).Prefer).toContain('IdType="ImmutableId"');
+  });
+});
+
+describe('graph client — flags, moves, delete, attachments, reply all, forward (web-mail release 2)', () => {
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  const call = (m: ReturnType<typeof vi.fn>, i = 0) => m.mock.calls[i] as unknown as [string, RequestInit];
+  const headers = (init: RequestInit) => init.headers as Record<string, string>;
+  const sentBody = (m: ReturnType<typeof vi.fn>, i = 0) => JSON.parse(call(m, i)[1].body as string) as unknown;
+
+  test('deltaStartUrl and searchStartUrl ask for flag', () => {
+    expect(new URL(deltaStartUrl('inbox', new Date('2026-08-24T00:00:00Z'))).searchParams.get('$select')!.split(',')).toContain('flag');
+    expect(new URL(searchStartUrl('a@acme.com', new Date('2026-08-24T00:00:00Z'))).searchParams.get('$select')!.split(',')).toContain('flag');
+  });
+
+  test('deltaPage maps flag status and keeps the due date and zone as Graph sent them (the sync converts to the user\'s day)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({
+      value: [
+        { id: 'g1', flag: { flagStatus: 'flagged', dueDateTime: { dateTime: '2026-11-27T00:00:00.0000000', timeZone: 'UTC' } } },
+        { id: 'g2', flag: { flagStatus: 'complete' } },
+        { id: 'g3', flag: { flagStatus: 'notFlagged' } },
+        { id: 'g4' },
+        { id: 'g5', flag: { flagStatus: 'somethingNew', dueDateTime: { dateTime: 7 } } },
+        { id: 'g6', flag: { flagStatus: 'flagged', dueDateTime: { dateTime: '2026-11-26T18:30:00.0000000' } } },
+      ],
+    })));
+    const page = await createGraphClient(env).deltaPage(await account(), 'https://graph.microsoft.com/v1.0/x');
+    expect(page.messages.map((m) => m.flag)).toEqual([
+      { status: 'flagged', due: { dateTime: '2026-11-27T00:00:00.0000000', timeZone: 'UTC' } },
+      { status: 'complete', due: null },
+      { status: 'notFlagged', due: null },
+      { status: 'notFlagged', due: null },
+      { status: 'notFlagged', due: null },
+      { status: 'flagged', due: { dateTime: '2026-11-26T18:30:00.0000000', timeZone: 'UTC' } },
+    ]);
+  });
+
+  test('setFlag sends flagStatus with start and due in the given zone; noDate sends neither; complete and clear only the status', async () => {
+    const fetchMock = vi.fn(async () => json({}));
+    vi.stubGlobal('fetch', fetchMock);
+    const g = createGraphClient(env);
+    const acc = await account();
+    await g.setFlag(acc, 'id/1', { status: 'flagged', start: '2026-11-26', due: '2026-11-27', timeZone: 'Asia/Kolkata' });
+    await g.setFlag(acc, 'id/1', { status: 'flagged', start: null, due: null, timeZone: 'Asia/Kolkata' });
+    await g.setFlag(acc, 'id/1', { status: 'complete' });
+    await g.setFlag(acc, 'id/1', { status: 'notFlagged' });
+    // Graph needs both dates or neither: one alone is sent as both.
+    await g.setFlag(acc, 'id/1', { status: 'flagged', start: null, due: '2026-11-30', timeZone: 'Europe/London' });
+
+    for (let i = 0; i < 5; i++) {
+      expect(call(fetchMock, i)[0]).toBe('https://graph.microsoft.com/v1.0/me/messages/id%2F1');
+      expect(call(fetchMock, i)[1].method).toBe('PATCH');
+      expect(headers(call(fetchMock, i)[1]).Prefer).toContain('IdType="ImmutableId"');
+    }
+    expect(sentBody(fetchMock, 0)).toEqual({ flag: { flagStatus: 'flagged', startDateTime: { dateTime: '2026-11-26T00:00:00', timeZone: 'Asia/Kolkata' }, dueDateTime: { dateTime: '2026-11-27T00:00:00', timeZone: 'Asia/Kolkata' } } });
+    expect(sentBody(fetchMock, 1)).toEqual({ flag: { flagStatus: 'flagged' } });
+    expect(sentBody(fetchMock, 2)).toEqual({ flag: { flagStatus: 'complete' } });
+    expect(sentBody(fetchMock, 3)).toEqual({ flag: { flagStatus: 'notFlagged' } });
+    expect(sentBody(fetchMock, 4)).toEqual({ flag: { flagStatus: 'flagged', startDateTime: { dateTime: '2026-11-30T00:00:00', timeZone: 'Europe/London' }, dueDateTime: { dateTime: '2026-11-30T00:00:00', timeZone: 'Europe/London' } } });
+  });
+
+  test('moveTo deleteditems posts destinationId deleteditems with immutable ids', async () => {
+    const fetchMock = vi.fn(async () => json({ id: 'id/1' }, 201));
+    vi.stubGlobal('fetch', fetchMock);
+    await createGraphClient(env).moveTo(await account(), 'id/1', 'deleteditems');
+    expect(call(fetchMock)[0]).toBe('https://graph.microsoft.com/v1.0/me/messages/id%2F1/move');
+    expect(call(fetchMock)[1].method).toBe('POST');
+    expect(sentBody(fetchMock)).toEqual({ destinationId: 'deleteditems' });
+    expect(headers(call(fetchMock)[1]).Prefer).toContain('IdType="ImmutableId"');
+    expect(msalState.scopes[0]).toEqual(GRAPH_MAIL_SCOPES);
+  });
+
+  test('deleteMessage sends DELETE on the message', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await createGraphClient(env).deleteMessage(await account(), 'id/1');
+    expect(call(fetchMock)[0]).toBe('https://graph.microsoft.com/v1.0/me/messages/id%2F1');
+    expect(call(fetchMock)[1].method).toBe('DELETE');
+    expect(call(fetchMock)[1].body).toBeUndefined();
+    expect(headers(call(fetchMock)[1]).Prefer).toContain('IdType="ImmutableId"');
+  });
+
+  test('deleteMessage: a message already gone is a GraphError with status 404', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ error: { code: 'ErrorItemNotFound' } }, 404)));
+    const err = await createGraphClient(env).deleteMessage(await account(), 'id/1').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GraphError);
+    expect((err as GraphError).status).toBe(404);
+  });
+
+  test('listAttachments maps id, name, type, size, inline and kind', async () => {
+    const fetchMock = vi.fn(async () => json({ value: [{ '@odata.type': '#microsoft.graph.fileAttachment', id: 'AAMk=', name: 'RFP.pdf', contentType: 'application/pdf', size: 2400000, isInline: false }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const list = await createGraphClient(env).listAttachments(await account(), 'id/1');
+    expect(list).toEqual([{ id: 'AAMk=', name: 'RFP.pdf', contentType: 'application/pdf', size: 2400000, isInline: false, kind: 'file' }]);
+    expect(call(fetchMock)[0]).toBe('https://graph.microsoft.com/v1.0/me/messages/id%2F1/attachments?$select=id,name,contentType,size,isInline');
+    expect(call(fetchMock)[1].method).toBe('GET');
+    expect(headers(call(fetchMock)[1]).Prefer).toContain('IdType="ImmutableId"');
+  });
+
+  test('listAttachments: item and reference kinds, inline pictures, and defaults for missing fields; entries without an id are left out', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({
+      value: [
+        { '@odata.type': '#microsoft.graph.itemAttachment', id: 'I1', name: 'Fwd: Meeting', contentType: null, size: 5000, isInline: false },
+        { '@odata.type': '#microsoft.graph.referenceAttachment', id: 'R1', name: 'Plan.docx', size: 0 },
+        { '@odata.type': '#microsoft.graph.fileAttachment', id: 'F1', name: 'logo.png', contentType: 'image/png', size: 1200, isInline: true },
+        { id: 'X1' },
+        { name: 'no-id.pdf' },
+      ],
+    })));
+    expect(await createGraphClient(env).listAttachments(await account(), 'id/1')).toEqual([
+      { id: 'I1', name: 'Fwd: Meeting', contentType: 'application/octet-stream', size: 5000, isInline: false, kind: 'item' },
+      { id: 'R1', name: 'Plan.docx', contentType: 'application/octet-stream', size: 0, isInline: false, kind: 'reference' },
+      { id: 'F1', name: 'logo.png', contentType: 'image/png', size: 1200, isInline: true, kind: 'file' },
+      { id: 'X1', name: '', contentType: 'application/octet-stream', size: 0, isInline: false, kind: 'file' },
+    ]);
+  });
+
+  test('attachmentContent reads the bytes of one attachment, its base64 id encoded in the path', async () => {
+    const bytes = Buffer.from('%PDF-1.4 hello %%EOF');
+    const fetchMock = vi.fn(async () => new Response(bytes, { status: 200, headers: { 'Content-Length': String(bytes.length) } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const out = await createGraphClient(env).attachmentContent(await account(), 'id/1', 'AAMk+a/b==', 1000);
+    expect(out.equals(bytes)).toBe(true);
+    expect(call(fetchMock)[0]).toBe('https://graph.microsoft.com/v1.0/me/messages/id%2F1/attachments/AAMk%2Ba%2Fb%3D%3D/$value');
+    expect(call(fetchMock)[1].method).toBe('GET');
+    expect(headers(call(fetchMock)[1]).Prefer).toContain('IdType="ImmutableId"');
+  });
+
+  test('attachmentContent refuses a file over the cap with 413 before reading it all', async () => {
+    // Content-Length over the cap: refused without reading the body.
+    let pulled = 0;
+    const endless = () => new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1;
+        controller.enqueue(new Uint8Array(400));
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(endless(), { status: 200, headers: { 'Content-Length': '5000' } })));
+    const g = createGraphClient(env);
+    const acc = await account();
+    const err = await g.attachmentContent(acc, 'id/1', 'A1', 1000).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GraphError);
+    expect((err as GraphError).status).toBe(413);
+    expect((err as GraphError).message).toBe('attachment_too_large');
+    expect(pulled).toBeLessThanOrEqual(1);
+
+    // No Content-Length: reading stops as soon as the cap is passed.
+    pulled = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(endless(), { status: 200 })));
+    const err2 = await g.attachmentContent(acc, 'id/1', 'A1', 1000).catch((e: unknown) => e);
+    expect((err2 as GraphError).status).toBe(413);
+    expect((err2 as GraphError).message).toBe('attachment_too_large');
+    expect(pulled).toBeLessThan(6);
+
+    // Exactly the cap is allowed.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array(1000), { status: 200 })));
+    expect((await g.attachmentContent(acc, 'id/1', 'A1', 1000)).length).toBe(1000);
+  });
+
+  test('attachmentContent: a download that stalls past the request timeout is a retryable GraphError 504', async () => {
+    const stalled = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(10));
+        controller.error(new DOMException('The operation timed out.', 'TimeoutError'));
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(stalled, { status: 200 })));
+    const err = await createGraphClient(env).attachmentContent(await account(), 'id/1', 'A1', 1000).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GraphError);
+    expect((err as GraphError).status).toBe(504);
+  });
+
+  test('replyAll and forward post comment and recipients to /replyAll and /forward', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 202 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const g = createGraphClient(env);
+    const acc = await account();
+    await g.replyAll(acc, 'id/1', { to: ['ana@acme.com', 'bo@acme.com'], cc: ['cc@acme.com'], html: '<div>All</div>' });
+    await g.forward(acc, 'id/1', { to: ['new@acme.com'], cc: ['cc@acme.com'], html: '<div>FYI</div>' });
+    await g.forward(acc, 'id/1', { to: ['new@acme.com'], html: '<div>FYI</div>' });
+
+    expect(call(fetchMock, 0)[0]).toBe('https://graph.microsoft.com/v1.0/me/messages/id%2F1/replyAll');
+    expect(sentBody(fetchMock, 0)).toEqual({
+      comment: '<div>All</div>',
+      message: {
+        toRecipients: [{ emailAddress: { address: 'ana@acme.com' } }, { emailAddress: { address: 'bo@acme.com' } }],
+        ccRecipients: [{ emailAddress: { address: 'cc@acme.com' } }],
+      },
+    });
+    // Graph's forward takes toRecipients at the top level; Cc goes in message (there is no top-level ccRecipients).
+    expect(call(fetchMock, 1)[0]).toBe('https://graph.microsoft.com/v1.0/me/messages/id%2F1/forward');
+    expect(sentBody(fetchMock, 1)).toEqual({
+      comment: '<div>FYI</div>',
+      toRecipients: [{ emailAddress: { address: 'new@acme.com' } }],
+      message: { ccRecipients: [{ emailAddress: { address: 'cc@acme.com' } }] },
+    });
+    expect(sentBody(fetchMock, 2)).toEqual({
+      comment: '<div>FYI</div>',
+      toRecipients: [{ emailAddress: { address: 'new@acme.com' } }],
+      message: { ccRecipients: [] },
+    });
+    for (let i = 0; i < 3; i++) {
+      expect(call(fetchMock, i)[1].method).toBe('POST');
+      expect(headers(call(fetchMock, i)[1]).Prefer).toContain('IdType="ImmutableId"');
+    }
   });
 });
 

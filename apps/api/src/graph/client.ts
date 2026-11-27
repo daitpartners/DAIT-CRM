@@ -51,6 +51,40 @@ export interface GraphMessage {
   hasAttachments: boolean;
   /** HTML as Graph sends it (asked for with `outlook.body-content-type="html"`); sync sanitises it before storing. */
   body: GraphBody;
+  /**
+   * Web-mail release 2: the Outlook flag. `due` is Graph's `dueDateTime` exactly as sent (Graph sends UTC unless asked
+   * otherwise, so 27 Nov in Asia/Kolkata arrives as `2026-11-26T18:30:00`); the sync turns it into the user's own day.
+   */
+  flag: { status: GraphFlagStatus; due: { dateTime: string; timeZone: string } | null };
+}
+
+export type GraphFlagStatus = 'notFlagged' | 'flagged' | 'complete';
+
+/** A message's attachment as listed by Graph (web-mail release 2): never stored, read on demand. */
+export interface GraphAttachment {
+  id: string;
+  name: string;
+  contentType: string;
+  size: number;
+  isInline: boolean;
+  /** file = bytes (fileAttachment), item = an attached message or event, reference = a link to a cloud file. */
+  kind: 'file' | 'item' | 'reference';
+}
+
+/**
+ * A flag to set (web-mail release 2): a due day with its start day (`YYYY-MM-DD`, midnight in `timeZone`, the user's
+ * zone), flagged with no dates (both null), Mark complete, or Clear flag (`notFlagged`).
+ */
+export type GraphFlag =
+  | { status: 'notFlagged' }
+  | { status: 'complete' }
+  | { status: 'flagged'; start: string | null; due: string | null; timeZone: string };
+
+/** Mail sent from an existing message (reply, reply all, forward). */
+export interface GraphResponseMessage {
+  to: string[];
+  cc?: string[];
+  html: string;
 }
 
 /** One page of a delta query: changed messages, removed ids, and the link to continue from. */
@@ -96,10 +130,19 @@ export interface GraphClient {
   sendMail(account: EmailAccount, msg: MailMessage): Promise<void>;
   /** Release 2B-2 (the account's own mailbox, delegated): */
   deltaPage(account: EmailAccount, url: string): Promise<DeltaPage>;
-  attachmentNames(account: EmailAccount, graphId: string): Promise<string[]>;
+  /** Web-mail release 2: a message's attachments (inline pictures included). */
+  listAttachments(account: EmailAccount, graphId: string): Promise<GraphAttachment[]>;
+  /** One attachment's bytes; more than `maxBytes` is `GraphError('attachment_too_large', 413)`, never read in full. */
+  attachmentContent(account: EmailAccount, graphId: string, attachmentId: string, maxBytes: number): Promise<Buffer>;
   markRead(account: EmailAccount, graphId: string, isRead: boolean): Promise<void>;
-  moveTo(account: EmailAccount, graphId: string, folder: 'archive' | 'inbox'): Promise<void>;
-  reply(account: EmailAccount, graphId: string, msg: { to: string[]; cc?: string[]; html: string }): Promise<void>;
+  moveTo(account: EmailAccount, graphId: string, folder: 'inbox' | 'archive' | 'deleteditems'): Promise<void>;
+  /** Web-mail release 2: set, complete or clear the Outlook flag. */
+  setFlag(account: EmailAccount, graphId: string, flag: GraphFlag): Promise<void>;
+  /** Web-mail release 2: delete permanently (from Deleted items). */
+  deleteMessage(account: EmailAccount, graphId: string): Promise<void>;
+  reply(account: EmailAccount, graphId: string, msg: GraphResponseMessage): Promise<void>;
+  replyAll(account: EmailAccount, graphId: string, msg: GraphResponseMessage): Promise<void>;
+  forward(account: EmailAccount, graphId: string, msg: GraphResponseMessage): Promise<void>;
   /**
    * One message's body as HTML (a message synced before bodies were stored as HTML, opened in the reader); `timeoutMs`
    * shortens the usual request timeout.
@@ -135,7 +178,7 @@ export const GRAPH_CALENDAR_SCOPES = ['https://graph.microsoft.com/Calendars.Rea
 const GRAPH = 'https://graph.microsoft.com/v1.0';
 const SYNC_FIELDS = [
   'subject', 'from', 'toRecipients', 'ccRecipients', 'bccRecipients', 'receivedDateTime', 'sentDateTime', 'isRead', 'isDraft',
-  'conversationId', 'internetMessageId', 'hasAttachments', 'body',
+  'conversationId', 'internetMessageId', 'hasAttachments', 'body', 'flag',
 ];
 /** Immutable ids survive moves between folders, so a message keeps its row when archived. */
 const IMMUTABLE = 'IdType="ImmutableId"';
@@ -213,6 +256,75 @@ function bodyOf(v: unknown): GraphBody {
   return { contentType: str(body?.contentType)?.toLowerCase() === 'html' ? 'html' : 'text', content: str(body?.content) ?? '' };
 }
 
+const FLAG_STATUSES = new Set<string>(['notFlagged', 'flagged', 'complete']);
+
+/** Graph's followupFlag: an unknown status is not flagged; a due date without a zone is UTC (Graph's default). */
+function flagOf(v: unknown): GraphMessage['flag'] {
+  const flag = v as { flagStatus?: unknown; dueDateTime?: { dateTime?: unknown; timeZone?: unknown } | null } | null | undefined;
+  const raw = str(flag?.flagStatus);
+  const status = (raw && FLAG_STATUSES.has(raw) ? raw : 'notFlagged') as GraphFlagStatus;
+  const dateTime = status === 'flagged' ? str(flag?.dueDateTime?.dateTime) : null;
+  return { status, due: dateTime ? { dateTime, timeZone: str(flag?.dueDateTime?.timeZone) ?? 'UTC' } : null };
+}
+
+const ATTACHMENT_KINDS: Record<string, GraphAttachment['kind']> = {
+  '#microsoft.graph.fileAttachment': 'file',
+  '#microsoft.graph.itemAttachment': 'item',
+  '#microsoft.graph.referenceAttachment': 'reference',
+};
+
+/** A Graph attachment entry (null without an id). */
+function toAttachment(v: Record<string, unknown>): GraphAttachment | null {
+  const id = str(v.id);
+  if (!id) return null;
+  return {
+    id,
+    name: str(v.name) ?? '',
+    contentType: str(v.contentType) || 'application/octet-stream',
+    size: typeof v.size === 'number' && Number.isFinite(v.size) && v.size >= 0 ? v.size : 0,
+    isInline: v.isInline === true,
+    kind: ATTACHMENT_KINDS[str(v['@odata.type']) ?? ''] ?? 'file',
+  };
+}
+
+/** A day as Graph's dateTimeTimeZone at midnight in `timeZone`. */
+const midnight = (day: string, timeZone: string) => ({ dateTime: `${day}T00:00:00`, timeZone });
+
+/** The PATCH body for a flag: Graph takes both dates or neither, so one day alone is sent as both. */
+function flagBody(flag: GraphFlag): { flag: Record<string, unknown> } {
+  if (flag.status !== 'flagged') return { flag: { flagStatus: flag.status } };
+  const start = flag.start ?? flag.due;
+  const due = flag.due ?? flag.start;
+  if (!start || !due) return { flag: { flagStatus: 'flagged' } };
+  return { flag: { flagStatus: 'flagged', startDateTime: midnight(start, flag.timeZone), dueDateTime: midnight(due, flag.timeZone) } };
+}
+
+const tooLarge = () => new GraphError('attachment_too_large', 413);
+
+/** A response body read up to `maxBytes`; reading stops (and the download is cancelled) once it passes the cap. */
+async function cappedBody(res: Response, maxBytes: number): Promise<Buffer> {
+  const length = Number(res.headers.get('Content-Length'));
+  if (Number.isFinite(length) && length > maxBytes) {
+    await res.body?.cancel().catch(() => undefined);
+    throw tooLarge();
+  }
+  if (!res.body) return Buffer.alloc(0);
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw tooLarge();
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks, total);
+}
+
 /** A delta entry as a GraphMessage. */
 function toMessage(v: Record<string, unknown>): GraphMessage {
   const from = v.from as GraphAddress;
@@ -232,6 +344,7 @@ function toMessage(v: Record<string, unknown>): GraphMessage {
     internetMessageId: str(v.internetMessageId),
     hasAttachments: v.hasAttachments === true,
     body: bodyOf(v.body),
+    flag: flagOf(v.flag),
   };
 }
 
@@ -412,10 +525,23 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
       return { messages, removed, nextLink: page['@odata.nextLink'], deltaLink: page['@odata.deltaLink'] };
     },
 
-    async attachmentNames(account, graphId) {
-      const res = await mailCall(account, `${messageUrl(graphId)}/attachments?$select=name`, 'GET');
-      const body = (await res.json()) as { value?: { name?: unknown }[] };
-      return (body.value ?? []).map((a) => str(a.name)).filter((n): n is string => !!n);
+    async listAttachments(account, graphId) {
+      const res = await mailCall(account, `${messageUrl(graphId)}/attachments?$select=id,name,contentType,size,isInline`, 'GET');
+      const body = (await res.json()) as { value?: Record<string, unknown>[] };
+      return (body.value ?? []).map(toAttachment).filter((a): a is GraphAttachment => a !== null);
+    },
+
+    async attachmentContent(account, graphId, attachmentId, maxBytes) {
+      // Attachment ids are base64 (`+`, `/`, `=`): encoded, so the id stays one path segment.
+      const res = await mailCall(account, `${messageUrl(graphId)}/attachments/${encodeURIComponent(attachmentId)}/$value`, 'GET');
+      try {
+        return await cappedBody(res, maxBytes);
+      } catch (err) {
+        // The request's timeout also covers reading the body: a stalled download is retryable like a hung request.
+        const name = (err as { name?: unknown } | null)?.name;
+        if (name === 'TimeoutError' || name === 'AbortError') throw new GraphError('graph_request_failed timeout', 504);
+        throw err;
+      }
     },
 
     async markRead(account, graphId, isRead) {
@@ -426,10 +552,34 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
       await mailCall(account, `${messageUrl(graphId)}/move`, 'POST', { destinationId: folder });
     },
 
+    async setFlag(account, graphId, flag) {
+      await mailCall(account, messageUrl(graphId), 'PATCH', flagBody(flag));
+    },
+
+    async deleteMessage(account, graphId) {
+      await mailCall(account, messageUrl(graphId), 'DELETE');
+    },
+
     async reply(account, graphId, msg) {
       await mailCall(account, `${messageUrl(graphId)}/reply`, 'POST', {
         comment: msg.html,
         message: { toRecipients: recipients(msg.to), ccRecipients: recipients(msg.cc) },
+      });
+    },
+
+    async replyAll(account, graphId, msg) {
+      await mailCall(account, `${messageUrl(graphId)}/replyAll`, 'POST', {
+        comment: msg.html,
+        message: { toRecipients: recipients(msg.to), ccRecipients: recipients(msg.cc) },
+      });
+    },
+
+    async forward(account, graphId, msg) {
+      // Graph's forward takes toRecipients at the top level but no top-level ccRecipients: Cc goes in `message`.
+      await mailCall(account, `${messageUrl(graphId)}/forward`, 'POST', {
+        comment: msg.html,
+        toRecipients: recipients(msg.to),
+        message: { ccRecipients: recipients(msg.cc) },
       });
     },
 

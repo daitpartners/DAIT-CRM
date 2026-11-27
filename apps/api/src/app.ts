@@ -37,6 +37,7 @@ import { MailAccessError } from './mail/access.js';
 import { registerAuth } from './plugins/auth.js';
 import { createMsalClient, type MicrosoftClient } from './auth/microsoft.js';
 import { createGraphClient, type GraphClient } from './graph/client.js';
+import { createE2eGraph } from './graph/e2eFake.js';
 
 export interface BuildAppOptions {
   logger?: boolean;
@@ -130,7 +131,8 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   });
   await app.register(cookie, { secret: sessionSecret(env) });
   await app.register(rateLimit, { global: false });
-  app.decorate('graph', opts.graph ?? createGraphClient(env));
+  // The e2e server's stand-in for Microsoft (web-mail release 2): only under NODE_ENV=test, never in production.
+  app.decorate('graph', opts.graph ?? (env.E2E_FAKE_GRAPH === '1' && env.NODE_ENV === 'test' ? createE2eGraph() : createGraphClient(env)));
   registerAuth(app, { secureCookies });
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ValidationError) return reply.code(400).send({ error: 'validation', issues: error.issues });
