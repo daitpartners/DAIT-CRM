@@ -1,17 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useMatch, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { MAIL_CHIPS, MAIL_SORTS, MAIL_VIEWS, useMailList, useMailMessage, useMailMeta, type ListSort, type MailChip, type MailFilter } from '../../api/mail';
 import { clientName } from '../../api/companies';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { useStoredFlag } from '../../hooks/useStoredFlag';
 import { useT } from '../../i18n/useT';
-import { ComposeModal, type ComposeStart } from './ComposeModal';
 import { FolderPane, viewLabel } from './FolderPane';
 import { MailTopBar, type MailSearch } from './MailTopBar';
 import { LeadPanel } from './LeadPanel';
 import { MessageList } from './MessageList';
 import { ReadingPane, type Composing } from './ReadingPane';
 import { CommandBar } from './CommandBar';
+import { NewMessagePage, newMessageHref } from './compose/NewMessagePage';
 import { rowTarget, selectionTarget, useMailCommands, type MailTarget } from './useMailCommands';
 
 const num = (v: string | null) => (v && /^\d+$/.test(v) ? Number(v) : undefined);
@@ -55,7 +55,8 @@ function filterFrom(params: URLSearchParams, mailOf: 'all' | number | undefined)
  * Filters panel, the command bar, and the panes (folders, the message list, the reading pane, the lead panel). Your own mailbox, synced
  * every 5 minutes; Administrators and Managers pick "Mail of:" Me / Everyone / one user to read the team's lead mail,
  * view only (web-mail release 1). A link's `company`, `lead` or `project` narrows the list and shows as a removable chip.
- * `?compose=1` (with `company`, `lead`, `project`) opens Compose preset (the Projects list's Email buttons).
+ * `/email/new` is the full-page New message (web-mail release 3): the top bar stays, the command bar and the panes give
+ * way to it. `?compose=1` (with `company`, `lead`, `project`: the Projects list's Email buttons) goes there.
  * No page numbers (owner, 23 Nov 2026): the list loads the next 50 when scrolled near its foot.
  */
 export function EmailPage() {
@@ -63,7 +64,10 @@ export function EmailPage() {
   const me = useCurrentUser();
   const navigate = useNavigate();
   const { id } = useParams();
-  const [params] = useSearchParams();
+  const composePage = useMatch('/email/new') !== null;
+  const [routeParams] = useSearchParams();
+  // On the New message page the list's filters are not in the address (its draft and link are the page's).
+  const params = composePage ? new URLSearchParams() : routeParams;
   const teamRight = me.can('view_team_mail');
   const mailOf = mailOfParam(params.get('mailof'), teamRight);
   const filter = filterFrom(params, mailOf);
@@ -71,7 +75,6 @@ export function EmailPage() {
   const { data: meta } = useMailMeta(mailOf);
   const list = useMailList(filter);
   const { items } = list;
-  const [compose, setCompose] = useState<ComposeStart | null>(null);
   /** The inline Reply / Reply all / Forward (state 2), in the reading pane of message `paneId`. */
   const [composing, setComposing] = useState<(Composing & { paneId: number }) | null>(null);
   const composingRef = useRef(composing);
@@ -115,12 +118,12 @@ export function EmailPage() {
     const s = q.toString();
     return `/email${keepId && id ? `/${id}` : ''}${s ? `?${s}` : ''}`;
   };
-  const setQuery = (change: Record<string, string | undefined>) => navigate(href(change));
+  // From the New message page a search leaves it: the draft is saved first.
+  const setQuery = (change: Record<string, string | undefined>) => (composePage ? afterSave(() => navigate(href(change))) : navigate(href(change)));
 
   // The screen's commands (rows, menus, the bulk bar); a message moved or deleted while open leaves the reading pane.
   const commands = useMailCommands({
     connected,
-    onCompose: setCompose,
     // Reply to a message of the open conversation opens the editor there; another message (a list row) is opened first.
     // The editor already open for the same reply stays; any other first saves the open one (kept on a failed save).
     onReply: (originalId, kind) => {
@@ -136,7 +139,7 @@ export function EmailPage() {
         navigate(`/email/${originalId}${params.toString() ? `?${params.toString()}` : ''}`);
       });
     },
-    newStart: () => ({ companyId: filter.company, companyName, leadId: filter.lead, projectId: filter.project }),
+    newStart: () => ({ company: filter.company, lead: filter.lead, project: filter.project }),
     onGone: (ids) => {
       const open = num(id ?? null);
       if (open !== undefined && ids.includes(open)) navigate(href({}, false));
@@ -186,15 +189,12 @@ export function EmailPage() {
     // Only their arrival in the address should trigger this.
   }, [oldPaging]);
 
-  // A Compose link (`?compose=1&company=…&lead=…&project=…`) opens Compose once; the filters stay in the address.
+  // A Compose link (`?compose=1&company=…&lead=…&project=…`, the Projects list's Email buttons) opens the New message
+  // page with them, in place of the link (Back goes to where the link was).
   const composeLink = params.get('compose') === '1';
   useEffect(() => {
     if (!composeLink) return;
-    setCompose({ companyId: filter.company, leadId: filter.lead, projectId: filter.project });
-    const q = new URLSearchParams(params);
-    q.delete('compose');
-    const s = q.toString();
-    navigate(`/email${id ? `/${id}` : ''}${s ? `?${s}` : ''}`, { replace: true });
+    navigate(newMessageHref({ company: filter.company, lead: filter.lead, project: filter.project }), { replace: true });
     // Only the link's arrival should trigger this.
   }, [composeLink]);
 
@@ -240,77 +240,81 @@ export function EmailPage() {
         </div>
       ) : null}
 
-      <CommandBar
-        target={target}
-        commands={commands}
-        onCompose={setCompose}
-        view={{
-          conv: filter.conv !== false, sort: filter.sort ?? 'date', dir: filter.dir ?? 'desc', setQuery,
-          foldersClosed, onToggleFolders: () => setFoldersClosed(!foldersClosed),
-          leadPanelClosed, onToggleLeadPanel: () => setLeadPanelClosed(!leadPanelClosed),
-        }}
-      />
+      {composePage ? <NewMessagePage guard={guard} /> : null}
 
-      <div className="wm-panes">
-        <FolderPane
-          view={view}
-          meta={meta}
-          mailOf={mailOf}
-          team={teamRight}
-          collapsed={foldersClosed}
-          onToggle={() => setFoldersClosed(!foldersClosed)}
-          href={(change) => href(change)}
-        />
+      {composePage ? null : (
+        <>
+          <CommandBar
+            target={target}
+            commands={commands}
+            view={{
+              conv: filter.conv !== false, sort: filter.sort ?? 'date', dir: filter.dir ?? 'desc', setQuery,
+              foldersClosed, onToggleFolders: () => setFoldersClosed(!foldersClosed),
+              leadPanelClosed, onToggleLeadPanel: () => setLeadPanelClosed(!leadPanelClosed),
+            }}
+          />
 
-        <MessageList
-          view={view}
-          teamView={teamView}
-          filter={filter}
-          unread={meta?.counts.inbox}
-          list={list}
-          selectedId={selectedId}
-          opened={opened}
-          rowHref={(rowId) => `/email/${rowId}${params.toString() ? `?${params.toString()}` : ''}`}
-          setQuery={setQuery}
-          commands={commands}
-          checked={checked}
-          setChecked={setChecked}
-          extra={linked ? (
-            <div className="ml-row3">
-              <Link className="chip wm-linkchip" to={href({ company: undefined, lead: undefined, project: undefined })} title={t('Clear')}>
-                {chipName || t('Linked records')} ✕
-              </Link>
-            </div>
-          ) : null}
-        />
-
-        {selectedId !== null ? (
-          <>
-            <ReadingPane
-              key={selectedId}
-              id={selectedId}
-              peek={peek}
-              teamView={teamView}
-              commands={commands}
-              composing={composing && composing.paneId === selectedId ? composing : null}
-              onCompose={(c) => {
-                if (!c) setComposing(null);
-                else afterSave(() => openEditor(selectedId, c));
-              }}
-              onSent={(sent) => setComposing((c) => (c ? { ...c, sent } : c))}
-              guard={guard}
+          <div className="wm-panes">
+            <FolderPane
+              view={view}
+              meta={meta}
+              mailOf={mailOf}
+              team={teamRight}
+              collapsed={foldersClosed}
+              onToggle={() => setFoldersClosed(!foldersClosed)}
+              href={(change) => href(change)}
             />
-            {shown && shown.id === selectedId ? (
-              <LeadPanel m={shown} commands={commands} collapsed={leadPanelClosed} onToggle={() => setLeadPanelClosed(!leadPanelClosed)} />
-            ) : null}
-          </>
-        ) : (
-          <section className="rpane empty" aria-label={t('Reading pane')}>{t('Select a message.')}</section>
-        )}
-      </div>
+
+            <MessageList
+              view={view}
+              teamView={teamView}
+              filter={filter}
+              unread={meta?.counts.inbox}
+              list={list}
+              selectedId={selectedId}
+              opened={opened}
+              rowHref={(rowId) => `/email/${rowId}${params.toString() ? `?${params.toString()}` : ''}`}
+              setQuery={setQuery}
+              commands={commands}
+              checked={checked}
+              setChecked={setChecked}
+              extra={linked ? (
+                <div className="ml-row3">
+                  <Link className="chip wm-linkchip" to={href({ company: undefined, lead: undefined, project: undefined })} title={t('Clear')}>
+                    {chipName || t('Linked records')} ✕
+                  </Link>
+                </div>
+              ) : null}
+            />
+
+            {selectedId !== null ? (
+              <>
+                <ReadingPane
+                  key={selectedId}
+                  id={selectedId}
+                  peek={peek}
+                  teamView={teamView}
+                  commands={commands}
+                  composing={composing && composing.paneId === selectedId ? composing : null}
+                  onCompose={(c) => {
+                    if (!c) setComposing(null);
+                    else afterSave(() => openEditor(selectedId, c));
+                  }}
+                  onSent={(sent) => setComposing((c) => (c ? { ...c, sent } : c))}
+                  guard={guard}
+                />
+                {shown && shown.id === selectedId ? (
+                  <LeadPanel m={shown} commands={commands} collapsed={leadPanelClosed} onToggle={() => setLeadPanelClosed(!leadPanelClosed)} />
+                ) : null}
+              </>
+            ) : (
+              <section className="rpane empty" aria-label={t('Reading pane')}>{t('Select a message.')}</section>
+            )}
+          </div>
+        </>
+      )}
 
       {commands.dialog}
-      {compose ? <ComposeModal start={compose} connected={connected} from={mailbox?.address ?? null} onClose={() => setCompose(null)} /> : null}
     </div>
   );
 }

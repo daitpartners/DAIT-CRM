@@ -53,12 +53,14 @@ test('mail parity: app side', async ({ page }) => {
   // 2. Compose with a lead chosen.
   await page.goto(`/email?company=${ob.companyId}&lead=${ob.id}`);
   await page.getByRole('button', { name: 'New mail', exact: true }).click();
-  await expect(page.getByRole('dialog')).toBeVisible();
+  // Web-mail release 3: the full-page New message (mockup state 3) in place of the prototype's Compose dialog.
+  const compose = page.getByRole('form', { name: 'New message' });
+  await expect(compose).toBeVisible();
+  await expect(compose.locator('.leadpick')).toContainText(ob.number);
   await shot(page, 'compose-open-app');
-  // The dialog opens with nothing focused (as the prototype); a click on the title leaves it unchanged.
-  await page.getByRole('dialog').getByText('Compose email', { exact: true }).click();
   await shot(page, 'compose-app');
-  await page.getByRole('dialog').getByRole('button', { name: 'Discard' }).click();
+  await compose.getByRole('button', { name: 'Discard' }).click();
+  await expect(compose).toHaveCount(0);
 
   // 3. Link email to a lead. In the full run email.spec has already made a lead from this message; unlink it again.
   sql(`update email_messages set lead_id=null, contact_id=null, company_id=null where subject='Website enquiry' and user_id=${me.id}`);

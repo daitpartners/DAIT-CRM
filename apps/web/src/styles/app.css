@@ -1338,3 +1338,38 @@ select.in.pj-locked:disabled{opacity:1;color:var(--text);-webkit-text-fill-color
 .wm .fld{align-items:flex-start}
 .wm .fld>label{line-height:36px}
 .wm .fld .lk{margin-top:8px}
+/* Web-mail release 3: the full-page New message (mockup state 3, `.cpage`): the crumb and Back to Inbox, the card with
+   DraftComposer's page form (From, Lead with its picker, Project, the template bar) and the chosen lead on the right. */
+.wm .cpage{flex:1;display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--pane)}
+.wm .cp-top{padding:12px 24px 10px}
+.wm .cp-top .crumb{font-size:12px;color:var(--muted);margin-bottom:2px}
+.wm .cp-back{font-size:13px;font-weight:600}
+.wm .cp-grid{flex:1;min-height:0;display:flex;gap:16px;padding:0 24px 16px;justify-content:center}
+.wm .cp-main{flex:1 1 auto;max-width:900px;min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;overflow:hidden}
+.wm .cp-main.cp-loading{padding:16px;font-size:12.5px;color:var(--muted)}
+.wm .reply.page{padding:0;gap:0}
+.wm .cp-main>.reply.page{flex:1;min-height:0;overflow-y:auto;border:0;border-radius:0;box-shadow:none}
+.wm .cp-main .rtop{padding:12px 14px 10px}
+.wm .cp-main .fld>label{width:56px}
+.wm .cp-main iframe.rbody{min-height:260px}
+.wm .reply.page .subj-in{font-weight:600}
+.wm .cp-lead{flex:0 0 264px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;align-self:flex-start;max-height:100%;min-width:0}
+.wm .cp-lead .lp-sec{margin:0}
+.wm .cp-lead .cp-open{justify-content:flex-start;align-self:stretch}
+.wm .cp-none{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted)}
+.wm .cp-none b{color:var(--text);font-weight:600}
+@media (max-width:1360px){.wm .cp-lead{flex-basis:236px}}
+@media (max-width:899.98px){.wm .cp-grid{flex-direction:column;padding:0 12px 12px}.wm .cp-lead{flex:none;align-self:stretch}}
+.wm .fld select.from{border:0;background-color:transparent;font-size:12.5px;font-weight:600;height:28px;padding:0 4px;color:var(--text);font-family:inherit;max-width:100%;min-width:0}
+.wm .fld select.from:disabled{color:var(--muted)}
+.wm .fld .hintr{margin-left:auto;font-size:11px;color:var(--muted);white-space:nowrap}
+.wm .leadpick{display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 8px;border:1px solid var(--field);border-radius:7px;font-size:12px;font-weight:600;background:var(--surface);color:var(--text);max-width:100%;font-family:inherit;cursor:pointer}
+.wm .leadpick:hover{border-color:var(--purple)}
+.wm .leadpick .lp-t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.wm .leadpick .ico{width:13px;height:13px;color:var(--orange)}
+.wm .leadpick .ico.car{color:var(--muted)}
+.wm .tplbar{display:flex;align-items:center;gap:8px;padding:8px 14px;background:#FFFBF4;border-top:1px solid var(--line-2);border-bottom:1px dashed var(--peach);font-size:12px;color:var(--body)}
+.wm .tplbar .ico{width:14px;height:14px;color:var(--orange)}
+.wm .tplbar b{font-weight:600;color:var(--text)}
+.wm .tplbar .lk{border:0;background:none;padding:0;font-size:12px;font-weight:600;color:var(--purple);margin-left:-4px}
+.wm .tplbar .lk:hover{text-decoration:underline}

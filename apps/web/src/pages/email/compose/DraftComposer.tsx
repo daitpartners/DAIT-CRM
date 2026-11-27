@@ -3,7 +3,7 @@ import { isClosedStatus, localNow } from '@dait-crm/shared';
 import { ApiError, api } from '../../../api/client';
 import {
   isFinalSaveCode, useApplyTemplateFiles, useAutoSave, useCreateDraft, useDiscardDraft, useDraftFile,
-  type DraftFields, type DraftFileView, type DraftStart, type DraftView, type SendResult,
+  type DraftFields, type DraftFileView, type DraftStart, type DraftView, type FlushResult, type SendResult,
 } from '../../../api/drafts';
 import { useLead } from '../../../api/leads';
 import { useSignature } from '../../../api/signature';
@@ -25,6 +25,20 @@ import { RecipientField } from './RecipientField';
 
 /** What a send left for the screen: the queued send, and who it went to (the first To recipient's name). */
 export type SentInfo = { result: SendResult; to: string };
+
+/** What the full page asks of its composer (the Lead and Project rows, the template bar). */
+export type ComposerControl = {
+  /** Saves what the editor holds now (useAutoSave's flush). */
+  flush(): Promise<FlushResult>;
+  /** A change made on the page's own rows (the lead, the project): the draft counts as touched. */
+  touch(): void;
+  /** Puts `address` in To when To is empty. */
+  fillTo(address: string): void;
+  /** Puts `addresses` in Cc when Cc is empty, leaving out To's addresses and `except`. */
+  fillCc(addresses: string[], except?: string[]): void;
+  /** Opens the templates menu under `el` (the template bar's Change). */
+  openTemplates(el: HTMLElement): void;
+};
 
 type Props = {
   draft: DraftView;
@@ -50,6 +64,20 @@ type Props = {
    * (the screen then keeps the editor where it is).
    */
   guard?: MutableRefObject<(() => Promise<boolean>) | null>;
+  /** The page's rows before To (From). */
+  before?: ReactNode;
+  /** The lead chosen on the page (its Lead picker); the draft's own when not given. */
+  leadId?: number | null;
+  /** The project chosen on the page; the draft's own when not given. */
+  projectId?: number | null;
+  /** The chosen lead's time zone when it is not the sender's; the draft's own when not given. */
+  recipientZone?: { zone: string; label: string } | null;
+  /** Set while the composer is open (the page's Lead and Project rows and template bar use it). */
+  control?: MutableRefObject<ComposerControl | null>;
+  /** A template to fill once the templates are loaded (`?template=`); a fill the user did not make, so not a touch. */
+  template?: number;
+  /** A template was filled (from `template`, the toolbar or the template bar), its fields from lead `lead` (number). */
+  onTemplate?(tp: EmailTemplate, lead: string | null): void;
 };
 
 /** Codes saying the draft itself is gone: discarding then just closes. */
@@ -73,8 +101,14 @@ function signatureOf(html: string): string {
  * (subject when empty, the message from the draft's lead, then the template's files) and sends through the one send flow.
  * Closing (Discard, Pop out) saves first and stays open when that fails. A draft the screen just created and the user
  * never touched is discarded when the composer goes; a touched one is saved once more and stays in Drafts.
+ * The full page (state 3) adds its From row (`before`), its Lead / Project rows and template bar (`header`), the lead
+ * and project it chose (`leadId`, `projectId`, with that lead's `recipientZone`), a `?template=` to fill once, and
+ * `control` for its rows to fill To / Cc, count as a change, save, or open the templates menu.
  */
-export function DraftComposer({ draft, variant, label, onClose, onUndone, header, lead, created = false, start, onDraftId, guard }: Props) {
+export function DraftComposer({
+  draft, variant, label, onClose, onUndone, header, lead, created = false, start, onDraftId, guard, before, leadId: chosenLead, projectId: chosenProject,
+  recipientZone, control, template, onTemplate,
+}: Props) {
   const t = useT();
   const me = useCurrentUser();
   const toast = useToast();
@@ -98,7 +132,9 @@ export function DraftComposer({ draft, variant, label, onClose, onUndone, header
   const [templatesAt, setTemplatesAt] = useState<{ x: number; y: number } | null>(null);
 
   const sendHtml = useMemo(() => toSendHtml(body.html ?? ''), [body.html]);
-  const fields: DraftFields = { to, cc, bcc, subject, bodyHtml: sendHtml, leadId: draft.leadId, projectId: draft.projectId };
+  const leadId = chosenLead !== undefined ? chosenLead : draft.leadId;
+  const projectId = chosenProject !== undefined ? chosenProject : draft.projectId;
+  const fields: DraftFields = { to, cc, bcc, subject, bodyHtml: sendHtml, leadId, projectId };
   const auto = useAutoSave(id, fields, { enabled: true });
 
   // What the timers and the unmount read: the latest of everything.
@@ -155,16 +191,20 @@ export function DraftComposer({ draft, variant, label, onClose, onUndone, header
     // Once, for the composer's life.
   }, []);
 
-  // The lead for the follow-up box: the screen's, else read from the draft's (visible) lead.
-  const readLead = lead === undefined && draft.lead !== null && draft.leadId !== null;
-  const { data: full } = useLead(readLead ? draft.leadId! : NaN);
+  // The lead for the follow-up box: the screen's, else read from the draft's (visible) lead or the one the page chose.
+  const otherLead = leadId !== draft.leadId;
+  const readLead = lead === undefined && leadId !== null && (otherLead || draft.lead !== null);
+  const { data: full } = useLead(readLead ? leadId! : NaN);
   const flowLead: SendFlowLead | null = lead !== undefined
     ? lead
     : readLead && full
       ? { id: full.id, number: full.number, company: full.companyName, status: full.status, open: !full.archivedAt && !isClosedStatus(full.status) }
       : null;
   const nameOf = (address: string | undefined) => (address ? known.find((r) => r.address.toLowerCase() === address.toLowerCase())?.name || address : '');
-  const who = draft.lead?.contact?.name || nameOf(to[0]);
+  // Who the mail is for (the template's first name, the follow-up box): the chosen lead's contact.
+  const contactName = otherLead ? full?.contact?.name : draft.lead?.contact?.name;
+  const companyName = otherLead ? full?.companyName : draft.lead?.company?.name ?? flowLead?.company;
+  const who = contactName || nameOf(to[0]);
 
   const flow = useSendFlow({
     draftId: async () => latest.current.id,
@@ -225,11 +265,12 @@ export function DraftComposer({ draft, variant, label, onClose, onUndone, header
     }
   }
 
-  async function applyTemplate(tp: EmailTemplate) {
-    touch();
+  async function applyTemplate(tp: EmailTemplate, byUser = true) {
+    if (byUser) touch();
+    onTemplate?.(tp, flowLead?.number ?? null);
     const ctx = {
-      firstName: firstName(draft.lead?.contact?.name || nameOf(to[0]) || ''),
-      company: draft.lead?.company?.name ?? flowLead?.company ?? '',
+      firstName: firstName(contactName || nameOf(to[0]) || ''),
+      company: companyName ?? '',
       me: me.name,
       leadNumber: flowLead?.number ?? '',
     };
@@ -325,9 +366,45 @@ export function DraftComposer({ draft, variant, label, onClose, onUndone, header
     };
   }, [guard]);
 
+  // `?template=`: filled once the templates (and the chosen lead, for its merge fields) are loaded.
+  const pendingTemplate = useRef(template);
+  const templateReady = templates !== undefined && (!readLead || full !== undefined);
+  useEffect(() => {
+    if (pendingTemplate.current === undefined || !templateReady) return;
+    const tp = templates?.find((x) => x.id === pendingTemplate.current);
+    pendingTemplate.current = undefined;
+    if (tp) void applyTemplate(tp, false);
+    // Once, when ready.
+  }, [templateReady]);
+
+  // The page's handle on the composer.
+  useEffect(() => {
+    if (!control) return;
+    const c: ComposerControl = {
+      flush: auto.flush,
+      touch: () => touch(),
+      fillTo: (address) => setTo((v) => (v.length ? v : [address])),
+      fillCc: (addresses, except = []) => {
+        const skip = new Set([...latest.current.fields.to, ...except].map((a) => a.toLowerCase()));
+        const add = [...new Set(addresses.map((a) => a.toLowerCase()))].filter((a) => !skip.has(a));
+        if (!add.length) return;
+        setCc((v) => (v.length ? v : add));
+        setRows((r) => ({ ...r, cc: true }));
+      },
+      openTemplates: (el) => {
+        const r = el.getBoundingClientRect();
+        setTemplatesAt({ x: r.left, y: r.bottom + 4 });
+      },
+    };
+    control.current = c;
+    return () => {
+      if (control.current === c) control.current = null;
+    };
+  });
+
   /** The draft was removed in Outlook: a new one with what the editor holds (a reply again, for a reply). */
   async function saveAsNew() {
-    const s: DraftStart = start ?? { kind: 'new', ...(draft.leadId ? { leadId: draft.leadId } : {}), ...(draft.projectId ? { projectId: draft.projectId } : {}) };
+    const s: DraftStart = start ?? { kind: 'new', ...(leadId ? { leadId } : {}), ...(projectId ? { projectId } : {}) };
     setClosing(true);
     try {
       const v = await create.mutateAsync(s);
@@ -365,7 +442,7 @@ export function DraftComposer({ draft, variant, label, onClose, onUndone, header
           onSchedule={flow.schedule}
           options={variant === 'inline' ? 'menu' : 'popover'}
           disabled={busy}
-          recipientZone={draft.recipientZone}
+          recipientZone={recipientZone !== undefined ? recipientZone : draft.recipientZone}
         />
         <button type="button" className="btn sm" disabled={busy} onClick={() => void closeAfterSave('discarded')}>
           <span className="ico" aria-hidden="true">{Icons.trash}</span>
@@ -396,6 +473,7 @@ export function DraftComposer({ draft, variant, label, onClose, onUndone, header
           ) : null}
         </div>
       ) : null}
+      {before}
       <RecipientField
         label="To"
         value={to}
@@ -427,7 +505,7 @@ export function DraftComposer({ draft, variant, label, onClose, onUndone, header
         <div className="fld">
           <label htmlFor={`dc-subject-${draft.id}`}>{t('Subject')}</label>
           <div className="fv">
-            <input id={`dc-subject-${draft.id}`} value={subject} onChange={(e) => {
+            <input id={`dc-subject-${draft.id}`} className="subj-in" value={subject} onChange={(e) => {
               touch();
               setSubject(e.target.value);
             }} />

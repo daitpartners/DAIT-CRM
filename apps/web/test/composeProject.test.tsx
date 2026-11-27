@@ -4,12 +4,14 @@ import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { EmailPage } from '../src/pages/email/EmailPage';
+import { UndoSendProvider } from '../src/components/send/UndoSend';
 import type { MailMeta } from '../src/api/mail';
 import type { ProjectRow } from '../src/api/projects';
 import { ToastProvider } from '../src/components/Toast';
 import { ConfirmProvider } from '../src/components/ConfirmDialog';
 import { I18nProvider } from '../src/i18n';
-import { makeClient, rep } from './leadFixture';
+import { draftApi, draftView } from './draftFixture';
+import { makeClient, makeLead, rep } from './leadFixture';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -20,12 +22,6 @@ const META: MailMeta = {
   unread: 0, counts: { inbox: 0, drafts: 0, scheduled: 0, flagged: 0, awaiting: 0, due: 0, leads: 0 }, leadOwners: [], companies: [{ id: 4, name: 'Acme', legalName: null, isClient: true }], leads: [{ id: 5, number: 'LD-1005', companyId: 4, companyName: 'Acme', status: 'Won' }],
   projects: [{ id: 3, number: 'PRJ-3', name: 'Website rebuild', companyId: 4 }], mailUsers: [],
 };
-
-const contact = (id: number, first: string, email: string, isPrimary = false) => ({
-  id, companyId: 4, company: { id: 4, number: 'CO-0004', name: 'Acme' }, firstName: first, lastName: 'Ruiz', designation: null,
-  department: null, businessEmail: email, phone: null, mobile: null, linkedinUrl: null, contactType: 'Decision Maker',
-  isPrimary, isActive: true, updatedAt: '',
-});
 
 const project = (over: Partial<ProjectRow> = {}): ProjectRow => ({
   id: 3, number: 'PRJ-3', name: 'Website rebuild', status: 'Active', startDate: '2026-11-01', value: 1000, currency: 'USD',
@@ -46,26 +42,30 @@ const leadRow = {
 };
 
 function stub(companyProjects: { items: ProjectRow[]; isClient: boolean } = { items: [project()], isClient: true }, meta: MailMeta = META) {
-  const posts: { url: string; body: unknown }[] = [];
-  const gets: string[] = [];
+  const api = draftApi({
+    made: (n, b) => draftView({
+      id: n, replyToId: null, to: [], subject: '', quotedHtml: null, leadId: (b.leadId as number | undefined) ?? null,
+      projectId: (b.projectId as number | undefined) ?? null, lead: null,
+    }),
+  });
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-    if (init?.method === 'POST') {
-      posts.push({ url, body: init.body ? JSON.parse(String(init.body)) : undefined });
-      return Response.json({ id: 99 }, { status: 201 });
-    }
-    gets.push(url);
+    const handled = api.handle(url, init);
+    if (handled) return handled;
     if (url.startsWith('/api/mail?')) return Response.json({ items: [], total: 0, page: 1, pageSize: 50 });
     if (url === '/api/mail/meta') return Response.json(meta);
     if (url === '/api/me') return Response.json(me);
+    if (url === '/api/email-templates') return Response.json({ items: [] });
     if (url === '/api/companies/4/projects') return Response.json(companyProjects);
-    if (url.startsWith('/api/leads')) return Response.json({ items: [leadRow], total: 1, page: 1, pageSize: 100 });
-    if (url.startsWith('/api/contacts')) {
-      return Response.json({ items: [contact(11, 'Ana', 'ana@acme.com', true), contact(12, 'Ben', 'ben@acme.com')], total: 2, page: 1, pageSize: 100 });
+    if (url === '/api/leads/5') {
+      return Response.json(makeLead({
+        companyName: 'Acme', status: 'Won',
+        contact: { ...makeLead().contact!, name: 'Ana Ruiz', email: 'ana@acme.com', businessEmail: 'ana@acme.com' },
+      }));
     }
-    if (url.startsWith('/api/companies')) return Response.json({ items: [], total: 0, page: 1, pageSize: 100 });
+    if (url.startsWith('/api/leads')) return Response.json({ items: [leadRow], total: 1, page: 1, pageSize: 8 });
     return Response.json({ items: [] });
   }));
-  return { posts, gets };
+  return api;
 }
 
 function Where() {
@@ -79,12 +79,15 @@ function show(path: string) {
       <I18nProvider>
         <ToastProvider>
           <ConfirmProvider>
-            <MemoryRouter initialEntries={[path]}>
-              <Routes>
-                <Route path="/email" element={<EmailPage />} />
-              </Routes>
-              <Where />
-            </MemoryRouter>
+            <UndoSendProvider>
+              <MemoryRouter initialEntries={[path]}>
+                <Routes>
+                  <Route path="/email" element={<EmailPage />} />
+                  <Route path="/email/new" element={<EmailPage />} />
+                </Routes>
+                <Where />
+              </MemoryRouter>
+            </UndoSendProvider>
           </ConfirmProvider>
         </ToastProvider>
       </I18nProvider>
@@ -92,88 +95,72 @@ function show(path: string) {
   );
 }
 
-describe('Compose: Client → Lead → Project (release 3B, prototype V.compose)', () => {
-  it('without a client the Project picker waits for one', async () => {
+const form = () => screen.findByRole('form', { name: 'New message' });
+
+describe('New message: Lead → Project (release 3B tagging on the full page, plan decision 13)', () => {
+  it('without a lead or a client there is no Project field', async () => {
     const u = userEvent.setup();
     stub();
     show('/email');
     await u.click(await screen.findByRole('button', { name: 'New mail' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Compose email' });
-    const pick = within(dialog).getByRole('combobox', { name: 'Project' }) as HTMLSelectElement;
-    expect(pick.disabled).toBe(true);
-    expect(pick.selectedOptions[0]!.textContent).toBe('choose client first');
+    const f = await form();
+    expect(within(f).queryByRole('combobox', { name: 'Project' })).toBeNull();
   });
 
-  it("choosing a project fills its lead, copies its stakeholders with an email (not To) and sends projectId; clearing it empties Cc", async () => {
+  it("a lead of a client with projects shows Project; choosing one copies its stakeholders with an email (not To) and files projectId", async () => {
     const u = userEvent.setup();
-    const { posts } = stub();
-    show('/email?company=4');
+    const api = stub();
+    show('/email?lead=5');
     await u.click(await screen.findByRole('button', { name: 'New mail' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Compose email' });
-    const pick = within(dialog).getByRole('combobox', { name: 'Project' }) as HTMLSelectElement;
-    await within(dialog).findByRole('option', { name: 'PRJ-3 · Website rebuild' });
+    const f = await form();
+    expect(api.of('/api/mail/drafts').map((c) => c.body)).toEqual([{ kind: 'new', leadId: 5 }]);
+    const pick = await within(f).findByRole('combobox', { name: 'Project' }) as HTMLSelectElement;
+    await within(f).findByRole('option', { name: 'PRJ-3 · Website rebuild' });
     expect(pick.disabled).toBe(false);
     expect(pick.selectedOptions[0]!.textContent).toBe('— no project —');
-    await waitFor(() => expect(within(dialog).getByLabelText('To')).toHaveValue('ana@acme.com'));
+    await waitFor(() => expect(within(f).getByText('ana@acme.com')).toBeInTheDocument());
     await u.selectOptions(pick, '3');
-    expect(within(dialog).getByRole('combobox', { name: 'Lead' })).toHaveValue('5');
-    expect(within(dialog).getByLabelText(/^Cc/)).toHaveValue('ben@acme.com');
-    expect(within(dialog).getByText('Acme · LD-1005 · Website rebuild')).toBeTruthy();
-    await u.type(within(dialog).getByLabelText('Subject'), 'Kick-off');
-    await u.click(within(dialog).getByRole('button', { name: 'Send' }));
-    await waitFor(() => expect(posts[0]).toMatchObject({
-      url: '/api/mail', body: { to: 'ana@acme.com', cc: ['ben@acme.com'], leadId: 5, companyId: 4, projectId: 3 },
-    }));
+    expect(await within(f).findByText('ben@acme.com')).toBeInTheDocument();
+    expect(within(f).getAllByText('ana@acme.com')).toHaveLength(1);
+    await u.type(within(f).getByRole('textbox', { name: 'Subject' }), 'Kick-off');
+    await waitFor(() => expect(api.of('/api/mail/drafts/50', 'PATCH').at(-1)?.body).toMatchObject({
+      to: ['ana@acme.com'], cc: ['ben@acme.com'], subject: 'Kick-off', leadId: 5, projectId: 3,
+    }), { timeout: 4000 });
   });
 
-  it('clearing the project puts Cc back to how it was without one', async () => {
+  it('clearing the project files none', async () => {
     const u = userEvent.setup();
-    stub();
-    show('/email?company=4');
+    const api = stub();
+    show('/email?lead=5');
     await u.click(await screen.findByRole('button', { name: 'New mail' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Compose email' });
-    await within(dialog).findByRole('option', { name: 'PRJ-3 · Website rebuild' });
-    const pick = within(dialog).getByRole('combobox', { name: 'Project' });
+    const f = await form();
+    await within(f).findByRole('option', { name: 'PRJ-3 · Website rebuild' });
+    const pick = within(f).getByRole('combobox', { name: 'Project' });
     await u.selectOptions(pick, '3');
-    expect(within(dialog).getByLabelText(/^Cc/)).toHaveValue('ben@acme.com');
     await u.selectOptions(pick, '');
-    expect(within(dialog).getByLabelText(/^Cc/)).toHaveValue('');
+    expect(pick).toHaveValue('');
+    await waitFor(() => expect(api.of('/api/mail/drafts/50', 'PATCH').at(-1)?.body).toMatchObject({ leadId: 5, projectId: null }), { timeout: 4000 });
   });
 
-  it('a client with no projects says so', async () => {
+  it('a lead of a client with no projects shows no Project field', async () => {
     const u = userEvent.setup();
     stub({ items: [], isClient: true });
-    show('/email?company=4');
+    show('/email?lead=5');
     await u.click(await screen.findByRole('button', { name: 'New mail' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Compose email' });
-    const pick = within(dialog).getByRole('combobox', { name: 'Project' }) as HTMLSelectElement;
-    await waitFor(() => expect(pick.selectedOptions[0]!.textContent).toBe('no projects yet'));
+    const f = await form();
+    await waitFor(() => expect(within(f).getByText('ana@acme.com')).toBeInTheDocument());
+    expect(within(f).queryByRole('combobox', { name: 'Project' })).toBeNull();
   });
 
-  it('/email?compose=1&company=&lead=&project= opens Compose preset with the project and its Cc', async () => {
-    stub();
+  it('/email?compose=1&company=&lead=&project= opens the New message page with the lead, the project and its Cc', async () => {
+    const api = stub();
     show('/email?compose=1&company=4&lead=5&project=3');
-    const dialog = await screen.findByRole('dialog', { name: 'Compose email' });
-    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Project' })).toHaveValue('3'));
-    // The client marked as in the prototype's Client picker.
-    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Client' })).toHaveValue('Acme · client'));
-    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Lead' })).toHaveValue('5'));
-    await waitFor(() => expect(within(dialog).getByLabelText(/^Cc/)).toHaveValue('ben@acme.com'));
-    // The one-off open is not kept in the address (a refresh or Back does not reopen it); the filters stay.
-    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/email?company=4&lead=5&project=3'));
-  });
-
-  it('the Client picker shows the legal name where set, as the prototype (from the mail clients or the client projects)', async () => {
-    const u = userEvent.setup();
-    stub(undefined, { ...META, companies: [{ id: 4, name: 'Acme', legalName: 'Acme Holdings Pvt Ltd', isClient: true }] });
-    const view = show('/email?company=4');
-    await u.click(await screen.findByRole('button', { name: 'New mail' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Compose email' });
-    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Client' })).toHaveValue('Acme Holdings Pvt Ltd · client'));
-    view.unmount();
-    stub({ items: [project({ company: { id: 4, name: 'Acme', legalName: 'Acme Holdings Pvt Ltd' } })], isClient: true }, { ...META, companies: [] });
-    show('/email?compose=1&company=4');
-    const again = await screen.findByRole('dialog', { name: 'Compose email' });
-    await waitFor(() => expect(within(again).getByRole('combobox', { name: 'Client' })).toHaveValue('Acme Holdings Pvt Ltd · client'));
+    const f = await form();
+    expect(api.of('/api/mail/drafts').map((c) => c.body)).toEqual([{ kind: 'new', leadId: 5, projectId: 3 }]);
+    await waitFor(() => expect(within(f).getByRole('combobox', { name: 'Project' })).toHaveValue('3'));
+    expect(await within(f).findByRole('button', { name: 'LD-1005 · Acme · Won' })).toBeInTheDocument();
+    await waitFor(() => expect(within(f).getByText('ben@acme.com')).toBeInTheDocument());
+    // The one-off link is not kept in the address (a refresh or Back does not make another draft).
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/email/new?draft=50&company=4'));
   });
 });

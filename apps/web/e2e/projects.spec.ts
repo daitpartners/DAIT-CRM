@@ -151,12 +151,10 @@ test('Convert an accepted quotation: the project at net value, on the list, the 
   await expect(tabRow.getByRole('link', { name: lead.number })).toHaveAttribute('href', `/leads/${lead.id}`);
   await expect(page.getByRole('region', { name: 'How projects work' })).toBeVisible();
 
-  // The row's Email button opens Compose preset with the client, lead and project; the filters keep the project.
+  // The row's Email button opens the New message page with the client, lead and project (web-mail release 3). Arjun
+  // has no mailbox connected here, so the page says so instead of making a draft in Outlook.
   await tabRow.getByRole('link', { name: 'Email' }).click();
-  const compose = page.getByRole('dialog', { name: 'Compose email' });
-  await expect(compose.getByLabel('Project')).toHaveValue(String(project.id));
-  await expect(compose.getByLabel('Lead')).toHaveValue(String(lead.id));
-  await expect(compose.getByText(`${company} · ${lead.number} · ${project.name}`)).toBeVisible();
-  await expect(page).toHaveURL(new RegExp(`/email\\?company=${lead.companyId}&lead=${lead.id}&project=${project.id}$`));
+  await expect(page).toHaveURL(new RegExp(`/email/new\\?company=${lead.companyId}&lead=${lead.id}&project=${project.id}$`));
+  await expect(page.getByRole('region', { name: 'New message' }).getByRole('alert')).toContainText('Connect your Microsoft 365 mailbox');
   await captureParity(page, 'compose-project');
 });

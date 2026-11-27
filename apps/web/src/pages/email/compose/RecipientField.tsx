@@ -155,6 +155,7 @@ export function RecipientField({ label, value, onChange, autoFocus, known, extra
           <input
             id={inputId}
             aria-label={inputLabel}
+            placeholder={value.length ? undefined : t('Add people')}
             aria-invalid={invalid || undefined}
             aria-autocomplete="list"
             aria-expanded={open}

@@ -51,6 +51,7 @@ export const router = createBrowserRouter([
       { path: 'companies/:id', element: <CompanyProfile /> },
       { path: 'contacts', element: <ContactsList /> },
       { path: 'email', element: <EmailPage /> },
+      { path: 'email/new', element: <EmailPage /> },
       { path: 'email/:id', element: <EmailPage /> },
       { path: 'mailer', element: <MailerPage /> },
       { path: 'mailer/:id', element: <CampaignPage /> },

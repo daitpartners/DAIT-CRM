@@ -136,17 +136,21 @@ test('Reply all goes out through Outlook with the original recipients', async ({
   expect(replyAll!.html).toContain('Thanks, both of you.');
 });
 
-test('typing in the search box, a filter field, the Link to lead search or the Compose body never triggers shortcuts', async ({ page }) => {
+test('typing in the search box, a filter field, the Link to lead search or the New message body never triggers shortcuts', async ({ page }) => {
   await signInAs(page, NEHA);
   await page.goto('/email');
   const reader = page.getByRole('region', { name: 'Reading pane' });
   await row(page, SUBJECTS[0]!).getByRole('link').click();
   await expect(reader.getByRole('heading', { name: SUBJECTS[0], level: 2 })).toBeVisible();
 
-  // Every mailbox change is a POST / PATCH / DELETE under /api/mail: none may go out while typing.
+  // Every mailbox change is a POST / PATCH / DELETE under /api/mail: none may go out while typing (the New message
+  // page's own draft, its saves and recipient lookups aside).
   const changes: string[] = [];
   page.on('request', (r) => {
-    if (r.method() !== 'GET' && new URL(r.url()).pathname.startsWith('/api/mail')) changes.push(`${r.method()} ${r.url()}`);
+    const path = new URL(r.url()).pathname;
+    if (r.method() !== 'GET' && path.startsWith('/api/mail') && !path.startsWith('/api/mail/drafts') && !path.startsWith('/api/mail/recipients')) {
+      changes.push(`${r.method()} ${r.url()}`);
+    }
   });
   // Archive (e), reply (r), forward (f), new mail (n), Delete.
   const KEYS = 'refine';
@@ -180,14 +184,16 @@ test('typing in the search box, a filter field, the Link to lead search or the C
   await expect(dialogs).toHaveCount(0);
   await page.keyboard.press('Escape');
 
-  // 4. The Compose body: still one dialog.
+  // 4. The New message page's body (web-mail release 3): the keys type there, nothing else opens.
   await page.getByRole('button', { name: 'New mail', exact: true }).click();
-  const compose = page.getByRole('dialog', { name: 'Compose email' });
-  await compose.getByLabel('Message').click();
+  const compose = page.getByRole('form', { name: 'New message' });
+  const message = compose.frameLocator('iframe.rbody').locator('body');
+  await message.click({ position: { x: 24, y: 16 } });
   await typeKeys();
-  await expect(compose.getByLabel('Message')).toHaveValue(new RegExp(KEYS));
-  await expect(dialogs).toHaveCount(1);
+  await expect(message).toContainText(KEYS);
+  await expect(dialogs).toHaveCount(0);
   await compose.getByRole('button', { name: 'Discard' }).click();
+  await expect(reader.getByRole('heading', { name: SUBJECTS[0], level: 2 })).toBeVisible();
 
   // Nothing moved: no change went out and the message is still in the Inbox.
   expect(changes).toEqual([]);

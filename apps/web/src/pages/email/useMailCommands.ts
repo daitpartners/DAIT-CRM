@@ -8,7 +8,7 @@ import { useConfirm } from '../../components/ConfirmDialog';
 import { useToast } from '../../components/Toast';
 import { firstName, mailErrorText } from '../../i18n/labels';
 import { useT, type TFn } from '../../i18n/useT';
-import type { ComposeStart } from './ComposeModal';
+import { newMessageHref, type NewMessageStart } from './compose/NewMessagePage';
 import type { ReplyKind } from './compose/InlineReply';
 import { LinkLeadModal } from './LinkLeadModal';
 import { followUpWhen, LinkMenu } from './menus';
@@ -77,12 +77,10 @@ export function commandState(id: CommandId, target: MailTarget | null, rules: Ru
 export type MailCommandsContext = {
   /** Your own mailbox is connected. */
   connected: boolean;
-  /** New mail (and its templates). */
-  onCompose: (s: ComposeStart) => void;
   /** Reply, Reply all or Forward of message `originalId`: the inline editor opens at the top of its conversation. */
   onReply: (originalId: number, kind: ReplyKind) => void;
   /** What New mail starts with (a link's client, lead and project); empty when not given. */
-  newStart?: () => ComposeStart;
+  newStart?: () => Omit<NewMessageStart, 'draft' | 'template'>;
   /** Messages moved or deleted: the screen lets go of the open one if it is among them. */
   onGone?: (ids: number[]) => void;
 };
@@ -138,7 +136,8 @@ export function useMailCommands(ctx: MailCommandsContext): {
   const run = (id: CommandId, target: MailTarget | null, arg?: unknown) => {
     if (!state(id, target).enabled) return;
     if (id === 'new') {
-      ctx.onCompose(ctx.newStart?.() ?? {});
+      // The full-page New message; `arg`: a template's id (New mail ▾ → New from template).
+      navigate(newMessageHref({ ...ctx.newStart?.(), template: typeof arg === 'number' ? arg : undefined }));
       return;
     }
     if (!target) return;

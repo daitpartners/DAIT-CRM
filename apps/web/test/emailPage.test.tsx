@@ -11,6 +11,7 @@ import { ConfirmProvider } from '../src/components/ConfirmDialog';
 import { I18nProvider } from '../src/i18n';
 import { keys, type Me } from '../src/api/queries';
 import es from '../src/locales/es.json';
+import { draftView } from './draftFixture';
 import { lookup, makeClient, rep } from './leadFixture';
 
 afterEach(() => {
@@ -53,7 +54,10 @@ function stub(items: MailItem[], details: Record<number, MailDetail>, meta: Mail
       if (r !== undefined) return Response.json(r);
     }
     if (init?.method === 'POST') {
-      posts.push({ url, body: init.body ? JSON.parse(String(init.body)) : undefined });
+      const body = init.body ? JSON.parse(String(init.body)) : undefined;
+      posts.push({ url, body });
+      // A new draft (the New message page) answers as a draft; anything else as before.
+      if (url === '/api/mail/drafts') return Response.json({ ...DRAFT, leadId: body?.leadId ?? null, projectId: body?.projectId ?? null }, { status: 201 });
       return Response.json({ id: 99, leadId: 5 }, { status: 201 });
     }
     if (url.startsWith('/api/mail?')) return Response.json({ items, total: items.length, page: 1, pageSize: 50 });
@@ -88,6 +92,7 @@ function show(path = '/email', user: Me = me, setup?: (qc: ReturnType<typeof mak
             <MemoryRouter initialEntries={[path]}>
               <Routes>
                 <Route path="/email" element={<EmailPage />} />
+                <Route path="/email/new" element={<EmailPage />} />
                 <Route path="/email/:id" element={<EmailPage />} />
               </Routes>
               <Where />
@@ -121,6 +126,9 @@ const leadRow = (id: number, number: string, over: Record<string, unknown> = {})
   country: 'India', outreachLanguage: 'en', city: null, leadSource: 'Referral', status: 'New', priority: 'Medium', assignedTo: null,
   nextFollowUp: null, isOverdue: false, archivedAt: null, createdAt: '', updatedAt: '', ...over,
 });
+
+/** A new draft as the drafts API answers it (the New message page). */
+const DRAFT = draftView({ id: 99, replyToId: null, to: [], subject: '', quotedHtml: null, leadId: null, lead: null });
 
 describe('Email screen (release 2B-2, prototype V.email)', () => {
   it('folder pane: mockup folders with counts, the Leads group, no Unlinked, no Templates list', async () => {
@@ -724,36 +732,21 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     });
   });
 
-  it('compose lead option shows translated status and source', async () => {
+  it('New message: the Lead picker shows each lead with its stage translated', async () => {
     const u = userEvent.setup();
     const spanish: Me = { ...me, language: 'es' };
     stub([], {}, META, (url) => {
       if (url === '/api/me') return spanish;
-      if (url.startsWith('/api/leads')) return { items: [leadRow(5, 'LD-1005', { status: 'Contacted', leadSource: 'Referral' })], total: 1, page: 1, pageSize: 100 };
-      if (url.startsWith('/api/contacts')) {
-        return {
-          items: [{
-            id: 9, companyId: 4, company: { id: 4, number: 'CO-0004', name: 'Acme' }, firstName: 'Ana', lastName: 'Ruiz', designation: null,
-            department: null, businessEmail: 'ana@acme.com', phone: null, mobile: null, linkedinUrl: null, contactType: 'Decision Maker',
-            isPrimary: true, isActive: true, updatedAt: '',
-          }],
-          total: 1, page: 1, pageSize: 100,
-        };
-      }
+      if (url === '/api/mail/drafts/99') return DRAFT;
+      if (url.startsWith('/api/leads?')) return { items: [leadRow(5, 'LD-1005', { status: 'Contacted' })], total: 1, page: 1, pageSize: 8 };
       return undefined;
     });
-    show('/email?company=4', spanish, (qc) =>
-      qc.setQueryData(keys.lookups, {
-        lead_source: [{ ...lookup('lead_source', 'Referral', 2), labelEs: 'Recomendación' }],
-        contact_type: [{ ...lookup('contact_type', 'Decision Maker', 3), labelEs: 'Decisor' }],
-      }),
-    );
-    await u.click(await screen.findByRole('button', { name: es['New mail'] }));
-    const dialog = await screen.findByRole('dialog', { name: es['Compose email'] });
-    expect(await within(dialog).findByRole('option', { name: `LD-1005 · Recomendación · ${es['Contacted|lead']}` })).toBeTruthy();
-    expect(await within(dialog).findByText(/· Decisor/)).toBeTruthy();
+    show('/email/new?draft=99', spanish);
+    const f = await screen.findByRole('form', { name: es['New message'] });
+    await u.click(within(f).getByRole('button', { name: es['Choose a lead'] }));
+    const menu = await screen.findByRole('menu', { name: es['Choose a lead'] });
+    expect(await within(menu).findByRole('menuitem', { name: new RegExp(`^LD-1005 · Acme.*${es['Contacted|lead']}`) })).toBeTruthy();
   });
-
   it('link modal: one searchable Existing lead select (no separate search box) that keeps the chosen lead', async () => {
     const u = userEvent.setup();
     const a = item();
@@ -815,21 +808,14 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     expect(within(panel).getByRole('link', { name: 'Add contact' }).getAttribute('href')).toBe('/companies/4?tab=contacts');
   });
 
-  it('compose opens with the form visible: no field takes focus, the chosen client shows at once', async () => {
-    const u = userEvent.setup();
-    stub([], {});
-    show('/email?company=4');
-    await u.click(await screen.findByRole('button', { name: 'New mail' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Compose email' });
-    const client = within(dialog).getByRole('combobox', { name: 'Client' }) as HTMLInputElement;
-    // The companies search answers nothing here: the name comes from the screen's own client filter.
-    expect(client.value).toBe('Acme');
-    expect(client.getAttribute('aria-expanded')).toBe('false');
-    expect(document.activeElement).toBe(dialog);
-    // "(stakeholders)" is a muted, normal-weight note in the Cc label, as in the prototype.
-    expect(within(dialog).getByText('(stakeholders)').className).toBe('lbl-note');
+  it('?compose=1 (the Projects list\'s Email buttons) opens the New message page with the link\'s lead and project, in place of the link', async () => {
+    const posts = stub([], {}, META, (url) => (url === '/api/mail/drafts/99' ? { ...DRAFT, leadId: 5, projectId: 3 } : undefined));
+    show('/email?compose=1&company=4&lead=5&project=3');
+    expect(await screen.findByRole('region', { name: 'New message' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/email/new?draft=99&company=4'));
+    expect(posts).toContainEqual({ url: '/api/mail/drafts', body: { kind: 'new', leadId: 5, projectId: 3 } });
+    expect(screen.queryByRole('toolbar', { name: 'Mail commands' })).toBeNull();
   });
-
   it('« folds the folders column to a strip and » opens it, keeping the folder and filters; remembered per browser', async () => {
     const u = userEvent.setup();
     localStorage.clear();

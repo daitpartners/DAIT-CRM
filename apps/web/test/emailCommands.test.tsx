@@ -101,6 +101,7 @@ function show(path = '/email/1', user: Me = me) {
             <MemoryRouter initialEntries={[path]}>
               <Routes>
                 <Route path="/email" element={<EmailPage />} />
+                <Route path="/email/new" element={<p>New message page</p>} />
                 <Route path="/email/:id" element={<EmailPage />} />
                 <Route path="*" element={null} />
               </Routes>
@@ -131,25 +132,28 @@ describe('Email command bar, menus and shortcuts (web-mail release 2, Task 14)',
     const menu = screen.getByRole('menu');
     await waitFor(() => expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['New mail', 'Intro', 'Intro ES', 'Manage templates…']));
     expect(within(menu).getByText('New from template')).toBeInTheDocument();
-    // A template opens Compose filled the way release 1's folder template list did.
-    await user.click(within(menu).getByRole('menuitem', { name: 'Intro' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Compose email' });
-    expect(within(dialog).getByLabelText('Subject')).toHaveValue(`Hello from ${me.name}`);
-    await user.click(within(dialog).getByRole('button', { name: 'Discard' }));
-    await user.click(screen.getByRole('button', { name: 'More new mail options' }));
-    await user.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Manage templates…' }));
+    await user.click(within(menu).getByRole('menuitem', { name: 'Manage templates…' }));
     expect(where()).toBe('/settings/templates');
   });
 
-  it('New mail opens Compose with the link’s client; an .oft template is marked', async () => {
+  it('New mail ▾ → a template opens the New message page with it (web-mail release 3)', async () => {
+    const user = userEvent.setup();
+    stub([item()], { templates: [template({ id: 1, name: 'Intro' })] });
+    show('/email/1?lead=5');
+    await user.click(await screen.findByRole('button', { name: 'More new mail options' }));
+    await user.click(await within(screen.getByRole('menu')).findByRole('menuitem', { name: 'Intro' }));
+    expect(where()).toBe('/email/new?lead=5&template=1');
+  });
+
+  it('New mail opens the New message page with the link’s client; an .oft template is marked', async () => {
     const user = userEvent.setup();
     stub([item()], { templates: [template({ id: 3, name: 'Brochure', sourceType: 'oft' })] });
     show('/email?company=4');
-    await user.click(await screen.findByRole('button', { name: 'New mail' }));
-    expect(await screen.findByRole('dialog', { name: 'Compose email' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Discard' }));
-    await user.click(screen.getByRole('button', { name: 'More new mail options' }));
+    await user.click(await screen.findByRole('button', { name: 'More new mail options' }));
     expect(await within(screen.getByRole('menu')).findByRole('menuitem', { name: /Brochure/ })).toHaveTextContent('Brochure.oft');
+    await user.keyboard('{Escape}');
+    await user.click(await screen.findByRole('button', { name: 'New mail' }));
+    expect(where()).toBe('/email/new?company=4');
   });
 
   it('Flag ▾ Tomorrow posts flag tomorrow; Move to ▾ Deleted items posts move deleted', async () => {
@@ -309,14 +313,14 @@ describe('Email command bar, menus and shortcuts (web-mail release 2, Task 14)',
     await user.click(within(form).getByRole('button', { name: 'Discard' }));
     await waitFor(() => expect(screen.queryByRole('form')).toBeNull());
     await user.click(document.body);
-    await user.keyboard('n');
-    const dialog = await screen.findByRole('dialog', { name: 'Compose email' });
-    await user.click(within(dialog).getByRole('button', { name: 'Discard' }));
     await user.keyboard('e');
     await waitFor(() => expect(posts).toContainEqual({ url: '/api/mail/1/change', body: { type: 'move', folder: 'archive' } }));
     await waitFor(() => expect(cmd('Delete')).toBeEnabled());
     await user.keyboard('{Delete}');
     await waitFor(() => expect(posts.filter((p) => (p.body as { type?: string })?.type === 'delete')).toHaveLength(1));
+    await user.click(document.body);
+    await user.keyboard('n');
+    await waitFor(() => expect(where()).toBe('/email/new'));
   });
 
   it('shortcuts never fire while typing in the search box, a filter field, the Link search or the inline Reply (Review Focus 4)', async () => {

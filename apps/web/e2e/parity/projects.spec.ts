@@ -141,8 +141,11 @@ test('projects parity: app side', async ({ page }) => {
 
     // Compose with a project, then the Email Project filter.
     await page.goto(`/email?compose=1&company=${orbit.companyId}&lead=${orbit.id}&project=${project.id}`);
-    await expect(page.getByRole('dialog', { name: 'Compose email' }).getByLabel('Project')).toHaveValue(String(project.id));
+    const compose = page.getByRole('form', { name: 'New message' });
+    await expect(compose.getByLabel('Project')).toHaveValue(String(project.id));
     await shot(page, 'compose-project-app');
+    await compose.getByRole('button', { name: 'Discard' }).click();
+    await expect(compose).toHaveCount(0);
     await page.goto(`/email?company=${orbit.companyId}&project=${project.id}`);
     await expect(page.getByText(`Signed: ${q.number} accepted`).first()).toBeVisible();
     await shot(page, 'email-project-app');

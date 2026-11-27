@@ -10,8 +10,6 @@ import { Modal } from '../../components/Modal';
 import { useDebounce } from '../../hooks/useDebounce';
 import { leadStatusText } from '../../i18n/labels';
 import { useT, type TFn } from '../../i18n/useT';
-import { fillTemplate, fillTemplateHtml } from '../../lib/mergeFields';
-import type { ComposeStart } from './ComposeModal';
 import { dayLabel, dayMonthLabel } from './listDates';
 import type { CommandId, FlagChoice, MailTarget, useMailCommands } from './useMailCommands';
 
@@ -314,27 +312,21 @@ export function sortEntries(t: TFn, sort: ListSort, dir: 'asc' | 'desc', setQuer
 
 /**
  * New mail ▾ (mockup `mNew`): New mail; New from template, every team template with the user's language first (an
- * `.oft` marked), each opening Compose filled as release 1's folder template list did; Manage templates….
+ * `.oft` marked), each opening the New message page with that template filled (`onNew(templateId)`); Manage templates….
  */
-export function NewMailMenu({ at, onNew, onCompose, onClose }: { at: { x: number; y: number }; onNew: () => void; onCompose: (s: ComposeStart) => void; onClose: () => void }) {
+export function NewMailMenu({ at, onNew, onClose }: { at: { x: number; y: number }; onNew: (templateId?: number) => void; onClose: () => void }) {
   const t = useT();
   const me = useCurrentUser();
   const navigate = useNavigate();
   const { data: templates } = useTemplates();
   const list = [...(templates ?? [])].sort((a, b) => Number(b.language === me.language) - Number(a.language === me.language));
   const items: MenuEntry[] = [
-    { key: 'new', label: t('New mail'), icon: Icons.mailplus, onSelect: onNew },
+    { key: 'new', label: t('New mail'), icon: Icons.mailplus, onSelect: () => onNew() },
     { kind: 'sep', key: 's1' },
     { kind: 'head', key: 'h', label: t('New from template') },
     ...list.map((tp): MenuEntry => ({
       key: `tp${tp.id}`, label: tp.name, icon: Icons.template, title: tp.subject, hint: tp.sourceType === 'oft' ? '.oft' : undefined,
-      onSelect: () => {
-        const ctx = { firstName: '', company: '', me: me.name, leadNumber: '' };
-        onCompose({
-          subject: fillTemplate(tp.subject, ctx), body: fillTemplate(tp.body, ctx), bodyHtml: tp.bodyHtml ? fillTemplateHtml(tp.bodyHtml, ctx) : null,
-          templateId: tp.id,
-        });
-      },
+      onSelect: () => onNew(tp.id),
     })),
     { kind: 'sep', key: 's2' },
     { key: 'manage', label: t('Manage templates…'), icon: Icons.settings, onSelect: () => navigate('/settings/templates') },

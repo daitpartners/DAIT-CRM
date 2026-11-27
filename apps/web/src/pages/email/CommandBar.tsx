@@ -4,7 +4,6 @@ import type { ListSort } from '../../api/mail';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Icons } from '../../components/Icons';
 import { useT } from '../../i18n/useT';
-import type { ComposeStart } from './ComposeModal';
 import { fitCommands } from './fitCommands';
 import { flagEntries, FollowUpMenu, Menu, moveEntries, NewMailMenu, sortEntries, type MenuEntry } from './menus';
 import { useMailShortcuts } from './useMailShortcuts';
@@ -30,8 +29,6 @@ type Props = {
   target: MailTarget | null;
   commands: ReturnType<typeof useMailCommands>;
   view: CommandBarView;
-  /** New from template: Compose filled from the template. */
-  onCompose: (s: ComposeStart) => void;
 };
 
 /** A Home command: `short` ones lose their label when the bar is compact (mockup `data-short`). */
@@ -58,7 +55,7 @@ const outer = (el: HTMLElement) => {
  * commands show their icon only (named by aria-label and title), then the tail moves into "…". View: Conversation view,
  * Sort by ▾, Folder pane and Lead panel. Every command, and every keyboard shortcut, goes through the commands' rules.
  */
-export function CommandBar({ target, commands, view, onCompose }: Props) {
+export function CommandBar({ target, commands, view }: Props) {
   const t = useT();
   const me = useCurrentUser();
   const [tab, setTab] = useState<'home' | 'view'>('home');
@@ -281,7 +278,7 @@ export function CommandBar({ target, commands, view, onCompose }: Props) {
         )}
       </div>
 
-      {menu?.kind === 'new' ? <NewMailMenu at={menu.at} onNew={() => commands.run('new', null)} onCompose={onCompose} onClose={close} /> : null}
+      {menu?.kind === 'new' ? <NewMailMenu at={menu.at} onNew={(template) => commands.run('new', null, template)} onClose={close} /> : null}
       {menu?.kind === 'move' && target ? <Menu at={menu.at} label={t('Move to')} items={moveMenu()} onClose={close} /> : null}
       {menu?.kind === 'flag' && target ? <Menu at={menu.at} label={t('Flag')} items={flagMenu()} onClose={close} /> : null}
       {menu?.kind === 'followUp' && target ? <FollowUpMenu at={menu.at} target={target} commands={commands} onClose={close} /> : null}
