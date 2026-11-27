@@ -712,6 +712,38 @@ describe('graph client — drafts, draft attachments, sending a draft (web-mail 
     expect((err as GraphError).message).toBe('not_a_draft');
   });
 
+  test('getDraft: Graph refusing the contentId type-cast select (400) is read again without it, then never asked again; logged once', async () => {
+    const urls: string[] = [];
+    const fetchMock = vi.fn(async (url: string) => {
+      urls.push(url);
+      if (url.includes('fileAttachment/contentId')) return json({ error: { code: 'BadRequest', message: 'Could not find a property' } }, 400);
+      return json(draftAnswer({ attachments: [{ id: 'A1', name: 'p.png', contentType: 'image/png', size: 5, isInline: true }] }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const g = createGraphClient(env);
+      const acc = await account();
+      const first = await g.getDraft(acc, 'D=');
+      await g.getDraft(acc, 'D=');
+      expect(first.attachments).toEqual([{ id: 'A1', name: 'p.png', contentType: 'image/png', size: 5, isInline: true, kind: 'file' }]);
+      const plain = 'https://graph.microsoft.com/v1.0/me/messages/D%3D?$select=subject,body,toRecipients,ccRecipients,bccRecipients,conversationId,lastModifiedDateTime,isDraft&$expand=attachments($select=id,name,contentType,size,isInline)';
+      expect(urls).toEqual([`${plain.slice(0, -1)},microsoft.graph.fileAttachment/contentId)`, plain, plain]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]![0])).not.toContain('D=');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test('getDraft: a refusal other than 400 is not read again without the contentId select', async () => {
+    const fetchMock = vi.fn(async (_url: string) => json({ error: { code: 'x' } }, 503));
+    vi.stubGlobal('fetch', fetchMock);
+    const err = await createGraphClient(env).getDraft(await account(), 'D=').catch((e: unknown) => e);
+    expect((err as GraphError).status).toBe(503);
+    expect(fetchMock.mock.calls.every(([url]) => url.includes('fileAttachment/contentId'))).toBe(true);
+  });
+
   test('getDraft: a draft gone from the mailbox is a GraphError with status 404', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ error: { code: 'ErrorItemNotFound' } }, 404)));
     const err = await createGraphClient(env).getDraft(await account(), 'AAMkD=').catch((e: unknown) => e);

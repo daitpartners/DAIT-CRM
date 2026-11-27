@@ -185,6 +185,31 @@ describe('drafts API (web-mail release 3)', () => {
     expect((g.calls[0]![1] as DraftFields).html).toBe(quote);
   });
 
+  it('a step failing after the Outlook draft was made deletes that draft (no orphan) and leaves no row', async () => {
+    const f = await setup();
+    const original = await msg(f.rep.id, f.repBox.id, { leadId: f.lead.id, graphId: 'g-orig' });
+    // Reading the reply draft's files fails.
+    g.getDraft = async () => {
+      throw new GraphError('graph_request_failed status=503', 503);
+    };
+    expect((await call('POST', '/api/mail/drafts', f.repCookie, { kind: 'reply', replyToId: original.id })).json()).toEqual({ error: 'outlook_busy' });
+    expect(g.calls).toEqual([['createReplyDraft', 'g-orig', 'reply'], ['getDraft', 'D1'], ['deleteMessage', 'D1']]);
+    // Writing it fails.
+    g.calls = [];
+    g.getDraft = async (id) => draft({ id });
+    g.updateError = new GraphError('graph_request_failed status=400', 400);
+    expect((await call('POST', '/api/mail/drafts', f.repCookie, { kind: 'forward', replyToId: original.id })).json()).toEqual({ error: 'outlook_refused' });
+    expect(g.calls.map((c) => c[0])).toEqual(['createReplyDraft', 'getDraft', 'updateDraft', 'deleteMessage']);
+    // Its CRM row cannot be written (here: the id is already taken), for a new message; the delete failing changes nothing.
+    g.calls = [];
+    g.updateError = null;
+    g.deleteError = new GraphError('graph_request_failed status=503', 503);
+    await crmDraft(f, { graphId: 'D1' });
+    expect((await call('POST', '/api/mail/drafts', f.repCookie, { kind: 'new' })).statusCode).toBe(500);
+    expect(g.calls.map((c) => c[0])).toEqual(['createDraft', 'deleteMessage']);
+    expect(await prisma.emailMessage.count({ where: { folder: 'drafts' } })).toBe(1);
+  });
+
   it('a reply to a draft is 409 draft; a reply with no replyToId is 400', async () => {
     const f = await setup();
     const d = await crmDraft(f);

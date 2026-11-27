@@ -4,9 +4,9 @@ import { requireRight } from '../plugins/auth.js';
 import { NotFoundError, parseBody, parseQuery } from '../validate.js';
 import { FORMATTED_BODY_LIMIT, perUser } from '../mail/formatted.js';
 import {
-  addDraftFile, applyTemplateFiles, createDraft, discardDraft, draftFor, draftView, openDraft, removeDraftFile, resolveRecipients, saveDraft,
-  suggestRecipients,
+  createDraft, discardDraft, draftFor, draftView, openDraft, resolveRecipients, saveDraft, suggestRecipients,
 } from '../mail/drafts.js';
+import { addDraftFile, applyTemplateFiles, removeDraftFile } from '../mail/draftFiles.js';
 import { guard } from './leads.js';
 
 /**

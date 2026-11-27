@@ -375,6 +375,9 @@ function toDraft(v: Record<string, unknown>): GraphDraft {
   };
 }
 
+const ATTACHMENT_SELECT = 'id,name,contentType,size,isInline';
+/** A fileAttachment's contentId (a derived type's property, so selected with its type cast). */
+const CONTENT_ID_SELECT = 'microsoft.graph.fileAttachment/contentId';
 const DRAFT_SELECT = 'subject,body,toRecipients,ccRecipients,bccRecipients,conversationId,lastModifiedDateTime,isDraft';
 const REPLY_ACTIONS = { reply: 'createReply', replyAll: 'createReplyAll', forward: 'createForward' } as const;
 
@@ -487,6 +490,8 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
    * would delay every other job and risk Microsoft throttling.
    */
   const tokens = new Map<string, { token: string; until: number }>();
+  /** Set once Graph refuses getDraft's type-cast `$select` of the attachments' contentId (400): asked without it since. */
+  let contentIdRefused = false;
 
   /** An access token for the account (refresh-token grant); a rotated refresh token is stored encrypted. */
   async function accessToken(account: EmailAccount, scopes: string[]): Promise<string> {
@@ -719,8 +724,19 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
     },
 
     async getDraft(account, draftId) {
-      const url = `${messageUrl(draftId)}?$select=${DRAFT_SELECT}&$expand=attachments($select=id,name,contentType,size,isInline,microsoft.graph.fileAttachment/contentId)`;
-      const res = await mailCall(account, url, 'GET', undefined, `${IMMUTABLE}, ${HTML_BODY}`);
+      const url = (cast: boolean) =>
+        `${messageUrl(draftId)}?$select=${DRAFT_SELECT}&$expand=attachments($select=${ATTACHMENT_SELECT}${cast ? `,${CONTENT_ID_SELECT}` : ''})`;
+      let res: Response;
+      try {
+        res = await mailCall(account, url(!contentIdRefused), 'GET', undefined, `${IMMUTABLE}, ${HTML_BODY}`);
+      } catch (err) {
+        // Graph refusing the type-cast select: read the draft without content-ids from now on (their cid: pictures are
+        // then not kept, as before web-mail release 3 Task 7), logged once, never with the draft's content.
+        if (contentIdRefused || !(err instanceof GraphError && err.status === 400)) throw err;
+        contentIdRefused = true;
+        console.warn('graph: getDraft refused the attachment contentId select (400); drafts are read without content-ids');
+        res = await mailCall(account, url(false), 'GET', undefined, `${IMMUTABLE}, ${HTML_BODY}`);
+      }
       const v = (await res.json()) as Record<string, unknown>;
       if (v.isDraft === false) throw new GraphError('not_a_draft', 409);
       return toDraft(v);
