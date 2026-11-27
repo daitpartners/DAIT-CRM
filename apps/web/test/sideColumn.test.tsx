@@ -94,6 +94,34 @@ describe('SideColumn', () => {
     expect(link.textContent).toMatch(/10:30$/);
   });
 
+  it('Coming up lists an email follow-up task standing in for the lead follow-up once, as itself', () => {
+    const emailTask = (id: number, dueDate: string) => ({
+      id, leadId: 1, lead: null, title: `Follow up: Proposal ${id}`, dueDate, kind: 'followup' as const, dueTime: '09:00',
+      durationMinutes: null, assignedTo: { id: 2, name: 'Arjun Mehta' }, isDone: false, doneAt: null, origin: 'email_follow_up' as const,
+      closedReason: null, priority: 'normal' as const, note: null, isOverdue: false, isToday: false, updatedAt: '2030-01-01T10:00:00.000Z',
+    });
+    const { unmount } = render(
+      <Wrap qc={makeClient()}>
+        <SideColumn lead={makeLead({ number: 'LD-1001', nextFollowUp: '2030-01-02', tasks: [emailTask(8, '2030-01-02')] })} live />
+      </Wrap>,
+    );
+    const list = screen.getByRole('heading', { name: 'Coming up' }).parentElement!.querySelector('ul')!;
+    expect(within(list).getAllByRole('listitem')).toHaveLength(1);
+    expect(within(list).getByText('Follow up: Proposal 8')).toBeInTheDocument();
+    expect(within(list).queryByText(/Follow-up · LD-1001/)).toBeNull();
+    unmount();
+
+    // On another day it does not stand in: both lines show.
+    render(
+      <Wrap qc={makeClient()}>
+        <SideColumn lead={makeLead({ number: 'LD-1001', nextFollowUp: '2030-01-02', tasks: [emailTask(9, '2030-01-05')] })} live />
+      </Wrap>,
+    );
+    const both = screen.getByRole('heading', { name: 'Coming up' }).parentElement!.querySelector('ul')!;
+    expect(within(both).getAllByRole('listitem')).toHaveLength(2);
+    expect(within(both).getByText(/Follow-up · LD-1001/)).toBeInTheDocument();
+  });
+
   it("Coming up lists the lead's quotations with total and status, linking to each (prototype)", async () => {
     const quote = (id: number, number: string, leadId: number, status: string, total: number) => ({
       id, number, status, revision: 1, editingNewRevision: false, company: { id: 4, number: 'CO-0004', name: 'Meridian Textiles', legalName: null },

@@ -60,6 +60,20 @@ export async function openFollowUpTask(db: Tx | PrismaClient, lead: Pick<Lead, '
 }
 
 /**
+ * Every standing-in email follow-up task due on or before `onOrBefore` (YYYY-MM-DD), one per lead: the rule of
+ * openFollowUpTask (an open `email_follow_up` task due on the lead's next follow-up day, earliest id, on a lead with no
+ * open `follow_up` task). For the follow-up counts and the Overdue tab, which count a stand-in as a follow-up task.
+ */
+export async function standInFollowUps(db: Tx | PrismaClient, onOrBefore: string): Promise<{ taskId: number; leadId: number; dueDate: Date }[]> {
+  return db.$queryRaw<{ taskId: number; leadId: number; dueDate: Date }[]>`
+    SELECT DISTINCT ON (t.lead_id) t.id AS "taskId", t.lead_id AS "leadId", t.due_date AS "dueDate"
+    FROM tasks t JOIN leads l ON l.id = t.lead_id
+    WHERE t.origin = 'email_follow_up' AND NOT t.is_done AND t.due_date = l.next_follow_up AND t.due_date <= ${dateOnly(onOrBefore)}::date
+      AND NOT EXISTS (SELECT 1 FROM tasks f WHERE f.lead_id = t.lead_id AND f.origin = 'follow_up' AND NOT f.is_done)
+    ORDER BY t.lead_id, t.id`;
+}
+
+/**
  * Keeps the lead's single open follow-up task in step with `nextFollowUp` and the assignee:
  * re-dated / re-assigned when both are set, deleted otherwise. An open email follow-up task due on the same day
  * stands in for it: then no `follow_up` task is kept.

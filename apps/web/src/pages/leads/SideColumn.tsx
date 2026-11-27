@@ -206,7 +206,7 @@ function AiLine({ lead }: { lead: LeadFull }) {
 }
 
 /**
- * Next follow-up and the open tasks, soonest first. A call or meeting shows as the prototype's calendar events: the
+ * Next follow-up (or the email follow-up task standing in for it) and the open tasks, soonest first. A call or meeting shows as the prototype's calendar events: the
  * calendar icon, date and start time, linking to that week of the Calendar; a timed follow-up shows its time. Then the
  * lead's quotations the user can see (prototype): number · total and the status badge, linking to each.
  */
@@ -215,8 +215,13 @@ function ComingUp({ lead }: { lead: LeadFull }) {
   const { day } = useFormatDate();
   const { data: quoteList } = useQuotations({ companyId: lead.companyId ?? undefined }, lead.companyId !== null);
   const quotes = quoteList?.items?.filter((q) => q.lead?.id === lead.id) ?? [];
+  // An email follow-up task on the lead's next follow-up day stands in for the lead follow-up (openFollowUpTask in the
+  // API): it is listed once, as itself (with its title and time), instead of the "Follow-up · LD-…" line.
+  const standIn = lead.nextFollowUp && !lead.tasks.some((task) => task.origin === 'follow_up')
+    ? lead.tasks.filter((task) => task.origin === 'email_follow_up' && task.dueDate === lead.nextFollowUp).sort((a, b) => a.id - b.id)[0]
+    : undefined;
   const items = [
-    ...(lead.nextFollowUp ? [{ key: 'fu', title: t('Follow-up · {number}', { number: lead.number }), due: lead.nextFollowUp, time: null, event: false, over: lead.isOverdue }] : []),
+    ...(lead.nextFollowUp && !standIn ? [{ key: 'fu', title: t('Follow-up · {number}', { number: lead.number }), due: lead.nextFollowUp, time: null, event: false, over: lead.isOverdue }] : []),
     ...lead.tasks
       .filter((task) => task.origin !== 'follow_up' || task.dueDate !== lead.nextFollowUp)
       .map((task) => ({ key: `t${task.id}`, title: taskTitle(t, task.title), due: task.dueDate, time: task.dueTime, event: task.kind !== 'followup', over: task.isOverdue })),

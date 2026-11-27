@@ -381,6 +381,34 @@ describe('email follow-up tasks and the lead follow-up', () => {
     expect(await prisma.task.count({ where: { leadId: lead.id, isDone: false } })).toBe(0);
   });
 
+  it('unticking a done email follow-up stand-in restores the lead follow-up date, as for a follow_up task', async () => {
+    const { rep, lead } = await setup();
+    const task = await emailTask(lead.id, rep.user.id, '2026-12-01');
+    await sync(lead.id);
+    const done = await req('PATCH', `/api/tasks/${task.id}`, rep.cookie, { isDone: true, updatedAt: stamp(task) });
+    expect((await leadOf(lead.id)).nextFollowUp).toBeNull();
+    const untick = await req('PATCH', `/api/tasks/${task.id}`, rep.cookie, { isDone: false, updatedAt: done.json().updatedAt });
+    expect(untick.statusCode).toBe(200);
+    expect((await leadOf(lead.id)).nextFollowUp).toEqual(day('2026-12-01'));
+    // It stands in again: no lead follow-up task comes back on the next sync.
+    await sync(lead.id);
+    expect(await prisma.task.count({ where: { leadId: lead.id, isDone: false } })).toBe(1);
+    const logs = await prisma.auditLog.findMany({ where: { entityType: 'lead', entityId: String(lead.id) }, orderBy: { id: 'asc' } });
+    expect(logs.map((l) => l.after)).toEqual([{ nextFollowUp: null }, { nextFollowUp: '2026-12-01' }]);
+  });
+
+  it('unticking a done email follow-up task leaves a lead date that has moved on alone', async () => {
+    const { rep, lead } = await setup();
+    const task = await emailTask(lead.id, rep.user.id, '2026-12-01');
+    await sync(lead.id);
+    const done = await req('PATCH', `/api/tasks/${task.id}`, rep.cookie, { isDone: true, updatedAt: stamp(task) });
+    // A new follow-up date set on the lead since.
+    await prisma.lead.update({ where: { id: lead.id }, data: { nextFollowUp: day('2026-12-10') } });
+    await sync(lead.id);
+    await req('PATCH', `/api/tasks/${task.id}`, rep.cookie, { isDone: false, updatedAt: done.json().updatedAt });
+    expect((await leadOf(lead.id)).nextFollowUp).toEqual(day('2026-12-10'));
+  });
+
   it('moving the standing-in email follow-up task moves the lead follow-up', async () => {
     const { rep, lead } = await setup();
     const task = await emailTask(lead.id, rep.user.id, '2026-12-01');

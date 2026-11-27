@@ -49,6 +49,17 @@ const notifyAssignee = (tx: Tx, task: Pick<Task, 'assignedToId' | 'title'>) =>
   notifyUser(tx, task.assignedToId, `Task assigned to you · ${task.title}`, null, '/tasks');
 
 /**
+ * Whether an email follow-up task stands in for the lead follow-up task (plan decision 6), so its edits mirror onto
+ * `lead.nextFollowUp` as a `follow_up` task's do. Open: it is the lead's open follow-up task (openFollowUpTask). Done:
+ * the lead has no next follow-up (its tick cleared it) and no open follow-up task, so unticking it restores the date,
+ * as unticking a `follow_up` task does. Never on a closed lead (the lead's follow-up stays cleared).
+ */
+async function standsIn(tx: Tx, task: Task, lead: Lead): Promise<boolean> {
+  if (!task.isDone) return (await openFollowUpTask(tx, lead))?.id === task.id;
+  return lead.nextFollowUp === null && !isClosedStatus(lead.status) && (await openFollowUpTask(tx, lead)) === null;
+}
+
+/**
  * The visible task the user may edit, checked against the client's `updatedAt` (409 `stale` when it
  * has moved on). Editing needs more than seeing: the actor is the task's assignee, the lead's
  * assignee, or has `view_all_leads` (else 403 `forbidden`). For a follow-up task the lead row is
@@ -65,8 +76,7 @@ async function editableTask(
     await lockLeads(tx, [found.leadId]);
     const lead = await tx.lead.findUniqueOrThrow({ where: { id: found.leadId } });
     if (found.origin === 'follow_up') followUpLead = lead;
-    // An email follow-up task on the lead's next follow-up day stands in for the lead follow-up task.
-    else if (found.origin === 'email_follow_up' && (await openFollowUpTask(tx, lead))?.id === found.id) followUpLead = lead;
+    else if (found.origin === 'email_follow_up' && (await standsIn(tx, found, lead))) followUpLead = lead;
     if (found.assignedToId !== user.id && lead.assignedToId !== user.id && !can(user.role, 'view_all_leads')) {
       throw new RuleError('forbidden');
     }

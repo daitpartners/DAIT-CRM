@@ -171,6 +171,38 @@ describe('leads API', () => {
     expect(await ids('import-2026-11-24-2')).toEqual([second.id]);
   });
 
+  it('an email follow-up task standing in for the lead follow-up counts in Overdue and the follow-up tiles, once', async () => {
+    const mgr = await as('MANAGER', 'Europe/London');
+    const today = todayIn('Europe/London');
+    const email = (leadId: number, due: string, extra: { isDone?: boolean } = {}) =>
+      prisma.task.create({ data: { leadId, assignedToId: mgr.user.id, title: 'Follow up: Proposal', dueDate: day(due), origin: 'email_follow_up', ...extra } });
+    // Overdue: two same-day email tasks on one lead still count once (lead and tile).
+    const late = await makeLead({ assignedToId: mgr.user.id, nextFollowUp: day(shift(today, -2)) });
+    await email(late.id, shift(today, -2));
+    await email(late.id, shift(today, -2));
+    // Due today: a stand-in on today.
+    const due = await makeLead({ assignedToId: mgr.user.id, nextFollowUp: day(today) });
+    await email(due.id, today);
+    // Not stand-ins: an overdue email task on another day than the lead's date, and a done one.
+    const other = await makeLead({ assignedToId: mgr.user.id, nextFollowUp: day(shift(today, 3)) });
+    await email(other.id, shift(today, -1));
+    const ticked = await makeLead({ assignedToId: mgr.user.id, nextFollowUp: day(shift(today, -1)) });
+    await email(ticked.id, shift(today, -1), { isDone: true });
+    // A lead with its own overdue follow-up task and a same-day email task: counted once, by its follow-up task.
+    const both = await makeLead({ assignedToId: mgr.user.id, nextFollowUp: day(shift(today, -3)) });
+    await followUp(both.id, mgr.user.id, shift(today, -3));
+    await email(both.id, shift(today, -3));
+
+    const body = (await req('GET', '/api/leads', mgr.cookie)).json();
+    expect(body.counts.overdue).toBe(2);
+    expect(body.tiles).toMatchObject({ followUpsDueToday: 1, overdue: 2 });
+    const ids = (await req('GET', '/api/leads?tab=overdue', mgr.cookie)).json().items.map((i: { id: number }) => i.id);
+    expect(ids.sort()).toEqual([late.id, both.id].sort());
+    // A closed lead is not overdue.
+    await prisma.lead.update({ where: { id: late.id }, data: { status: 'Lost' } });
+    expect((await req('GET', '/api/leads', mgr.cookie)).json()).toMatchObject({ counts: { overdue: 1 }, tiles: { overdue: 1 } });
+  });
+
   it('overdue tab uses the user\'s timezone', async () => {
     const east = await as('MANAGER', 'Pacific/Kiritimati');
     const west = await as('MANAGER', 'Pacific/Pago_Pago');

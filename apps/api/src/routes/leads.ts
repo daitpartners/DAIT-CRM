@@ -21,7 +21,7 @@ import {
 import { timelineViewer } from '../mail/access.js';
 import {
   RuleError, applyStatusChange, auditCreatedLead, companyDataFromLead, createLeadWithCompany, recordAssignment,
-  syncFollowUpTask,
+  standInFollowUps, syncFollowUpTask,
 } from '../leads/service.js';
 import { dateOnly, todayIn } from '../leads/dates.js';
 import { attachmentHeader } from '../imports/exports.js';
@@ -138,18 +138,31 @@ function orderBy(sort: LeadListQuery['sort'], dir: 'asc' | 'desc'): Prisma.LeadO
   }
 }
 
-/** Leads with an open follow-up task due before `today` that are still open. */
-const overdueWhere = (today: string): Prisma.LeadWhereInput => ({
-  status: { notIn: [...CLOSED_STATUSES] },
-  tasks: { some: { origin: 'follow_up', isDone: false, dueDate: { lt: dateOnly(today) } } },
-});
+/** Standing-in email follow-up tasks (standInFollowUps) due on or before today. */
+type StandIns = Awaited<ReturnType<typeof standInFollowUps>>;
 
-function tabWhere(tab: LeadListQuery['tab'], user: AuthUser, today: string): Prisma.LeadWhereInput {
+/**
+ * Leads with an open follow-up task due before `today` that are still open; an email follow-up task standing in for
+ * the lead follow-up (`standIns`) counts as one.
+ */
+const overdueWhere = (today: string, standIns: StandIns): Prisma.LeadWhereInput => {
+  const day = dateOnly(today);
+  const late = standIns.filter((s) => s.dueDate < day).map((s) => s.leadId);
+  return {
+    status: { notIn: [...CLOSED_STATUSES] },
+    OR: [
+      { tasks: { some: { origin: 'follow_up', isDone: false, dueDate: { lt: day } } } },
+      ...(late.length ? [{ id: { in: late } }] : []),
+    ],
+  };
+};
+
+function tabWhere(tab: LeadListQuery['tab'], user: AuthUser, today: string, standIns: StandIns): Prisma.LeadWhereInput {
   switch (tab) {
     case 'leads': return { leadType: 'Lead' };
     case 'prospects': return { leadType: 'Prospect' };
     case 'mine': return { assignedToId: user.id };
-    case 'overdue': return overdueWhere(today);
+    case 'overdue': return overdueWhere(today, standIns);
     case 'unassigned': return { assignedToId: null };
     default: return {};
   }
@@ -183,10 +196,15 @@ function filterWhere(query: LeadListQuery): Prisma.LeadWhereInput[] {
   return and;
 }
 
-/** Open follow-up tasks on visible, live, open leads: mine (or everyone's with view_all_leads). */
-function followUpTasks(user: AuthUser, dueDate: Prisma.DateTimeFilter): Prisma.TaskWhereInput {
+/**
+ * Open follow-up tasks on visible, live, open leads: mine (or everyone's with view_all_leads). A standing-in email
+ * follow-up task (`standIns`) counts as the lead's follow-up task.
+ */
+function followUpTasks(user: AuthUser, dueDate: Prisma.DateTimeFilter, standIns: StandIns): Prisma.TaskWhereInput {
+  const ids = standIns.map((s) => s.taskId);
   return {
-    origin: 'follow_up', isDone: false, dueDate,
+    ...(ids.length ? { OR: [{ origin: 'follow_up' }, { id: { in: ids } }] } : { origin: 'follow_up' }),
+    isDone: false, dueDate,
     ...(can(user.role, 'view_all_leads') ? {} : { assignedToId: user.id }),
     lead: { AND: [leadWhere(user), { status: { notIn: [...CLOSED_STATUSES] } }] },
   };
@@ -202,8 +220,9 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
     const today = todayIn(user.timezone);
     const visible = leadWhere(user, { includeArchived: query.archived === '1' });
     const live = leadWhere(user);
-    const where: Prisma.LeadWhereInput = { AND: [visible, tabWhere(query.tab, user, today), ...filterWhere(query)] };
-    const countTab = (tab: LeadListQuery['tab']) => prisma.lead.count({ where: { AND: [live, tabWhere(tab, user, today)] } });
+    const standIns = await standInFollowUps(prisma, today);
+    const where: Prisma.LeadWhereInput = { AND: [visible, tabWhere(query.tab, user, today, standIns), ...filterWhere(query)] };
+    const countTab = (tab: LeadListQuery['tab']) => prisma.lead.count({ where: { AND: [live, tabWhere(tab, user, today, standIns)] } });
     const weekAgo = new Date(Date.now() - 7 * DAY_MS);
     const dir = query.sort ? query.dir : 'desc';
 
@@ -214,9 +233,9 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
         countTab('all'), countTab('leads'), countTab('prospects'), countTab('mine'), countTab('overdue'), countTab('unassigned'),
         prisma.lead.count({ where: { AND: [live, { createdAt: { gte: weekAgo } }] } }),
         prisma.lead.count({ where: { AND: [live, { createdAt: { gte: weekAgo }, leadSource: WEBSITE_SOURCE }] } }),
-        prisma.task.count({ where: followUpTasks(user, { equals: dateOnly(today) }) }),
-        prisma.task.count({ where: followUpTasks(user, { lt: dateOnly(today) }) }),
-        prisma.lead.count({ where: { AND: [live, tabWhere('unassigned', user, today), { leadType: 'Prospect' }] } }),
+        prisma.task.count({ where: followUpTasks(user, { equals: dateOnly(today) }, standIns) }),
+        prisma.task.count({ where: followUpTasks(user, { lt: dateOnly(today) }, standIns) }),
+        prisma.lead.count({ where: { AND: [live, tabWhere('unassigned', user, today, standIns), { leadType: 'Prospect' }] } }),
       ]);
     // The batch number in the Created cell links to the batch in the Data manager (Administrators and Managers).
     const numbers = [...new Set(rows.map((r) => r.importBatch?.toUpperCase()).filter((n): n is string => !!n))];
@@ -244,8 +263,9 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
     const user = request.user!;
     if (query.archived === '1' && !can(user.role, 'view_all_leads')) return reply.code(403).send({ error: 'forbidden' });
     const today = todayIn(user.timezone);
+    const standIns = query.tab === 'overdue' ? await standInFollowUps(prisma, today) : [];
     const where: Prisma.LeadWhereInput = {
-      AND: [leadWhere(user, { includeArchived: query.archived === '1' }), tabWhere(query.tab, user, today), ...filterWhere(query)],
+      AND: [leadWhere(user, { includeArchived: query.archived === '1' }), tabWhere(query.tab, user, today, standIns), ...filterWhere(query)],
     };
     const lang = (['en', 'es', 'fr'] as const).find((l) => l === user.language) ?? 'en';
     const result = await leadsWorkbook(where, orderBy(query.sort, query.sort ? query.dir : 'desc'), lang);
