@@ -81,7 +81,7 @@ type Props = {
   onTemplate?: (anchor: HTMLElement) => void;
   /** Mail: the user's signature HTML (server-sanitised); the Signature button is off without one. */
   signatureHtml?: string | null;
-  /** Mail: the message frame grows with what it holds (at least 120 px), as the mockup's inline reply does. */
+  /** Mail: the message frame grows with what it holds (at least 120 px), as the mockup's inline reply and New message do. */
   autoGrow?: boolean;
 };
 

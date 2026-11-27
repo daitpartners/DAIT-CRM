@@ -16,6 +16,13 @@ import { PARITY_OUT } from './_shared';
  * PDF and a spreadsheet, graph id `parity-att-…`, which the e2e fake Graph answers with two attachments), flags and
  * unread rows, and Maya's own lead mail for the team view. Every message's graph id starts `parity-`; afterAll deletes
  * them, puts the seeded messages it set aside back in their folders and sets both users' language back to English.
+ *
+ * Web-mail release 3 (Task 17) adds mockup states 2 (inline Reply on the HTML conversation, a few lines typed, Draft
+ * saved), 3 (full-page New message with a lead, a Cc, a template and a PDF), 6 (the follow-up box after Send on that
+ * page) and the Undo toast (`#s=2&send` in the mockup), as `state2-…`, `state3-…`, `state6-…` and `toast-…`. For them
+ * beforeAll also gives Neha a signature (Add automatically on) and adds the template `Proposal follow-up (EN)`; the
+ * e2e fake Graph answers the reply draft for the `parity-att-…` message. Every draft made is removed after each capture
+ * (Undo leaves nothing queued) and afterAll puts Neha's signature back and deletes the template.
  */
 const RUN = process.env.PARITY_WEB_MAIL === '1';
 const OUT = process.env.PARITY_DIR ?? PARITY_OUT;
@@ -83,8 +90,13 @@ const MESSAGES: Msg[] = [
 ];
 
 const SET_ASIDE = 'parity-set-aside';
+const TEMPLATE = 'Proposal follow-up (EN)';
+const SIGNATURE = '<p><b>Neha Kapoor</b><br>DAIT Partners · Digital and design partner<br>daitpartners.com</p>';
+/** A small PDF the draft upload accepts (`sniff()` reads the `%PDF-` header). */
+const PDF = Buffer.from('%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n'.padEnd(1_850_000, ' '));
+let savedSignature: { html: string | null; auto: boolean } | null = null;
 
-test.describe('web-mail release 2 parity', () => {
+test.describe('web-mail parity (releases 2 and 3)', () => {
   test.skip(!RUN, 'Parity captures run only with PARITY_WEB_MAIL=1');
   test.describe.configure({ mode: 'serial' });
 
@@ -114,6 +126,13 @@ test.describe('web-mail release 2 parity', () => {
       const fu = l.followUp === null ? 'null' : `current_date + ${l.followUp}`;
       sql(`update leads set contact_id=${contact.id}, next_follow_up=${fu} where id=${lead.id}`);
       leadIds[l.key] = { lead: lead.id, contact: contact.id, company: lead.companyId };
+      // Release 3 state 2: the reply's Cc is a known contact of the client (shown by name, as the mockup's Robert Hayes).
+      if (l.key === 'acme') {
+        const r = await page.request.post('/api/contacts', {
+          data: { companyId: lead.companyId, firstName: 'Robert', lastName: 'Hayes', designation: 'Head of Digital', businessEmail: 'robert.hayes@acme-logistics.com' },
+        });
+        expect(r.status(), await r.text()).toBe(201);
+      }
     }
     await page.close();
 
@@ -133,15 +152,28 @@ test.describe('web-mail release 2 parity', () => {
              ${m.html ? lit(html) : 'null'}, ${m.unread ? 'false' : 'true'}, ${m.at}, now(), 'sync', '${graphId}', 'parity-${who}-${m.thread}',
              '${m.flag ? 'flagged' : 'notFlagged'}', '${m.att ? '["Acme_RFP-2026-118_Website-Portal.pdf","RFP-2026-118_Pricing-Sheet.xlsx"]' : '[]'}'::jsonb, ${m.att ? 2_600_000 : 24_000})`);
     });
+
+    // Release 3: Neha's signature (kept to put back) and the mockup's template.
+    const neha = await browser.newPage();
+    await signInAs(neha, NEHA);
+    savedSignature = (await (await neha.request.get('/api/me/signature')).json()) as { html: string | null; auto: boolean };
+    const sig = await neha.request.put('/api/me/signature', { data: { html: SIGNATURE, auto: true } });
+    expect(sig.ok(), await sig.text()).toBe(true);
+    await neha.close();
+    const body = 'Hi {first_name},\n\nThank you for the time on the discovery call. As promised, attached is our proposal for the {company} patient portal: UX audit, new appointment flow and a design system your team can keep extending.\n\nThe first phase takes six weeks and could start on 7 Dec 2026.\n\nWould Wednesday 2 Dec at 15:00 ET work for a 30-minute walkthrough?\n\nBest regards,';
+    sql(`insert into email_templates (name, language, subject, body, source_type, updated_at) values (${lit(TEMPLATE)}, 'en', ${lit('Proposal: {company} patient portal UX')}, ${lit(body)}, 'manual', now())`);
   });
 
   test.afterAll(async ({ browser }) => {
+    removeDrafts();
+    sql(`delete from email_templates where name = ${lit(TEMPLATE)}`);
     sql(`delete from email_messages where graph_id like 'parity-%'`);
     sql(`update email_messages set folder = substr(last_error, ${SET_ASIDE.length + 2}), last_error = null where last_error like '${SET_ASIDE}:%'`);
     const page = await browser.newPage();
     for (const who of [NEHA, MAYA]) {
       await signInAs(page, who);
       await setLanguage(page, 'en');
+      if (who === NEHA && savedSignature) await page.request.put('/api/me/signature', { data: savedSignature });
     }
     await page.close();
   });
@@ -200,6 +232,78 @@ test.describe('web-mail release 2 parity', () => {
     });
   }
 
+  for (const lang of LANGS) {
+    test(`app: states 2, 3, 6 and the Undo toast in ${lang}`, async ({ page }) => {
+      test.setTimeout(240_000);
+      for (const vp of VIEWPORTS) {
+        await page.setViewportSize(vp);
+        await signInAs(page, NEHA);
+        await setLanguage(page, lang);
+
+        // State 2: the HTML conversation, Reply (inline, at the top), a Cc, a few lines typed, Draft saved.
+        await page.goto('/email?folder=inbox');
+        await openAcme(page);
+        await reader(page).locator('.msg-foot button').first().click();
+        const reply = reader(page).locator('form.reply');
+        await expect(reply.locator('.rtop .draft .ico')).toBeVisible();
+        await reply.locator('.fld').first().locator('.lk').first().click();
+        await addRecipient(page, reply.locator('.rcp-in input').nth(1), 'robert.hayes@acme-logistics.com');
+        await typeBody(page, reply, ['Hi Maria,', 'Thank you for sending the RFP and the pricing sheet. We confirm our intent to bid and will send our questions before the 3 Dec deadline.', 'Could we book 30 minutes with Robert next week to walk through the portal integrations?']);
+        await page.mouse.move(0, 0);
+        await shot(page, `state2-${vp.width}-${lang}-app`);
+        removeDrafts();
+
+        // State 3: New mail, the lead chosen (To takes its contact), a Cc, Bcc open, the template, one PDF.
+        await page.goto('/email?folder=inbox');
+        await page.locator('.wm-cmdbar .split button').first().click();
+        await expect(page).toHaveURL(/\/email\/new\?draft=\d+$/);
+        const form = page.locator('form.reply.page');
+        await expect(form.locator('.rtop .draft .ico')).toBeVisible();
+        await form.locator('.leadpick').click();
+        const picker = page.locator('.mm-link');
+        await picker.locator('input[type=search]').fill('Northwind');
+        await picker.getByRole('menuitem').filter({ hasText: 'Northwind Health' }).first().click();
+        await expect(form.locator('.rcp').filter({ hasText: /James Whitaker|james.whitaker/ })).toBeVisible();
+        await form.locator('.fld').filter({ has: page.locator('.rcp-in') }).first().locator('.lk').first().click();
+        await addRecipient(page, form.locator('.rcp-in input').nth(1), MAYA);
+        // The Bcc row open and empty (`Add people`), as the mockup shows it.
+        await form.locator('.fld').filter({ has: page.locator('.rcp-in') }).first().locator('.lk').nth(1).click();
+        await expect(form.locator('.rcp-in input')).toHaveCount(3);
+        await form.locator('.tb.wide').first().click();
+        await page.getByRole('menuitem').filter({ hasText: TEMPLATE }).first().click();
+        await expect(form.locator('.tplbar')).toContainText(TEMPLATE);
+        await form.locator('input[type=file][multiple]').setInputFiles({ name: 'DAIT_Proposal_Northwind-Health_v2.pdf', mimeType: 'application/pdf', buffer: PDF });
+        await expect(form.locator('.att-chip').first()).toContainText('DAIT_Proposal_Northwind-Health_v2.pdf');
+        await expect(page.locator('.cp-grid')).toContainText('Northwind Health');
+        await expect(form.locator('.rtop .draft .ico')).toBeVisible();
+        await page.mouse.move(0, 0);
+        await shot(page, `state3-${vp.width}-${lang}-app`);
+
+        // State 6: Send → the follow-up box.
+        await form.locator('.rtop .split .btn.primary').first().click();
+        const box = page.locator('.modal.fu');
+        await expect(box).toBeVisible();
+        await page.mouse.move(0, 0);
+        await shot(page, `state6-${vp.width}-${lang}-app`);
+
+        // The Undo toast: Send and add follow-up, captured within the 10 s; then Undo leaves nothing queued.
+        await box.locator('.actions .btn.primary').click();
+        const toast = page.locator('.utoast');
+        await expect(toast).toBeVisible();
+        await page.mouse.move(0, 0);
+        await page.waitForTimeout(300);
+        await page.screenshot({ path: join(OUT, `toast-${vp.width}-${lang}-app.png`) });
+        const sent = Number(sql(`select id from email_messages where status = 'queued' and graph_id like 'e2e-draft-%' order by id desc limit 1`));
+        await toast.locator('button').click();
+        await expect(toast).toHaveCount(0);
+        await expect.poll(() => sql(`select status from email_messages where id = ${sent}`)).toBe('draft');
+        expect(sql(`select count(*) from jobs where type = 'send_user_email' and status = 'queued' and (payload->>'emailMessageId')::int = ${sent}`)).toBe('0');
+        await expect(page).toHaveURL(/\/email\/new\?draft=\d+$/);
+        removeDrafts();
+      }
+    });
+  }
+
   test('mockup: states 1, 4 and 5', async () => {
     test.setTimeout(120_000);
     const b = await chromium.launch();
@@ -215,7 +319,51 @@ test.describe('web-mail release 2 parity', () => {
     }
     await b.close();
   });
+
+  test('mockup: states 2, 3, 6 and the Undo toast', async () => {
+    test.setTimeout(120_000);
+    const b = await chromium.launch();
+    for (const vp of VIEWPORTS) {
+      const page = await (await b.newContext({ viewport: vp })).newPage();
+      for (const [name, hash] of [['state2', 's=2'], ['state3', 's=3'], ['state6', 's=6'], ['toast', 's=2&send']] as const) {
+        await page.goto(`${MOCKUP}#${hash}`);
+        await page.reload();
+        await page.waitForTimeout(800);
+        await shot(page, `${name}-${vp.width}-mockup`);
+      }
+      await page.close();
+    }
+    await b.close();
+  });
 });
+
+/** Neha's drafts made by the captures (the fake Graph's `e2e-draft-…` ids), with any send left queued for them. */
+function removeDrafts(): void {
+  const mine = `select m.id from email_messages m join users u on u.id = m.user_id where u.email = '${NEHA}' and m.graph_id like 'e2e-draft-%'`;
+  sql(`delete from jobs where type = 'send_user_email' and (payload->>'emailMessageId')::int in (${mine})`);
+  sql(`delete from email_messages where id in (${mine})`);
+}
+
+/** Types an address into a recipient field and takes it as a chip. */
+async function addRecipient(page: Page, input: ReturnType<Page['locator']>, address: string): Promise<void> {
+  await input.fill(address);
+  await input.press('Enter');
+  await expect(page.locator('.rcp').filter({ hasText: new RegExp(address.split('@')[0]!.split('.')[0]!, 'i') }).first()).toBeVisible();
+}
+
+/** Types paragraphs at the top of the editor's message and waits for the auto-save (Draft saved). */
+async function typeBody(page: Page, form: ReturnType<Page['locator']>, lines: string[]): Promise<void> {
+  const body = form.frameLocator('iframe.rbody').locator('body');
+  await body.click({ position: { x: 24, y: 16 } });
+  await page.keyboard.press('Control+Home');
+  await page.keyboard.press('Meta+ArrowUp');
+  for (const [i, line] of lines.entries()) {
+    await page.keyboard.type(line);
+    if (i < lines.length - 1) await page.keyboard.press('Enter');
+  }
+  await expect.poll(() => sql(`select count(*) from email_messages where graph_id like 'e2e-draft-%' and body_html like ${lit(`%${lines[lines.length - 1]!.slice(0, 30)}%`)}`), { timeout: 15_000 }).toBe('1');
+  await expect(form.locator('.rtop .draft .ico')).toBeVisible();
+}
 
 /**
  * Carried check (T16): folding the lead panel widens the HTML frame and unfolding narrows it again; each time the frame

@@ -542,7 +542,7 @@ export function DraftComposer({
         id={`dc-body-${draft.id}`}
         label={t('Message')}
         toolbar="mail"
-        autoGrow={variant === 'inline'}
+        autoGrow
         value={body}
         onChange={onBody}
         onPicture={onPicture}

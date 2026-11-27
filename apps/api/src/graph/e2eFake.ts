@@ -68,6 +68,12 @@ const ORIGINALS: Record<string, { conversationId: string; subject: string; fromN
   },
 };
 
+/** web/e2e/parity/webMail.spec.ts: its HTML RFP message (graph id `parity-att-…`) is the one replied to in state 2. */
+const PARITY_RFP = {
+  conversationId: 'parity-neha-acme', subject: 'RFP-2026-118: Website & customer portal redesign', fromName: 'Maria Gómez', from: 'maria.gomez@acme-logistics.com',
+  to: ['neha.kapoor@daitpartners.com'], text: 'Please find attached our formal RFP and the pricing sheet. Proposals are due 11 Dec 2026.',
+};
+
 /** Drafts made through the fake, by id (`e2e-draft-<n>`); attachment ids are `e2e-att-<n>`. */
 const drafts = new Map<string, GraphDraft>();
 let draftCount = 0;
@@ -110,7 +116,7 @@ export function createE2eGraph(): GraphClient {
       return newDraft({ conversationId: null, ...writeFields(d) });
     },
     async createReplyDraft(account, graphId, kind) {
-      const o = ORIGINALS[graphId];
+      const o = ORIGINALS[graphId] ?? (graphId.startsWith('parity-att') ? PARITY_RFP : undefined);
       if (!o) throw notFound();
       const own = account.address.toLowerCase();
       const to = kind === 'forward' ? [] : kind === 'reply' ? [o.from] : [o.from, ...o.to.filter((a) => a !== own && a !== o.from)];
