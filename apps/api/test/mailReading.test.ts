@@ -156,6 +156,17 @@ describe('GET /mail/:id — conversation and lead panel', () => {
     expect((await get(`/api/mail/${other.id}`, await signIn(app, f.rep))).json().leadPanel.linkReason).toBeNull();
   });
 
+  it('a Bcc address gives the link reason to the mailbox owner, never in team view', async () => {
+    const f = await setup();
+    const m = await msg(f.rep.id, f.repBox.id, {
+      folder: 'sent', status: 'sent', fromAddress: 'maya@daitpartners.com', toAddresses: ['someone@gmail.com'], bccAddresses: ['ana@acme.com'], leadId: f.lead.id,
+    });
+    expect((await get(`/api/mail/${m.id}`, await signIn(app, f.rep))).json().leadPanel.linkReason).toEqual({ kind: 'address', value: 'ana@acme.com' });
+    const team = (await get(`/api/mail/${m.id}`, await signIn(app, f.admin))).json();
+    expect(team.viewOnly).toBe(true);
+    expect(team.leadPanel.linkReason).toBeNull();
+  });
+
   it('a message with no lead has no lead panel', async () => {
     const f = await setup();
     const m = await msg(f.rep.id, f.repBox.id, { fromAddress: 'mum@gmail.com' });

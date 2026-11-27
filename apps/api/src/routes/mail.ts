@@ -438,8 +438,9 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
       const hidden = m.leadId !== null && !(await canSeeLead(prisma, user, m.leadId));
       // The list's scope for this message (its owner's mail, team-readable only in team view), for its conversation count.
       const scopeWhere: Prisma.EmailMessageWhereInput = viewOnly ? { AND: [{ userId: m.userId }, teamReadableWhere] } : { userId: user.id };
+      // The lead panel's link reason: Bcc counts for the mailbox owner only (team view never shows another user's Bcc).
       const participants = participantsOf({
-        from: m.fromAddress, to: m.toAddresses as string[], cc: m.ccAddresses as string[], bcc: m.bccAddresses as string[],
+        from: m.fromAddress, to: m.toAddresses as string[], cc: m.ccAddresses as string[], bcc: viewOnly ? [] : (m.bccAddresses as string[]),
       });
       const [restricted, lead, contact, company, thread, projects, shown, panel] = await Promise.all([
         hidden ? prisma.lead.findUnique({ where: { id: m.leadId! }, select: { number: true, companyName: true, company: { select: { name: true } } } }) : null,
