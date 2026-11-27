@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { PagingQuery } from './paging.js';
+import { isoDate } from './common.js';
+import { FLAG_PRESETS } from '../mailDates.js';
 
 /** `PATCH /mailboxes/:id` (prototype "Mailbox options"); every field optional. */
 export const MailboxOptions = z.object({
@@ -141,9 +143,64 @@ export const MailCompose = z.object({
 }).superRefine(plainBodyRule(true));
 export type MailCompose = z.infer<typeof MailCompose>;
 
-/** `POST /mail/:id/reply` (release 2B-2): to the sender (or the original recipients of your own message). */
-export const MailReply = z.object({ cc: mailCc, body: mailBody, bodyHtml }).superRefine(plainBodyRule(true));
+/**
+ * `POST /mail/:id/reply` (release 2B-2; reply all and forward in web-mail release 2). Reply goes to the sender (or the
+ * original recipients of your own message) and Reply all adds the other recipients, so `to` is ignored for both;
+ * Forward goes to `to`, which needs at least one address.
+ */
+export const MailReply = z.object({
+  mode: z.enum(['reply', 'replyAll', 'forward']).default('reply'),
+  to: z.array(mailAddress).max(20).default([]),
+  cc: mailCc,
+  body: mailBody,
+  bodyHtml,
+}).superRefine(plainBodyRule(true)).superRefine((v, ctx) => {
+  if (v.mode === 'forward' && v.to.length === 0) {
+    ctx.addIssue({ code: z.ZodIssueCode.too_small, minimum: 1, type: 'array', inclusive: true, path: ['to'] });
+  }
+});
 export type MailReply = z.infer<typeof MailReply>;
+
+/** Folders a message can be moved to from the Email screen (web-mail release 2). */
+export const MOVE_FOLDERS = ['inbox', 'archive', 'deleted'] as const;
+
+/**
+ * One change to a message, made in Outlook first (web-mail release 2): move it, delete it permanently, mark it read
+ * or unread, or flag it (a due-day preset, Mark complete or Clear flag).
+ */
+export const MailChange = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('move'), folder: z.enum(MOVE_FOLDERS) }),
+  z.object({ type: z.literal('delete') }),
+  z.object({ type: z.literal('read'), isRead: z.boolean() }),
+  z.object({ type: z.literal('flag'), flag: z.enum([...FLAG_PRESETS, 'complete', 'clear']) }),
+]);
+export type MailChange = z.infer<typeof MailChange>;
+
+/** Most messages one bulk change takes (the selection, or a conversation's messages). */
+export const BULK_MAX = 50;
+/** `POST /mail/bulk`: the same change to each message. */
+export const MailBulk = z.object({ ids: z.array(z.number().int().positive()).min(1).max(BULK_MAX), change: MailChange });
+export type MailBulk = z.infer<typeof MailBulk>;
+
+/** `POST /mail/:id/follow-up`: the linked lead's next follow-up day and 24-hour time (the user's zone), or clear it. */
+export const MailFollowUp = z.union([
+  z.object({ date: isoDate, time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/) }),
+  z.object({ clear: z.literal(true) }),
+]);
+export type MailFollowUp = z.infer<typeof MailFollowUp>;
+
+/**
+ * Email screen folders (web-mail release 2), shared by the API and the screen. The list query keeps `view` a plain
+ * string: an unknown view (the retired `unlinked` included) is read as the Inbox rather than refused.
+ */
+export const MAIL_VIEWS = ['inbox', 'sent', 'drafts', 'scheduled', 'flagged', 'archive', 'deleted', 'awaiting', 'due', 'mine'] as const;
+export type MailView = (typeof MAIL_VIEWS)[number];
+/** Email list sort keys. */
+export const MAIL_SORTS = ['date', 'from', 'lead', 'stage', 'size'] as const;
+export type ListSort = (typeof MAIL_SORTS)[number];
+/** Email list quick filters (the chips above the list). */
+export const MAIL_CHIPS = ['all', 'unread', 'flagged', 'attachments'] as const;
+export type MailChip = (typeof MAIL_CHIPS)[number];
 
 /**
  * `GET /mail` (Email screen list; paged at the owner's request, 22 Nov 2026): 50 a page, at most 100 as other lists.
@@ -164,6 +221,25 @@ export const MailListQuery = PagingQuery.pick({ page: true, pageSize: true }).ex
    * user's lead mail. Anything but your own needs `view_team_mail` (Administrator, Manager) and is view only.
    */
   mailOf: z.union([z.enum(['me', 'all']), z.string().regex(/^\d{1,9}$/)]).optional(),
+  /** Web-mail release 2: a quick filter chip. */
+  chip: z.enum(MAIL_CHIPS).optional(),
+  /** `0`: one row per message instead of per conversation (the default). */
+  conv: z.enum(['0', '1']).optional(),
+  sort: z.enum(MAIL_SORTS).optional(),
+  dir: z.enum(['desc', 'asc']).optional(),
+  /** Filters panel: text in the sender, the recipients, the subject or the linked lead / client. */
+  from: z.string().max(200).optional(),
+  to: z.string().max(200).optional(),
+  subject: z.string().max(200).optional(),
+  leadQ: z.string().max(200).optional(),
+  /** Filters panel: the linked lead's assignee (`me` or a user id). */
+  owner: z.union([z.literal('me'), z.string().regex(/^\d{1,9}$/)]).optional(),
+  /** Filters panel: received today or in the last 7 days / 30 days / 12 months, or `custom` = `since`..`until`. */
+  date: z.enum(['today', '7d', '30d', '12m', 'custom']).optional(),
+  since: isoDate.optional(),
+  until: isoDate.optional(),
+  /** `1`: only messages with attachments. */
+  attachments: z.literal('1').optional(),
 });
 export type MailListQuery = z.infer<typeof MailListQuery>;
 
