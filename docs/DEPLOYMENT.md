@@ -368,8 +368,25 @@ Only after the owner says "deploy". Follow "Deploying a release to live" (backup
    failing or waiting beyond the regular schedule (counts only):
    `sudo -u postgres psql -d dait_crm -c "SELECT status, count(*) FROM jobs WHERE type = 'sync_mailbox' GROUP BY status;"`
    (only the regular scheduled runs remain queued).
-2. **Check one flag due date against Outlook:** flag a lead message in Outlook with a due date (as a user in
-   Asia/Kolkata if possible), wait for the next sync, and check the CRM shows the same day (not the day before).
+2. **Check how Outlook writes a flag's due date (decides whether users west of UTC see the right day).** The CRM
+   assumes Graph sends a due date as the user's local midnight converted to UTC, and turns it back into the user's day.
+   If Graph instead sends a "floating" midnight labelled UTC, the CRM still shows the right day for users east of UTC
+   (Deepak and Lakshita, India; Spain) but **the day before** for users west of UTC (anyone in Latin America, e.g.
+   Carlos or Sebastian if their CRM time zone is in the Americas). Checking the CRM screen as an India user cannot tell
+   the two apart, so read Graph's raw value instead (read only, nothing in the CRM changes):
+   - In Outlook, as Deepak (Asia/Kolkata), flag any message with a custom due date of a known day, e.g. 27 Nov.
+   - Open Microsoft Graph Explorer (`https://developer.microsoft.com/graph/graph-explorer`), sign in as Deepak, and run
+     `GET https://graph.microsoft.com/v1.0/me/messages?$filter=flag/flagStatus eq 'flagged'&$select=subject,flag&$top=5`
+     with **no** `Prefer` header (the sync sends none for flags). Find the message and read `flag.dueDateTime`.
+   - **Expected (CRM correct for everyone):** `"dateTime": "2026-11-26T18:30:00.0000000", "timeZone": "UTC"`. That is
+     27 Nov 00:00 in Kolkata, given in UTC. Nothing more to do.
+   - **Floating (tell the developer, no live action):** `"dateTime": "2026-11-27T00:00:00.0000000", "timeZone": "UTC"`.
+     Then users west of UTC see every flag synced from Outlook one day early, and each sync overwrites the correct date.
+     Send the developer the raw value and the CRM time zones of the team
+     (`sudo -u postgres psql -d dait_crm -c "SELECT id, timezone FROM users WHERE is_active;"`); the fix is in
+     `flagDueDay` (sync).
+   - Any other value (a Windows zone name such as "India Standard Time", or another time of day): send it to the
+     developer as well.
 
 ## One-time steps after a release
 
