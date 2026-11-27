@@ -398,4 +398,56 @@ export const Icons: Record<string, ReactElement> = {
       <path d="M3 9h18M9 9v12" />
     </svg>
   ),
+  /* Web-mail release 3: the message editor (copied from the mockup's P icon map). */
+  popout: (
+    <svg {...base}>
+      <path d="M14 4h6v6M20 4l-8 8" />
+      <path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
+    </svg>
+  ),
+  pen: (
+    <svg {...base}>
+      <path d="M3 20c3-1 4-4 7-4s2 3 5 3 4-3 6-4" />
+      <path d="M14 4l4 4-7 7H7v-4z" />
+    </svg>
+  ),
+  marker: (
+    <svg {...base}>
+      <path d="M15 4l5 5-9 9H6v-5z" />
+      <path d="M4 21h8" />
+    </svg>
+  ),
+  bullets: (
+    <svg {...base}>
+      <path d="M9 6h11M9 12h11M9 18h11" />
+      <circle cx="4.5" cy="6" r="1" fill="currentColor" />
+      <circle cx="4.5" cy="12" r="1" fill="currentColor" />
+      <circle cx="4.5" cy="18" r="1" fill="currentColor" />
+    </svg>
+  ),
+  numbers: (
+    <svg {...base}>
+      <path d="M10 6h10M10 12h10M10 18h10" />
+      <path d="M4 4h1.5v4M3.5 8h3M3.5 13.5a1.5 1.5 0 1 1 2.5 1L3.5 17h3" />
+    </svg>
+  ),
+  indent: (
+    <svg {...base}>
+      <path d="M4 6h16M10 10h10M10 14h10M4 18h16" />
+      <path d="M4 9l3 3-3 3" />
+    </svg>
+  ),
+  outdent: (
+    <svg {...base}>
+      <path d="M4 6h16M10 10h10M10 14h10M4 18h16" />
+      <path d="M7 9l-3 3 3 3" />
+    </svg>
+  ),
+  image: (
+    <svg {...base}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="8.5" cy="9.5" r="1.5" />
+      <path d="M21 16l-5-5-9 9" />
+    </svg>
+  ),
 };

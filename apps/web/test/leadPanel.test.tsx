@@ -37,7 +37,7 @@ const item = (over: Partial<MailItem> = {}): MailItem => ({
   fromAddress: 'maria.gomez@acme-logistics.com', fromName: 'Maria Gómez', toAddresses: ['arjun@daitpartners.com'], subject: 'RFP-2026-118',
   preview: 'Please find attached', occurredAt: '2026-11-22T11:05:00.000Z', isRead: true, leadId: 5, leadNumber: 'LD-1178', companyId: 4,
   hasAttachments: false, projectId: null, projectNumber: null, flagStatus: 'notFlagged', flagDue: null, replied: false, conversationCount: 1,
-  leadStatus: 'Contacted', ...over,
+  leadStatus: 'Contacted', scheduledAt: null, ...over,
 });
 const activity = (id: number, title: string, body: string | null, occurredAt: string) => ({
   id, leadId: 5, activityType: 'email', title, body, url: null, statusFrom: null, statusTo: null, relatedType: null, relatedId: null, by: null, occurredAt,

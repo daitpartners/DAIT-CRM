@@ -356,7 +356,8 @@ function EmailList({ emails }: { emails: LeadEmail[] }) {
 }
 
 function failureText(t: TFn, code: string): string {
-  if (code === 'mailbox_needs_reconnect') return t('Your mailbox needs reconnecting in Settings → Email & calendar connections, then send again.');
+  // Web-mail release 3: a draft send that will not happen (the draft is back in Drafts).
+  if (code === 'mailbox_needs_reconnect' || code === 'draft_gone' || code === 'interrupted_may_have_sent') return errorText(t, code);
   if (code === 'mailbox_not_connected') return t('Your mailbox was not connected when this was sent. Connect it in Settings and send again.');
   return t('Microsoft 365 did not accept this email: {reason}', { reason: code });
 }

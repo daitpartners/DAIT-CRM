@@ -407,15 +407,15 @@ export function errorText(t: TFn, code: string, vars: Record<string, string | nu
     case 'message_too_long':
       return t('This message is too long to send. Shorten it, or remove large pictures or formatting.');
     case 'signature_too_long':
-      return t('The signature is too long (20 000 characters at most).');
+      return t('The signature is too long.');
     case 'try_again':
       return t('The server is busy. Try again in a moment.');
     case 'html_too_complex':
       return t('The formatting is too complex to read. Simplify it, or remove the formatting.');
     case 'attachments_too_large':
-      return t('The pictures and attachments are too large to send (2.5 MB at most together). Remove an attachment and try again.');
+      return t('Files over 2.5 MB can be attached in Outlook.');
     case 'attachment_type':
-      return t('One of the files is not a type the CRM can send (pictures, PDF, Word, Excel or PowerPoint).');
+      return t('This type of file cannot be attached here. Attach it in Outlook.');
     case 'template_files_missing':
       return t('This template’s files have changed or are missing. Pick the template again (or upload the .oft again).');
     case 'attachment_invalid':
@@ -424,6 +424,25 @@ export function errorText(t: TFn, code: string, vars: Record<string, string | nu
       return t('View only: only the mailbox owner can do this.');
     case 'no_mailbox':
       return t('Connect your Microsoft 365 mailbox in Settings to send email from the CRM.');
+    // Web-mail release 3: writing, sending and taking a send back (routes/mailDrafts.ts), and why a send failed.
+    case 'draft_gone':
+      return t('This draft was removed in Outlook.');
+    case 'already_sent':
+      return t('Too late: the email was sent.');
+    case 'no_recipients':
+      return t('Add at least one recipient.');
+    case 'schedule_time':
+      return t('Choose a time at least a minute from now and within a year.');
+    case 'follow_up_time':
+      return t('Choose a follow-up time after the email is sent.');
+    case 'mailbox_changed':
+      return t('This draft is in a mailbox that is no longer connected. Open it in Outlook.');
+    case 'not_draft':
+      return t('This email is no longer a draft.');
+    case 'interrupted_may_have_sent':
+      return t('Sending was interrupted and the email may have left. Check Sent Items before sending it again.');
+    case 'mailbox_needs_reconnect':
+      return t('Your mailbox needs reconnecting in Settings → Email & calendar connections, then send again.');
     case 'cannot_deactivate_self':
       return t('You cannot deactivate your own account');
     case 'last_administrator':

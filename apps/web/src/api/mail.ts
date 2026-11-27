@@ -69,6 +69,8 @@ export type MailItem = {
   conversationCount: number;
   /** The linked lead's status; null without a lead or for a restricted lead. */
   leadStatus: string | null;
+  /** Web-mail release 3: when a scheduled send leaves (null when it is not scheduled). */
+  scheduledAt: string | null;
   /** List rows only: the conversation's messages in this view (at most BULK_MAX), which the row's actions change together. */
   conversationIds?: number[];
 };

@@ -98,6 +98,6 @@ describe('Settings: email signature', () => {
     renderCard();
     await screen.findByRole('checkbox', { name: 'Add automatically' });
     await user.click(screen.getByRole('button', { name: 'Save' }));
-    expect(await screen.findByText('The signature is too long (20 000 characters at most).')).toBeInTheDocument();
+    expect(await screen.findByText('The signature is too long.')).toBeInTheDocument();
   });
 });

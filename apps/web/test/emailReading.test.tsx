@@ -24,7 +24,7 @@ const item = (over: Partial<MailItem> = {}): MailItem => ({
   id: 1, owner: { id: 2, name: 'Arjun Mehta' }, viewOnly: false, leadRestricted: false, folder: 'inbox', status: 'received', fromAddress: 'ana@acme.com',
   fromName: 'Ana Ruiz', toAddresses: ['arjun@daitpartners.com'], subject: 'Proposal', preview: 'Looks good', occurredAt: '2026-11-22T09:05:00.000Z',
   isRead: true, leadId: null, leadNumber: null, companyId: null, hasAttachments: false, projectId: null, projectNumber: null,
-  flagStatus: 'notFlagged', flagDue: null, replied: false, conversationCount: 1, leadStatus: null, ...over,
+  flagStatus: 'notFlagged', flagDue: null, replied: false, conversationCount: 1, leadStatus: null, scheduledAt: null, ...over,
 });
 type ThreadEntry = MailDetail['thread'][number];
 const entry = (m: MailItem, over: Partial<ThreadEntry> = {}): ThreadEntry => ({

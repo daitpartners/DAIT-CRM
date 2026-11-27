@@ -24,7 +24,7 @@ const item = (over: Partial<MailItem> = {}): MailItem => ({
   id: 1, owner: { id: 2, name: 'Arjun Mehta' }, viewOnly: false, leadRestricted: false, folder: 'inbox', status: 'received', fromAddress: 'ana@acme.com', fromName: 'Ana Ruiz', toAddresses: ['arjun@daitpartners.com'],
   subject: 'Proposal', preview: 'Looks good', occurredAt: '2026-11-20T10:00:00.000Z', isRead: false, leadId: null, leadNumber: null,
   companyId: null, hasAttachments: false, projectId: null, projectNumber: null,
-  flagStatus: 'notFlagged', flagDue: null, replied: false, conversationCount: 1, leadStatus: null, ...over,
+  flagStatus: 'notFlagged', flagDue: null, replied: false, conversationCount: 1, leadStatus: null, scheduledAt: null, ...over,
 });
 type ThreadEntry = MailDetail['thread'][number];
 /** A thread entry with release 1's fields; the reading pane's (web-mail release 2) default to an empty message. */

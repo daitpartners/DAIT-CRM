@@ -24,7 +24,7 @@ const item = (over: Partial<MailItem> = {}): MailItem => ({
   id: 1, owner: { id: 2, name: 'Arjun Mehta' }, viewOnly: false, leadRestricted: false, folder: 'inbox', status: 'received', fromAddress: 'ana@acme.com',
   fromName: 'Ana Ruiz', toAddresses: ['arjun@daitpartners.com'], subject: 'Proposal', preview: 'Looks good', occurredAt: '2026-11-26T10:00:00.000Z',
   isRead: true, leadId: null, leadNumber: null, companyId: null, hasAttachments: false, projectId: null, projectNumber: null,
-  flagStatus: 'notFlagged', flagDue: null, replied: false, conversationCount: 1, leadStatus: null, ...over,
+  flagStatus: 'notFlagged', flagDue: null, replied: false, conversationCount: 1, leadStatus: null, scheduledAt: null, ...over,
 });
 const detail = (m: MailItem): MailDetail => ({
   ...m, ccAddresses: [], bodyText: 'Looks good', bodyHtml: null, attachmentNames: [], loggedAt: null, lead: null, contact: null, company: null,
