@@ -2233,5 +2233,6 @@
   "Suggestions": "Sugerencias",
   "Forwarded to {name} · it will appear here.": "Reenviado a {name} · aparecerá aquí.",
   "Forwarded to {name} · follow-up task added · it will appear here and on {lead}'s timeline.": "Reenviado a {name} · tarea de seguimiento añadida · aparecerá aquí y en la cronología de {lead}.",
-  "Forwarded to {name} · it will appear here and on {lead}'s timeline.": "Reenviado a {name} · aparecerá aquí y en la cronología de {lead}."
+  "Forwarded to {name} · it will appear here and on {lead}'s timeline.": "Reenviado a {name} · aparecerá aquí y en la cronología de {lead}.",
+  "Close without saving": "Cerrar sin guardar"
 }

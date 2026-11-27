@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type MutableRefObject, type React
 import { isClosedStatus, localNow } from '@dait-crm/shared';
 import { ApiError, api } from '../../../api/client';
 import {
-  useApplyTemplateFiles, useAutoSave, useCreateDraft, useDiscardDraft, useDraftFile,
+  isFinalSaveCode, useApplyTemplateFiles, useAutoSave, useCreateDraft, useDiscardDraft, useDraftFile,
   type DraftFields, type DraftFileView, type DraftStart, type DraftView, type SendResult,
 } from '../../../api/drafts';
 import { useLead } from '../../../api/leads';
@@ -110,8 +110,21 @@ export function DraftComposer({ draft, variant, label, onClose, onUndone, header
   const removing = useRef(new Set<string>());
   /** The files the last template put on the draft (the next template replaces them). */
   const templateFiles = useRef(new Set<string>());
+  /**
+   * After a save failed for good (isFinalSaveCode: the mailbox disconnected, the draft gone…): what `Close without
+   * saving` does — the switch or Discard that was asked for. A screen switch waits on `waiting` until then.
+   */
+  const leave = useRef<(() => void) | null>(null);
+  const waiting = useRef<((ok: boolean) => void) | null>(null);
+  /** A switch still waiting on `Close without saving` is dropped (the user went on writing, or asked for another). */
+  const dropWaiting = () => {
+    waiting.current?.(false);
+    waiting.current = null;
+    leave.current = null;
+  };
   const touch = () => {
     touched.current = true;
+    if (waiting.current) dropWaiting();
   };
 
   // Leaving. The screen's own switches go through `guard` first (saved, or kept open). What is left here: a
@@ -240,10 +253,19 @@ export function DraftComposer({ draft, variant, label, onClose, onUndone, header
     if (closing) return;
     setClosing(true);
     setProblem(null);
+    dropWaiting();
     const saved = await auto.flush();
     if (!saved.ok && !(reason === 'discarded' && GONE.has(saved.code))) {
       setProblem(saved.code);
       setClosing(false);
+      // Saving cannot work again: Close without saving still discards (in Outlook too, when it can) or closes.
+      if (isFinalSaveCode(saved.code) && reason === 'discarded') {
+        leave.current = () => {
+          closed.current = true;
+          discardDraft.mutate(latest.current.id);
+          onClose('discarded');
+        };
+      }
       return;
     }
     if (reason === 'discarded') {
@@ -265,11 +287,32 @@ export function DraftComposer({ draft, variant, label, onClose, onUndone, header
   /** Before the screen replaces the editor: everything saved (true), or the failure shown and the editor kept (false). */
   async function release(): Promise<boolean> {
     if (closing) return false;
+    dropWaiting();
     setProblem(null);
     const saved = await auto.flush();
     if (saved.ok) return true;
     setProblem(saved.code);
-    return false;
+    if (!isFinalSaveCode(saved.code)) return false;
+    // Saving cannot work again: the switch waits for `Close without saving` (or is dropped by a change or another ask).
+    return new Promise<boolean>((resolve) => {
+      waiting.current = resolve;
+      leave.current = () => {
+        closed.current = true;
+        waiting.current = null;
+        resolve(true);
+      };
+    });
+  }
+
+  /** `Close without saving`: what was asked for goes ahead (else the editor just closes); nothing more is saved. */
+  function closeWithoutSaving() {
+    const go = leave.current;
+    leave.current = null;
+    if (go) go();
+    else {
+      closed.current = true;
+      onClose('discarded');
+    }
   }
   const releaseRef = useRef(release);
   releaseRef.current = release;
@@ -342,13 +385,16 @@ export function DraftComposer({ draft, variant, label, onClose, onUndone, header
           </button>
         ) : null}
       </div>
-      {error === 'draft_gone' ? (
+      {error ? (
         <div className="note warn rnote" role="alert">
-          <span>{t('This draft was removed in Outlook.')}</span>
-          <button type="button" className="btn sm" disabled={closing} onClick={() => void saveAsNew()}>{t('Save as a new draft')}</button>
+          <span>{error === 'draft_gone' ? t('This draft was removed in Outlook.') : errorText(t, error, {}, { context: 'draft' })}</span>
+          {error === 'draft_gone' ? (
+            <button type="button" className="btn sm" disabled={closing} onClick={() => void saveAsNew()}>{t('Save as a new draft')}</button>
+          ) : null}
+          {isFinalSaveCode(error) ? (
+            <button type="button" className="btn sm" disabled={closing} onClick={closeWithoutSaving}>{t('Close without saving')}</button>
+          ) : null}
         </div>
-      ) : error ? (
-        <div className="note warn rnote" role="alert">{errorText(t, error, {}, { context: 'draft' })}</div>
       ) : null}
       <RecipientField
         label="To"

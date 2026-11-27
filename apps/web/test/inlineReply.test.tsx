@@ -12,6 +12,7 @@ import { UndoSendProvider } from '../src/components/send/UndoSend';
 import { ToastProvider } from '../src/components/Toast';
 import { I18nProvider } from '../src/i18n';
 import { EmailPage } from '../src/pages/email/EmailPage';
+import { draftKindOf } from '../src/pages/email/compose/InlineReply';
 import { draftApi, draftView } from './draftFixture';
 import { makeClient, rep } from './leadFixture';
 
@@ -334,6 +335,81 @@ describe('Inline Reply, Reply all and Forward (web-mail release 3, state 2)', ()
     expect(screen.queryByRole('form', { name: 'Forward' })).toBeNull();
     expect(screen.getByRole('form', { name: 'Reply' })).toBe(form);
     expect(api.of('/api/mail/drafts')).toHaveLength(1);
+    // A passing failure: no way out but saving (it is retried).
+    expect(within(form).queryByRole('button', { name: 'Close without saving' })).toBeNull();
+  });
+
+  it('a mailbox no longer connected: Close without saving lets the other message open', async () => {
+    const user = userEvent.setup();
+    const second = item({ id: 2, subject: 'Second', fromName: 'Tom Becker', occurredAt: '2026-11-21T10:00:00.000Z' });
+    const api = stub({ items: [item(), second], details: { 1: detail(item()), 2: detail(second) }, saveErrors: ['mailbox_not_connected', 'mailbox_not_connected'] });
+    show();
+    const form = await openReply(user);
+    // (The editor of the test before may still save once as it goes: count from here.)
+    const before = api.of('/api/mail/drafts/50', 'PATCH').length;
+    await typeMessage(form, '<p>Cannot be saved</p>');
+    await user.click(screen.getByRole('link', { name: /Second/ }));
+    const alert = await within(form).findByRole('alert');
+    expect(screen.getByTestId('where')).toHaveTextContent('/email/1');
+    await user.click(within(alert).getByRole('button', { name: 'Close without saving' }));
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/email/2'));
+    expect(screen.queryByRole('form')).toBeNull();
+    await new Promise((r) => setTimeout(r, 20));
+    // The one failed save; nothing more once closed without saving.
+    expect(api.of('/api/mail/drafts/50', 'PATCH')).toHaveLength(before + 1);
+  });
+
+  it('a mailbox no longer connected: Close without saving after Discard closes the editor (and still asks Outlook to discard)', async () => {
+    const user = userEvent.setup();
+    const api = stub({ saveErrors: ['mailbox_not_connected', 'mailbox_not_connected'] });
+    show();
+    const form = await openReply(user);
+    await typeMessage(form, '<p>Cannot be saved</p>');
+    await user.click(within(form).getByRole('button', { name: 'Discard' }));
+    const alert = await within(form).findByRole('alert');
+    expect(screen.getByRole('form', { name: 'Reply' })).toBe(form);
+    await user.click(within(alert).getByRole('button', { name: 'Close without saving' }));
+    await waitFor(() => expect(screen.queryByRole('form')).toBeNull());
+    await waitFor(() => expect(api.of('/api/mail/drafts/50', 'DELETE')).toHaveLength(1));
+    expect(within(await footer()).getByRole('button', { name: 'Reply' })).toBeInTheDocument();
+  });
+
+  it('a mailbox no longer connected: another reply asked for goes ahead after Close without saving', async () => {
+    const user = userEvent.setup();
+    const api = stub({ saveErrors: ['mailbox_not_connected', 'mailbox_not_connected'] });
+    show();
+    const form = await openReply(user);
+    await typeMessage(form, '<p>Cannot be saved</p>');
+    const article = within(await pane()).getByRole('article');
+    await user.click(within(article.querySelector('.mh') as HTMLElement).getByRole('button', { name: 'Forward' }));
+    await user.click(within(await within(form).findByRole('alert')).getByRole('button', { name: 'Close without saving' }));
+    await screen.findByRole('form', { name: 'Forward' });
+    expect(api.of('/api/mail/drafts').map((c) => c.body)).toEqual([{ kind: 'reply', replyToId: 1 }, { kind: 'forward', replyToId: 1 }]);
+  });
+
+  it('draftKindOf: forward prefixes in English, Spanish and French Outlook; reply all by recipients', () => {
+    const one = [{ address: 'a@x.com', name: null, leadNumber: null }];
+    expect(draftKindOf({ subject: 'Fw: Proposal', to: one, cc: [] })).toBe('forward');
+    expect(draftKindOf({ subject: 'FWD: Proposal', to: one, cc: [] })).toBe('forward');
+    expect(draftKindOf({ subject: 'RV: Propuesta', to: one, cc: [] })).toBe('forward');
+    expect(draftKindOf({ subject: 'TR : Proposition', to: one, cc: [] })).toBe('forward');
+    expect(draftKindOf({ subject: 'RE: Proposal', to: one, cc: one })).toBe('replyAll');
+    expect(draftKindOf({ subject: 'RE: Proposal', to: one, cc: [] })).toBe('reply');
+    expect(draftKindOf({ subject: 'Travel plans', to: one, cc: [] })).toBe('reply');
+  });
+
+  it.each(['RV: Propuesta', 'TR: Proposition'])('Continue editing a "%s" draft opens it as Forward', async (subject) => {
+    const user = userEvent.setup();
+    const m = item();
+    const draftRow = item({ id: 8, status: 'draft', folder: 'drafts', preview: 'FYI', occurredAt: '2026-11-22T15:00:00.000Z' });
+    stub({
+      details: { 1: detail(m, { thread: [entry(draftRow, { kind: 'draft', direction: 'out' }), entry(m)] }) },
+      drafts: { 8: draftView({ id: 8, subject, to: [{ address: 'tom@x.com', name: null, leadNumber: null }] }) },
+    });
+    show();
+    const row = (await within(await pane()).findByText('Draft · FYI')).closest('.msg') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: 'Continue editing' }));
+    expect(await screen.findByRole('form', { name: 'Forward' })).toBeInTheDocument();
   });
 
   it('Continue editing a forward draft opens it as Forward', async () => {

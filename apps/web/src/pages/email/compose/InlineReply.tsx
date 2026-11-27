@@ -12,11 +12,11 @@ import { DraftComposer, type SentInfo } from './DraftComposer';
 export type ReplyKind = 'reply' | 'replyAll' | 'forward';
 
 /**
- * What a draft reply opened again answers as (the CRM keeps no kind on the row): a forward by its `Fw:` subject (the
- * shared replySubject), a reply all when it goes to more than one person, else a reply.
+ * What a draft reply opened again answers as (the CRM keeps no kind on the row): a forward by its forward prefix (`Fw:` from the
+ * shared replySubject, `Fwd:`, or Outlook's Spanish `RV:` and French `TR:`), a reply all when it goes to more than one person, else a reply.
  */
 export function draftKindOf(d: Pick<DraftView, 'subject' | 'to' | 'cc'>): ReplyKind {
-  if (/^\s*fwd?:/i.test(d.subject)) return 'forward';
+  if (/^\s*(fwd?|rv|tr)\s*:/i.test(d.subject)) return 'forward';
   return d.to.length + d.cc.length > 1 ? 'replyAll' : 'reply';
 }
 

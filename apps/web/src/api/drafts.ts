@@ -74,6 +74,9 @@ const FINAL = new Set([
   // Outlook refused the change, the mailbox needs reconnecting, the session ended: retrying would not help.
   'outlook_refused', 'mailbox_not_connected', 'unauthenticated',
 ]);
+/** Whether a save failed for good (`FINAL`): saving again cannot succeed, so an editor may be closed without saving. */
+export const isFinalSaveCode = (code: string) => FINAL.has(code);
+
 /** Codes the same fields would meet again: not retried by themselves, saved again on the next change or flush. */
 const NO_RETRY = new Set(['validation', 'message_too_long', 'html_too_complex', 'attachments_too_large']);
 /** Waits before retrying a passing failure (Outlook busy, the network, the rate limit): 2 s, doubling, at most 30 s. */
