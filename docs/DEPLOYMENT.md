@@ -474,7 +474,7 @@ All of these have already been run on live; they are kept for reference and for 
   maximum, `SELECT max(found) FROM mail_backfills` (as root), or a `found=` value above 250 in the worker log; not the
   `--status` total, which sums all rows.
 
-- **Web mail release 2 — re-read of the mailboxes** (not yet run on live): after the release 1 backfill has finished,
+- **Web mail release 2 — re-read of the mailboxes** (done on live 27 Nov 2026 after the deploy of `70ec558`, no errors): after the release 1 backfill has finished,
   stop the worker, clear `email_accounts.sync_state`, start the worker, so flags already set in Outlook reach stored mail; the command and how to tell it
   has finished are in "Web mail release 2: deploy runbook", step 1. Then that runbook's step 2 (flag due-date check).
 

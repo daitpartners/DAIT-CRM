@@ -5,10 +5,11 @@ in the git history).
 
 ## Where things stand (27 Nov 2026)
 
-- **Live** at crm.daitpartners.com: release `2f981c2`, web-mail release 1 (live since 27 Nov 2026). Its backfill and
-  clean-up have finished (see "Live: web-mail release 1" below).
-- **Ready, waiting for "deploy":** branch `web-mail-r2` — web-mail release 2 (the Microsoft 365-style Email screen;
-  Delete, Archive, Move, Flag and Read change Outlook too). See "Ready, waiting for deploy: web-mail release 2" below.
+- **Live** at crm.daitpartners.com: release `70ec558`, web-mail release 2 (the Microsoft 365-style Email screen;
+  live since 27 Nov 2026; owner checked every Outlook action on his own mailbox, all worked). Web-mail release 1's
+  backfill and clean-up have finished.
+- **In progress:** branch `web-mail-r3` — web-mail release 3 (inline reply, full-page New message, signature, Schedule
+  send, Undo send, follow-up box after Send, task priority and note).
 - **There is no test copy on the server.** Each release was checked on the developer's machine (automatic tests and
   side-by-side screenshots against the prototype) and then put live by hand, only after you said "deploy". How that is
   done, and how to undo it, is in `docs/DEPLOYMENT.md`.
@@ -39,11 +40,13 @@ in the git history).
 | Minor fixes | 26 review follow-ups (time zones, mail linking, Mailer wizard, quotations, keyboard) + handover docs | `79b9415` |
 | Leads delete, import follow-ups | Delete leads with their company (Administrators), Download all leads, update rows through Import leads, Do not email list | `7d1d8c2` (live 26 Nov) |
 | Web-mail release 1 | Lead mail only, 12-month backfill, team view (view only) for Administrators and Managers | `2f981c2` (live 27 Nov; clean-up done 27 Nov) |
+| Web-mail release 2 | Microsoft 365-style Email screen; Delete, Archive, Move, Flag, Read change Outlook too; Reply all, Forward, attachments, lead panel | `70ec558` (live 27 Nov; backup `dait_crm-pre-web-mail-r2.dump`) |
 
-## Ready, waiting for deploy: web-mail release 2 (branch `web-mail-r2`)
+## Live: web-mail release 2 (`70ec558`, since 27 Nov 2026)
 
-Design: `docs/superpowers/specs/2026-11-26-web-mail-email-design.md` (mockup 2026-11-26-outlook-mail). Reviewed and
-tested; not live. It builds on web-mail release 1 (live).
+Design: `docs/superpowers/specs/2026-11-26-web-mail-email-design.md` (mockup 2026-11-26-outlook-mail). Live since
+27 Nov 2026: Outlook mailboxes re-read for flags (no errors); the owner's live check of every Outlook action passed.
+Still open: the read-only Graph flag due-date check (runbook step 2), to confirm flag days for users west of UTC.
 
 **What changes for users:**
 - **A new Email screen in the style of Microsoft 365 web mail:** a top bar with "Search lead mail" and a Filters panel
