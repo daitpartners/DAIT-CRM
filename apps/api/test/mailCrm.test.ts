@@ -85,6 +85,18 @@ describe('POST /mail/:id/follow-up', () => {
     expect(await prisma.task.count({ where: { leadId: lead.id, origin: 'follow_up', isDone: false } })).toBe(0);
   });
 
+  it('Follow-up on the day of an email follow-up task sets that task\'s time and adds no lead follow-up task', async () => {
+    const { m, lead, rep, repCookie } = await setup();
+    const email = await prisma.task.create({
+      data: { leadId: lead.id, title: 'Follow up: Proposal', dueDate: new Date('2026-11-30T00:00:00Z'), dueTime: '09:00', assignedToId: rep.id, origin: 'email_follow_up' },
+    });
+    const res = await call('POST', `/api/mail/${m.id}/follow-up`, repCookie, { date: '2026-11-30', time: '15:00' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ leadId: lead.id, nextFollowUp: '2026-11-30', taskId: email.id });
+    expect(await openFollowUps(lead.id)).toHaveLength(0);
+    expect(await prisma.task.findUniqueOrThrow({ where: { id: email.id } })).toMatchObject({ dueTime: '15:00', isDone: false });
+  });
+
   it('an unassigned lead takes the date with no task', async () => {
     const { m, lead, repCookie } = await setup();
     await prisma.lead.update({ where: { id: lead.id }, data: { assignedToId: null } });

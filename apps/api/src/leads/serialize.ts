@@ -1,5 +1,5 @@
 import type { Prisma } from '@prisma/client';
-import { CLOSED_STATUSES, isClosedStatus } from '@dait-crm/shared';
+import { CLOSED_STATUSES, isClosedStatus, type TaskPriority } from '@dait-crm/shared';
 import { ymd } from './dates.js';
 import { contactProfile, contactSummaryInclude } from '../companies/serialize.js';
 
@@ -191,6 +191,8 @@ export function taskRow(t: TaskRow, today: string) {
     doneAt: t.doneAt,
     origin: t.origin,
     closedReason: t.closedReason,
+    priority: t.priority as TaskPriority,
+    note: t.note,
     isOverdue: !t.isDone && due < today,
     isToday: due === today,
     updatedAt: t.updatedAt,

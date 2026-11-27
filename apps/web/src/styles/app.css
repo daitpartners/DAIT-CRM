@@ -154,6 +154,8 @@ textarea.in{height:auto;padding:10px 12px;resize:vertical;line-height:1.5}
 .task.over{border-color:#F2B8B8;background:#FFF7F7}.task.done{opacity:.55}
 .task strong{display:block}.task .m{color:var(--muted);font-size:12px;margin-top:2px}
 .task-when{color:var(--muted);font-size:12px;font-weight:500;margin-left:4px;white-space:nowrap}
+.task .task-prio{font-size:10.5px;padding:1px 7px;line-height:14px;margin-left:4px;vertical-align:1px}
+.task-note{display:block;color:var(--muted);font-size:12px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* Lets the title shrink in a narrow column (Completed), so the unbreakable type · time drops to its own line. */
 .task .grow{min-width:0}
 .task input{margin-top:3px;accent-color:var(--purple)}

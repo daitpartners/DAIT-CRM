@@ -3,7 +3,7 @@ import { CLOSED_STATUSES, domainOf, isClosedStatus } from '@dait-crm/shared';
 import type { AuthUser } from '../plugins/auth.js';
 import { audit } from '../audit.js';
 import { dateOnly, ymd } from '../leads/dates.js';
-import { RuleError, syncFollowUpTask } from '../leads/service.js';
+import { RuleError, openFollowUpTask, syncFollowUpTask } from '../leads/service.js';
 import { assertLeadVisible, leadWhere } from '../leads/visibility.js';
 import { lockLeads } from '../routes/leads.js';
 import { isExcludedDomain, isOwnAddress, loadMailboxDomains, participantsOf } from './leadMail.js';
@@ -16,7 +16,8 @@ export const SUGGESTIONS_MAX = 5;
 
 /**
  * Follow-up from an email (web-mail release 2): the lead's next follow-up day, and `v.time` on its open follow-up task
- * (the assignee's, kept by `syncFollowUpTask`; none while the lead is unassigned). `null` clears both. Locks the lead;
+ * (openFollowUpTask: the assignee's, kept by `syncFollowUpTask`, or an email follow-up task due that day standing in for it;
+ * none while the lead is unassigned). `null` clears both. Locks the lead;
  * the user must see it (else NotFoundError); an archived lead is `lead_archived` and a closed lead with a date
  * `lead_closed`, as editing the lead.
  */
@@ -30,7 +31,7 @@ export async function setLeadFollowUp(
 
   const after = await tx.lead.update({ where: { id: leadId }, data: { nextFollowUp: v ? dateOnly(v.date) : null } });
   await syncFollowUpTask(tx, after);
-  const task = await tx.task.findFirst({ where: { leadId, origin: 'follow_up', isDone: false }, select: { id: true } });
+  const task = await openFollowUpTask(tx, after);
   if (task && v) await tx.task.update({ where: { id: task.id }, data: { dueTime: v.time } });
 
   await audit(tx, {

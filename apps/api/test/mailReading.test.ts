@@ -156,6 +156,17 @@ describe('GET /mail/:id — conversation and lead panel', () => {
     expect((await get(`/api/mail/${other.id}`, await signIn(app, f.rep))).json().leadPanel.linkReason).toBeNull();
   });
 
+  it('lead panel follow-up shows the standing-in email follow-up task date and time', async () => {
+    const f = await setup();
+    await prisma.lead.update({ where: { id: f.lead.id }, data: { nextFollowUp: dateOnly('2026-12-01') } });
+    // An email follow-up task on another day is not the lead's follow-up.
+    await prisma.task.create({ data: { leadId: f.lead.id, title: 'Follow up: Other', dueDate: dateOnly('2026-12-05'), dueTime: '11:00', assignedToId: f.rep.id, origin: 'email_follow_up' } });
+    await prisma.task.create({ data: { leadId: f.lead.id, title: 'Follow up: Proposal', dueDate: dateOnly('2026-12-01'), dueTime: '09:00', assignedToId: f.rep.id, origin: 'email_follow_up' } });
+    const m = await msg(f.rep.id, f.repBox.id, { leadId: f.lead.id, companyId: f.acme.id, contactId: f.ana.id });
+    const body = (await get(`/api/mail/${m.id}`, await signIn(app, f.rep))).json();
+    expect(body.leadPanel.followUp).toMatchObject({ date: '2026-12-01', time: '09:00' });
+  });
+
   it("value is the newest quotation's last SENT total, even while a new revision is being edited", async () => {
     const f = await setup();
     // Sent as revision 1 for 48,000; now being revised: its lines (the unsent revision 2) total 99,000.

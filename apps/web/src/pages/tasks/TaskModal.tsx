@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useForm, type Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
-import { TASK_KINDS, TaskCreate, TaskUpdate, type TaskKind } from '@dait-crm/shared';
+import { TASK_KINDS, TASK_PRIORITIES, TaskCreate, TaskUpdate, type TaskKind, type TaskPriority } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
 import { useLeads } from '../../api/leads';
 import { keys, useUsers } from '../../api/queries';
@@ -14,12 +14,15 @@ import { Modal } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
 import { applyServerIssues } from '../../forms/applyServerIssues';
 import { useDebounce } from '../../hooks/useDebounce';
-import { errorText, taskKindText } from '../../i18n/labels';
+import { errorText, taskKindText, taskPriorityText } from '../../i18n/labels';
 import { useT, type TFn } from '../../i18n/useT';
 
-type Values = { title: string; dueDate: string; assignedToId: string; leadId: string; kind: TaskKind; dueTime: string; updatedAt?: string };
+type Values = {
+  title: string; dueDate: string; assignedToId: string; leadId: string; kind: TaskKind; dueTime: string; priority: TaskPriority; note: string;
+  updatedAt?: string;
+};
 type Field = Exclude<keyof Values, 'updatedAt'>;
-const FIELDS: Field[] = ['title', 'dueDate', 'assignedToId', 'leadId', 'kind', 'dueTime'];
+const FIELDS: Field[] = ['title', 'dueDate', 'assignedToId', 'leadId', 'kind', 'dueTime', 'priority', 'note'];
 
 function fieldMessage(t: TFn, f: Field): string {
   switch (f) {
@@ -31,10 +34,15 @@ function fieldMessage(t: TFn, f: Field): string {
       return t('Choose who does it');
     case 'dueTime':
       return t('Enter a time for a call or meeting');
+    case 'note':
+      return t('Up to 1000 characters');
     default:
       return t('Check this value');
   }
 }
+
+/** A task note's length limit (TaskCreate / TaskUpdate). */
+const NOTE_MAX = 1000;
 
 /** Today in the browser as YYYY-MM-DD (the default due date). */
 function today(): string {
@@ -44,8 +52,8 @@ function today(): string {
 
 /**
  * Add a manual task (optionally on a lead; `lead` fixes it, as from the lead page's "+ Task"), or edit a task's
- * title, type, due date and time, and assignee. Only editing offers type and time (owner, release 3C); a call or
- * meeting needs a time.
+ * title, type, due date and time, assignee, priority and note. Only editing offers type and time (owner, release 3C); a
+ * call or meeting needs a time. Priority and note are offered in both (web-mail release 3, plan decision 14).
  */
 export function TaskModal({ task, lead, onClose }: { task?: TaskRow; lead?: Pick<TaskRow, 'lead'>['lead']; onClose: () => void }) {
   const t = useT();
@@ -90,6 +98,8 @@ export function TaskModal({ task, lead, onClose }: { task?: TaskRow; lead?: Pick
       dueDate: task?.dueDate ?? today(),
       assignedToId: String(task?.assignedTo.id ?? me.id),
       leadId: task?.leadId ? String(task.leadId) : lead ? String(lead.id) : '',
+      priority: task?.priority ?? 'normal',
+      note: task?.note ?? '',
       ...(task ? { kind: task.kind, dueTime: task.dueTime ?? '', updatedAt: task.updatedAt } : {}),
     },
   });
@@ -190,6 +200,18 @@ export function TaskModal({ task, lead, onClose }: { task?: TaskRow; lead?: Pick
               </option>
             ))}
           </select>
+        </FormField>
+        <FormField id="tk-priority" label={t('Priority')} error={err('priority')}>
+          <select id="tk-priority" className={errors.priority ? 'in err' : 'in'} {...aria('priority')} {...register('priority')}>
+            {TASK_PRIORITIES.map((p) => (
+              <option key={p} value={p}>
+                {taskPriorityText(t, p)}
+              </option>
+            ))}
+          </select>
+        </FormField>
+        <FormField id="tk-note" label={t('Note')} error={err('note')} className="span2">
+          <textarea id="tk-note" className={errors.note ? 'in err' : 'in'} rows={3} maxLength={NOTE_MAX} {...aria('note')} {...register('note')} />
         </FormField>
         <div className="span2">
           {task || lead ? (

@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { TASK_TABS, TaskCreateInput, TaskKind, TaskOrigin, TaskUpdate } from '@dait-crm/shared';
+import type { TASK_TABS, TaskCreateInput, TaskKind, TaskOrigin, TaskPriority, TaskUpdate } from '@dait-crm/shared';
 import { api } from './client';
 import { keys } from './queries';
 
@@ -23,6 +23,9 @@ export type TaskRow = {
   doneAt: string | null;
   origin: TaskOrigin;
   closedReason: string | null;
+  priority: TaskPriority;
+  /** Optional note, at most 1000 characters. */
+  note: string | null;
   isOverdue: boolean;
   isToday: boolean;
   updatedAt: string;

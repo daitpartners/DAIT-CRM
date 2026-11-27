@@ -9,7 +9,7 @@ import { Pager } from '../../components/Pager';
 import { Topbar } from '../../components/Topbar';
 import { useToast } from '../../components/Toast';
 import { useFormatDate } from '../../hooks/useFormatDate';
-import { errorText, taskOriginText, taskWhenText } from '../../i18n/labels';
+import { errorText, taskOriginText, taskPriorityText, taskWhenText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
 import { TaskModal } from './TaskModal';
 import { taskTitle } from '../../i18n/systemText';
@@ -164,7 +164,8 @@ export function TasksList() {
 export type TaskItemProps = { task: TaskRow; busy: boolean; onTick: () => void; onEdit?: () => void; onSnooze?: () => void };
 
 /**
- * The prototype's checkbox row: title (with type and time, e.g. "Call · 10:00–10:30"), "when · lead · origin · assignee",
+ * The prototype's checkbox row: title (with type and time, e.g. "Call · 10:00–10:30", and a "High" badge), the note as one
+ * muted line, "when · lead · origin · assignee",
  * a state badge, and Edit / Snooze.
  */
 export function TaskItem({ task, busy, onTick, onEdit, onSnooze }: TaskItemProps) {
@@ -186,7 +187,13 @@ export function TaskItem({ task, busy, onTick, onEdit, onSnooze }: TaskItemProps
           {/* A break chance before the time: in the narrow Completed card the title keeps its words together and the
               type · time moves to its own line (review #27). */}
           {when ? <>{' '}<span className="task-when">{when}</span></> : null}
+          {task.priority === 'high' ? <>{' '}<span className="badge b-warn task-prio">{taskPriorityText(t, 'high')}</span></> : null}
         </strong>
+        {task.note ? (
+          <span className="task-note" title={task.note}>
+            {task.note}
+          </span>
+        ) : null}
         <span className="m">
           {task.isDone ? (
             day(task.dueDate)

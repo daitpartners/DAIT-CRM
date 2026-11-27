@@ -3,6 +3,7 @@ import { domainOf, quoteTotals } from '@dait-crm/shared';
 import type { AuthUser } from '../plugins/auth.js';
 import { todayIn, ymd } from '../leads/dates.js';
 import { activityInclude, activityRow } from '../leads/serialize.js';
+import { openFollowUpTask } from '../leads/service.js';
 import { timelineViewer } from './access.js';
 import { isExcludedDomain, loadMailboxDomains, normaliseAddress } from './leadMail.js';
 
@@ -43,14 +44,14 @@ const placeOf = (city: string | null, country: string | null) => [city, country]
 
 /**
  * The lead panel for a lead the caller has already checked `user` may see (canSeeLead): a restricted lead never comes
- * here. `participants`: the open message's addresses (participantsOf). Follow-up: the open follow-up task's day and time,
- * else the lead's next follow-up, due when on or before today in the viewer's zone. Value: the sent total (sentTotal) of
- * the newest quotation that is not a Draft. Recent: the newest activities, worded for the viewer (an email line's subject only for its mailbox
+ * here. `participants`: the open message's addresses (participantsOf). Follow-up: the open follow-up task's day and time
+ * (openFollowUpTask: an email follow-up task on the lead's day stands in), else the lead's next follow-up, due when on
+ * or before today in the viewer's zone. Value: the sent total (sentTotal) of the newest quotation that is not a Draft. Recent: the newest activities, worded for the viewer (an email line's subject only for its mailbox
  * owner and team-mail readers). Link reason: a participant is the lead's or the contact's address, else at the
  * company's own domain (never free mail, shared hosts or our own domains).
  */
 export async function leadPanel(db: Db, user: AuthUser, leadId: number, participants: string[], now: Date = new Date()): Promise<LeadPanel> {
-  const [lead, task, activities, quotation, mailboxDomains] = await Promise.all([
+  const [lead, activities, quotation, mailboxDomains] = await Promise.all([
     db.lead.findUniqueOrThrow({
       where: { id: leadId },
       select: {
@@ -60,7 +61,6 @@ export async function leadPanel(db: Db, user: AuthUser, leadId: number, particip
         assignedTo: { select: { name: true } },
       },
     }),
-    db.task.findFirst({ where: { leadId, origin: 'follow_up', isDone: false }, orderBy: [{ dueDate: 'asc' }, { id: 'asc' }], select: { dueDate: true, dueTime: true } }),
     db.leadActivity.findMany({ where: { leadId }, include: activityInclude, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: RECENT }),
     db.quotation.findFirst({
       where: { leadId, status: { not: 'Draft' } }, orderBy: [{ quotationDate: 'desc' }, { id: 'desc' }],
@@ -71,6 +71,7 @@ export async function leadPanel(db: Db, user: AuthUser, leadId: number, particip
     }),
     loadMailboxDomains(db),
   ]);
+  const task = await openFollowUpTask(db, { id: leadId, nextFollowUp: lead.nextFollowUp });
   const viewer = await timelineViewer(db, user, activities);
   const recent = activities.map((a) => activityRow(a, viewer));
 

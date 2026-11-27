@@ -1,4 +1,4 @@
-import type { Lead, Prisma } from '@prisma/client';
+import type { Lead, Prisma, PrismaClient, Task } from '@prisma/client';
 import { checkDomain, defaultOutreachLanguage, isClosedStatus, normaliseCompanyName, normalisePhone, type LeadCreate } from '@dait-crm/shared';
 import { pickAllocation } from '../allocation/pick.js';
 import { findCompanyMatches } from '../companies/match.js';
@@ -39,12 +39,34 @@ export async function closeOpenTasks(tx: Tx, leadId: number, closedReason: strin
 }
 
 /**
+ * The open email follow-up task (web-mail release 3) due on the lead's next follow-up day, earliest first: it stands
+ * in for the lead's follow-up task (plan decision 6). None when the lead has no next follow-up.
+ */
+async function standInTask(db: Tx | PrismaClient, lead: Pick<Lead, 'id' | 'nextFollowUp'>): Promise<Task | null> {
+  if (!lead.nextFollowUp) return null;
+  return db.task.findFirst({
+    where: { leadId: lead.id, origin: 'email_follow_up', isDone: false, dueDate: lead.nextFollowUp },
+    orderBy: { id: 'asc' },
+  });
+}
+
+/**
+ * The lead's open follow-up task: the open `follow_up` task, else the open `email_follow_up` task due on
+ * `lead.nextFollowUp` (earliest id), which stands in for it. Null when neither is open.
+ */
+export async function openFollowUpTask(db: Tx | PrismaClient, lead: Pick<Lead, 'id' | 'nextFollowUp'>): Promise<Task | null> {
+  const own = await db.task.findFirst({ where: { leadId: lead.id, origin: 'follow_up', isDone: false }, orderBy: { id: 'asc' } });
+  return own ?? standInTask(db, lead);
+}
+
+/**
  * Keeps the lead's single open follow-up task in step with `nextFollowUp` and the assignee:
- * re-dated / re-assigned when both are set, deleted otherwise.
+ * re-dated / re-assigned when both are set, deleted otherwise. An open email follow-up task due on the same day
+ * stands in for it: then no `follow_up` task is kept.
  */
 export async function syncFollowUpTask(tx: Tx, lead: Lead): Promise<void> {
   const where = { leadId: lead.id, origin: 'follow_up', isDone: false };
-  if (!lead.nextFollowUp || lead.assignedToId === null) {
+  if (!lead.nextFollowUp || lead.assignedToId === null || (await standInTask(tx, lead))) {
     await tx.task.deleteMany({ where });
     return;
   }

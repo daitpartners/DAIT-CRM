@@ -2138,5 +2138,8 @@
   "Linked automatically: {value} is on this lead.": "Vinculado automáticamente: {value} figura en este lead.",
   "Last activity": "Última actividad",
   "Recent on the lead": "Reciente en el lead",
-  "Lead · {number}": "Lead · {number}"
+  "Lead · {number}": "Lead · {number}",
+  "Normal|priority": "Normal",
+  "Up to 1000 characters": "Hasta 1000 caracteres",
+  "Email follow-up": "Seguimiento por correo"
 }

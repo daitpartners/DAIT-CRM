@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { t as translate } from '@dait-crm/shared';
 import es from '../src/locales/es.json';
 import type { TaskRow } from '../src/api/tasks';
-import { errorText, taskKindText, taskWhenText } from '../src/i18n/labels';
+import { errorText, taskKindText, taskOriginText, taskWhenText } from '../src/i18n/labels';
 import { FollowUpPanel } from '../src/pages/leads/FollowUpPanel';
 import { TaskItem } from '../src/pages/tasks/TasksList';
 import { TaskModal } from '../src/pages/tasks/TaskModal';
@@ -20,7 +20,7 @@ function task(overrides: Partial<TaskRow> = {}): TaskRow {
   return {
     id: 11, leadId: 5, lead: { id: 5, number: 'LD-1005', companyName: 'Meridian Textiles' }, title: 'Call Tom back',
     dueDate: inDays(2), kind: 'followup', dueTime: null, durationMinutes: null, assignedTo: { id: 2, name: 'Arjun Mehta' },
-    isDone: false, doneAt: null, origin: 'manual', closedReason: null, isOverdue: false, isToday: false,
+    isDone: false, doneAt: null, origin: 'manual', closedReason: null, priority: 'normal', note: null, isOverdue: false, isToday: false,
     updatedAt: '2026-11-20T10:00:00.000Z', ...overrides,
   };
 }
@@ -205,5 +205,79 @@ describe('type and time beside the title', () => {
       </Wrap>,
     );
     expect(screen.getByText('Meeting · 14:00–15:00')).toBeTruthy();
+  });
+});
+
+describe('priority and note', () => {
+  it('a high-priority task shows the High badge and its note as a second muted line', () => {
+    render(
+      <Wrap qc={makeClient()}>
+        <ul>
+          <TaskItem task={task({ priority: 'high', note: 'Ask about the CTO' })} busy={false} onTick={() => {}} />
+        </ul>
+      </Wrap>,
+    );
+    const row = screen.getByRole('listitem');
+    expect(within(row).getByText('High')).toHaveClass('badge');
+    const note = within(row).getByText('Ask about the CTO');
+    expect(note).toHaveClass('task-note');
+    expect(note).toHaveAttribute('title', 'Ask about the CTO');
+  });
+
+  it('a normal task with no note shows neither', () => {
+    render(
+      <Wrap qc={makeClient()}>
+        <ul>
+          <TaskItem task={task()} busy={false} onTick={() => {}} />
+        </ul>
+      </Wrap>,
+    );
+    const row = screen.getByRole('listitem');
+    expect(within(row).queryByText('High')).toBeNull();
+    expect(row.querySelector('.task-note')).toBeNull();
+  });
+
+  it('the task dialog edits priority and note', async () => {
+    const u = userEvent.setup();
+    const calls = stubTasks();
+    const onClose = vi.fn();
+    render(
+      <Wrap qc={makeClient()}>
+        <TaskModal task={task({ note: 'Old note' })} onClose={onClose} />
+      </Wrap>,
+    );
+    const priority = screen.getByLabelText('Priority');
+    expect(within(priority).getAllByRole('option').map((o) => o.textContent)).toEqual(['Normal', 'High']);
+    expect(priority).toHaveValue('normal');
+    const note = screen.getByLabelText('Note');
+    expect(note).toHaveValue('Old note');
+    expect(note).toHaveAttribute('maxLength', '1000');
+    await u.selectOptions(priority, 'high');
+    await u.clear(note);
+    await u.type(note, 'Ask about the CTO');
+    await u.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(calls[0]!.body).toMatchObject({ priority: 'high', note: 'Ask about the CTO' });
+  });
+
+  it('a new task sends priority and note; an empty note is sent as null', async () => {
+    const u = userEvent.setup();
+    const calls = stubTasks();
+    const onClose = vi.fn();
+    render(
+      <Wrap qc={makeClient()}>
+        <TaskModal lead={{ id: 5, number: 'LD-1005', companyName: 'Meridian Textiles' }} onClose={onClose} />
+      </Wrap>,
+    );
+    await u.type(screen.getByLabelText(/Title/), 'Send brochure');
+    await u.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(calls[0]!.body).toMatchObject({ priority: 'normal', note: null });
+  });
+
+  it('labels are translated, and the email follow-up origin is named', () => {
+    expect(taskOriginText(en, 'email_follow_up')).toBe('Email follow-up');
+    expect(taskOriginText(esT, 'email_follow_up')).not.toBe('Email follow-up');
+    for (const phrase of ['High|priority', 'Normal|priority', 'Priority', 'Note', 'Email follow-up']) expect(Object.hasOwn(es, phrase) || Object.hasOwn(es, en(phrase))).toBe(true);
   });
 });

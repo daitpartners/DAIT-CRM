@@ -250,7 +250,7 @@ An `email` activity shows its subject only to its sender; everyone else sees "Em
 | duration_minutes | int | call 30, meeting 60; null for a follow-up |
 | assigned_to_id | FK users | required; restrict delete |
 | is_done, done_at | bool, timestamp | |
-| origin | text | follow_up / new_assignment / transfer / manual / quotation |
+| origin | text | follow_up / new_assignment / transfer / manual / quotation / email_follow_up (web-mail release 3: added with a sent email; on the lead's next follow-up day it stands in for the follow_up task) |
 | closed_reason | text | set when closing a lead closes the task |
 | priority | varchar(6) | `normal` (default) / `high` (web-mail release 3) |
 | note | text, nullable | optional note, at most 1000 characters (web-mail release 3) |

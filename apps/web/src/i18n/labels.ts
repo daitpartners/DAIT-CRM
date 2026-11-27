@@ -1,5 +1,5 @@
 /* Translated display labels for fixed enums. Each phrase is a literal t() call so scripts/i18n-check.ts sees it. */
-import type { CompanyStatus, LeadType, LookupGroup, Priority, Role, TaskKind, TaskOrigin } from '@dait-crm/shared';
+import type { CompanyStatus, LeadType, LookupGroup, Priority, Role, TaskKind, TaskOrigin, TaskPriority } from '@dait-crm/shared';
 import { CSV_MAX_ROWS, TASK_DURATION, taskEndTime } from '@dait-crm/shared';
 import type { Lang } from '../api/queries';
 import type { TFn } from './useT';
@@ -327,9 +327,16 @@ export function taskOriginText(t: TFn, origin: TaskOrigin): string {
       return t('Manual|task');
     case 'quotation':
       return t('Quotation');
+    case 'email_follow_up':
+      return t('Email follow-up');
     default:
       return origin;
   }
+}
+
+/** A task's priority (`|priority`, as a lead's: feminine in Spanish and French). */
+export function taskPriorityText(t: TFn, priority: TaskPriority): string {
+  return priority === 'high' ? t('High|priority') : t('Normal|priority');
 }
 
 /** A task's type: follow-up, call or meeting. */

@@ -8,7 +8,7 @@ import { requireUser, type AuthUser } from '../plugins/auth.js';
 import { StaleError } from '../prismaErrors.js';
 import { assertLeadVisible, canUserSeeLead, leadWhere } from '../leads/visibility.js';
 import { taskInclude, taskRow } from '../leads/serialize.js';
-import { RuleError } from '../leads/service.js';
+import { RuleError, openFollowUpTask } from '../leads/service.js';
 import { notifyUser } from '../leads/notify.js';
 import { dateOnly, todayIn, ymd } from '../leads/dates.js';
 import { guard, lockLeads } from './leads.js';
@@ -52,7 +52,8 @@ const notifyAssignee = (tx: Tx, task: Pick<Task, 'assignedToId' | 'title'>) =>
  * The visible task the user may edit, checked against the client's `updatedAt` (409 `stale` when it
  * has moved on). Editing needs more than seeing: the actor is the task's assignee, the lead's
  * assignee, or has `view_all_leads` (else 403 `forbidden`). For a follow-up task the lead row is
- * locked too (returned as `followUpLead`), since the edit is mirrored onto `lead.nextFollowUp`.
+ * locked too (returned as `followUpLead`), since the edit is mirrored onto `lead.nextFollowUp`; likewise for an
+ * email follow-up task standing in for it (openFollowUpTask).
  */
 async function editableTask(
   tx: Tx, user: AuthUser, id: number, updatedAt: string,
@@ -64,6 +65,8 @@ async function editableTask(
     await lockLeads(tx, [found.leadId]);
     const lead = await tx.lead.findUniqueOrThrow({ where: { id: found.leadId } });
     if (found.origin === 'follow_up') followUpLead = lead;
+    // An email follow-up task on the lead's next follow-up day stands in for the lead follow-up task.
+    else if (found.origin === 'email_follow_up' && (await openFollowUpTask(tx, lead))?.id === found.id) followUpLead = lead;
     if (found.assignedToId !== user.id && lead.assignedToId !== user.id && !can(user.role, 'view_all_leads')) {
       throw new RuleError('forbidden');
     }
@@ -172,6 +175,7 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
           data: {
             leadId, title: body.title, dueDate: dateOnly(body.dueDate), assignedToId: body.assignedToId, origin: 'manual',
             kind: body.kind, dueTime: body.dueTime ?? null, durationMinutes: durationOf(body.kind),
+            priority: body.priority, note: body.note ?? null,
           },
           include: { assignedTo: { select: { name: true } } },
         });
@@ -195,6 +199,8 @@ export const taskRoutes: FastifyPluginAsync = async (app) => {
         if (body.title !== undefined) data.title = body.title;
         if (body.dueDate !== undefined) data.dueDate = dateOnly(body.dueDate);
         if (body.dueTime !== undefined) data.dueTime = body.dueTime;
+        if (body.priority !== undefined) data.priority = body.priority;
+        if (body.note !== undefined) data.note = body.note;
         if (body.kind !== undefined && body.kind !== before.kind) {
           // The automatic follow-up task is managed from the lead (syncFollowUpTask): it stays a follow-up.
           if (before.origin === 'follow_up') throw new RuleError('follow_up_kind');

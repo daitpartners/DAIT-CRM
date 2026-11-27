@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { prisma } from '../src/db';
 import { buildApp } from '../src/app';
 import { todayIn } from '../src/leads/dates';
+import { syncFollowUpTask } from '../src/leads/service';
 import { resetDb, seedLookups } from './helpers';
 import { makeLead, makeUser, signIn } from './factory';
 
@@ -307,6 +308,110 @@ describe('follow-up tasks stay in step with the lead', () => {
     expect(await prisma.task.count({ where: { leadId: lead.id, origin: 'follow_up', isDone: false } })).toBe(0);
     expect((await leadOf(lead.id)).nextFollowUp).toBeNull();
     expect((await prisma.task.findUniqueOrThrow({ where: { id: t.id } })).isDone).toBe(true);
+  });
+});
+
+describe('priority and note', () => {
+  it('creates and edits a task with priority and note; the list returns them', async () => {
+    const rep = await as('SALES_REPRESENTATIVE', 'UTC');
+    const today = todayIn('UTC');
+    const res = await req('POST', '/api/tasks', rep.cookie, { title: 'Call Ana', dueDate: today, assignedToId: rep.user.id, priority: 'high', note: 'Ask about the CTO' });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({ priority: 'high', note: 'Ask about the CTO' });
+    const created = await prisma.auditLog.findFirstOrThrow({ where: { entityType: 'task', entityId: String(res.json().id), action: 'create' } });
+    expect(created.after).toMatchObject({ priority: 'high', note: 'Ask about the CTO' });
+
+    const list = (await req('GET', '/api/tasks?tab=today', rep.cookie)).json();
+    expect(list.items[0]).toMatchObject({ id: res.json().id, priority: 'high', note: 'Ask about the CTO' });
+
+    // Left out, priority is normal and there is no note.
+    const plain = await req('POST', '/api/tasks', rep.cookie, { title: 'Plain', dueDate: today, assignedToId: rep.user.id });
+    expect(plain.json()).toMatchObject({ priority: 'normal', note: null });
+
+    const edit = await req('PATCH', `/api/tasks/${res.json().id}`, rep.cookie, { priority: 'normal', note: '  Ask about the budget ', updatedAt: res.json().updatedAt });
+    expect(edit.statusCode).toBe(200);
+    expect(edit.json()).toMatchObject({ priority: 'normal', note: 'Ask about the budget' });
+    const updated = await prisma.auditLog.findFirstOrThrow({ where: { entityType: 'task', entityId: String(res.json().id), action: 'update' } });
+    expect(updated).toMatchObject({ before: { priority: 'high', note: 'Ask about the CTO' }, after: { priority: 'normal', note: 'Ask about the budget' } });
+
+    // An emptied note is cleared; a title-only edit leaves priority and note alone.
+    const cleared = await req('PATCH', `/api/tasks/${res.json().id}`, rep.cookie, { note: '', updatedAt: edit.json().updatedAt });
+    expect(cleared.json()).toMatchObject({ priority: 'normal', note: null });
+    const high = await req('PATCH', `/api/tasks/${res.json().id}`, rep.cookie, { priority: 'high', note: 'Keep', updatedAt: cleared.json().updatedAt });
+    const titled = await req('PATCH', `/api/tasks/${res.json().id}`, rep.cookie, { title: 'Call Ana today', updatedAt: high.json().updatedAt });
+    expect(titled.json()).toMatchObject({ title: 'Call Ana today', priority: 'high', note: 'Keep' });
+
+    // Out of range values are refused.
+    expect((await req('POST', '/api/tasks', rep.cookie, { title: 'x', dueDate: today, assignedToId: rep.user.id, priority: 'urgent' })).statusCode).toBe(400);
+    expect((await req('POST', '/api/tasks', rep.cookie, { title: 'x', dueDate: today, assignedToId: rep.user.id, note: 'n'.repeat(1001) })).statusCode).toBe(400);
+  });
+});
+
+describe('email follow-up tasks and the lead follow-up', () => {
+  const setup = async () => {
+    const rep = await as('SALES_REPRESENTATIVE');
+    const lead = await makeLead({ companyName: 'Acme', assignedToId: rep.user.id, nextFollowUp: day('2026-12-01') });
+    const followUp = await prisma.task.create({
+      data: { leadId: lead.id, assignedToId: rep.user.id, title: 'Follow up · Acme', dueDate: day('2026-12-01'), origin: 'follow_up' },
+    });
+    return { rep, lead, followUp };
+  };
+  const emailTask = (leadId: number, assignedToId: number, due: string) =>
+    prisma.task.create({
+      data: { leadId, assignedToId, title: 'Follow up: Proposal', dueDate: day(due), dueTime: '09:00', origin: 'email_follow_up', kind: 'followup' },
+    });
+  const sync = (leadId: number) =>
+    prisma.$transaction(async (tx) => syncFollowUpTask(tx, await tx.lead.findUniqueOrThrow({ where: { id: leadId } })));
+  const leadOf = (id: number) => prisma.lead.findUniqueOrThrow({ where: { id } });
+
+  it('an email follow-up task on the lead follow-up day stands in for it: no second follow_up task; done clears the lead date', async () => {
+    const { rep, lead } = await setup();
+    const task = await emailTask(lead.id, rep.user.id, '2026-12-01');
+    await sync(lead.id);
+    expect(await prisma.task.count({ where: { leadId: lead.id, isDone: false } })).toBe(1);
+    expect(await prisma.task.findFirstOrThrow({ where: { leadId: lead.id, isDone: false } })).toMatchObject({ id: task.id });
+    // Syncing again (any lead edit) does not bring the lead follow-up task back.
+    await sync(lead.id);
+    expect(await prisma.task.count({ where: { leadId: lead.id, isDone: false } })).toBe(1);
+
+    const res = await req('PATCH', `/api/tasks/${task.id}`, rep.cookie, { isDone: true, updatedAt: stamp(task) });
+    expect(res.statusCode).toBe(200);
+    expect((await leadOf(lead.id)).nextFollowUp).toBeNull();
+    await sync(lead.id);
+    expect(await prisma.task.count({ where: { leadId: lead.id, isDone: false } })).toBe(0);
+  });
+
+  it('moving the standing-in email follow-up task moves the lead follow-up', async () => {
+    const { rep, lead } = await setup();
+    const task = await emailTask(lead.id, rep.user.id, '2026-12-01');
+    await sync(lead.id);
+    const res = await req('PATCH', `/api/tasks/${task.id}`, rep.cookie, { dueDate: '2026-12-04', updatedAt: stamp(task) });
+    expect(res.statusCode).toBe(200);
+    expect((await leadOf(lead.id)).nextFollowUp).toEqual(day('2026-12-04'));
+    expect(await prisma.task.count({ where: { leadId: lead.id, isDone: false } })).toBe(1);
+  });
+
+  it('an email follow-up task on another day leaves the lead follow-up task alone', async () => {
+    const { rep, lead, followUp } = await setup();
+    const task = await emailTask(lead.id, rep.user.id, '2026-12-03');
+    await sync(lead.id);
+    const open = await prisma.task.findMany({ where: { leadId: lead.id, isDone: false }, orderBy: { id: 'asc' } });
+    expect(open.map((t) => [t.id, t.origin])).toEqual([[followUp.id, 'follow_up'], [task.id, 'email_follow_up']]);
+    // Ticking it does not touch the lead's date; moving the lead date away from an email task brings the lead task back.
+    expect((await req('PATCH', `/api/tasks/${task.id}`, rep.cookie, { isDone: true, updatedAt: stamp(task) })).statusCode).toBe(200);
+    expect((await leadOf(lead.id)).nextFollowUp).toEqual(day('2026-12-01'));
+    expect(await prisma.task.count({ where: { leadId: lead.id, origin: 'follow_up', isDone: false } })).toBe(1);
+  });
+
+  it('an email follow-up task that stood in brings the lead follow-up task back when the lead date moves away', async () => {
+    const { rep, lead } = await setup();
+    await emailTask(lead.id, rep.user.id, '2026-12-01');
+    await sync(lead.id);
+    await prisma.lead.update({ where: { id: lead.id }, data: { nextFollowUp: day('2026-12-08') } });
+    await sync(lead.id);
+    const open = await prisma.task.findMany({ where: { leadId: lead.id, isDone: false }, orderBy: { id: 'asc' } });
+    expect(open.map((t) => t.origin).sort()).toEqual(['email_follow_up', 'follow_up']);
+    expect(open.find((t) => t.origin === 'follow_up')!.dueDate).toEqual(day('2026-12-08'));
   });
 });
 

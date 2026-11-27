@@ -16,7 +16,7 @@ const TODAY = '2026-11-22';
 function task(overrides: Partial<TaskRow>): TaskRow {
   return {
     id: 1, leadId: null, lead: null, title: 'Task', dueDate: TODAY, kind: 'followup', dueTime: null, durationMinutes: null,
-    assignedTo: { id: 2, name: 'Arjun Mehta' }, isDone: false, doneAt: null, origin: 'manual', closedReason: null,
+    assignedTo: { id: 2, name: 'Arjun Mehta' }, isDone: false, doneAt: null, origin: 'manual', closedReason: null, priority: 'normal', note: null,
     isOverdue: false, isToday: true, updatedAt: '2026-11-20T10:00:00.000Z', ...overrides,
   };
 }
