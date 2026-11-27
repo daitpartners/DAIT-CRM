@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import {
-  BULK_MAX, MAIL_SORTS, MAIL_VIEWS, MailBulk, MailChange, MailFollowUp, MailListQuery, MailReply,
+  BULK_MAX, MAIL_SORTS, MAIL_VIEWS, MailBulk, MailChange, MailFollowUp, MailListQuery,
   DraftAttachmentUpload, DraftCreate, DraftSave, DraftSend, DraftTemplateApply, RecipientQuery, RecipientResolve,
   SignatureUpdate, UNDO_SEND_SECONDS,
 } from '../src/index.js';
@@ -23,17 +23,6 @@ test('MailBulk takes 1 to 50 ids', () => {
   expect(MailBulk.safeParse({ ids: ids(51), change }).success).toBe(false);
   expect(MailBulk.parse({ ids: ids(50), change }).ids).toHaveLength(50);
   expect(MailBulk.safeParse({ ids: [0], change }).success).toBe(false);
-});
-test('MailReply: forward needs a To; reply defaults its mode', () => {
-  const forward = MailReply.safeParse({ mode: 'forward', body: 'x' });
-  expect(forward.success).toBe(false);
-  expect(forward.error?.issues.map((i) => i.path)).toEqual([['to']]);
-  expect(MailReply.parse({ mode: 'forward', to: ['A@Example.com'], body: 'x' }).to).toEqual(['a@example.com']);
-  const reply = MailReply.parse({ body: 'x' });
-  expect(reply.mode).toBe('reply');
-  expect(reply.to).toEqual([]);
-  expect(MailReply.parse({ mode: 'replyAll', body: 'x' }).mode).toBe('replyAll');
-  expect(MailReply.safeParse({ body: '' }).success).toBe(false);
 });
 test('MailFollowUp: date + 24-hour time, or clear', () => {
   expect(MailFollowUp.safeParse({ date: '2026-11-30', time: '24:00' }).success).toBe(false);

@@ -1,8 +1,6 @@
 import { prisma } from '../db.js';
 import { NotFoundError, ValidationError } from '../validate.js';
-import { AttachmentError, filesToSend, type StoredFile } from './files.js';
-import { outgoingBody, type Formatted } from './formatted.js';
-import type { MailAttachment } from '../graph/client.js';
+import { AttachmentError, type StoredFile } from './files.js';
 
 /**
  * A message filled from a template with files (template pictures and attachments, owner 24 Nov 2026): the template's
@@ -21,17 +19,4 @@ export async function templateFiles(templateId: number | null | undefined, attac
   if (attachmentIds.some((id) => !regular.has(id))) throw new AttachmentError('template_files_missing', 409);
   const keep = new Set(attachmentIds);
   return template.attachments.filter((a) => a.isInline || keep.has(a.id));
-}
-
-/**
- * The message to queue with its files: the body sanitised (outgoingBody) keeping only cid: pictures of the template's
- * inline files, then the files it sends read from disk (filesToSend: 413 `attachments_too_large` past the cap).
- */
-export async function outgoingWithFiles(
-  body: string | undefined, bodyHtml: string | null | undefined, templateId: number | null | undefined, attachmentIds: number[],
-): Promise<{ body: string; formatted: Formatted | null; attachments: MailAttachment[] }> {
-  const stored = await templateFiles(templateId, attachmentIds);
-  const cids = stored.filter((f) => f.isInline && f.contentId).map((f) => f.contentId!);
-  const message = await outgoingBody(body, bodyHtml, cids);
-  return { ...message, attachments: await filesToSend(stored, message.formatted?.html) };
 }

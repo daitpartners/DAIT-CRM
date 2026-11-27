@@ -204,7 +204,7 @@ describe('team mail (web-mail release 1)', () => {
     for (const viewer of [f.admin, f.manager]) {
       const cookie = await signIn(app, viewer);
       for (const [url, payload] of [
-        [`/api/mail/${m.id}/reply`, { cc: [], body: 'x' }],
+        ['/api/mail/drafts', { kind: 'reply', replyToId: m.id }],
         [`/api/mail/${m.id}/read`, { isRead: true }],
         [`/api/mail/${m.id}/archive`, undefined],
         [`/api/mail/${m.id}/change`, { type: 'delete' }],
@@ -245,7 +245,7 @@ describe('team mail (web-mail release 1)', () => {
     const beta = await prisma.emailMessage.findFirstOrThrow({ where: { subject: 'Beta pricing' } });
     const repCookie = await signIn(app, f.rep);
     expect((await call('GET', `/api/mail/${beta.id}`, repCookie)).statusCode).toBe(404);
-    expect((await call('POST', `/api/mail/${beta.id}/reply`, repCookie, { cc: [], body: 'x' })).statusCode).toBe(404);
+    expect((await call('POST', '/api/mail/drafts', repCookie, { kind: 'reply', replyToId: beta.id })).statusCode).toBe(404);
     expect((await call('POST', `/api/mail/${beta.id}/task`, repCookie)).statusCode).toBe(404);
   });
 

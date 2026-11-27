@@ -31,6 +31,7 @@ export interface Outgoing {
    * plain text derived from it. Without it the message is the plain `body`, sent as simple HTML.
    */
   formatted?: Formatted | null;
+  /** A reply: no route queues one since web-mail release 3 (the worker still sends the replies release 2 queued). */
   replyToId?: number;
   /** Web-mail release 2: how it answers `replyToId` (default reply); the worker sends it the same way in Outlook. */
   replyMode?: ReplyMode;

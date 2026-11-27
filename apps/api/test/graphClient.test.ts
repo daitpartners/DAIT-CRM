@@ -736,6 +736,32 @@ describe('graph client — drafts, draft attachments, sending a draft (web-mail 
     }
   });
 
+  test('getDraft: a 400 that the read without the contentId select also gets does not turn the select off', async () => {
+    const urls: string[] = [];
+    let failPlain = true;
+    const fetchMock = vi.fn(async (url: string) => {
+      urls.push(url);
+      if (url.includes('fileAttachment/contentId') || failPlain) return json({ error: { code: 'BadRequest', message: 'Bad id' } }, 400);
+      return json(draftAnswer());
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const g = createGraphClient(env);
+      const acc = await account();
+      const err = await g.getDraft(acc, 'D=').catch((e: unknown) => e);
+      expect((err as GraphError).status).toBe(400);
+      expect(warn).not.toHaveBeenCalled();
+      // The next read still asks for the content-ids first (nothing was latched off).
+      failPlain = false;
+      urls.length = 0;
+      await g.getDraft(acc, 'D=').catch(() => undefined);
+      expect(urls[0]).toContain('fileAttachment/contentId');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test('getDraft: a refusal other than 400 is not read again without the contentId select', async () => {
     const fetchMock = vi.fn(async (_url: string) => json({ error: { code: 'x' } }, 503));
     vi.stubGlobal('fetch', fetchMock);

@@ -353,6 +353,16 @@ Small issues found in reviews and not fixed yet.
   with the keyboard — both as the prototype.
 - Check the first live Outlook sync: compare times and all-day events with Outlook for a couple of users.
 - Database tidy-up: the unused column `claude_monthly_cap_usd` can be dropped in a later migration.
+- Web mail release 3 (final review, 28 Nov 2026):
+  - Undo clicked after leaving the screen that sent (another conversation, or off the lead page) puts the mail safely
+    back in Drafts, but nothing on screen says so; open it from Drafts.
+  - If a sync reads Sent Items in the few milliseconds between Outlook taking a mail and the CRM marking it sent, the
+    copy is stored as a second row: two rows in Sent items for one mail (the same window existed for release 2 sends).
+  - The message written to Outlook can reach about 400,000 characters: up to 200,000 of the user's own text plus up to
+    200,000 of the quoted message (both sanitised; well under Microsoft's 4 MB limit).
+- To tell you at hand-over (web mail release 3, no change planned): the follow-up box's date field follows the
+  browser's language settings (an English (US) browser shows 12/02/2026); New message shows about 30 px of extra space
+  before the signature.
 
 ## Formatted email templates (branch `template-html`, not yet released)
 

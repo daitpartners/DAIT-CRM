@@ -88,7 +88,7 @@ const RETRY_MAX_MS = 30_000;
  * The code of a failed request. Fastify's own refusals carry no code of ours: a body over the limit (413) reads as
  * message_too_long, the rate limit (429) and a server error as try_again; anything not from the API (the network) too.
  */
-function codeOf(err: unknown): string {
+export function codeOf(err: unknown): string {
   if (!(err instanceof ApiError)) return 'try_again';
   if (/^[a-z_]+$/.test(err.code) && err.code !== 'server_error') return err.code;
   return err.status === 413 ? 'message_too_long' : 'try_again';

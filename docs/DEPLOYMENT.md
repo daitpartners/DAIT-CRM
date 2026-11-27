@@ -446,11 +446,25 @@ release 2 (live since 27 Nov 2026 as `70ec558`; the owner live-checked every Out
    columns: `signature_html` and `signature_auto` on `users`, `priority` and `note` on `tasks`, `scheduled_at`,
    `quoted_html` and `draft_files` on `email_messages`. Anything else (a failed or unknown migration, or 1–27 missing)
    means stop and ask.
-2. **The worker restart is part of the deploy.** Sending now runs on the worker's job queue in its own `send` lane
-   (the 10-second Undo window and Schedule send wait there). `release.sh install live` reloads both `crm-live` and
-   `crm-live-worker`, so the new lane starts with the release; check in `pm2 ls` that `crm-live-worker` restarted (its
-   uptime is as short as `crm-live`'s). If it did not, `sudo -iu daitcrm pm2 restart crm-live-worker`. Until the
-   worker runs the new release, nothing sent from the CRM leaves (it waits, it is not lost).
+2. **Stop the worker just before installing; the install starts it on the new release.** Sending now runs on the
+   worker's job queue in its own `send` lane (the 10-second Undo window and Schedule send wait there). While release
+   2's worker runs, it would pick up any send release 3 queues and send it the wrong way (without its attachments,
+   inline pictures, Bcc, quote or follow-up, with its copy left in Outlook's Drafts, where it could be sent a second
+   time). So, right before step 5 (as `daitcrm`):
+
+   ```
+   pm2 stop crm-live-worker
+   ```
+
+   Then run step 5 at once. `release.sh install live` runs `pm2 startOrReload … --only crm-live,crm-live-worker`, which
+   starts the stopped worker on the new release. Before anyone uses the CRM, check `pm2 ls`: `crm-live` and
+   `crm-live-worker` are both `online` with the same short uptime. If the worker is still `stopped`, run
+   `pm2 start crm-live-worker` and check again.
+
+   **If `release.sh` reports `Release <sha> did not pass its health check` and `Put back 70ec558`**, release 2 is
+   running again with its worker, and release 3 may have queued a send in those seconds. Immediately run the release 3
+   rollback steps 2, 3 and 5 below (empty the release 3 send queue, then tell the users), stopping the worker first
+   (`pm2 stop crm-live-worker`) and starting it again after step 3 (`pm2 start crm-live-worker`, then `pm2 ls`).
 3. **Keep the API as one process (PM2 fork mode, as `deploy/ecosystem.config.cjs` has it). Never start `crm-live` in
    cluster mode or with more than one instance.** The API keeps a per-draft lock in memory, so a save and a Send on the
    same draft never overlap; with two API processes they could, and an edit made just before Send could be lost.
@@ -509,10 +523,11 @@ release 2 (live since 27 Nov 2026 as `70ec558`; the owner live-checked every Out
    scheduled would go out without its attachments, inline pictures or Bcc, with no follow-up task, while its copy stays
    in Outlook's Drafts (and could be sent a second time from there). So the queue is emptied first:
 
-   1. **Stop the worker** (nothing is sent from here on):
+   1. **Stop the API and the worker** (nothing is sent from here on, and no one can click Send or Schedule while the
+      queue is emptied; the CRM is down for the few minutes the rollback takes):
 
       ```
-      sudo -iu daitcrm pm2 stop crm-live-worker
+      sudo -iu daitcrm pm2 stop crm-live crm-live-worker
       ```
 
    2. **List the mail waiting to be sent** (as root; ids, users, states and times only, never content). Note the user
@@ -539,15 +554,20 @@ release 2 (live since 27 Nov 2026 as `70ec558`; the owner live-checked every Out
 
       Running step 2's query again must now list nothing.
 
-   4. **Switch back to release 2 and start both processes** (as `daitcrm`; `startOrReload` starts the stopped worker on
-      release 2):
+   4. **Switch back to release 2 and start both processes** (as `daitcrm`; `startOrReload` starts the two stopped
+      processes on release 2):
 
       ```
       sudo -iu daitcrm
       ln -sfn ~/live/releases/70ec558 ~/live/current
       pm2 startOrReload ~/live/current/deploy/ecosystem.config.cjs --only crm-live,crm-live-worker --update-env
       curl -s http://127.0.0.1:3090/api/health      # shows 70ec558
+      pm2 ls
       ```
+
+      `pm2 ls` must show `crm-live` and `crm-live-worker` both `online` with a fresh uptime (if one is still `stopped`:
+      `pm2 start crm-live crm-live-worker`). Then, as root, run step 2's query again: it must still list nothing
+      (0 rows).
 
    5. **Tell the users from step 2** that their scheduled or just-sent mail did not go: it is in their Outlook Drafts,
       to send (or delete) from Outlook. For a "may have been sent" one, they look in Sent Items first.

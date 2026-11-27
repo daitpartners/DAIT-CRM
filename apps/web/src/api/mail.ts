@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query';
-import { flagDueDay, localNow, type ListSort, type MailChange, type MailChip, type MailView, type ReplyMode } from '@dait-crm/shared';
+import { flagDueDay, localNow, type ListSort, type MailChange, type MailChip, type MailView } from '@dait-crm/shared';
 import { useToast } from '../components/Toast';
 import { mailErrorText } from '../i18n/labels';
 import { useT } from '../i18n/useT';
@@ -143,12 +143,6 @@ export type MailMeta = {
   mailUsers: { id: number; name: string }[];
   /** The Filters panel's Owner choices (active users, by name). */
   leadOwners: { id: number; name: string }[];
-};
-
-export type MailCompose = {
-  to: string; cc: string[]; subject: string; body: string; bodyHtml?: string | null; leadId?: number | null; companyId?: number | null; projectId?: number | null;
-  /** A template's files: its inline pictures go with the HTML that shows them, plus the attachments kept. */
-  templateId?: number | null; attachmentIds?: number[];
 };
 
 const ROOT = ['mail'] as const;
@@ -300,43 +294,6 @@ function useRefresh() {
     if (withLeads) void qc.invalidateQueries({ queryKey: keys.leadsAll });
     if (withLeads) void qc.invalidateQueries({ queryKey: ['tasks'] });
   };
-}
-
-/** The mailbox was disconnected meanwhile: refresh it so the screen shows the connect note. */
-function onMailboxError(qc: ReturnType<typeof useQueryClient>) {
-  return (err: unknown) => {
-    if (err instanceof ApiError && err.code === 'no_mailbox') {
-      void qc.invalidateQueries({ queryKey: ['mailboxes'] });
-      void qc.invalidateQueries({ queryKey: [...ROOT, 'meta'] });
-    }
-  };
-}
-
-export function useComposeMail() {
-  const qc = useQueryClient();
-  const refresh = useRefresh();
-  return useMutation({
-    mutationFn: (body: MailCompose) => api<MailItem>('/api/mail', { method: 'POST', body }),
-    onSuccess: () => refresh(true),
-    onError: onMailboxError(qc),
-  });
-}
-
-/**
- * Reply, Reply all or Forward (web-mail release 2). `mode` defaults to `reply` and `to` to none: Reply and Reply all
- * go to the recipients the server works out (shared replyRecipients), Forward to `to`.
- */
-export function useReplyMail() {
-  const qc = useQueryClient();
-  const refresh = useRefresh();
-  return useMutation({
-    mutationFn: (v: { id: number; mode?: ReplyMode; to?: string[]; cc: string[]; body: string; bodyHtml?: string | null }) =>
-      api<MailItem>(`/api/mail/${v.id}/reply`, {
-        method: 'POST', body: { mode: v.mode ?? 'reply', to: v.to ?? [], cc: v.cc, body: v.body, bodyHtml: v.bodyHtml ?? null },
-      }),
-    onSuccess: () => refresh(true),
-    onError: onMailboxError(qc),
-  });
 }
 
 /** Mark read / unread, archive, log, link, create lead, add task: one mutation per action on a message. */

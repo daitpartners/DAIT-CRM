@@ -394,6 +394,17 @@ describe('send flow (web-mail release 3)', () => {
     expect(screen.queryByRole('dialog', { name: 'Set the next follow-up' })).toBeNull();
   });
 
+  it('a body over the request limit (Fastify 413, no code of ours) says the message is too long; a server error says try again (M3)', async () => {
+    const u = userEvent.setup();
+    stubApi({ sendAnswers: [{ status: 413, error: 'Payload Too Large' }, { status: 500, error: 'server_error' }] });
+    // The lead page: no flush before Send.
+    mount({ lead: null });
+    await u.click(screen.getByRole('button', { name: 'Send' }));
+    expect(await screen.findByText('This message is too long to send. Shorten it, or remove large pictures or formatting.')).toBeInTheDocument();
+    await u.click(screen.getByRole('button', { name: 'Send' }));
+    expect(await screen.findByText('The server is busy. Try again in a moment.')).toBeInTheDocument();
+  });
+
   it('while the send is being made, Cancel, Esc and the backdrop do not close the box', async () => {
     const u = userEvent.setup();
     let release!: () => void;

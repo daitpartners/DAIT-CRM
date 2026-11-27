@@ -1,18 +1,20 @@
 import type { FastifyInstance } from 'fastify';
-import type { EmailAccount } from '@prisma/client';
+import type { EmailAccount, User } from '@prisma/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app';
 import { prisma } from '../src/db';
 import { encrypt } from '../src/crypto/tokens';
-import { localNow } from '@dait-crm/shared';
+import { localNow, roleLabel } from '@dait-crm/shared';
 import type { GraphClient, GraphDraft, MailMessage } from '../src/graph/client';
 import { GraphError } from '../src/graph/client';
 import { runOnce } from '../src/jobs/runner';
 import { sendUserEmailHandler } from '../src/jobs/handlers/sendUserEmail';
 import { ymd } from '../src/leads/dates';
 import { fakeGraph, resetDb, seedLookups } from './helpers';
-import { setBodyWorkerMemoryForTests } from '../src/mail/bodies';
 import { makeCompany, makeContact, makeLead, makeProject, makeUser, signIn } from './factory';
+import { queueOutgoing, type Outgoing } from '../src/mail/outgoing';
+import { outgoingBody } from '../src/mail/formatted';
+import type { AuthUser } from '../src/plugins/auth';
 
 /** Outlook for the drafts path: a new draft is D1, saves and sends are taken (and sends recorded). */
 const draftGraph: GraphClient & { sent: string[] } = {
@@ -82,9 +84,10 @@ async function sendFromLeadPage(cookie: string, leadId: number, opts: { projectI
 const run = (graph: GraphClient) => runOnce({ types: ['send_user_email'], handlers: { send_user_email: sendUserEmailHandler }, graph });
 
 /*
- * The lead page sends through the drafts path since web-mail release 3 (`POST /leads/:id/emails` is gone, see below).
- * A message queued on a lead with `POST /mail` goes through the same queue, worker and lead effects the lead page used
- * before, so those are checked here.
+ * The lead page sends through the drafts path since web-mail release 3 (`POST /leads/:id/emails` and release 2's
+ * `POST /mail` are gone). Its queue, worker and lead effects are checked here through the drafts path. Quotations still
+ * queue a ready message (queueOutgoing, folder `sent`) that the worker sends with sendMail; that path's failure handling
+ * is checked with a message queued on the lead the same way.
  */
 /** Every queued send made due now (the Undo window passed), then run with the drafts Outlook. */
 async function sendsDue() {
@@ -92,125 +95,119 @@ async function sendsDue() {
   while (await run(draftGraph));
 }
 
-describe('a message queued on a lead (POST /mail with the lead): queue, worker, lead effects', () => {
-  it('without a connected personal mailbox: 409 no_mailbox and nothing queued', async () => {
+const authUser = (u: User): AuthUser => ({ id: u.id, email: u.email, name: u.name, role: roleLabel(u.role), language: u.language, timezone: u.timezone, dateFormat: u.dateFormat });
+/** A ready message queued on the lead (as quotations queue theirs), sent by the worker with sendMail. */
+async function queueOnLead(rep: User, box: EmailAccount, leadId: number, extra: Partial<Outgoing> = {}) {
+  return prisma.$transaction(async (tx) => {
+    const lead = await tx.lead.findUniqueOrThrow({ where: { id: leadId } });
+    return queueOutgoing(tx, authUser(rep), box, {
+      lead, to: ['ana@andino.cl'], cc: ['carlos@daitpartners.com'], subject: '¿Una llamada esta semana?', body: 'Hola Ana:\n\nSaludos', ...extra,
+    });
+  });
+}
+
+describe('the lead page Send (drafts path): queue, worker, lead effects', () => {
+  it('without a connected personal mailbox: 409 no_mailbox and nothing made or queued', async () => {
     const { rep, lead } = await setup();
-    const res = await call('POST', '/api/mail', await signIn(app, rep), body(lead.id));
+    const res = await call('POST', '/api/mail/drafts', await signIn(app, rep), { kind: 'new', leadId: lead.id });
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toBe('no_mailbox');
     expect(await prisma.emailMessage.count()).toBe(0);
     expect(await prisma.job.count()).toBe(0);
   });
 
-  it('queues the message from the user\'s mailbox and logs the activity', async () => {
+  it("queues the draft from the user's mailbox; the worker sends the Outlook draft, then logs the activity on the lead", async () => {
     const { rep, lead, contact, company } = await setup();
     const box = await personal(rep.id, 'seba@daitpartners.com');
-    const res = await call('POST', '/api/mail', await signIn(app, rep), body(lead.id));
-    expect(res.statusCode).toBe(201);
-    const msg = await prisma.emailMessage.findFirstOrThrow();
-    expect(msg).toMatchObject({
-      userId: rep.id, accountId: box.id, leadId: lead.id, contactId: contact.id, companyId: company.id, folder: 'sent', status: 'queued',
-      fromAddress: 'seba@daitpartners.com', subject: '¿Una llamada esta semana?', bodyText: 'Hola Ana:\n\nSaludos',
+    const res = await sendFromLeadPage(await signIn(app, rep), lead.id);
+    expect(res.statusCode, res.body).toBe(202);
+    const queued = await prisma.emailMessage.findFirstOrThrow();
+    expect(queued).toMatchObject({
+      userId: rep.id, accountId: box.id, leadId: lead.id, contactId: contact.id, companyId: company.id, folder: 'drafts', status: 'queued',
+      fromAddress: 'seba@daitpartners.com', subject: '¿Una llamada esta semana?',
     });
-    expect(msg.toAddresses).toEqual(['ana@andino.cl']);
-    expect(msg.ccAddresses).toEqual(['carlos@daitpartners.com']);
+    expect(queued.toAddresses).toEqual(['ana@andino.cl']);
+    expect(queued.ccAddresses).toEqual(['carlos@daitpartners.com']);
     const job = await prisma.job.findFirstOrThrow();
     expect(job).toMatchObject({ type: 'send_user_email', status: 'queued' });
-    expect(job.payload).toEqual({ emailMessageId: msg.id });
+    expect(job.payload).toEqual({ emailMessageId: queued.id, draft: true });
+    // Nothing on the lead until the mail leaves.
+    expect(await prisma.leadActivity.count({ where: { activityType: 'email' } })).toBe(0);
+
+    await sendsDue();
+    expect(draftGraph.sent).toEqual(['D1']);
+    expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ folder: 'sent', status: 'sent', lastError: null });
     const act = await prisma.leadActivity.findFirstOrThrow({ where: { activityType: 'email' } });
-    expect(act).toMatchObject({ title: 'Email sent · ¿Una llamada esta semana?', relatedType: 'email_message', relatedId: msg.id, byUserId: rep.id });
-    // No follow-up from a send: the lead page's follow-up is the send dialog's task now (drafts path).
+    expect(act).toMatchObject({ title: 'Email sent · ¿Una llamada esta semana?', relatedType: 'email_message', relatedId: queued.id, byUserId: rep.id });
+    // No follow-up without the send dialog's task.
     expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).nextFollowUp).toBeNull();
   });
 
-  it('the worker sends through the user\'s mailbox and marks the message sent', async () => {
+  it('a message part over the cap is refused 413 message_too_long, never cut, and nothing is queued', async () => {
+    const { rep, lead } = await setup();
+    await personal(rep.id, 'seba@daitpartners.com');
+    const cookie = await signIn(app, rep);
+    const made = await call('POST', '/api/mail/drafts', cookie, { kind: 'new', leadId: lead.id });
+    const res = await call('POST', `/api/mail/drafts/${made.json().id}/send`, cookie, {
+      to: ['ana@andino.cl'], cc: [], bcc: [], subject: 'S', bodyHtml: '<p>' + 'x'.repeat(200_001) + '</p><p>tail</p>', leadId: lead.id, at: null, followUp: null,
+    });
+    expect(res.statusCode).toBe(413);
+    expect(res.json()).toEqual({ error: 'message_too_long' });
+    expect(await prisma.job.count({ where: { type: 'send_user_email' } })).toBe(0);
+  });
+
+  it('sending to a New or Not Contacted lead moves it to Contacted (prototype); later statuses are left alone', async () => {
+    const { rep, lead } = await setup();
+    await personal(rep.id, 'seba@daitpartners.com');
+    const cookie = await signIn(app, rep);
+    await prisma.lead.update({ where: { id: lead.id }, data: { status: 'New' } });
+    expect((await sendFromLeadPage(cookie, lead.id)).statusCode).toBe(202);
+    await sendsDue();
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).status).toBe('Contacted');
+    const change = await prisma.leadActivity.findFirstOrThrow({ where: { activityType: 'status' } });
+    expect(change).toMatchObject({ statusFrom: 'New', statusTo: 'Contacted', body: 'Email sent' });
+
+    await prisma.lead.update({ where: { id: lead.id }, data: { status: 'Interested' } });
+    expect((await sendFromLeadPage(cookie, lead.id)).statusCode).toBe(202);
+    await sendsDue();
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).status).toBe('Interested');
+  });
+});
+
+describe('a ready message queued on a lead (queueOutgoing, as quotations): worker sendMail and its failures', () => {
+  it('queues it in Sent with the "Email sent" line; the worker sends through the user\'s mailbox and marks it sent', async () => {
     const { rep, lead } = await setup();
     const box = await personal(rep.id, 'seba@daitpartners.com');
-    await call('POST', '/api/mail', await signIn(app, rep), body(lead.id));
+    const msg = await queueOnLead(rep, box, lead.id);
+    expect(msg).toMatchObject({ folder: 'sent', status: 'queued', bodyText: 'Hola Ana:\n\nSaludos', bodyHtml: '<div>Hola Ana:<br><br>Saludos</div>' });
+    expect((await prisma.job.findFirstOrThrow()).payload).toEqual({ emailMessageId: msg.id });
+    expect(await prisma.leadActivity.count({ where: { activityType: 'email', relatedId: msg.id } })).toBe(1);
     const graph = recordingGraph();
     expect(await run(graph)).toBe(true);
     expect(graph.calls).toHaveLength(1);
     expect(graph.calls[0]!.account.id).toBe(box.id);
-    expect(graph.calls[0]!.msg).toMatchObject({ to: ['ana@andino.cl'], cc: ['carlos@daitpartners.com'], subject: '¿Una llamada esta semana?', text: 'Hola Ana:\n\nSaludos' });
-    expect(graph.calls[0]!.msg.html).toContain('Hola Ana:<br><br>Saludos');
+    expect(graph.calls[0]!.msg).toMatchObject({
+      to: ['ana@andino.cl'], cc: ['carlos@daitpartners.com'], subject: '¿Una llamada esta semana?', html: '<div>Hola Ana:<br><br>Saludos</div>', text: 'Hola Ana:\n\nSaludos',
+    });
     expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ status: 'sent', lastError: null });
   });
 
-  it('formatted message (owner, 24 Nov 2026): the HTML is sanitised again on send and goes to Graph as HTML, with its text', async () => {
+  it('a formatted message goes to Graph as the sanitised HTML it stores, with its text', async () => {
     const { rep, lead } = await setup();
-    await personal(rep.id, 'seba@daitpartners.com');
-    const html = '<p>Hola <b>Ana</b>:</p><ul><li>Uno</li></ul><p><a href="https://dait.example/x" onclick="steal()">Web</a>'
-      + ' <a href="javascript:alert(1)">bad</a> <a href="tel:+34600">call</a></p><img src=x onerror="alert(1)"><script>alert(1)</script>';
-    const res = await call('POST', '/api/mail', await signIn(app, rep), body(lead.id, { body: 'Hola Ana: Uno Web', bodyHtml: html }));
-    expect(res.statusCode).toBe(201);
-    const msg = await prisma.emailMessage.findFirstOrThrow();
-    expect(msg.bodyHtml).toContain('<b>Ana</b>');
-    expect(msg.bodyHtml).toContain('<li>Uno</li>');
-    expect(msg.bodyHtml).toContain('href="https://dait.example/x"');
-    for (const bad of ['onclick', 'javascript:', 'tel:', 'onerror', '<script', 'alert(']) expect(msg.bodyHtml).not.toContain(bad);
-    // The plain text is derived on the server from the sanitised HTML.
-    expect(msg.bodyText).toBe('Hola Ana:\n\nUno\n\nWeb bad call');
-
+    const box = await personal(rep.id, 'seba@daitpartners.com');
+    const message = await outgoingBody('Hola Ana', '<p>Hola <b>Ana</b></p><script>alert(1)</script>');
+    const msg = await queueOnLead(rep, box, lead.id, message);
+    expect(msg.bodyHtml).toBe('<p>Hola <b>Ana</b></p>');
     const graph = recordingGraph();
     expect(await run(graph)).toBe(true);
     expect(graph.calls[0]!.msg.html).toBe(msg.bodyHtml);
     expect(graph.calls[0]!.msg.text).toBe(msg.bodyText);
   });
 
-  it('size (I2): a formatted message over the cap is refused as message_too_long, never cut; HTML needs no plain body (M5)', async () => {
-    const { rep, lead } = await setup();
-    await personal(rep.id, 'seba@daitpartners.com');
-    const cookie = await signIn(app, rep);
-    const big = '<p>' + 'x'.repeat(200_001) + '</p><p>tail</p>';
-    const res = await call('POST', '/api/mail', cookie, body(lead.id, { body: '', bodyHtml: big }));
-    expect(res.statusCode).toBe(413);
-    expect(res.json()).toEqual({ error: 'message_too_long' });
-    expect(await prisma.emailMessage.count()).toBe(0);
-    const ok = await call('POST', '/api/mail', cookie, body(lead.id, { body: '', bodyHtml: '<p>Hola <b>Ana</b></p>' }));
-    expect(ok.statusCode).toBe(201);
-    expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ bodyText: 'Hola Ana', bodyHtml: '<p>Hola <b>Ana</b></p>' });
-  });
-
-  it('an empty message (no text, HTML with nothing left) is a validation error on body; checks run before sanitising (M2)', async () => {
-    const { rep, lead } = await setup();
-    const cookie = await signIn(app, rep);
-    // No mailbox: refused before any sanitising.
-    expect((await call('POST', '/api/mail', cookie, body(lead.id, { bodyHtml: '<p>x</p>' }))).json()).toEqual({ error: 'no_mailbox' });
-    await personal(rep.id, 'seba@daitpartners.com');
-    const res = await call('POST', '/api/mail', cookie, body(lead.id, { body: '', bodyHtml: '<script>x()</script>' }));
-    expect(res.statusCode).toBe(400);
-    expect(res.json()).toMatchObject({ error: 'validation', issues: [{ path: ['body'] }] });
-    expect((await call('POST', '/api/mail', cookie, body(lead.id, { body: '' }))).statusCode).toBe(400);
-  });
-
-  it('when the sanitiser worker gives up on send, the plain body the user sent goes out (re-review R2)', async () => {
-    const { rep, lead } = await setup();
-    await personal(rep.id, 'seba@daitpartners.com');
-    setBodyWorkerMemoryForTests(16);
-    try {
-      const res = await call('POST', '/api/mail', await signIn(app, rep), body(lead.id, { body: 'Hola Ana, plain', bodyHtml: '<p>big</p>'.repeat(90_000) }));
-      expect(res.statusCode).toBe(201);
-    } finally {
-      setBodyWorkerMemoryForTests(null);
-    }
-    expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ bodyText: 'Hola Ana, plain', bodyHtml: '<div>Hola Ana, plain</div>' });
-  });
-
-  it('a plain message is unchanged: its text as simple HTML', async () => {
-    const { rep, lead } = await setup();
-    await personal(rep.id, 'seba@daitpartners.com');
-    await call('POST', '/api/mail', await signIn(app, rep), body(lead.id, { bodyHtml: null }));
-    const msg = await prisma.emailMessage.findFirstOrThrow();
-    expect(msg).toMatchObject({ bodyText: 'Hola Ana:\n\nSaludos', bodyHtml: '<div>Hola Ana:<br><br>Saludos</div>' });
-    const graph = recordingGraph();
-    await run(graph);
-    expect(graph.calls[0]!.msg).toMatchObject({ html: '<div>Hola Ana:<br><br>Saludos</div>', text: 'Hola Ana:\n\nSaludos' });
-  });
-
   it('a temporary failure retries; the last failure marks the message failed', async () => {
     const { rep, lead } = await setup();
-    await personal(rep.id, 'seba@daitpartners.com');
-    await call('POST', '/api/mail', await signIn(app, rep), body(lead.id));
+    const box = await personal(rep.id, 'seba@daitpartners.com');
+    await queueOnLead(rep, box, lead.id);
     await run(recordingGraph(new GraphError('unavailable', 503)));
     expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ status: 'queued' });
     const job = await prisma.job.findFirstOrThrow();
@@ -224,7 +221,7 @@ describe('a message queued on a lead (POST /mail with the lead): queue, worker, 
   it('a revoked mailbox marks the message failed at once and the mailbox in error', async () => {
     const { rep, lead } = await setup();
     const box = await personal(rep.id, 'seba@daitpartners.com');
-    await call('POST', '/api/mail', await signIn(app, rep), body(lead.id));
+    await queueOnLead(rep, box, lead.id);
     await run(recordingGraph(new GraphError('InvalidAuthenticationToken', 401)));
     expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ status: 'failed' });
     expect((await prisma.emailAccount.findUniqueOrThrow({ where: { id: box.id } })).status).toBe('error');
@@ -233,8 +230,8 @@ describe('a message queued on a lead (POST /mail with the lead): queue, worker, 
 
   it('a final failure removes the "Email sent" history line (the sender sees Failed in the Emails tab)', async () => {
     const { rep, lead } = await setup();
-    await personal(rep.id, 'seba@daitpartners.com');
-    await call('POST', '/api/mail', await signIn(app, rep), body(lead.id));
+    const box = await personal(rep.id, 'seba@daitpartners.com');
+    await queueOnLead(rep, box, lead.id);
     const job = await prisma.job.findFirstOrThrow();
     await prisma.job.update({ where: { id: job.id }, data: { attempts: job.maxAttempts - 1 } });
     await run(recordingGraph(new GraphError('unavailable', 503)));
@@ -245,7 +242,7 @@ describe('a message queued on a lead (POST /mail with the lead): queue, worker, 
   it('a revoked send does not turn a since-disconnected mailbox into an error', async () => {
     const { rep, lead } = await setup();
     const box = await personal(rep.id, 'seba@daitpartners.com');
-    await call('POST', '/api/mail', await signIn(app, rep), body(lead.id));
+    await queueOnLead(rep, box, lead.id);
     const graph: GraphClient = {
       ...fakeGraph(),
       async sendMail() {
@@ -261,8 +258,8 @@ describe('a message queued on a lead (POST /mail with the lead): queue, worker, 
 
   it('an interrupted send is never handed to Microsoft twice', async () => {
     const { rep, lead } = await setup();
-    await personal(rep.id, 'seba@daitpartners.com');
-    await call('POST', '/api/mail', await signIn(app, rep), body(lead.id));
+    const box = await personal(rep.id, 'seba@daitpartners.com');
+    await queueOnLead(rep, box, lead.id);
     // A previous attempt claimed the message and then died before recording the result.
     await prisma.emailMessage.updateMany({ data: { status: 'sending' } });
     const graph = recordingGraph();
@@ -274,31 +271,13 @@ describe('a message queued on a lead (POST /mail with the lead): queue, worker, 
   it('a queued message never goes out through a mailbox that now belongs to someone else', async () => {
     const { rep, lead } = await setup();
     const box = await personal(rep.id, 'seba@daitpartners.com');
-    await call('POST', '/api/mail', await signIn(app, rep), body(lead.id));
+    await queueOnLead(rep, box, lead.id);
     const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
     await prisma.emailAccount.update({ where: { id: box.id }, data: { userId: other.id } });
     const graph = recordingGraph();
     await run(graph);
     expect(graph.calls).toHaveLength(0);
     expect(await prisma.emailMessage.findFirstOrThrow()).toMatchObject({ status: 'failed', lastError: 'mailbox_not_connected' });
-  });
-
-  it('sending to a New or Not Contacted lead moves it to Contacted (prototype); later statuses are left alone', async () => {
-    const { rep, lead } = await setup();
-    await personal(rep.id, 'seba@daitpartners.com');
-    const cookie = await signIn(app, rep);
-    await prisma.lead.update({ where: { id: lead.id }, data: { status: 'New' } });
-    let fresh = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
-    expect((await call('POST', '/api/mail', cookie, body(lead.id))).statusCode).toBe(201);
-    fresh = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
-    expect(fresh.status).toBe('Contacted');
-    const change = await prisma.leadActivity.findFirstOrThrow({ where: { activityType: 'status' } });
-    expect(change).toMatchObject({ statusFrom: 'New', statusTo: 'Contacted', body: 'Email sent' });
-
-    await prisma.lead.update({ where: { id: lead.id }, data: { status: 'Interested' } });
-    fresh = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
-    await call('POST', '/api/mail', cookie, body(lead.id));
-    expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).status).toBe('Interested');
   });
 });
 

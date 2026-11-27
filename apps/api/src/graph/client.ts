@@ -731,11 +731,15 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
         res = await mailCall(account, url(!contentIdRefused), 'GET', undefined, `${IMMUTABLE}, ${HTML_BODY}`);
       } catch (err) {
         // Graph refusing the type-cast select: read the draft without content-ids from now on (their cid: pictures are
-        // then not kept, as before web-mail release 3 Task 7), logged once, never with the draft's content.
+        // then not kept, as before web-mail release 3 Task 7), logged once, never with the draft's content. Turned off
+        // only when the read without the select succeeds (proof the select caused the 400); a 400 that the plain read
+        // also gets is thrown and leaves the select on.
         if (contentIdRefused || !(err instanceof GraphError && err.status === 400)) throw err;
-        contentIdRefused = true;
-        console.warn('graph: getDraft refused the attachment contentId select (400); drafts are read without content-ids');
         res = await mailCall(account, url(false), 'GET', undefined, `${IMMUTABLE}, ${HTML_BODY}`);
+        if (!contentIdRefused) {
+          contentIdRefused = true;
+          console.warn('graph: getDraft refused the attachment contentId select (400); drafts are read without content-ids');
+        }
       }
       const v = (await res.json()) as Record<string, unknown>;
       if (v.isDraft === false) throw new GraphError('not_a_draft', 409);

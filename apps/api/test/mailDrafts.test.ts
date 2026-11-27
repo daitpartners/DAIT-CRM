@@ -140,6 +140,43 @@ describe('drafts API (web-mail release 3)', () => {
     expect(g.calls).toEqual([]);
   });
 
+  it('New with a project of the lead stores the tag; a project you cannot see, of another client or unknown is 400 invalid_project (moved from POST /mail)', async () => {
+    const f = await setup();
+    const project = (companyId: number, managerId: number, number: string) => prisma.project.create({
+      data: { number, companyId, name: 'P', startDate: new Date('2026-11-01T00:00:00Z'), currency: 'INR', managerId, createdById: f.admin.id },
+    });
+    const mine = await project(f.acme.id, f.rep.id, 'PRJ-1');
+    const hidden = await project(f.hidden.companyId!, f.admin.id, 'PRJ-2');
+    const foreign = await project(f.hidden.companyId!, f.rep.id, 'PRJ-3'); // visible (manager), but another client
+    const ok = await call('POST', '/api/mail/drafts', f.repCookie, { kind: 'new', leadId: f.lead.id, projectId: mine.id });
+    expect(ok.statusCode, ok.body).toBe(201);
+    expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: ok.json().id } })).projectId).toBe(mine.id);
+    g.calls = [];
+    for (const body of [
+      { kind: 'new', leadId: f.lead.id, projectId: hidden.id },
+      { kind: 'new', leadId: f.lead.id, projectId: foreign.id },
+      { kind: 'new', projectId: mine.id }, // no lead
+      { kind: 'new', leadId: f.lead.id, projectId: 999999 },
+    ]) {
+      const res = await call('POST', '/api/mail/drafts', f.repCookie, body);
+      expect(res.statusCode, res.body).toBe(400);
+      expect(res.json().error).toBe('invalid_project');
+    }
+    expect(g.calls).toEqual([]);
+    expect(await prisma.emailMessage.count({ where: { folder: 'drafts' } })).toBe(1);
+  });
+
+  it('a reply draft carries over the replied-to message’s project (moved from POST /mail/:id/reply)', async () => {
+    const f = await setup();
+    const project = await prisma.project.create({
+      data: { number: 'PRJ-1', companyId: f.acme.id, name: 'P', startDate: new Date('2026-11-01T00:00:00Z'), currency: 'INR', managerId: f.rep.id, createdById: f.admin.id },
+    });
+    const original = await msg(f.rep.id, f.repBox.id, { leadId: f.lead.id, companyId: f.acme.id, projectId: project.id });
+    const res = await call('POST', '/api/mail/drafts', f.repCookie, { kind: 'reply', replyToId: original.id });
+    expect(res.statusCode, res.body).toBe(201);
+    expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: res.json().id } })).projectId).toBe(project.id);
+  });
+
   it('Reply all: createReplyAll on the original, To = sender + other To without mine, Cc = original Cc without mine, subject Re:, quote kept, same thread', async () => {
     const f = await setup();
     const original = await msg(f.rep.id, f.repBox.id, {

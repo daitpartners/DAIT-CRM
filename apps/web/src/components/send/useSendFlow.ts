@@ -1,7 +1,6 @@
 import { createElement, useRef, useState, type ReactNode } from 'react';
 import { localNow, type SendFollowUp } from '@dait-crm/shared';
-import { ApiError } from '../../api/client';
-import { useSendDraft, type DraftFields, type DraftView, type FlushResult, type SendResult } from '../../api/drafts';
+import { codeOf, useSendDraft, type DraftFields, type DraftView, type FlushResult, type SendResult } from '../../api/drafts';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { errorText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
@@ -38,9 +37,6 @@ const ENDS_THE_BOX = new Set([
   'draft_gone', 'already_sent', 'not_draft', 'mailbox_changed', 'view_only', 'not_found', 'forbidden', 'no_mailbox',
   'mailbox_not_connected', 'mailbox_needs_reconnect', 'unauthenticated',
 ]);
-
-/** The code of a failed request (a network failure reads as try_again). */
-const codeOf = (err: unknown) => (err instanceof ApiError ? err.code : 'try_again');
 
 /**
  * The one send flow for every screen (web-mail release 3): `send()` sends now, `schedule(at)` at `at`. The editor's

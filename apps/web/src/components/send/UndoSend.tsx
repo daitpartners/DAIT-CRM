@@ -1,7 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { UNDO_SEND_SECONDS } from '@dait-crm/shared';
-import { ApiError } from '../../api/client';
-import { useUnsend, type DraftView } from '../../api/drafts';
+import { codeOf, useUnsend, type DraftView } from '../../api/drafts';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { errorText } from '../../i18n/labels';
 import { useLang, useT } from '../../i18n/useT';
@@ -50,7 +49,7 @@ export function UndoSendProvider({ children }: { children: ReactNode }) {
       },
       onError: (err) => {
         setCurrent((c) => (c?.key === shown.key ? null : c));
-        const code = err instanceof ApiError ? err.code : 'try_again';
+        const code = codeOf(err);
         toast(code === 'already_sent' ? t('Too late: the email was sent.') : errorText(t, code, {}, { context: 'draft' }), 'warn');
       },
     });

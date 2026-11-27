@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import type { EmailAccount, EmailMessage, Job } from '@prisma/client';
+import type { EmailAccount, EmailMessage, Job, User } from '@prisma/client';
+import { replySubject, roleLabel } from '@dait-crm/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/app';
 import { prisma } from '../src/db';
@@ -13,19 +14,9 @@ import { resetBodyFetchBackoff } from '../src/routes/mail';
 import { setBodyWorkerMemoryForTests } from '../src/mail/bodies';
 import { fakeGraph, resetDb, seedLookups } from './helpers';
 import { makeCompany, makeContact, makeLead, makeProject, makeUser, signIn } from './factory';
-
-// Lets a test make the reply's lead lock fail like a database error would.
-const lockFault = vi.hoisted(() => ({ error: null as Error | null }));
-vi.mock('../src/routes/leads', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/routes/leads')>();
-  return {
-    ...actual,
-    lockLeads: async (...args: Parameters<typeof actual.lockLeads>) => {
-      if (lockFault.error) throw lockFault.error;
-      return actual.lockLeads(...args);
-    },
-  };
-});
+import { queueOutgoing } from '../src/mail/outgoing';
+import { outgoingBody } from '../src/mail/formatted';
+import type { AuthUser } from '../src/plugins/auth';
 
 /** The routes' Graph client: each test may answer messageBody; by default Microsoft is unreachable. */
 const bodies = vi.hoisted(() => ({ calls: [] as { accountId: number; graphId: string; timeoutMs?: number }[], answer: null as null | GraphClient['messageBody'] }));
@@ -52,7 +43,6 @@ beforeAll(async () => {
 });
 afterAll(() => app.close());
 beforeEach(async () => {
-  lockFault.error = null;
   bodies.calls = [];
   bodies.answer = null;
   changes.calls = [];
@@ -96,90 +86,34 @@ async function synced(userId: number, accountId: number | null, data: Partial<Em
 const runJobs = (graph = fakeGraph()) =>
   runOnce({ types: ['send_user_email', 'mail_action'], handlers: { send_user_email: sendUserEmailHandler, mail_action: mailActionHandler }, graph });
 
-describe('compose and reply (2B-2)', () => {
-  it('compose without a lead queues a message from your mailbox with the contact and company, but no lead', async () => {
-    const { rep, company, contact, box } = await setup();
-    const res = await call('POST', '/api/mail', await signIn(app, rep), { to: 'Ana@Acme.com', cc: [], subject: 'Hello', body: 'Hi Ana' });
-    expect(res.statusCode).toBe(201);
-    const m = await prisma.emailMessage.findUniqueOrThrow({ where: { id: res.json().id } });
-    expect(m).toMatchObject({ userId: rep.id, accountId: box.id, folder: 'sent', status: 'queued', source: 'crm', toAddresses: ['ana@acme.com'], contactId: contact.id, companyId: company.id, leadId: null });
-    expect(await prisma.job.count({ where: { type: 'send_user_email' } })).toBe(1);
-    expect(await prisma.leadActivity.count({ where: { activityType: 'email' } })).toBe(0);
-  });
+/*
+ * Release 2's `POST /mail` and `POST /mail/:id/reply` are gone (web-mail release 3: every message is written as an
+ * Outlook draft and sent through the drafts path, tested in mailDrafts / mailSend). A reply release 2 queued may still
+ * be in the queue when release 3's worker starts, so the worker still answers its original in Outlook; checked here
+ * with a reply queued as release 2 queued it.
+ */
+const authUser = (u: User): AuthUser => ({ id: u.id, email: u.email, name: u.name, role: roleLabel(u.role), language: u.language, timezone: u.timezone, dateFormat: u.dateFormat });
+async function queuedReply(
+  user: User, box: EmailAccount, original: EmailMessage,
+  o: { mode?: 'reply' | 'replyAll' | 'forward'; to: string[]; cc?: string[]; body?: string; bodyHtml?: string },
+) {
+  const mode = o.mode ?? 'reply';
+  const message = await outgoingBody(o.body, o.bodyHtml);
+  return prisma.$transaction((tx) => queueOutgoing(tx, authUser(user), box, {
+    lead: null, companyId: original.companyId, contactId: original.contactId, to: o.to, cc: o.cc ?? [], subject: replySubject(original.subject, mode),
+    ...message, replyToId: original.id, replyMode: mode, threadId: original.threadId,
+  }));
+}
 
-  it('compose and reply store the HTML that is sent, so the reader shows it as sent', async () => {
-    const { rep, box } = await setup();
-    const cookie = await signIn(app, rep);
-    const res = await call('POST', '/api/mail', cookie, { to: 'ana@acme.com', cc: [], subject: 'Hello', body: 'Hi Ana,\n<b>not bold</b> & more' });
-    const m = await prisma.emailMessage.findUniqueOrThrow({ where: { id: res.json().id } });
-    expect(m.bodyHtml).toBe('<div>Hi Ana,<br>&lt;b&gt;not bold&lt;/b&gt; &amp; more</div>');
-    const original = await synced(rep.id, box.id);
-    const r = await call('POST', `/api/mail/${original.id}/reply`, cookie, { cc: [], body: 'Thanks' });
-    expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: r.json().id } })).bodyHtml).toBe('<div>Thanks</div>');
-  });
+describe("a reply queued by release 2 (the worker's reply path)", () => {
+  const toAll = { toAddresses: ['maya@daitpartners.com', 'bo@acme.com'], ccAddresses: ['cy@acme.com'] };
 
-  it('compose on a lead writes the history line and moves New to Contacted', async () => {
-    const { rep, lead } = await setup();
-    const res = await call('POST', '/api/mail', await signIn(app, rep), { to: 'ana@acme.com', cc: [], subject: 'Hello', body: 'Hi', leadId: lead.id });
-    expect(res.statusCode).toBe(201);
-    expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).status).toBe('Contacted');
-    expect(await prisma.leadActivity.findFirst({ where: { leadId: lead.id, activityType: 'email' } })).toMatchObject({ title: 'Email sent · Hello' });
-  });
-
-  it('compose on a lead you cannot see is 404; without a mailbox 409 no_mailbox', async () => {
-    const { lead } = await setup();
-    const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
-    await personal(other.id, 'other@daitpartners.com');
-    const cookie = await signIn(app, other);
-    expect((await call('POST', '/api/mail', cookie, { to: 'ana@acme.com', subject: 's', body: 'b', leadId: lead.id })).statusCode).toBe(404);
-    const none = await makeUser({ role: 'SALES_REPRESENTATIVE' });
-    const res = await call('POST', '/api/mail', await signIn(app, none), { to: 'ana@acme.com', subject: 's', body: 'b' });
-    expect(res.statusCode).toBe(409);
-    expect(res.json().error).toBe('no_mailbox');
-  });
-
-  it('reply answers the sender in the same conversation and keeps the links', async () => {
-    const { rep, box, lead, company, contact } = await setup();
-    const original = await synced(rep.id, box.id, { leadId: lead.id, companyId: company.id, contactId: contact.id });
-    const res = await call('POST', `/api/mail/${original.id}/reply`, await signIn(app, rep), { cc: ['boss@acme.com'], body: 'Thanks Ana' });
-    expect(res.statusCode).toBe(201);
-    const m = await prisma.emailMessage.findUniqueOrThrow({ where: { id: res.json().id } });
-    expect(m).toMatchObject({
-      replyToId: original.id, subject: 'Re: Proposal', toAddresses: ['ana@acme.com'], ccAddresses: ['boss@acme.com'], status: 'queued',
-      leadId: lead.id, companyId: company.id, contactId: contact.id, threadId: 'conv-1',
-    });
-    expect(await prisma.leadActivity.count({ where: { leadId: lead.id, activityType: 'email', title: 'Email sent · Re: Proposal' } })).toBe(1);
-  });
-
-  it('reply surfaces a database error instead of sending without the lead', async () => {
-    const { rep, box, lead, company, contact } = await setup();
-    const original = await synced(rep.id, box.id, { leadId: lead.id, companyId: company.id, contactId: contact.id });
-    const cookie = await signIn(app, rep);
-    lockFault.error = new Error('connection lost');
-    const res = await call('POST', `/api/mail/${original.id}/reply`, cookie, { cc: [], body: 'Thanks Ana' });
-    expect(res.statusCode).toBe(500);
-    expect(await prisma.emailMessage.count()).toBe(1);
-    expect(await prisma.job.count({ where: { type: 'send_user_email' } })).toBe(0);
-  });
-
-  it("a Sales rep gets 404 for another user's message; an Administrator gets 403 view_only", async () => {
-    const { rep, admin, box, lead } = await setup();
-    const original = await synced(rep.id, box.id, { leadId: lead.id });
-    const other = await makeUser({ role: 'SALES_REPRESENTATIVE' });
-    await personal(other.id, 'other@daitpartners.com');
-    expect((await call('POST', `/api/mail/${original.id}/reply`, await signIn(app, other), { cc: [], body: 'x' })).statusCode).toBe(404);
-    const res = await call('POST', `/api/mail/${original.id}/reply`, await signIn(app, admin), { cc: [], body: 'x' });
-    expect(res.statusCode).toBe(403);
-    expect(res.json()).toEqual({ error: 'view_only' });
-    expect(await prisma.emailMessage.count()).toBe(1);
-    expect(await prisma.job.count({ where: { type: 'send_user_email' } })).toBe(0);
-  });
-
-  it('the worker sends a reply through Graph reply on the original message (sendMail when it has no Graph id)', async () => {
+  it('a plain reply goes through Graph reply on the original (no reply mode on the job); sendMail when it has no Graph id', async () => {
     const { rep, box } = await setup();
     const original = await synced(rep.id, box.id, { graphId: 'orig-1' });
-    const cookie = await signIn(app, rep);
-    await call('POST', `/api/mail/${original.id}/reply`, cookie, { cc: [], body: 'Thanks' });
+    const queued = await queuedReply(rep, box, original, { to: ['ana@acme.com'], body: 'Thanks' });
+    expect(queued.bodyHtml).toBe('<div>Thanks</div>');
+    expect((await prisma.job.findFirstOrThrow({ where: { type: 'send_user_email' } })).payload).not.toHaveProperty('replyMode');
     const replies: { graphId: string; to: string[]; html: string }[] = [];
     const sends: string[] = [];
     const graph = fakeGraph({
@@ -189,64 +123,23 @@ describe('compose and reply (2B-2)', () => {
     await runJobs(graph);
     expect(replies).toEqual([{ graphId: 'orig-1', to: ['ana@acme.com'], html: '<div>Thanks</div>' }]);
     const crmOnly = await prisma.emailMessage.create({ data: { userId: rep.id, accountId: box.id, folder: 'sent', status: 'sent', fromAddress: 'maya@daitpartners.com', toAddresses: ['ana@acme.com'], subject: 'First' } });
-    await call('POST', `/api/mail/${crmOnly.id}/reply`, cookie, { cc: [], body: 'Again' });
+    await queuedReply(rep, box, crmOnly, { to: ['ana@acme.com'], body: 'Again' });
     await runJobs(graph);
     expect(sends).toEqual(['Re: First']);
   });
-});
 
-describe('Reply all and Forward (web-mail release 2)', () => {
-  const toAll = { toAddresses: ['maya@daitpartners.com', 'bo@acme.com'], ccAddresses: ['cy@acme.com'] };
-
-  it('Reply all goes to the sender and the other To addresses, never your own; Cc as given; subject Re:', async () => {
+  it('a formatted reply goes to Graph as its sanitised HTML', async () => {
     const { rep, box } = await setup();
-    await prisma.emailAccount.update({ where: { id: box.id }, data: { sendAs: 'sales@daitpartners.com' } });
-    const m = await synced(rep.id, box.id, { toAddresses: [...toAll.toAddresses, 'Sales@DaitPartners.com'], ccAddresses: toAll.ccAddresses });
-    const res = await call('POST', `/api/mail/${m.id}/reply`, await signIn(app, rep), { mode: 'replyAll', cc: ['cy@acme.com'], body: 'Thanks' });
-    expect(res.statusCode).toBe(201);
-    expect(res.json()).toMatchObject({ toAddresses: ['ana@acme.com', 'bo@acme.com'], ccAddresses: ['cy@acme.com'], subject: 'Re: Proposal' });
-    expect((await prisma.job.findFirstOrThrow({ where: { type: 'send_user_email' } })).payload).toMatchObject({ replyMode: 'replyAll' });
-  });
-
-  it('a plain reply puts no reply mode on the job', async () => {
-    const { rep, box } = await setup();
-    const m = await synced(rep.id, box.id);
-    await call('POST', `/api/mail/${m.id}/reply`, await signIn(app, rep), { cc: [], body: 'Thanks' });
-    expect((await prisma.job.findFirstOrThrow({ where: { type: 'send_user_email' } })).payload).not.toHaveProperty('replyMode');
-  });
-
-  it('Forward needs a To, keeps the conversation and lead, subject Fw: once', async () => {
-    const { rep, box, lead, company, contact } = await setup();
-    const m = await synced(rep.id, box.id, { leadId: lead.id, companyId: company.id, contactId: contact.id });
-    const cookie = await signIn(app, rep);
-    expect((await call('POST', `/api/mail/${m.id}/reply`, cookie, { mode: 'forward', body: 'x' })).statusCode).toBe(400);
-    const res = await call('POST', `/api/mail/${m.id}/reply`, cookie, { mode: 'forward', to: ['New@Acme.com'], cc: [], body: 'FYI' });
-    expect(res.statusCode).toBe(201);
-    const created = await prisma.emailMessage.findUniqueOrThrow({ where: { id: res.json().id } });
-    expect(created).toMatchObject({ toAddresses: ['new@acme.com'], subject: 'Fw: Proposal', replyToId: m.id, leadId: lead.id, threadId: 'conv-1' });
-    expect((await prisma.job.findFirstOrThrow({ where: { type: 'send_user_email' } })).payload).toMatchObject({ replyMode: 'forward' });
-    const fw = await synced(rep.id, box.id, { subject: 'FW: Proposal' });
-    const again = await call('POST', `/api/mail/${fw.id}/reply`, cookie, { mode: 'forward', to: ['new@acme.com'], body: 'FYI' });
-    expect(again.json().subject).toBe('FW: Proposal');
-  });
-
-  it("Reply all / Forward on another user's message are 403 view_only", async () => {
-    const { rep, admin, box, lead } = await setup();
-    const m = await synced(rep.id, box.id, { leadId: lead.id });
-    const cookie = await signIn(app, admin);
-    for (const body of [{ mode: 'replyAll', body: 'x' }, { mode: 'forward', to: ['new@acme.com'], body: 'x' }]) {
-      const res = await call('POST', `/api/mail/${m.id}/reply`, cookie, body);
-      expect(res.statusCode).toBe(403);
-      expect(res.json()).toEqual({ error: 'view_only' });
-    }
-    expect(await prisma.emailMessage.count()).toBe(1);
-    expect(await prisma.job.count({ where: { type: 'send_user_email' } })).toBe(0);
+    const original = await synced(rep.id, box.id, { graphId: 'orig-2' });
+    await queuedReply(rep, box, original, { to: ['ana@acme.com'], body: 'Thanks', bodyHtml: '<p><i>Thanks</i></p><script>x()</script>' });
+    const replies: string[] = [];
+    await runJobs(fakeGraph({ async reply(_a: EmailAccount, _g, msg) { replies.push(msg.html); } }));
+    expect(replies).toEqual(['<p><i>Thanks</i></p>']);
   });
 
   it('a queued Reply all / Forward is sent with Graph replyAll / forward on the original', async () => {
     const { rep, box } = await setup();
     const original = await synced(rep.id, box.id, { graphId: 'orig-1', ...toAll });
-    const cookie = await signIn(app, rep);
     const calls: [string, string, unknown][] = [];
     const sends: string[] = [];
     const graph = fakeGraph({
@@ -254,11 +147,12 @@ describe('Reply all and Forward (web-mail release 2)', () => {
       async forward(_a, graphId, msg) { calls.push(['forward', graphId, msg]); },
       async sendMail(_a, msg) { sends.push(msg.subject); },
     });
-    await call('POST', `/api/mail/${original.id}/reply`, cookie, { mode: 'replyAll', cc: ['cy@acme.com'], body: 'Thanks' });
+    await queuedReply(rep, box, original, { mode: 'replyAll', to: ['ana@acme.com', 'bo@acme.com'], cc: ['cy@acme.com'], body: 'Thanks' });
+    expect((await prisma.job.findFirstOrThrow({ where: { type: 'send_user_email' } })).payload).toMatchObject({ replyMode: 'replyAll' });
     await runJobs(graph);
     expect(calls).toEqual([['replyAll', original.graphId, { to: ['ana@acme.com', 'bo@acme.com'], cc: ['cy@acme.com'], html: expect.any(String) }]]);
     calls.length = 0;
-    await call('POST', `/api/mail/${original.id}/reply`, cookie, { mode: 'forward', to: ['new@acme.com'], body: 'FYI' });
+    await queuedReply(rep, box, original, { mode: 'forward', to: ['new@acme.com'], body: 'FYI' });
     await runJobs(graph);
     expect(calls).toEqual([['forward', original.graphId, { to: ['new@acme.com'], html: '<div>FYI</div>' }]]);
     expect(sends).toEqual([]);
@@ -268,7 +162,7 @@ describe('Reply all and Forward (web-mail release 2)', () => {
   it('a queued reply whose payload names another Graph call fails it and Microsoft is never asked', async () => {
     const { rep, box } = await setup();
     const original = await synced(rep.id, box.id, { graphId: 'orig-2', ...toAll });
-    await call('POST', `/api/mail/${original.id}/reply`, await signIn(app, rep), { mode: 'replyAll', cc: [], body: 'Thanks' });
+    await queuedReply(rep, box, original, { mode: 'replyAll', to: ['ana@acme.com', 'bo@acme.com'], body: 'Thanks' });
     const job = await prisma.job.findFirstOrThrow({ where: { type: 'send_user_email' } });
     await prisma.job.update({ where: { id: job.id }, data: { payload: { ...(job.payload as object), replyMode: 'deleteMessage' } } });
     // fakeGraph throws on any call it was not given.
@@ -288,7 +182,7 @@ describe('Reply all and Forward (web-mail release 2)', () => {
     });
     const sends: { to: string[]; subject: string; html: string; text?: string }[] = [];
     const graph = fakeGraph({ async sendMail(_a, msg) { sends.push(msg); } });
-    await call('POST', `/api/mail/${crmOnly.id}/reply`, await signIn(app, rep), { mode: 'forward', to: ['new@acme.com'], body: 'See below' });
+    await queuedReply(rep, box, crmOnly, { mode: 'forward', to: ['new@acme.com'], body: 'See below' });
     await runJobs(graph);
     expect(sends).toHaveLength(1);
     expect(sends[0]).toMatchObject({ to: ['new@acme.com'], subject: 'Fw: Price list' });
@@ -311,49 +205,9 @@ describe('Reply all and Forward (web-mail release 2)', () => {
       data: { userId: rep.id, accountId: box.id, folder: 'sent', status: 'sent', fromAddress: 'maya@daitpartners.com', toAddresses: ['ana@acme.com', 'bo@acme.com'], subject: 'First' },
     });
     const sends: { to: string[]; subject: string; html: string }[] = [];
-    await call('POST', `/api/mail/${crmOnly.id}/reply`, await signIn(app, rep), { mode: 'replyAll', cc: [], body: 'Again' });
+    await queuedReply(rep, box, crmOnly, { mode: 'replyAll', to: ['ana@acme.com', 'bo@acme.com'], body: 'Again' });
     await runJobs(fakeGraph({ async sendMail(_a, msg) { sends.push(msg); } }));
     expect(sends).toEqual([expect.objectContaining({ to: ['ana@acme.com', 'bo@acme.com'], subject: 'Re: First', html: '<div>Again</div>' })]);
-  });
-});
-
-describe('formatted compose and reply (24 Nov 2026)', () => {
-  it('compose and reply send formatted HTML (sanitised again on the server) with its plain text', async () => {
-    const { rep, box } = await setup();
-    const cookie = await signIn(app, rep);
-    const res = await call('POST', '/api/mail', cookie, {
-      to: 'ana@acme.com', cc: [], subject: 'Hello', body: 'Hi Ana', bodyHtml: '<p>Hi <b>Ana</b></p><p onclick="x()"><a href="javascript:x()">y</a></p>',
-    });
-    expect(res.statusCode).toBe(201);
-    const m = await prisma.emailMessage.findUniqueOrThrow({ where: { id: res.json().id } });
-    expect(m.bodyHtml).toBe('<p>Hi <b>Ana</b></p><p><a target="_blank" rel="noopener noreferrer">y</a></p>');
-    expect(m.bodyText).toBe('Hi Ana\n\ny');
-    const original = await synced(rep.id, box.id, { graphId: 'orig-2' });
-    await call('POST', `/api/mail/${original.id}/reply`, cookie, { cc: [], body: 'Thanks', bodyHtml: '<p><i>Thanks</i></p><script>x()</script>' });
-    const replies: string[] = [];
-    const sends: { html: string; text: string }[] = [];
-    const graph = fakeGraph({
-      async reply(_a: EmailAccount, _g, msg) { replies.push(msg.html); },
-      async sendMail(_a, msg) { sends.push({ html: msg.html, text: msg.text }); },
-    });
-    await runJobs(graph);
-    await runJobs(graph);
-    expect(sends).toEqual([{ html: m.bodyHtml, text: 'Hi Ana\n\ny' }]);
-    expect(replies).toEqual(['<p><i>Thanks</i></p>']);
-  });
-});
-
-describe('formatted compose and reply: size (security review I2)', () => {
-  it('compose and reply over the cap are refused as message_too_long', async () => {
-    const { rep, box } = await setup();
-    const cookie = await signIn(app, rep);
-    const big = '<p>' + 'x'.repeat(200_001) + '</p>';
-    const c = await call('POST', '/api/mail', cookie, { to: 'ana@acme.com', cc: [], subject: 'Hello', bodyHtml: big });
-    expect([c.statusCode, c.json()]).toEqual([413, { error: 'message_too_long' }]);
-    const original = await synced(rep.id, box.id);
-    const r = await call('POST', `/api/mail/${original.id}/reply`, cookie, { cc: [], bodyHtml: big });
-    expect([r.statusCode, r.json()]).toEqual([413, { error: 'message_too_long' }]);
-    expect(await prisma.emailMessage.count({ where: { folder: 'sent' } })).toBe(0);
   });
 });
 
@@ -789,48 +643,22 @@ describe('reading mail on the Email screen (2B-2)', () => {
 });
 
 describe('project-tagged email (3B)', () => {
-  it('compose with a project stores the tag; the list carries it and ?project= narrows to it', async () => {
+  it('a tagged message carries its project in the list and the reader; ?project= narrows to it', async () => {
     const { rep, box, lead, company } = await setup();
     const project = await makeProject({ companyId: company.id, leadId: lead.id, managerId: rep.id, name: 'Website' });
     const cookie = await signIn(app, rep);
-    const res = await call('POST', '/api/mail', cookie, { to: 'ana@acme.com', subject: 'Kick-off', body: 'Hi', leadId: lead.id, projectId: project.id });
-    expect(res.statusCode, res.body).toBe(201);
-    expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: res.json().id } })).projectId).toBe(project.id);
-    // Without a lead, for the client.
-    const res2 = await call('POST', '/api/mail', cookie, { to: 'ana@acme.com', subject: 'Plan', body: 'Hi', companyId: company.id, projectId: project.id });
-    expect(res2.statusCode, res2.body).toBe(201);
-    expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: res2.json().id } })).projectId).toBe(project.id);
-    await synced(rep.id, box.id, { folder: 'sent', status: 'sent', subject: 'Untagged' });
+    const sentOn = (subject: string, data: Partial<EmailMessage> = {}) =>
+      synced(rep.id, box.id, { folder: 'sent', status: 'sent', source: 'crm', fromAddress: 'maya@daitpartners.com', toAddresses: ['ana@acme.com'], subject, threadId: `conv-${subject}`, ...data });
+    const kickOff = await sentOn('Kick-off', { leadId: lead.id, companyId: company.id, projectId: project.id });
+    await sentOn('Plan', { companyId: company.id, projectId: project.id });
+    await sentOn('Untagged');
     const all = (await call('GET', '/api/mail?view=sent', cookie)).json();
     expect(all.total).toBe(3);
     const tagged = (await call('GET', `/api/mail?view=sent&project=${project.id}`, cookie)).json();
     expect(tagged.items.map((i: { subject: string }) => i.subject).sort()).toEqual(['Kick-off', 'Plan']);
     expect(tagged.items[0]).toMatchObject({ projectId: project.id, projectNumber: project.number });
-    expect((await call('GET', `/api/mail/${res.json().id}`, cookie)).json()).toMatchObject({ projectId: project.id, projectNumber: project.number });
+    expect((await call('GET', `/api/mail/${kickOff.id}`, cookie)).json()).toMatchObject({ projectId: project.id, projectNumber: project.number });
     expect(tagged.total).toBe(2);
-  });
-
-  it('a project you cannot see, or on another company, is 400 invalid_project and nothing is queued', async () => {
-    const { rep, admin, lead, company } = await setup();
-    const other = await makeCompany({ name: 'Other Co' });
-    const otherLead = await makeLead({ companyId: other.id, assignedToId: admin.id });
-    const hidden = await makeProject({ companyId: other.id, leadId: otherLead.id, managerId: admin.id });
-    const mine = await makeProject({ companyId: company.id, leadId: lead.id, managerId: rep.id });
-    const foreign = await makeProject({ companyId: other.id, managerId: rep.id }); // visible (manager), but another client
-    const cookie = await signIn(app, rep);
-    const send = (extra: Record<string, unknown>) => call('POST', '/api/mail', cookie, { to: 'ana@acme.com', subject: 's', body: 'b', ...extra });
-    for (const res of [
-      await send({ leadId: lead.id, projectId: hidden.id }),
-      await send({ leadId: lead.id, projectId: foreign.id }),
-      await send({ companyId: company.id, projectId: foreign.id }),
-      await send({ projectId: mine.id }), // no lead and no client given
-      await send({ leadId: lead.id, projectId: 999999 }),
-    ]) {
-      expect(res.statusCode, res.body).toBe(400);
-      expect(res.json().error).toBe('invalid_project');
-    }
-    expect(await prisma.emailMessage.count()).toBe(0);
-    expect(await prisma.job.count()).toBe(0);
   });
 
   it('Review Focus 5: ?project= lists only your own mail even when someone else emailed the same project', async () => {
@@ -859,15 +687,6 @@ describe('project-tagged email (3B)', () => {
     const item = (await call('GET', '/api/mail?view=inbox', cookie)).json().items[0];
     expect(item).toMatchObject({ projectId: null, projectNumber: null });
     expect((await call('GET', `/api/mail/${m.id}`, cookie)).json()).toMatchObject({ projectId: null, projectNumber: null });
-  });
-
-  it('reply carries over the replied-to message’s project', async () => {
-    const { rep, box, lead, company } = await setup();
-    const project = await makeProject({ companyId: company.id, leadId: lead.id, managerId: rep.id });
-    const original = await synced(rep.id, box.id, { leadId: lead.id, companyId: company.id, projectId: project.id });
-    const res = await call('POST', `/api/mail/${original.id}/reply`, await signIn(app, rep), { cc: [], body: 'Thanks' });
-    expect(res.statusCode).toBe(201);
-    expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: res.json().id } })).projectId).toBe(project.id);
   });
 
   it('meta gives each client its legal name (the Email filter shows it where set, as the prototype)', async () => {

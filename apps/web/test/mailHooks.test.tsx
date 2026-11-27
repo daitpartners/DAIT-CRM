@@ -3,7 +3,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import {
-  attachmentUrl, useBulkMailChange, useMailChange, useMailList, useMailMessage, useReplyMail,
+  attachmentUrl, useBulkMailChange, useMailChange, useMailList, useMailMessage,
   type MailChange, type MailDetail, type MailFilter, type MailItem,
 } from '../src/api/mail';
 import type { Me } from '../src/api/queries';
@@ -227,28 +227,5 @@ describe('list filters and attachment links', () => {
   it('attachmentUrl encodes the Graph id (base64 + / =) so it arrives intact (F13)', () => {
     expect(attachmentUrl(7, 'AAMk+a/b==', false)).toBe('/api/mail/7/attachment?att=AAMk%2Ba%2Fb%3D%3D');
     expect(attachmentUrl(7, 'AAMk+a/b==', true)).toBe('/api/mail/7/attachment?att=AAMk%2Ba%2Fb%3D%3D&inline=1');
-  });
-});
-
-describe('replies', () => {
-  it('useReplyMail sends the mode and To (defaults: reply, no To)', async () => {
-    const { posts } = stub([], () => ({ status: 201, body: item({ id: 50 }) }));
-    function Send() {
-      const r = useReplyMail();
-      return (
-        <div>
-          <button type="button" onClick={() => r.mutate({ id: 9, mode: 'forward', to: ['bo@x.com'], cc: [], body: 'FYI', bodyHtml: null })}>Forward</button>
-          <button type="button" onClick={() => r.mutate({ id: 9, cc: ['li@acme.com'], body: 'Thanks' })}>Reply</button>
-        </div>
-      );
-    }
-    show(<Send />);
-    await userEvent.click(screen.getByRole('button', { name: 'Forward' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Reply' }));
-    await waitFor(() => expect(posts).toHaveLength(2));
-    expect(posts).toEqual([
-      { url: '/api/mail/9/reply', body: { mode: 'forward', to: ['bo@x.com'], cc: [], body: 'FYI', bodyHtml: null } },
-      { url: '/api/mail/9/reply', body: { mode: 'reply', to: [], cc: ['li@acme.com'], body: 'Thanks', bodyHtml: null } },
-    ]);
   });
 });

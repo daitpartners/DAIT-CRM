@@ -8,9 +8,7 @@ import { TEMPLATE_ATTACHMENTS_MAX_BYTES } from '@dait-crm/shared';
 import { buildApp } from '../src/app';
 import { prisma } from '../src/db';
 import { encrypt } from '../src/crypto/tokens';
-import type { GraphClient, MailMessage } from '../src/graph/client';
-import { runOnce } from '../src/jobs/runner';
-import { sendUserEmailHandler } from '../src/jobs/handlers/sendUserEmail';
+import type { MailMessage } from '../src/graph/client';
 import { campaignStepHandler } from '../src/jobs/handlers/campaignStep';
 import { GRAPH_REQUEST_MAX, checkRequestSize, checkUploads, cleanCid, cleanFileName, readStoredFile, sniff } from '../src/mail/files';
 import { fakeGraph, resetDb, seedLookups } from './helpers';
@@ -255,90 +253,7 @@ async function sender() {
   return { rep, lead, cookie, t, company };
 }
 
-function recordingGraph(): GraphClient & { sent: MailMessage[] } {
-  const sent: MailMessage[] = [];
-  return { ...fakeGraph(), sent, async sendMail(_a, msg) { sent.push(msg); } };
-}
-const runSends = (graph: GraphClient) => runOnce({ types: ['send_user_email'], handlers: { send_user_email: sendUserEmailHandler }, graph });
-
 describe('sending a template with files', () => {
-  it('lead email: inline pictures (isInline + contentId) and the kept attachment go to Graph; the message lists the attachment', async () => {
-    const { lead, cookie, t } = await sender();
-    const pdf = t.attachments.find((a) => !a.inline)!;
-    const res = await call('POST', '/api/mail', cookie, {
-      to: 'ana@andino.cl', cc: [], subject: 'Season’s greetings', body: 'Hi', bodyHtml: t.bodyHtml.replace('{first_name}', 'Ana'),
-      templateId: t.id, attachmentIds: [pdf.id], leadId: lead.id,
-    });
-    expect(res.statusCode).toBe(201);
-    const graph = recordingGraph();
-    await runSends(graph);
-    expect(graph.sent).toHaveLength(1);
-    const msg = graph.sent[0]!;
-    expect(msg.html).toContain('src="cid:dait-logo.png"');
-    expect(msg.attachments).toEqual([
-      { name: 'dait-logo.png', contentType: 'image/png', contentBase64: b64(PNG), isInline: true, contentId: 'dait-logo.png' },
-      { name: 'signature.png', contentType: 'image/png', contentBase64: b64(PNG2), isInline: true, contentId: 'sig@01DB' },
-      { name: 'Brochure 2026.pdf', contentType: 'application/pdf', contentBase64: b64(PDF) },
-    ]);
-    const stored = await prisma.emailMessage.findUniqueOrThrow({ where: { id: res.json().id } });
-    expect(stored.attachmentNames).toEqual(['Brochure 2026.pdf']);
-    expect(stored.status).toBe('sent');
-  });
-
-  it('a removed attachment and a picture taken out of the message are not sent; a cid: the template lacks is dropped', async () => {
-    const { lead, cookie, t } = await sender();
-    const res = await call('POST', '/api/mail', cookie, {
-      to: 'ana@andino.cl', cc: [], subject: 'S', body: 'Hi', bodyHtml: '<p>Hi</p><img src="cid:dait-logo.png"><img src="cid:image009.png">',
-      templateId: t.id, attachmentIds: [], leadId: lead.id,
-    });
-    expect(res.statusCode).toBe(201);
-    const graph = recordingGraph();
-    await runSends(graph);
-    expect(graph.sent[0]!.html).not.toContain('image009');
-    expect(graph.sent[0]!.attachments?.map((a) => a.name)).toEqual(['dait-logo.png']);
-  });
-
-  it('without a template no cid: picture survives; attachments no longer the template’s are 409 template_files_missing, without one a 400', async () => {
-    const { lead, cookie, t } = await sender();
-    const other = (await call('POST', '/api/email-templates', cookie, template({ name: 'Other' }))).json() as TemplateJson;
-    const base = { to: 'ana@andino.cl', cc: [], subject: 'S', body: 'Hi', leadId: lead.id };
-    const wrong = await call('POST', '/api/mail', cookie, { ...base, templateId: t.id, attachmentIds: [other.attachments[2]!.id] });
-    expect(wrong.statusCode).toBe(409);
-    expect(wrong.json()).toEqual({ error: 'template_files_missing' });
-    // An inline picture is not a "kept attachment" either.
-    expect((await call('POST', '/api/mail', cookie, { ...base, templateId: t.id, attachmentIds: [t.attachments[0]!.id] })).statusCode).toBe(409);
-    expect((await call('POST', '/api/mail', cookie, { ...base, attachmentIds: [t.attachments[2]!.id] })).statusCode).toBe(400);
-    expect((await call('POST', '/api/mail', cookie, { ...base, templateId: 999999 })).statusCode).toBe(404);
-    const plain = await call('POST', '/api/mail', cookie, { ...base, bodyHtml: '<p>Hi</p><img src="cid:dait-logo.png">' });
-    expect(plain.statusCode).toBe(201);
-    const graph = recordingGraph();
-    await runSends(graph);
-    expect(graph.sent[0]!.html).not.toContain('cid:');
-    expect(graph.sent[0]!.attachments).toBeUndefined();
-  });
-
-  it('413 attachments_too_large when the files together are over the cap (a template stored before a lower cap)', async () => {
-    const { lead, cookie, t } = await sender();
-    await prisma.emailTemplateAttachment.updateMany({ where: { templateId: t.id, isInline: false }, data: { size: TEMPLATE_ATTACHMENTS_MAX_BYTES } });
-    const res = await call('POST', '/api/mail', cookie, {
-      to: 'ana@andino.cl', cc: [], subject: 'S', body: 'Hi', bodyHtml: t.bodyHtml, templateId: t.id, attachmentIds: [t.attachments[2]!.id], leadId: lead.id,
-    });
-    expect(res.statusCode).toBe(413);
-    expect(res.json().error).toBe('attachments_too_large');
-    expect(await prisma.emailMessage.count()).toBe(0);
-  });
-
-  it('Compose (Email screen) sends a template’s files too', async () => {
-    const { cookie, t } = await sender();
-    const res = await call('POST', '/api/mail', cookie, {
-      to: 'someone@example.com', cc: [], subject: 'S', body: 'Hi', bodyHtml: t.bodyHtml, templateId: t.id, attachmentIds: [t.attachments[2]!.id],
-    });
-    expect(res.statusCode).toBe(201);
-    const graph = recordingGraph();
-    await runSends(graph);
-    expect(graph.sent[0]!.attachments?.map((a) => [a.name, a.isInline ?? false])).toEqual([['dait-logo.png', true], ['signature.png', true], ['Brochure 2026.pdf', false]]);
-  });
-
   it('Mailer: the campaign keeps its own copies of the files, and each email sends them even after the template is deleted', async () => {
     const { rep, lead, cookie, t } = await sender();
     const created = await call('POST', '/api/mailer', cookie, {
@@ -388,44 +303,6 @@ describe('security review fixes', () => {
     expect(() => checkRequestSize(Math.ceil(2_500_000 / 3) * 4, `<p>${'€'.repeat(190_000)}</p>`)).toThrow('attachments_too_large');
   });
 
-  it('I1: lead send at the cap with very long HTML is 413 attachments_too_large and nothing is queued', async () => {
-    const { lead, cookie } = await sender();
-    const big = Buffer.alloc(TEMPLATE_ATTACHMENTS_MAX_BYTES - PNG.length, 1);
-    PDF.copy(big);
-    const t = (await call('POST', '/api/email-templates', cookie, template({ name: 'Big', attachments: [FILES[0], { name: 'big.pdf', inline: false, data: b64(big) }] }))).json() as TemplateJson;
-    const base = { to: 'ana@andino.cl', cc: [], subject: 'S', body: 'Hi', templateId: t.id, attachmentIds: [t.attachments[1]!.id], leadId: lead.id };
-    const long = await call('POST', '/api/mail', cookie, { ...base, bodyHtml: `<p>${'€'.repeat(190_000)}</p><img src="cid:dait-logo.png">` });
-    expect(long.statusCode).toBe(413);
-    expect(long.json()).toEqual({ error: 'attachments_too_large' });
-    expect(await prisma.emailMessage.count()).toBe(0);
-    // The same files with an ordinary message go, and the request Graph gets is under its limit.
-    const ok = await call('POST', '/api/mail', cookie, { ...base, bodyHtml: t.bodyHtml });
-    expect(ok.statusCode).toBe(201);
-    const graph = recordingGraph();
-    await runSends(graph);
-    const m = graph.sent[0]!;
-    const size = JSON.stringify({ message: { body: { content: m.html }, attachments: m.attachments } }).length;
-    expect(size).toBeLessThan(GRAPH_REQUEST_MAX);
-  });
-
-  it('I2: an Outlook-style cid goes to Graph in the file’s exact case, in the HTML and as contentId', async () => {
-    const { lead, cookie } = await sender();
-    const cid = 'image001.png@01DB4F1E.6B7C5A40';
-    const t = (await call('POST', '/api/email-templates', cookie, template({
-      name: 'Outlook', bodyHtml: `<p>Hi</p><img src="cid:${cid}">`, attachments: [{ name: 'image001.png', contentId: cid, inline: true, data: b64(PNG) }],
-    }))).json() as TemplateJson;
-    expect(t.bodyHtml).toContain(`src="cid:${cid}"`);
-    // A browser or editor that lower-cased it: still sent as the file has it.
-    const res = await call('POST', '/api/mail', cookie, {
-      to: 'ana@andino.cl', cc: [], subject: 'S', body: 'Hi', bodyHtml: `<p>Hi</p><img src="cid:${cid.toLowerCase()}">`, templateId: t.id, attachmentIds: [], leadId: lead.id,
-    });
-    expect(res.statusCode).toBe(201);
-    const graph = recordingGraph();
-    await runSends(graph);
-    expect(graph.sent[0]!.html).toContain(`src="cid:${cid}"`);
-    expect(graph.sent[0]!.attachments).toEqual([{ name: 'image001.png', contentType: 'image/png', contentBase64: b64(PNG), isInline: true, contentId: cid }]);
-  });
-
   it('I3: replacing only the files moves updatedAt, so a stale copy is refused (409)', async () => {
     const cookie = await signIn(app, await makeUser({ role: 'SALES_REPRESENTATIVE' }));
     const t = (await call('POST', '/api/email-templates', cookie, template({ bodyHtml: undefined, body: 'Plain', attachments: [FILES[2]] }))).json() as TemplateJson;
@@ -439,17 +316,10 @@ describe('security review fixes', () => {
     expect(await filesIn(`templates/${t.id}`)).toHaveLength(1);
   });
 
-  it('I4: a stored file gone from disk is 409 template_files_missing on lead send, Compose and Mailer create, with no path', async () => {
+  it('I4: a stored file gone from disk is 409 template_files_missing on Mailer create, with no path (a draft: mailDraftFiles)', async () => {
     const { lead, cookie, t } = await sender();
     const row = await prisma.emailTemplateAttachment.findFirstOrThrow({ where: { templateId: t.id, isInline: false } });
     await rm(path.join(storage, row.storagePath));
-    const lead1 = await call('POST', '/api/mail', cookie, {
-      to: 'ana@andino.cl', cc: [], subject: 'S', body: 'Hi', bodyHtml: t.bodyHtml, templateId: t.id, attachmentIds: [row.id], leadId: lead.id,
-    });
-    expect(lead1.statusCode).toBe(409);
-    expect(lead1.json()).toEqual({ error: 'template_files_missing' });
-    const compose = await call('POST', '/api/mail', cookie, { to: 'x@example.com', cc: [], subject: 'S', body: 'Hi', bodyHtml: t.bodyHtml, templateId: t.id, attachmentIds: [row.id] });
-    expect(compose.statusCode).toBe(409);
     const mailer = await call('POST', '/api/mailer', cookie, {
       leadIds: [lead.id], name: 'X', templateId: t.id, cc: [], bcc: [], startAt: null, intervalMinutes: 3,
       workingHoursOnly: false, unsubscribeLine: true, lawfulBasis: 'Legitimate interest (B2B outreach relevant to their role)',
@@ -458,7 +328,7 @@ describe('security review fixes', () => {
     expect(mailer.json()).toEqual({ error: 'template_files_missing' });
     expect(await prisma.emailCampaign.count()).toBe(0);
     expect(await filesIn('campaigns')).toEqual([]);
-    for (const r of [lead1, compose, mailer]) expect(r.body).not.toContain(storage);
+    expect(mailer.body).not.toContain(storage);
     expect(await prisma.emailMessage.count()).toBe(0);
   });
 

@@ -32,7 +32,6 @@ export const PLAIN_BODY_MAX = 20000;
  * The plain `body` beside a formatted one: the server derives the message's text from the HTML, so with HTML the
  * plain body is only a fallback, neither required nor held to PLAIN_BODY_MAX; without HTML it is the message.
  */
-const looseBody = z.string().trim().max(MESSAGE_HTML_MAX_CHARS);
 function plainBodyRule(required: boolean) {
   return (v: { body?: string; bodyHtml?: string | null }, ctx: z.RefinementCtx) => {
     if (v.bodyHtml?.trim() || v.body === undefined) return;
@@ -99,51 +98,8 @@ export const EmailTemplateUpdate = EmailTemplateFields.omit({ sourceType: true, 
   .superRefine(plainBodyRule(false));
 export type EmailTemplateUpdate = z.infer<typeof EmailTemplateUpdate>;
 
-/**
- * A message filled from a template with files: the template (its inline pictures go with the HTML that shows them)
- * and the regular attachments the sender kept (each one of that template's).
- */
-const templateFiles = {
-  templateId: z.number().int().positive().nullish(),
-  attachmentIds: z.array(z.number().int().positive()).max(TEMPLATE_ATTACHMENTS_MAX_COUNT).default([]),
-};
-
 const mailAddress = z.string().trim().toLowerCase().email();
 const mailCc = z.array(mailAddress).max(20).default([]);
-const mailBody = looseBody.default('');
-
-/** `POST /mail` (release 2B-2, Email screen Compose): optionally on a lead or for a client. */
-export const MailCompose = z.object({
-  to: mailAddress,
-  cc: mailCc,
-  subject: z.string().trim().min(1).max(500),
-  body: mailBody,
-  bodyHtml,
-  leadId: z.number().int().positive().nullish(),
-  companyId: z.number().int().positive().nullish(),
-  /** Release 3B: a project the sender can see, of the lead's company (or the client given without a lead). */
-  projectId: z.number().int().positive().nullish(),
-  ...templateFiles,
-}).superRefine(plainBodyRule(true));
-export type MailCompose = z.infer<typeof MailCompose>;
-
-/**
- * `POST /mail/:id/reply` (release 2B-2; reply all and forward in web-mail release 2). Reply goes to the sender (or the
- * original recipients of your own message) and Reply all adds the other recipients, so `to` is ignored for both;
- * Forward goes to `to`, which needs at least one address.
- */
-export const MailReply = z.object({
-  mode: z.enum(['reply', 'replyAll', 'forward']).default('reply'),
-  to: z.array(mailAddress).max(20).default([]),
-  cc: mailCc,
-  body: mailBody,
-  bodyHtml,
-}).superRefine(plainBodyRule(true)).superRefine((v, ctx) => {
-  if (v.mode === 'forward' && v.to.length === 0) {
-    ctx.addIssue({ code: z.ZodIssueCode.too_small, minimum: 1, type: 'array', inclusive: true, path: ['to'] });
-  }
-});
-export type MailReply = z.infer<typeof MailReply>;
 
 /** Seconds a sent message waits in the queue, so Undo can still take it back (web-mail release 3). */
 export const UNDO_SEND_SECONDS = 10;

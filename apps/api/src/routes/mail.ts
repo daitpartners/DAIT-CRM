@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
 import { Prisma, type EmailMessage, type Lead } from '@prisma/client';
-import { BULK_MAX, LeadCreate, MailBulk, MailChange, MailCompose, MailFollowUp, MailLink, MailListQuery, MailRead, MailReply, can, replyRecipients, replySubject, checkDomain, domainOf, isFreeMail, pageArgs } from '@dait-crm/shared';
+import { BULK_MAX, LeadCreate, MailBulk, MailChange, MailFollowUp, MailLink, MailListQuery, MailRead, can, checkDomain, domainOf, isFreeMail, pageArgs } from '@dait-crm/shared';
 import { audit } from '../audit.js';
 import { enqueue } from '../jobs/queue.js';
 import { BODY_MAX } from '../jobs/handlers/syncMailbox.js';
@@ -17,21 +17,16 @@ import { prisma } from '../db.js';
 import { requireRight, type AuthUser } from '../plugins/auth.js';
 import { NotFoundError, parseBody, parseQuery } from '../validate.js';
 import { assertLeadVisible, canSeeLead, leadWhere } from '../leads/visibility.js';
-import { assertCompanyVisible } from '../companies/visibility.js';
-import { matchMail } from '../mail/match.js';
 import { canSeeTeamMail, mailScope, messageFor, teamReadableWhere } from '../mail/access.js';
 import { changeMany, changeMessage } from '../mail/changes.js';
 import { attachmentFile, attachmentHeaders, attachmentsOf } from '../mail/attachments.js';
 import { LIST_CANDIDATES_MAX, conversationKey, countKey, decorate, listWhere, orderCandidates, type Candidate } from '../mail/list.js';
-import { assertProjectFor, queueOutgoing } from '../mail/outgoing.js';
 import { leadPanel } from '../mail/leadPanel.js';
 import { setLeadFollowUp, suggestLeads } from '../mail/crm.js';
 import { participantsOf } from '../mail/leadMail.js';
-import { FORMATTED_BODY_LIMIT, outgoingBody, perUser } from '../mail/formatted.js';
-import { outgoingWithFiles } from '../mail/templateFiles.js';
+import { perUser } from '../mail/formatted.js';
 import { projectWhere } from '../projects/visibility.js';
-import { emailView } from './leadEmails.js';
-import { domainTaken, guard, lockLeads } from './leads.js';
+import { domainTaken, guard } from './leads.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -141,9 +136,6 @@ function nameFromDomain(address: string): string | null {
   return domain.split('.')[0]!.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).trim() || null;
 }
 
-/** The caller's connected personal mailbox, or null. */
-const myMailbox = (userId: number) => prisma.emailAccount.findFirst({ where: { kind: 'personal', userId, status: 'connected' } });
-
 /** The reader waits at most this long for an older message's body (a send waits 20 s). */
 const BODY_FETCH_TIMEOUT_MS = 4000;
 /** After a refusal (401/403) or FAILS_BEFORE_PAUSE failures in a row, a mailbox is not asked for bodies for this long. */
@@ -215,13 +207,6 @@ async function visibleProjects(user: AuthUser, ids: (number | null)[]): Promise<
   return new Map(rows.map((p) => [p.id, p]));
 }
 
-/** A live lead the user can see, locked for the transaction. */
-async function lockedLead(tx: Tx, user: AuthUser, leadId: number): Promise<Lead> {
-  await assertLeadVisible(tx, user, leadId);
-  await lockLeads(tx, [leadId]);
-  return tx.lead.findUniqueOrThrow({ where: { id: leadId } });
-}
-
 /**
  * The Email screen (release 2B-2). Privacy (owner, 22 Nov 2026): a message belongs to the user whose mailbox it is.
  * Web-mail release 1 (mail/access.ts): Administrators and Managers (`view_team_mail`) also read every other user's lead
@@ -232,75 +217,6 @@ async function lockedLead(tx: Tx, user: AuthUser, leadId: number): Promise<Lead>
  */
 export const mailRoutes: FastifyPluginAsync = async (app) => {
   const pre = { preHandler: [requireRight('use_email')] };
-
-  // Compose (prototype V.compose): optionally on a lead or for a client; otherwise linked by matching.
-  // A formatted message carries its HTML: a larger request, sanitised again here (after the cheap checks, before the
-  // transaction), and at most 30 sends a minute per user.
-  const send = { ...pre, bodyLimit: FORMATTED_BODY_LIMIT, config: perUser(30) };
-  app.post('/mail', send, async (request, reply) => {
-    const body = parseBody(MailCompose, request.body);
-    const user = request.user!;
-    return guard(reply, async () => {
-      const account = await myMailbox(user.id);
-      if (!account) return reply.code(409).send({ error: 'no_mailbox' });
-      if (body.leadId) await assertLeadVisible(prisma, user, body.leadId);
-      const message = await outgoingWithFiles(body.body, body.bodyHtml, body.templateId, body.attachmentIds);
-      const created = await prisma.$transaction(async (tx) => {
-        const lead = body.leadId ? await lockedLead(tx, user, body.leadId) : null;
-        let links = { companyId: null as number | null, contactId: null as number | null };
-        if (!lead && body.companyId) {
-          await assertCompanyVisible(tx, user, body.companyId);
-          const contact = await tx.contact.findFirst({
-            where: { companyId: body.companyId, businessEmail: { equals: body.to, mode: 'insensitive' } }, select: { id: true },
-          });
-          links = { companyId: body.companyId, contactId: contact?.id ?? null };
-        } else if (!lead) {
-          // "— no lead —" was the user's choice: only the contact and company are filled in.
-          const m = await matchMail(tx, user, { threadId: null, counterparts: [body.to, ...body.cc], ownAddress: account.address });
-          links = { companyId: m.companyId, contactId: m.contactId };
-        }
-        // The project's company must be the lead's, or without a lead the client chosen (not one matching guessed).
-        if (body.projectId) await assertProjectFor(tx, user, body.projectId, lead ? lead.companyId : (body.companyId ?? null));
-        return queueOutgoing(tx, user, account, {
-          lead, ...links, to: [body.to], cc: body.cc, subject: body.subject, ...message, projectId: body.projectId ?? null,
-        });
-      });
-      return reply.code(201).send(emailView(created));
-    });
-  });
-
-  // Reply (prototype Reply): to the sender of a received message, or the recipients of your own; same conversation.
-  // Web-mail release 2: also Reply all (those and the original To, never your own addresses) and Forward (to the `to`
-  // given; it keeps the conversation and lead too). Recipients and subject: shared replyRecipients / replySubject.
-  // Only from your own mailbox: another user's message is view only (403) or not yours to see (404).
-  app.post<{ Params: { id: string } }>('/mail/:id/reply', send, async (request, reply) => {
-    const body = parseBody(MailReply, request.body);
-    const user = request.user!;
-    return guard(reply, async () => {
-      const { m: original } = await messageFor(prisma, user, request.params.id, 'change');
-      if (original.status === 'draft') return reply.code(409).send({ error: 'draft' });
-      const account = await myMailbox(user.id);
-      if (!account) return reply.code(409).send({ error: 'no_mailbox' });
-      const message = await outgoingBody(body.body, body.bodyHtml);
-      const own = [account.address, ...(account.sendAs ? [account.sendAs] : [])];
-      const { to } = replyRecipients({ ...original, toAddresses: original.toAddresses as string[] }, body.mode, own, body.to);
-      const subject = replySubject(original.subject, body.mode);
-      const created = await prisma.$transaction(async (tx) => {
-        const lead = original.leadId && (await canSeeLead(tx, user, original.leadId))
-          ? await lockedLead(tx, user, original.leadId).catch((e) => {
-            // Only a lead gone in the meantime is skipped; a database error must not send the reply without its lead.
-            if (e instanceof NotFoundError) return null;
-            throw e;
-          })
-          : null;
-        return queueOutgoing(tx, user, account, {
-          lead, companyId: original.companyId, contactId: original.contactId, to, cc: body.cc, subject, ...message,
-          replyToId: original.id, replyMode: body.mode, threadId: original.threadId, projectId: original.projectId,
-        });
-      });
-      return reply.code(201).send(emailView(created));
-    });
-  });
 
   // The message list, paged (owner, 22 Nov 2026): every filter applies first (mail/list.ts listWhere: the view, chip,
   // Filters panel, client, lead, project and search), `total` counts the rows they leave (`count=0`, the later batches

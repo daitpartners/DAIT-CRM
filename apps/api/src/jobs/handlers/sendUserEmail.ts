@@ -230,7 +230,8 @@ export async function sendUserEmailHandler(job: Job, ctx: JobContext): Promise<v
   if (claimed.count === 0) return; // another run took it
 
   // A reply, reply all or forward goes through Graph on the original (reply / replyAll / forward), so it stays in the
-  // conversation in Outlook too and a forward carries the original's attachments.
+  // conversation in Outlook too and a forward carries the original's attachments. Since web-mail release 3 no route
+  // queues one (replies are Outlook drafts); kept for a reply release 2 queued just before the switch.
   const original = msg.replyToId ? await prisma.emailMessage.findUnique({ where: { id: msg.replyToId } }) : null;
   // The HTML stored when it was queued: a formatted message's sanitised HTML, or its plain text as simple HTML.
   const html = msg.bodyHtml || textToHtml(msg.bodyText);
