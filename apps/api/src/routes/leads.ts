@@ -16,9 +16,9 @@ import { StaleError, isNotFound, isUniqueViolation } from '../prismaErrors.js';
 import { assertLeadVisible, leadWhere } from '../leads/visibility.js';
 import {
   activityInclude, activityRow, assignmentInclude, assignmentRow, leadDetail, leadDetailInclude, leadSummary,
-  leadSummaryInclude, taskInclude, taskRow, type ListedAddresses, type TimelineViewer,
+  leadSummaryInclude, taskInclude, taskRow, type ListedAddresses,
 } from '../leads/serialize.js';
-import { canSeeTeamMail } from '../mail/access.js';
+import { timelineViewer } from '../mail/access.js';
 import {
   RuleError, applyStatusChange, auditCreatedLead, companyDataFromLead, createLeadWithCompany, recordAssignment,
   syncFollowUpTask,
@@ -32,14 +32,6 @@ import { suppressed, unsuppress } from '../mailer/suppression.js';
 type Tx = Prisma.TransactionClient;
 
 const ACTIVITY_PAGE_SIZE = 15;
-
-/** The reader of these timeline rows, with the mailbox owner of each logged email (one query; none for Admin/Manager). */
-async function timelineViewer(user: AuthUser, rows: { activityType: string; relatedType: string | null; relatedId: number | null }[]): Promise<TimelineViewer> {
-  const teamMail = canSeeTeamMail(user);
-  const ids = teamMail ? [] : [...new Set(rows.flatMap((a) => (a.activityType === 'email' && a.relatedType === 'email_message' && a.relatedId !== null ? [a.relatedId] : [])))];
-  const owners = ids.length ? await prisma.emailMessage.findMany({ where: { id: { in: ids } }, select: { id: true, userId: true } }) : [];
-  return { id: user.id, teamMail, mailOwners: new Map(owners.map((m) => [m.id, m.userId])) };
-}
 
 const WEBSITE_SOURCE = 'Website Contact Form';
 const DAY_MS = 86_400_000;
@@ -363,7 +355,7 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
       if (!row) throw new NotFoundError();
       // The AI line's Run research: only when the user can see the company (an unassigned lead's may be hidden).
       const companyVisible = row.companyId !== null && (await visibleCompanyIds(prisma, user, [row.companyId])).has(row.companyId);
-      const viewer = await timelineViewer(user, activities);
+      const viewer = await timelineViewer(prisma, user, activities);
       return {
         ...leadDetail(row, today, await listedAddresses(prisma, row)),
         companyVisible,
@@ -395,7 +387,7 @@ export const leadRoutes: FastifyPluginAsync = async (app) => {
       prisma.leadActivity.aggregate({ where: { AND: [where, NOT_PLANNED, { occurredAt: { lte: new Date() } }] }, _max: { occurredAt: true } }),
     ]);
     const ofType = (type: string) => byType.find((g) => g.activityType === type)?._count._all ?? 0;
-    const viewer = await timelineViewer(user, rows);
+    const viewer = await timelineViewer(prisma, user, rows);
     return {
       items: rows.map((r) => ({ ...activityRow(r, viewer), lead: { id: r.lead.id, number: r.lead.number } })),
       total,

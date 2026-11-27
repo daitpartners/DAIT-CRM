@@ -586,7 +586,12 @@ describe('reading mail on the Email screen (2B-2)', () => {
     const noThread = await synced(rep.id, box.id, { threadId: null, folder: 'sent', status: 'sent', fromAddress: 'maya@daitpartners.com', fromName: null });
     const cookie = await signIn(app, rep);
     expect((await call('GET', `/api/mail/${m.id}`, cookie)).json().thread).toEqual([
-      { id: m.id, occurredAt: '2026-11-20T10:00:00.000Z', direction: 'in', who: 'Ana Ruiz', subject: 'Interested in your work', kind: 'received', by: null, unmatched: true },
+      {
+        id: m.id, occurredAt: '2026-11-20T10:00:00.000Z', direction: 'in', who: 'Ana Ruiz', subject: 'Interested in your work', kind: 'received', by: null, unmatched: true,
+        // Web-mail release 2: what the reading pane's conversation shows for each message.
+        fromName: 'Ana Ruiz', fromAddress: 'ana@acme.com', toAddresses: ['maya@daitpartners.com'], ccAddresses: [], preview: 'Looks good',
+        hasAttachments: false, folder: 'inbox', isRead: true,
+      },
     ]);
     // Without a conversation id: the message alone; your own open message reads "sent" (prototype E-6), no "by".
     expect((await call('GET', `/api/mail/${noThread.id}`, cookie)).json().thread).toMatchObject([{ id: noThread.id, kind: 'sent', by: null }]);

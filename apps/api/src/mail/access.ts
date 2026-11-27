@@ -1,6 +1,7 @@
 import type { EmailMessage, Prisma, PrismaClient } from '@prisma/client';
 import { can } from '@dait-crm/shared';
 import type { AuthUser } from '../plugins/auth.js';
+import type { TimelineViewer } from '../leads/serialize.js';
 import { NotFoundError } from '../validate.js';
 
 type Db = Prisma.TransactionClient | PrismaClient;
@@ -57,4 +58,14 @@ export async function messageFor(db: Db, user: AuthUser, rawId: string, use: 're
   if (!other) throw new NotFoundError();
   if (use === 'change') throw new MailAccessError('view_only');
   return { m: other, viewOnly: true };
+}
+
+/** The reader of these timeline rows, with the mailbox owner of each logged email (one query; none for Admin/Manager). */
+export async function timelineViewer(
+  db: Db, user: AuthUser, rows: { activityType: string; relatedType: string | null; relatedId: number | null }[],
+): Promise<TimelineViewer> {
+  const teamMail = canSeeTeamMail(user);
+  const ids = teamMail ? [] : [...new Set(rows.flatMap((a) => (a.activityType === 'email' && a.relatedType === 'email_message' && a.relatedId !== null ? [a.relatedId] : [])))];
+  const owners = ids.length ? await db.emailMessage.findMany({ where: { id: { in: ids } }, select: { id: true, userId: true } }) : [];
+  return { id: user.id, teamMail, mailOwners: new Map(owners.map((m) => [m.id, m.userId])) };
 }

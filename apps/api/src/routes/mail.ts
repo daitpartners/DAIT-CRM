@@ -23,6 +23,8 @@ import { canSeeTeamMail, mailScope, messageFor, teamReadableWhere } from '../mai
 import { changeMany, changeMessage } from '../mail/changes.js';
 import { LIST_CANDIDATES_MAX, conversationKey, countKey, decorate, listWhere, orderCandidates, type Candidate } from '../mail/list.js';
 import { assertProjectFor, queueOutgoing } from '../mail/outgoing.js';
+import { leadPanel } from '../mail/leadPanel.js';
+import { participantsOf } from '../mail/leadMail.js';
 import { FORMATTED_BODY_LIMIT, outgoingBody, perUser } from '../mail/formatted.js';
 import { outgoingWithFiles } from '../mail/templateFiles.js';
 import { projectWhere } from '../projects/visibility.js';
@@ -45,6 +47,9 @@ type WithLead = EmailMessage & {
   leadRestricted?: boolean;
 };
 
+/** A message's one-line preview (list rows and the conversation): its text, spaces collapsed, PREVIEW characters. */
+const previewOf = (m: EmailMessage) => m.bodyText.replace(/\s+/g, ' ').trim().slice(0, PREVIEW);
+
 /**
  * A message in the list: no body, a short one-line preview. `owner` is the user whose mailbox it is; `viewOnly` when
  * that is not the viewer (team view: read, log and tasks only). `leadRestricted`: the lead is another owner's that the
@@ -56,7 +61,7 @@ function listItem(m: WithLead, viewerId: number, shown: { replied: boolean; conv
   return {
     owner: { id: m.user.id, name: m.user.name }, viewOnly: m.userId !== viewerId,
     id: m.id, folder: m.folder, status: m.status, fromAddress: m.fromAddress, fromName: m.fromName, toAddresses: m.toAddresses as string[],
-    subject: m.subject, preview: m.bodyText.replace(/\s+/g, ' ').trim().slice(0, PREVIEW), occurredAt: m.occurredAt, isRead: m.isRead,
+    subject: m.subject, preview: previewOf(m), occurredAt: m.occurredAt, isRead: m.isRead,
     leadId: restricted ? null : m.leadId, leadNumber: m.lead?.number ?? null, companyId: restricted ? null : m.companyId, leadRestricted: restricted,
     hasAttachments: (m.attachmentNames as string[]).length > 0,
     projectId: m.project?.id ?? null, projectNumber: m.project?.number ?? null,
@@ -78,7 +83,8 @@ const REPLY_SUBJECT = /^\s*(re|aw|sv|rv)\s*:/i;
  * The side panel's thread history (prototype `history`, newest first): the open message and the rest of the
  * conversation in its owner's mailbox. `kind` words the event ("sent by Maya", "reply received", "received"),
  * `by` is the sender's first name (else the mailbox owner's, `ownerName`) for the owner's mail other than the open
- * message, `unmatched` marks mail with no lead and no contact.
+ * message, `unmatched` marks mail with no lead and no contact. Each item also carries what the reading pane's
+ * conversation shows (web-mail release 2): sender, recipients, the list's preview, attachments, folder and read state.
  */
 function threadHistory(ownerName: string, open: EmailMessage, others: EmailMessage[]) {
   const all = [...others, open].sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime() || b.id - a.id);
@@ -92,6 +98,8 @@ function threadHistory(ownerName: string, open: EmailMessage, others: EmailMessa
     return {
       id: t.id, occurredAt: t.occurredAt, direction: inbound ? 'in' : 'out', who: counterpart(t), subject: t.subject,
       kind, by, unmatched: !t.leadId && !t.contactId,
+      fromName: t.fromName, fromAddress: t.fromAddress, toAddresses: t.toAddresses as string[], ccAddresses: t.ccAddresses as string[],
+      preview: previewOf(t), hasAttachments: (t.attachmentNames as string[]).length > 0, folder: t.folder, isRead: t.isRead,
     };
   });
 }
@@ -430,7 +438,10 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
       const hidden = m.leadId !== null && !(await canSeeLead(prisma, user, m.leadId));
       // The list's scope for this message (its owner's mail, team-readable only in team view), for its conversation count.
       const scopeWhere: Prisma.EmailMessageWhereInput = viewOnly ? { AND: [{ userId: m.userId }, teamReadableWhere] } : { userId: user.id };
-      const [restricted, lead, contact, company, thread, projects, shown] = await Promise.all([
+      const participants = participantsOf({
+        from: m.fromAddress, to: m.toAddresses as string[], cc: m.ccAddresses as string[], bcc: m.bccAddresses as string[],
+      });
+      const [restricted, lead, contact, company, thread, projects, shown, panel] = await Promise.all([
         hidden ? prisma.lead.findUnique({ where: { id: m.leadId! }, select: { number: true, companyName: true, company: { select: { name: true } } } }) : null,
         m.leadId && !hidden ? prisma.lead.findUnique({ where: { id: m.leadId }, ...leadRef }) : null,
         m.contactId && !hidden ? prisma.contact.findUnique({ where: { id: m.contactId }, select: { id: true, firstName: true, lastName: true } }) : null,
@@ -440,6 +451,8 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
           : [],
         visibleProjects(user, [m.projectId]),
         decorate([m], scopeWhere),
+        // The lead panel: a visible lead only; a restricted lead keeps `restrictedLead` (number and company name) only.
+        m.leadId && !hidden ? leadPanel(prisma, user, m.leadId, participants) : null,
       ]);
       return {
         ...listItem({
@@ -453,6 +466,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
         contact: contact ? { id: contact.id, name: `${contact.firstName} ${contact.lastName}`.trim() } : null,
         company,
         thread: threadHistory(owner.name, m, thread),
+        leadPanel: panel,
       };
     });
   });

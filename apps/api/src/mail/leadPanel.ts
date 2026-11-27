@@ -1,0 +1,88 @@
+import type { Prisma, PrismaClient } from '@prisma/client';
+import { domainOf, quoteTotals } from '@dait-crm/shared';
+import type { AuthUser } from '../plugins/auth.js';
+import { todayIn, ymd } from '../leads/dates.js';
+import { activityInclude, activityRow } from '../leads/serialize.js';
+import { timelineViewer } from './access.js';
+import { isExcludedDomain, loadMailboxDomains, normaliseAddress } from './leadMail.js';
+
+type Db = Prisma.TransactionClient | PrismaClient;
+
+/** How many of the lead's newest activities the panel lists. */
+const RECENT = 3;
+
+/** The reading pane's lead panel (web-mail release 2, prototype "Lead" card beside an open message). */
+export interface LeadPanel {
+  company: { id: number; name: string; site: string | null; place: string | null } | null;
+  contact: { name: string; role: string | null; email: string | null; phone: string | null } | null;
+  owner: string | null;
+  followUp: { date: string; time: string | null; due: boolean } | null;
+  lastActivity: { title: string; occurredAt: string } | null;
+  value: { amount: number; currency: string } | null;
+  recent: ReturnType<typeof activityRow>[];
+  linkReason: { kind: 'address' | 'domain'; value: string } | null;
+}
+
+const placeOf = (city: string | null, country: string | null) => [city, country].map((s) => s?.trim()).filter(Boolean).join(', ') || null;
+
+/**
+ * The lead panel for a lead the caller has already checked `user` may see (canSeeLead): a restricted lead never comes
+ * here. `participants`: the open message's addresses (participantsOf). Follow-up: the open follow-up task's day and time,
+ * else the lead's next follow-up, due when on or before today in the viewer's zone. Value: totals of the newest quotation
+ * that is not a Draft. Recent: the newest activities, worded for the viewer (an email line's subject only for its mailbox
+ * owner and team-mail readers). Link reason: a participant is the lead's or the contact's address, else at the
+ * company's own domain (never free mail, shared hosts or our own domains).
+ */
+export async function leadPanel(db: Db, user: AuthUser, leadId: number, participants: string[], now: Date = new Date()): Promise<LeadPanel> {
+  const [lead, task, activities, quotation, mailboxDomains] = await Promise.all([
+    db.lead.findUniqueOrThrow({
+      where: { id: leadId },
+      select: {
+        businessEmail: true, phone: true, city: true, country: true, nextFollowUp: true,
+        company: { select: { id: true, name: true, domain: true, city: true, country: true } },
+        contact: { select: { firstName: true, lastName: true, designation: true, businessEmail: true, phone: true, mobile: true } },
+        assignedTo: { select: { name: true } },
+      },
+    }),
+    db.task.findFirst({ where: { leadId, origin: 'follow_up', isDone: false }, orderBy: [{ dueDate: 'asc' }, { id: 'asc' }], select: { dueDate: true, dueTime: true } }),
+    db.leadActivity.findMany({ where: { leadId }, include: activityInclude, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: RECENT }),
+    db.quotation.findFirst({
+      where: { leadId, status: { not: 'Draft' } }, orderBy: [{ quotationDate: 'desc' }, { id: 'desc' }],
+      select: { currency: true, taxRate: true, overallDiscount: true, lines: { select: { qty: true, unitPrice: true, discount: true } } },
+    }),
+    loadMailboxDomains(db),
+  ]);
+  const viewer = await timelineViewer(db, user, activities);
+  const recent = activities.map((a) => activityRow(a, viewer));
+
+  const followDate = task ? ymd(task.dueDate) : ymd(lead.nextFollowUp);
+  const today = todayIn(user.timezone, now);
+
+  const people = participants.map(normaliseAddress).filter(Boolean);
+  const own = new Set([lead.businessEmail, lead.contact?.businessEmail].map(normaliseAddress).filter(Boolean));
+  const site = lead.company?.domain ?? null;
+  const byAddress = people.find((p) => own.has(p));
+  const byDomain = site && !isExcludedDomain(site, mailboxDomains) && people.some((p) => domainOf(p) === site);
+
+  const { company, contact } = lead;
+  return {
+    company: company ? { id: company.id, name: company.name, site, place: placeOf(company.city, company.country) } : null,
+    contact: contact
+      ? {
+        name: `${contact.firstName} ${contact.lastName}`.trim(), role: contact.designation, email: contact.businessEmail,
+        phone: contact.phone || contact.mobile || lead.phone || null,
+      }
+      : null,
+    owner: lead.assignedTo?.name ?? null,
+    followUp: followDate ? { date: followDate, time: task?.dueTime ?? null, due: followDate <= today } : null,
+    lastActivity: recent[0] ? { title: recent[0].title, occurredAt: recent[0].occurredAt.toISOString() } : null,
+    value: quotation
+      ? {
+        amount: quoteTotals({ lines: quotation.lines.map((l) => ({ qty: l.qty, price: l.unitPrice, discount: l.discount })), overallDiscount: quotation.overallDiscount, taxRate: quotation.taxRate }).total,
+        currency: quotation.currency,
+      }
+      : null,
+    recent,
+    linkReason: byAddress ? { kind: 'address', value: byAddress } : byDomain ? { kind: 'domain', value: site } : null,
+  };
+}
