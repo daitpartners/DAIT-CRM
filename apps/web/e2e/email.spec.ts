@@ -3,38 +3,46 @@ import { MAYA, NEHA, signInAs } from './fixtures';
 
 /**
  * Release 2B-2: the Email screen shows your own synced mail, linked to leads, and acts on it. Web-mail release 1:
- * Administrators and Managers read the team's lead mail, view only.
+ * Administrators and Managers read the team's lead mail, view only. Web-mail release 2: the conversation reading pane,
+ * attachment cards, the lead panel and Link to lead ▾ (no Unlinked folder).
  */
-test('Email screen: read, log on the lead, add a task; team mail is view only for an administrator', async ({ page }) => {
+test('Email screen: read the conversation, log on the lead, create a task; team mail is view only for an administrator', async ({ page }) => {
   await signInAs(page, NEHA);
   const nav = page.getByRole('navigation', { name: 'Main navigation' });
   await expect(nav.getByRole('link', { name: /^Email\s*2$/ })).toBeVisible();
   await nav.getByRole('link', { name: /^Email/ }).click();
   await expect(page.getByRole('heading', { name: 'Email', level: 1 })).toBeVisible();
   await expect(page.getByText('neha.kapoor@daitpartners.com · Microsoft 365')).toBeVisible();
+  await expect(page.getByRole('main')).toContainText('lead mail only');
 
   const folders = page.getByRole('navigation', { name: 'Mail folders' });
   const list = page.getByRole('region', { name: 'Message list' });
-  // Web-mail release 2: an unlinked row no longer carries release 1's "Unlinked · create lead?" badge.
+  // Web-mail release 2: an unlinked row no longer carries release 1's "Unlinked · create lead?" badge, and there is no
+  // Unlinked folder; the message stays in the Inbox.
   await expect(list.getByRole('link', { name: /Website enquiry/ })).toBeVisible();
-  await expect(list).not.toContainText('Unlinked · create lead?');
+  await expect(list).not.toContainText('Unlinked');
+  await expect(folders.getByRole('link', { name: /Unlinked/ })).toHaveCount(0);
 
-  // Open Orbit's reply: linked records, thread history, attachments; it is now read.
+  // Open Orbit's reply: the conversation (both messages, newest first), its attachment card, the lead panel; it is now read.
   await list.getByRole('link', { name: /Re: Orbit proposal/ }).click();
-  const reader = page.getByRole('article', { name: 'Re: Orbit proposal' });
-  await expect(reader).toContainText('Thanks Neha, can we talk on Thursday?');
-  await expect(reader).toContainText('Attachments: orbit-notes.pdf');
-  const side = page.getByRole('complementary', { name: 'Linked records' });
-  await expect(side.getByRole('link', { name: /Company\s*Orbit Fintech/ })).toBeVisible();
-  await expect(side.getByRole('link', { name: /Contact\s*/ })).toBeVisible();
-  // Thread history, newest first, the open message included (prototype "18 Nov 11:14 · reply received").
-  await expect(side).toContainText(/\d{2} \w{3} \d{2}:\d{2} · reply received\s*\d{2} \w{3} \d{2}:\d{2} · sent by Neha/);
+  const reader = page.getByRole('region', { name: 'Reading pane' });
+  await expect(reader.getByRole('heading', { name: 'Re: Orbit proposal', level: 2 })).toBeVisible();
+  await expect(reader).toContainText('2 messages');
+  await expect(reader).toContainText(/Thanks Neha, can we talk on Thursday\?[\s\S]*Hi, Please find our proposal\./);
+  const card = reader.getByRole('list', { name: 'Attachments' }).getByRole('listitem').filter({ hasText: 'orbit-notes.pdf' });
+  await expect(card.getByRole('link', { name: 'Download' })).toBeVisible();
+  // At 1280 px the lead panel starts folded to its rail: open it.
+  const panel = page.getByRole('complementary', { name: 'Lead' });
+  await panel.getByRole('button', { name: 'Expand lead panel' }).click();
+  await expect(panel.getByRole('heading', { name: 'Lead', level: 3 })).toBeVisible();
+  await expect(panel).toContainText('Orbit Fintech');
+  await expect(panel).toContainText('LD-1003');
   await expect(folders.getByRole('link', { name: /^Inbox\s*1$/ })).toBeVisible();
 
-  await reader.getByRole('button', { name: 'Log as activity' }).click();
+  await panel.getByRole('button', { name: 'Log as activity' }).click();
   await expect(page.getByRole('status').filter({ hasText: /Logged on LD-/ })).toBeVisible();
-  await expect(reader.getByRole('button', { name: 'Log as activity' })).toBeDisabled();
-  await reader.getByRole('button', { name: 'Add follow-up task' }).click();
+  await expect(panel.getByRole('button', { name: 'Log as activity' })).toBeDisabled();
+  await panel.getByRole('button', { name: 'Create task' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Task created' })).toBeVisible();
 
   // Smart views and search.
@@ -60,10 +68,14 @@ test('Email screen: read, log on the lead, add a task; team mail is view only fo
   await expect(mayaList.getByRole('link', { name: /Re: Orbit proposal/ })).toBeVisible();
   await expect(mayaList).not.toContainText('Website enquiry');
   await mayaList.getByRole('link', { name: /Re: Orbit proposal/ }).click();
-  const theirs = page.getByRole('article', { name: 'Re: Orbit proposal' });
+  const theirs = page.getByRole('region', { name: 'Reading pane' });
+  await expect(theirs.getByRole('heading', { name: 'Re: Orbit proposal', level: 2 })).toBeVisible();
   await expect(theirs.getByText("View only — Neha's mailbox.", { exact: true }).first()).toBeVisible();
-  await expect(theirs.getByRole('button', { name: 'Reply' })).toBeDisabled();
-  await expect(theirs.getByRole('button', { name: 'Reply' })).toHaveAttribute('title', "View only — Neha's mailbox");
+  // No Reply in another user's mailbox: the reading pane offers none, and the command bar's is disabled.
+  await expect(theirs.getByRole('button', { name: 'Reply', exact: true })).toHaveCount(0);
+  const reply = page.getByRole('toolbar', { name: 'Mail commands' }).getByRole('button', { name: 'Reply', exact: true });
+  await expect(reply).toBeDisabled();
+  await expect(reply).toHaveAttribute('title', "View only — Neha's mailbox");
   const leads = (await (await page.request.get('/api/leads?q=Orbit')).json()) as { items: { id: number }[] };
   await page.goto(`/leads/${leads.items[0]!.id}`);
   await page.getByRole('region', { name: 'Follow-up and history' }).getByRole('tab', { name: /^Calls/ }).click();
@@ -77,7 +89,10 @@ test('an unlinked email becomes a lead', async ({ page }) => {
   await page.goto('/email?folder=inbox');
   const list = page.getByRole('region', { name: 'Message list' });
   await list.getByRole('link', { name: /Website enquiry/ }).click();
-  await page.getByRole('article', { name: 'Website enquiry' }).getByRole('button', { name: 'Create lead from this email' }).click();
+  await expect(page.getByRole('region', { name: 'Reading pane' }).getByRole('heading', { name: 'Website enquiry' })).toBeVisible();
+  // Link to lead ▾ → Create lead from this email… opens release 1's dialog.
+  await page.getByRole('toolbar', { name: 'Mail commands' }).getByRole('button', { name: 'Link to lead' }).click();
+  await page.getByRole('menu', { name: 'Link to lead' }).getByRole('menuitem', { name: 'Create lead from this email…' }).click();
   const dialog = page.getByRole('dialog', { name: 'Link email to a lead' });
   await dialog.getByRole('button', { name: 'Link' }).click();
   await expect(page).toHaveURL(/\/leads\/\d+$/);

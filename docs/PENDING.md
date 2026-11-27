@@ -8,6 +8,9 @@ in the git history).
 - **Live** at crm.daitpartners.com: release `7d1d8c2` (live since 26 Nov 2026).
 - **Ready, waiting for "deploy":** branch `web-mail` — web-mail release 1 (lead mail only, team view for
   Administrators and Managers). See "Ready, waiting for deploy: web-mail release 1" below.
+- **Ready, waiting for "deploy":** branch `web-mail-r2` — web-mail release 2 (the Microsoft 365-style Email screen;
+  Delete, Archive, Move, Flag and Read change Outlook too). It contains release 1. See "Ready, waiting for deploy:
+  web-mail release 2" below.
 - **There is no test copy on the server.** Each release was checked on the developer's machine (automatic tests and
   side-by-side screenshots against the prototype) and then put live by hand, only after you said "deploy". How that is
   done, and how to undo it, is in `docs/DEPLOYMENT.md`.
@@ -37,6 +40,67 @@ in the git history).
 | Claude Code engine | Claude through the server's Claude Code, monthly run cap | `08ee5da` |
 | Minor fixes | 26 review follow-ups (time zones, mail linking, Mailer wizard, quotations, keyboard) + handover docs | `79b9415` |
 | Leads delete, import follow-ups | Delete leads with their company (Administrators), Download all leads, update rows through Import leads, Do not email list | `7d1d8c2` (live 26 Nov) |
+
+## Ready, waiting for deploy: web-mail release 2 (branch `web-mail-r2`)
+
+Design: `docs/superpowers/specs/2026-11-26-web-mail-email-design.md` (mockup 2026-11-26-outlook-mail). Reviewed and
+tested; not live. The branch contains web-mail release 1, so release 1's deploy steps come first if it is not live yet.
+
+**What changes for users:**
+- **A new Email screen in the style of Microsoft 365 web mail:** a top bar with "Search lead mail" and a Filters panel
+  (From, To, Subject, Lead, Owner, Date, Has attachments); a command bar (New mail ▾ with your templates, Delete,
+  Archive, Move to ▾, Reply, Reply all, Forward, Flag ▾, Mark as read / unread, Follow-up ▾, Link to lead ▾, Log as
+  activity) with a View tab (conversation view, Sort by, folder pane, lead panel); the folders (Inbox, Sent items,
+  Drafts, Scheduled, Flagged, Archive, Deleted items) and the Leads views (Awaiting reply, Follow-up due today, My
+  leads); a message list grouped by date with quick filters (All, Unread, Flagged, Attachments), tick boxes for several
+  messages at once, hover actions and a right-click menu; the whole conversation in the reading pane, newest first; and
+  a lead panel beside it (contact, owner, next follow-up, last activity, value, Recent on the lead, Open lead, Log as
+  activity, Create task, Set follow-up, Add contact). Keyboard shortcuts work as in Outlook (Delete, E, R, Shift+R, F,
+  N, Ctrl/⌘+U), never while typing in a box.
+- **Delete, Archive, Move to, Flag and Mark as read / unread change Outlook too**, straight away, on your own mailbox.
+  If Outlook refuses, the message goes back where it was and a message says why. Flags set in Outlook show in the CRM
+  after the next sync (every 5 minutes). In someone else's mailbox (team view) everything stays view only.
+- **Reply all and Forward**, besides Reply, all sent from your own mailbox and kept in the Outlook conversation.
+- **Attachments:** each received file shows as a card with its size, **Download**, and **Preview** (opens in a new
+  tab) for PDFs and pictures.
+- **The Unlinked folder is gone.** Mail not yet linked to a lead stays in its folder (Inbox, Sent items …) without a
+  badge; Link to lead ▾ links it to a lead or creates one from it ("Create lead from this email…").
+- HTML emails now take their own height in the conversation (no scroll bar inside the email); links in them open in a
+  new tab. Scripts in emails still never run.
+
+**Calls made for you (tell us if you want any changed):**
+- **"…" (more commands) has no Pin, Save as .eml or Email settings,** and there is **no React (smile) button**: Pin is
+  not in the design, .eml and settings are not in the specification, and Microsoft Graph has no reactions call.
+- **Delete inside Deleted items deletes permanently**, from Outlook too, after a confirmation.
+- **In conversation view an action applies to the whole conversation** in the folder you are looking at (as Outlook):
+  archiving a conversation archives all its messages there.
+- **The lead panel's Value is the total of the lead's last sent quotation** (leads have no value field), written as
+  the CRM writes amounts elsewhere (`USD 48,000.00`, not the mockup's `US$ 48,000`); "—" when nothing was sent.
+- **A "This week" group** sits between Yesterday and Last week in the message list.
+- **Preview covers PDFs and pictures only**; every other file is a download.
+- **Scheduled lists the CRM's outbox** (mail waiting to be sent) until release 3.
+- **The Filters panel's Owner is the lead's owner.** **Sort by Size is approximate** (Outlook's sync does not give a
+  message's size, so the CRM estimates it from the body; mail stored before release 2 keeps its stored attachment
+  names).
+- **The View tab holds the view switches** (conversation view, sorting, the two panes).
+- **Link to lead is disabled in someone else's mailbox** (team view stays view only, as the specification says).
+- **A follow-up set from an email** puts the date on the lead and the time on the assignee's task.
+- **The "Show mail for" row and the folder-pane template list leave the screen:** links from Companies, Leads and
+  Projects still open the Email screen filtered (one removable chip), and templates are under New mail ▾.
+- **The thread history in the old side panel is replaced** by the conversation in the reading pane and "Recent on the
+  lead" in the lead panel.
+- **Forwarding a message sent from the CRM** (not yet synced back from Outlook) carries the original text but not its
+  attachments. Reply all on a message with nobody else on it replies to the sender only (as Outlook).
+- **The email frame on the Email screen is same-origin and allows pop-ups** (so links in emails open, and the CRM can
+  size the frame to the email): `sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"`, still with
+  no scripts, forms or top navigation, and the frame refuses scripts in its own security policy
+  (`default-src 'none'; script-src 'none'`). The Mailer and lead page frames are unchanged.
+
+**The deploy** (runbook: `docs/DEPLOYMENT.md`, "Web mail release 2: deploy runbook"): migration 27
+(`20261213100000_web_mail_screen`, two flag columns and a size column on stored mail, with a back-fill) plus **one
+one-time step: after the release 1 backfill has finished, clear the stored sync links** so each mailbox is read once
+more and flags already set in Outlook reach the CRM (that re-read takes a while; nothing is lost). Then one read-only
+check on live of how Outlook writes a flag's due date (it decides whether users west of UTC see the right day).
 
 ## Ready, waiting for deploy: web-mail release 1 (branch `web-mail`)
 

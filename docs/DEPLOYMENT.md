@@ -351,7 +351,12 @@ Only after the owner says "deploy". Follow "Deploying a release to live" with th
 
 ## Web mail release 2: deploy runbook
 
-Only after the owner says "deploy". Follow "Deploying a release to live" (backup first), then:
+Only after the owner says "deploy". Web mail release 2 (branch `web-mail-r2`) contains release 1: if release 1 is not
+live yet, its runbook above comes first. Follow "Deploying a release to live" (backup first, named
+`dait_crm-pre-web-mail-r2.dump`). Before installing (release 1 live), `migrate status` (as in release 1's step 2) must list only
+`20261213100000_web_mail_screen` (number 27) as not yet applied: it adds `flag_status`, `flag_due` and `size_bytes` to
+`email_messages` and fills `size_bytes` from the stored bodies (one UPDATE over the mail table).
+Anything else means stop and ask. There is one one-time step (1) and one read-only check (2):
 
 1. **Re-read the mailboxes once, so flags already set in Outlook show** (sync stores Outlook flags from release 2 on,
    but a delta link only returns messages changed since it was taken, so flags set before the release would never
@@ -430,6 +435,10 @@ All of these have already been run on live; they are kept for reference and for 
   Check once on live that a long search continues past 250 results before trusting long results (F6): the per-row
   maximum, `SELECT max(found) FROM mail_backfills` (as root), or a `found=` value above 250 in the worker log; not the
   `--status` total, which sums all rows.
+
+- **Web mail release 2 — re-read of the mailboxes** (not yet run on live): after the release 1 backfill has finished,
+  clear `email_accounts.sync_state` so flags already set in Outlook reach stored mail; the command and how to tell it
+  has finished are in "Web mail release 2: deploy runbook", step 1. Then that runbook's step 2 (flag due-date check).
 
 ## Setting the server up from scratch (reference)
 

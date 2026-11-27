@@ -47,7 +47,7 @@ test('mail parity: app side', async ({ page }) => {
   // 1. Email screen with Orbit's reply open.
   await page.goto('/email');
   await page.getByRole('region', { name: 'Message list' }).getByRole('link', { name: /Re: Orbit proposal/ }).click();
-  await expect(page.getByRole('article', { name: 'Re: Orbit proposal' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Reading pane' }).getByRole('heading', { name: 'Re: Orbit proposal' })).toBeVisible();
   await shot(page, 'email-app');
 
   // 2. Compose with a lead chosen.
@@ -64,7 +64,9 @@ test('mail parity: app side', async ({ page }) => {
   sql(`update email_messages set lead_id=null, contact_id=null, company_id=null where subject='Website enquiry' and user_id=${me.id}`);
   await page.goto('/email?folder=inbox');
   await page.getByRole('region', { name: 'Message list' }).getByRole('link', { name: /Website enquiry/ }).click();
-  await page.getByRole('article', { name: 'Website enquiry' }).getByRole('button', { name: 'Link to lead / create lead' }).click();
+  await expect(page.getByRole('region', { name: 'Reading pane' }).getByRole('heading', { name: 'Website enquiry' })).toBeVisible();
+  await page.getByRole('toolbar', { name: 'Mail commands' }).getByRole('button', { name: 'Link to lead' }).click();
+  await page.getByRole('menu', { name: 'Link to lead' }).getByRole('menuitem', { name: 'Create lead from this email…' }).click();
   await expect(page.getByRole('dialog', { name: 'Link email to a lead' })).toBeVisible();
   await shot(page, 'link-lead-app');
   await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
