@@ -38,7 +38,8 @@ const detail = (m: MailItem, over: Omit<Partial<MailDetail>, 'thread'> & { threa
 });
 const META: MailMeta = {
   mailbox: { id: 7, address: 'arjun@daitpartners.com', status: 'connected', lastSyncAt: '2026-11-22T09:00:00.000Z' },
-  unread: 3, counts: { inbox: 3, drafts: 0, scheduled: 0, flagged: 0, awaiting: 0, due: 0, leads: 0 }, leadOwners: [], companies: [{ id: 4, name: 'Acme', legalName: null, isClient: true }, { id: 6, name: 'Bolt', legalName: 'Bolt Industries Ltd', isClient: false }], leads: [{ id: 5, number: 'LD-1005', companyId: 4, companyName: 'Acme', status: 'New' }],
+  unread: 3, counts: { inbox: 3, drafts: 2, scheduled: 1, flagged: 4, awaiting: 6, due: 3, leads: 58 },
+  leadOwners: [{ id: 2, name: 'Arjun Mehta' }, { id: 9, name: 'Carlos Torres' }, { id: 11, name: 'Lakshita Singh' }], companies: [{ id: 4, name: 'Acme', legalName: null, isClient: true }, { id: 6, name: 'Bolt', legalName: 'Bolt Industries Ltd', isClient: false }], leads: [{ id: 5, number: 'LD-1005', companyId: 4, companyName: 'Acme', status: 'New' }],
   projects: [{ id: 3, number: 'PRJ-3', name: 'Website rebuild', companyId: 4 }, { id: 8, number: 'PRJ-8', name: 'Brand refresh', companyId: 6 }],
   mailUsers: [],
 };
@@ -111,69 +112,192 @@ const leadRow = (id: number, number: string, over: Record<string, unknown> = {})
 });
 
 describe('Email screen (release 2B-2, prototype V.email)', () => {
-  it('shows the mailbox, the folders with counts, smart views and templates', async () => {
+  it('folder pane: mockup folders with counts, the Leads group, no Unlinked, no Templates list', async () => {
     const a = item();
     stub([a, item({ id: 2, subject: 'Linked one', leadId: 5, leadNumber: 'LD-1005', isRead: true })], { 1: detail(a) });
     show();
-    expect(await screen.findByText(/arjun@daitpartners.com · Microsoft 365/)).toBeTruthy();
-    const folders = screen.getByRole('navigation', { name: 'Mail folders' });
-    expect(within(folders).getByRole('link', { name: /Inbox\s*3/ })).toBeTruthy();
-    // Web-mail release 2: no Unlinked folder (spec non-goal).
-    expect(within(folders).queryByRole('link', { name: /Unlinked/ })).toBeNull();
-    for (const name of ['Sent', 'Drafts', 'Archive', 'Deleted items', 'Awaiting reply', 'My leads']) expect(within(folders).getByRole('link', { name })).toBeTruthy();
-    expect(await within(folders).findByRole('button', { name: 'Intro' })).toBeTruthy();
+    const pane = await screen.findByRole('navigation', { name: 'Mail folders' });
+    await waitFor(() => expect(within(pane).getAllByRole('link').map((l) => l.textContent)).toEqual([
+      'Inbox3', 'Sent items', 'Drafts2', 'Scheduled1', 'Flagged4', 'Archive', 'Deleted items', 'Awaiting reply6', 'Follow-up due today3', 'My leads58',
+    ]));
+    expect(within(pane).getByText('Leads', { selector: '.fsec' })).toBeInTheDocument();
+    // Muted and hot counts as the mockup; Inbox's unread count is the plain purple one.
+    const count = (name: RegExp) => within(pane).getByRole('link', { name }).querySelector('.n')!.className;
+    expect([count(/Inbox/), count(/Drafts/), count(/Scheduled/), count(/Flagged/), count(/Awaiting reply/), count(/Follow-up due today/), count(/My leads/)])
+      .toEqual(['n', 'n mute', 'n mute', 'n mute', 'n mute', 'n hot', 'n mute']);
+    expect(within(pane).getByRole('link', { name: /Inbox/ })).toHaveAttribute('aria-current', 'page');
+    // Web-mail release 2: no Unlinked folder (spec non-goal), no Smart views heading, no template list.
+    expect(within(pane).queryByText('Unlinked')).toBeNull();
+    expect(within(pane).queryByText('Smart views')).toBeNull();
+    expect(within(pane).queryByText('Templates')).toBeNull();
+    expect(within(pane).queryByRole('button', { name: 'Intro' })).toBeNull();
+    expect(within(pane).queryByRole('link', { name: 'Manage templates…' })).toBeNull();
+    // "Show mail for" left the screen.
+    expect(screen.queryByText('Show mail for')).toBeNull();
+    expect(screen.queryByRole('combobox', { name: 'Client / company' })).toBeNull();
     const list = screen.getByRole('region', { name: 'Message list' });
-    expect(await within(list).findByText('Unlinked · create lead?')).toBeTruthy();
-    expect(within(list).getByText('LD-1005')).toBeTruthy();
+    expect(await within(list).findByText('LD-1005')).toBeTruthy();
+    // A Leads view opens from its link.
+    await userEvent.setup().click(within(pane).getByRole('link', { name: /Follow-up due today/ }));
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/email?folder=due'));
+    expect(list).toHaveTextContent(/^Follow-up due today/);
   });
 
-  it('Project filter (release 3B): projects you can see, narrowed by the client; choosing one sets client and project and asks for them', async () => {
+  it('team view names the Leads view Team leads', async () => {
+    stub([], {}, TEAM_META, asAdmin);
+    show('/email?mailof=all&folder=mine', admin);
+    const pane = await screen.findByRole('navigation', { name: 'Mail folders' });
+    await waitFor(() => expect(within(pane).getAllByRole('link').map((l) => l.textContent)).toContain('Team leads58'));
+    expect(within(pane).getByRole('link', { name: /^Team leads/ })).toHaveAttribute('aria-current', 'page');
+    expect(within(pane).queryByRole('link', { name: /My leads/ })).toBeNull();
+    expect(screen.getByRole('region', { name: 'Message list' })).toHaveTextContent(/^Team leads/);
+  });
+
+  it('top bar sub line ends "lead mail only"; Sync now as before', async () => {
+    const u = userEvent.setup();
+    const posts = stub([], {});
+    show();
+    const sub = await screen.findByText(/arjun@daitpartners.com · Microsoft 365/);
+    expect(sub.textContent).toMatch(/· synced .+ · lead mail only$/);
+    expect(screen.queryByText(/every thread links to a Lead/)).toBeNull();
+    const sync = screen.getByRole('button', { name: 'Sync now' });
+    expect(sync).toHaveAttribute('title', 'Fetch new lead mail now');
+    await u.click(sync);
+    await waitFor(() => expect(posts.map((p) => p.url)).toContain('/api/mailboxes/7/sync'));
+    expect(await screen.findByText('Sync started — new mail appears in a few seconds')).toBeInTheDocument();
+  });
+
+  it('Search lead mail submits s; Esc closes the panel', async () => {
+    const u = userEvent.setup();
+    const asked: string[] = [];
+    stub([], {}, META, (url) => {
+      asked.push(url);
+      return undefined;
+    });
+    show('/email?folder=sent');
+    const search = within(screen.getByRole('search')).getByRole('searchbox', { name: 'Search lead mail' });
+    expect(search).toHaveAttribute('placeholder', 'Search lead mail');
+    await u.type(search, 'website{Enter}');
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/email?folder=sent&s=website'));
+    const lastListUrl = () => asked.filter((x) => x.startsWith('/api/mail?')).at(-1) ?? '';
+    await waitFor(() => expect(new URL(lastListUrl(), 'http://x').searchParams.get('s')).toBe('website'));
+    const filters = screen.getByRole('button', { name: 'Filters' });
+    expect(filters).toHaveAttribute('aria-expanded', 'false');
+    expect(filters).toHaveAttribute('aria-controls', 'mail-filters');
+    await u.click(filters);
+    expect(filters).toHaveAttribute('aria-expanded', 'true');
+    expect(document.getElementById('mail-filters')).toBeInTheDocument();
+    await u.keyboard('{Escape}');
+    expect(document.getElementById('mail-filters')).toBeNull();
+    expect(filters).toHaveAttribute('aria-expanded', 'false');
+    // A click outside closes it too.
+    await u.click(filters);
+    await u.click(screen.getByRole('region', { name: 'Message list' }));
+    expect(document.getElementById('mail-filters')).toBeNull();
+  });
+
+  it('Filters panel: From, To, Subject, Lead, Owner, Date, Has attachments; Search puts them in the address and the request', async () => {
+    const u = userEvent.setup();
+    const asked: string[] = [];
+    stub([], {}, META, (url) => {
+      asked.push(url);
+      return undefined;
+    });
+    show();
+    await u.click(screen.getByRole('button', { name: 'Filters' }));
+    const panel = document.getElementById('mail-filters') as HTMLElement;
+    expect(within(panel).getByLabelText('From')).toHaveAttribute('placeholder', 'Name or address');
+    expect(within(panel).getByLabelText('To')).toHaveAttribute('placeholder', 'Name or address');
+    expect(within(panel).getByLabelText('Subject')).toHaveAttribute('placeholder', 'Words in the subject');
+    expect(within(panel).getByLabelText('Lead')).toHaveAttribute('placeholder', 'LD number or company');
+    // Owner = the lead's owner: Anyone, Me, then the other users.
+    await waitFor(() => expect(within(within(panel).getByLabelText('Owner')).getAllByRole('option').map((o) => o.textContent)).toEqual(['Anyone', 'Me', 'Carlos Torres', 'Lakshita Singh']));
+    expect(within(within(panel).getByLabelText('Date')).getAllByRole('option').map((o) => o.textContent)).toEqual(['Any time', 'Today', 'Last 7 days', 'Last 30 days', 'Last 12 months', 'Custom range…']);
+    await u.type(screen.getByLabelText('From'), 'maria');
+    await u.type(screen.getByLabelText('To'), 'ana');
+    await u.type(screen.getByLabelText('Subject'), 'quote');
+    await u.type(screen.getByLabelText('Lead'), 'LD-1005');
+    await u.selectOptions(screen.getByLabelText('Owner'), 'Carlos Torres');
+    await u.selectOptions(screen.getByLabelText('Date'), 'Last 7 days');
+    await u.click(screen.getByRole('checkbox', { name: 'Has attachments' }));
+    await u.click(screen.getByRole('button', { name: 'Search' }));
+    expect(document.getElementById('mail-filters')).toBeNull();
+    const where = new URL(screen.getByTestId('where').textContent!, 'http://x').searchParams;
+    expect(Object.fromEntries(where)).toEqual({ from: 'maria', to: 'ana', subject: 'quote', leadq: 'LD-1005', owner: '9', date: '7d', att: '1' });
+    const lastListUrl = () => asked.filter((x) => x.startsWith('/api/mail?')).at(-1) ?? '';
+    await waitFor(() => expect(new URL(lastListUrl(), 'http://x').searchParams.get('from')).toBe('maria'));
+    const q = new URL(lastListUrl(), 'http://x').searchParams;
+    expect(q.get('from')).toBe('maria');
+    expect(q.get('to')).toBe('ana');
+    expect(q.get('subject')).toBe('quote');
+    expect(q.get('leadQ')).toBe('LD-1005');
+    expect(q.get('owner')).toBe('9');
+    expect(q.get('date')).toBe('7d');
+    expect(q.get('attachments')).toBe('1');
+    expect(q.has('since')).toBe(false);
+    // Reopened, the panel shows what is applied; Owner Me goes as owner=me.
+    await u.click(screen.getByRole('button', { name: 'Filters' }));
+    expect(screen.getByLabelText('From')).toHaveValue('maria');
+    expect(screen.getByRole('checkbox', { name: 'Has attachments' })).toBeChecked();
+    await u.selectOptions(screen.getByLabelText('Owner'), 'Me');
+    await u.click(screen.getByRole('button', { name: 'Search' }));
+    await waitFor(() => expect(new URL(lastListUrl(), 'http://x').searchParams.get('owner')).toBe('me'));
+  });
+
+  it('Custom range shows two date inputs; Clear filters empties the panel and the address', async () => {
+    const u = userEvent.setup();
+    const asked: string[] = [];
+    stub([], {}, META, (url) => {
+      asked.push(url);
+      return undefined;
+    });
+    show('/email?folder=archive&s=offer&from=maria&att=1');
+    await u.click(screen.getByRole('button', { name: 'Filters' }));
+    expect(screen.queryByLabelText('Start date')).toBeNull();
+    await u.selectOptions(screen.getByLabelText('Date'), 'Custom range…');
+    const since = screen.getByLabelText('Start date');
+    const until = screen.getByLabelText('End date');
+    expect(since).toHaveAttribute('type', 'date');
+    expect(until).toHaveAttribute('type', 'date');
+    await u.type(since, '2026-11-01');
+    await u.type(until, '2026-11-20');
+    await u.click(screen.getByRole('button', { name: 'Search' }));
+    const lastListUrl = () => asked.filter((x) => x.startsWith('/api/mail?')).at(-1) ?? '';
+    await waitFor(() => expect(new URL(lastListUrl(), 'http://x').searchParams.get('date')).toBe('custom'));
+    const q = new URL(lastListUrl(), 'http://x').searchParams;
+    expect([q.get('since'), q.get('until'), q.get('from'), q.get('s')]).toEqual(['2026-11-01', '2026-11-20', 'maria', 'offer']);
+    expect(screen.getByTestId('where').textContent).toBe('/email?folder=archive&s=offer&from=maria&att=1&date=custom&since=2026-11-01&until=2026-11-20');
+    // Clear filters: the panel's fields leave the address; the folder and the search box stay.
+    await u.click(screen.getByRole('button', { name: 'Filters' }));
+    await u.click(screen.getByRole('button', { name: 'Clear filters' }));
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/email?folder=archive&s=offer'));
+    await waitFor(() => expect(new URL(lastListUrl(), 'http://x').searchParams.has('from')).toBe(false));
+    await u.click(screen.getByRole('button', { name: 'Filters' }));
+    for (const name of ['From', 'To', 'Subject', 'Lead']) expect(screen.getByLabelText(name)).toHaveValue('');
+    expect(screen.getByLabelText('Owner')).toHaveValue('');
+    expect(screen.getByLabelText('Date')).toHaveValue('');
+    expect(screen.queryByLabelText('Start date')).toBeNull();
+    expect(screen.getByRole('checkbox', { name: 'Has attachments' })).not.toBeChecked();
+  });
+
+  it('a Projects-list link (?company=&project=) narrows the list and shows a removable chip', async () => {
     const u = userEvent.setup();
     const asked: string[] = [];
     stub([item({ id: 2, leadId: 5, leadNumber: 'LD-1005', projectId: 3, projectNumber: 'PRJ-3' })], {}, META, (url) => {
-      if (url.startsWith('/api/mail?')) asked.push(url);
+      asked.push(url);
       return undefined;
     });
-    show('/email');
-    const pick = screen.getByRole('combobox', { name: 'Project' }) as HTMLSelectElement;
-    expect(await within(pick).findByRole('option', { name: 'PRJ-8 · Brand refresh' })).toBeTruthy();
-    expect(pick.disabled).toBe(false);
-    expect(pick.selectedOptions[0]!.textContent).toBe('Project: all');
-    // The message row carries its project tag (prototype badge b-ok).
+    show('/email?company=4&project=3');
     const list = screen.getByRole('region', { name: 'Message list' });
+    const chip = await within(list).findByRole('link', { name: 'Acme · PRJ-3 · Website rebuild ✕' });
+    await waitFor(() => expect(asked.some((x) => x.startsWith('/api/mail?') && x.includes('company=4') && x.includes('project=3'))).toBe(true));
+    // The row keeps its project tag (prototype badge b-ok).
     expect((await within(list).findByText('PRJ-3')).className).toBe('badge b-ok');
-    await u.selectOptions(pick, '3');
-    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/email?project=3&company=4'));
-    await waitFor(() => expect(asked.some((x) => x.includes('company=4') && x.includes('project=3'))).toBe(true));
-    // Narrowed by the client now chosen; the Clear link drops the project too.
-    expect(within(pick).queryByRole('option', { name: 'PRJ-8 · Brand refresh' })).toBeNull();
-    expect(pick.selectedOptions[0]!.textContent).toBe('PRJ-3 · Website rebuild');
-    expect(within(pick).getByRole('option', { name: 'Project: all for this client' })).toBeTruthy();
-    await u.click(screen.getByRole('link', { name: '✕ Clear' }));
+    await u.click(chip);
     await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/email'));
-  });
-
-  it('changing the client drops the project filter', async () => {
-    const u = userEvent.setup();
-    stub([], {});
-    show('/email?company=4&project=3');
-    const client = await screen.findByRole('combobox', { name: 'Client / company' });
-    // Clients are marked as in the prototype ("name · client").
-    await within(client).findByRole('option', { name: 'Acme · client' });
-    // The legal name where set, as the prototype (legalName || name).
-    expect(within(client).getByRole('option', { name: 'Bolt Industries Ltd' })).toBeTruthy();
-    await u.selectOptions(client, '');
-    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/email'));
-  });
-
-  it('changing the lead drops the project filter (prototype fLead change)', async () => {
-    const u = userEvent.setup();
-    stub([], {});
-    show('/email?company=4&project=3');
-    const lead = await screen.findByRole('combobox', { name: 'Lead' });
-    await within(lead).findByRole('option', { name: 'LD-1005 · Acme' });
-    await u.selectOptions(lead, '5');
-    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/email?company=4&lead=5'));
+    expect(within(list).queryByRole('link', { name: /✕/ })).toBeNull();
+    const lastListUrl = () => asked.filter((x) => x.startsWith('/api/mail?')).at(-1) ?? '';
+    await waitFor(() => expect(new URL(lastListUrl(), 'http://x').searchParams.has('project')).toBe(false));
   });
 
   it('an unlinked message offers Link to lead / create lead; Log as activity waits for a lead', async () => {
@@ -234,18 +358,6 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     expect(await screen.findByText('Connect your mailbox to send and receive from the CRM.')).toBeTruthy();
     for (const link of screen.getAllByRole('link', { name: 'Connect Microsoft 365' })) expect(link.getAttribute('href')).toBe('/settings/connections');
     expect(await screen.findByText('Nothing here.')).toBeTruthy();
-  });
-
-  it('a template opens Compose filled in; Send posts it from your mailbox', async () => {
-    const u = userEvent.setup();
-    const posts = stub([], {});
-    show();
-    await u.click(await screen.findByRole('button', { name: 'Intro' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Compose email' });
-    expect((within(dialog).getByLabelText('Subject') as HTMLInputElement).value).toBe(`Hello from ${me.name}`);
-    await u.type(within(dialog).getByLabelText('To'), 'ana@acme.com');
-    await u.click(within(dialog).getByRole('button', { name: 'Send' }));
-    await waitFor(() => expect(posts[0]).toMatchObject({ url: '/api/mail', body: { to: 'ana@acme.com', cc: [], subject: `Hello from ${me.name}` } }));
   });
 
   it('list row shows time of day for today', async () => {
@@ -318,7 +430,7 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
         opened = true;
         return detail({ ...a, isRead: true });
       }
-      if (url === '/api/mail/meta') return opened ? { ...META, unread: 2 } : META;
+      if (url === '/api/mail/meta') return opened ? { ...META, unread: 2, counts: { ...META.counts, inbox: 2 } } : META;
       return undefined;
     });
     show();
@@ -461,8 +573,8 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       expect(await within(list).findByText('Message 1')).toBeTruthy();
       const rows = list.querySelector('.msglist-rows') as HTMLElement;
       rows.scrollTop = 900;
-      await u.selectOptions(screen.getByRole('combobox', { name: 'Client / company' }), '4');
-      await waitFor(() => expect(where()).toBe('/email?company=4'));
+      await u.type(screen.getByRole('searchbox', { name: 'Search lead mail' }), 'website{Enter}');
+      await waitFor(() => expect(where()).toBe('/email?s=website'));
       await waitFor(() => expect(rows.scrollTop).toBe(0));
     });
 
@@ -572,21 +684,21 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       let release = () => {};
       const gate = new Promise<void>((r) => (release = r));
       vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
-        if (url.includes('company=4')) await gate;
+        if (url.includes('s=website')) await gate;
         return inner(url, init);
       });
       show();
       const list = screen.getByRole('region', { name: 'Message list' });
       expect(await within(list).findByText('Message 1')).toBeTruthy();
-      await u.selectOptions(screen.getByRole('combobox', { name: 'Client / company' }), '4');
-      await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/email?company=4'));
+      await u.type(screen.getByRole('searchbox', { name: 'Search lead mail' }), 'website{Enter}');
+      await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/email?s=website'));
       // The old inbox rows still show, but the foot is not watched.
       expect(within(list).getByText('Message 1')).toBeTruthy();
       expect(w.live()).toHaveLength(0);
       release();
-      await waitFor(() => expect(lists.filter((q) => q.get('company') === '4').length).toBeGreaterThan(0));
+      await waitFor(() => expect(lists.filter((q) => q.get('s') === 'website').length).toBeGreaterThan(0));
       await waitFor(() => expect(w.live()).toHaveLength(1));
-      expect(lists.filter((q) => q.get('company') === '4' && q.get('page') === null)).toHaveLength(1);
+      expect(lists.filter((q) => q.get('s') === 'website' && q.get('page') === null)).toHaveLength(1);
     });
 
     it('crossing the 1100 px breakpoint watches the list foot again (its scrolling box changes)', async () => {
@@ -828,12 +940,12 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     await u.keyboard('{Enter}');
     expect(folders).toHaveClass('collapsed');
     expect(document.activeElement).toBe(within(folders).getByRole('button', { name: 'Expand folders' }));
-    // The list is hidden by CSS (wider screens only; a phone always shows the folders).
-    expect(folders.querySelector('.folders-list')).toBeTruthy();
+    // Folded, the names and counts are hidden by CSS (wider screens only; a phone always shows the folders).
+    expect(folders.querySelector('.fp-scroll')).toBeTruthy();
     expect(within(folders).getByRole('button', { name: 'Expand folders' })).toHaveAttribute('aria-expanded', 'false');
     // The list keeps the open folder and filter.
     expect(screen.getByTestId('where').textContent).toBe('/email?folder=sent&company=4');
-    expect(within(screen.getByRole('region', { name: 'Message list' })).getByText('Sent')).toBeTruthy();
+    expect(within(screen.getByRole('region', { name: 'Message list' })).getByText('Sent items')).toBeTruthy();
     expect(localStorage.getItem('dait-mail-folders-collapsed')).toBe('1');
     first.unmount();
 
@@ -841,7 +953,7 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     const again = screen.getByRole('navigation', { name: 'Mail folders' });
     expect(again).toHaveClass('collapsed');
     await u.click(within(again).getByRole('button', { name: 'Expand folders' }));
-    expect(within(again).getByRole('link', { name: 'Sent' })).toHaveAttribute('aria-current', 'page');
+    expect(within(again).getByRole('link', { name: 'Sent items' })).toHaveAttribute('aria-current', 'page');
     expect(localStorage.getItem('dait-mail-folders-collapsed')).toBe('0');
   });
 });

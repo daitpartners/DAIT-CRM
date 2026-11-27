@@ -36,7 +36,7 @@ test('« folds the sidebar to an icon rail and the Email folders to a strip; bot
   await expect(page).toHaveURL(/folder=sent/);
 
   await folders.getByRole('button', { name: 'Expand folders' }).click();
-  await expect(folders.getByRole('link', { name: 'Sent' })).toHaveAttribute('aria-current', 'page');
+  await expect(folders.getByRole('link', { name: 'Sent items' })).toHaveAttribute('aria-current', 'page');
   await page.getByRole('button', { name: 'Expand sidebar' }).click();
   await expect(nav).not.toHaveClass(/collapsed/);
 });

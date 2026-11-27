@@ -2047,5 +2047,22 @@
   "{n} could not be changed in Outlook": "{n} n'ont pas pu être modifiés dans Outlook",
   "Scheduled|mail": "Planifiés",
   "Flagged": "Avec indicateur",
-  "Follow-up due today": "Relance prévue aujourd'hui"
+  "Follow-up due today": "Relance prévue aujourd'hui",
+  "Sent items": "Éléments envoyés",
+  "Team leads": "Leads de l'équipe",
+  "lead mail only": "e-mails des leads uniquement",
+  "Search lead mail": "Rechercher dans les e-mails des leads",
+  "Search filters": "Filtres de recherche",
+  "Filters": "Filtres",
+  "Fetch new lead mail now": "Récupérer maintenant les nouveaux e-mails des leads",
+  "Name or address": "Nom ou adresse",
+  "Words in the subject": "Mots de l'objet",
+  "LD number or company": "Numéro LD ou entreprise",
+  "Any time": "N'importe quand",
+  "Last 7 days": "7 derniers jours",
+  "Last 30 days": "30 derniers jours",
+  "Last 12 months": "12 derniers mois",
+  "End date": "Date de fin",
+  "Has attachments": "Avec pièces jointes",
+  "Search": "Rechercher"
 }

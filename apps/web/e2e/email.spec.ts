@@ -36,12 +36,12 @@ test('Email screen: read, log on the lead, add a task; team mail is view only fo
   await expect(page.getByRole('status').filter({ hasText: 'Task created' })).toBeVisible();
 
   // Smart views and search.
-  await folders.getByRole('link', { name: 'Sent' }).click();
+  await folders.getByRole('link', { name: 'Sent items' }).click();
   await expect(list.getByRole('link', { name: /Orbit proposal/ })).toBeVisible();
   await folders.getByRole('link', { name: /^Inbox/ }).click();
   await expect(list).toContainText(/^Inbox · 2/);
-  await page.getByRole('searchbox', { name: 'Search mail' }).fill('website');
-  await page.getByRole('searchbox', { name: 'Search mail' }).press('Enter');
+  await page.getByRole('searchbox', { name: 'Search lead mail' }).fill('website');
+  await page.getByRole('searchbox', { name: 'Search lead mail' }).press('Enter');
   await expect(list).toContainText(/^Inbox · 1/);
   await expect(list).toContainText('Website enquiry');
 

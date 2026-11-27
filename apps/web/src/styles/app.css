@@ -685,49 +685,105 @@ td.nowrap{white-space:nowrap}
 .mail-meta{flex-basis:100%;font-size:12.5px;color:var(--muted)}
 .mail-body{white-space:pre-wrap;font:inherit;font-size:13px;color:var(--body);margin:10px 0 0}
 
-/* Email screen (release 2B-2; prototype .mail, .folders, .fold, .msglist, .msg, .reader, .mailside). */
-.mail-filters{background:var(--surface);padding:10px 28px;border-bottom:1px solid var(--line)}
-.mail-for{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-right:4px}
-.mail-pick{width:240px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.mail-search{height:34px;width:300px}
-.mail-search input{border:0;outline:0;background:none;flex:1;min-width:0;font:inherit;font-size:13px}
-.mail{display:flex;flex-wrap:wrap;align-items:stretch;flex-grow:1}
-.folders{flex:0 0 190px;padding:18px 14px;border-right:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;gap:2px}
-/* Owner addition (23 Nov 2026): « in the column's head folds folders and templates to a strip with ». */
-.folders-head{display:flex;justify-content:flex-end;margin:-10px -6px 0}
-.folders-toggle{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;flex:0 0 auto;border:0;border-radius:8px;background:none;color:var(--muted);padding:0}
-.folders-toggle:hover{background:var(--tint);color:var(--purple)}
-.folders-toggle svg{width:16px;height:16px}
-.folders-list{display:contents}
+/* Email screen (web-mail release 2, mockup 2026-11-26-outlook-mail): the .wm root holds the top bar with the lead-mail
+   search and its Filters panel, the command bar, and the panes (folder pane, message list, reading pane). The mockup's
+   own sizes are variables on .wm; colours, fonts and components are the live CRM's. */
+.wm{--fp:196px;--ml:322px;--pane:#F7F4FC;display:flex;flex-direction:column;flex:1 1 auto;min-width:0}
+@media (max-width:1360px){.wm{--fp:184px;--ml:300px}}
+.wm .ico{display:inline-flex;width:16px;height:16px;flex:0 0 auto}
+.wm .ico svg{width:100%;height:100%;display:block}
+/* Top bar: title, search (Outlook puts it centred at the top), sync */
+.wm .topbar.wm-top{gap:16px;padding:10px 20px;position:relative;flex-wrap:nowrap}
+.wm-top>.grow{display:none}
+.wm-top .topbar-t{flex:1 1 auto;min-width:0}
+.wm-top h1{font-size:18px;line-height:22px}
+.wm-top .sub{font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wm-top .sub .badge{font-size:10.5px;padding:1px 7px;line-height:14px}
+.msearch{flex:0 1 420px;display:flex;align-items:center;height:36px;border:1px solid var(--field);border-radius:8px;background:var(--pane);padding:0 4px 0 12px;gap:8px;min-width:200px}
+.msearch:focus-within{background:var(--surface);border-color:var(--purple)}
+.msearch .ico{color:var(--muted)}
+.msearch input{flex:1;border:0;outline:0;background:transparent;font-size:13px;min-width:0}
+.msearch .sfilter{height:28px;padding:0 8px;border:0;border-left:1px solid var(--line);border-radius:0 6px 6px 0;background:none;color:var(--purple);display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600}
+.msearch .sfilter:hover{background:var(--tint)}
+.msearch .sfilter .ico{color:var(--purple)}
+.mtop-r{flex:0 0 auto;display:flex;justify-content:flex-end;gap:8px}
+.mtop-r .btn .ico{width:15px;height:15px}
+.spanel{position:absolute;top:52px;left:50%;transform:translateX(-50%);width:440px;max-width:calc(100% - 32px);background:var(--surface);border:1px solid var(--field);border-radius:10px;box-shadow:0 14px 40px rgba(31,2,73,.18);padding:16px;z-index:70;display:grid;grid-template-columns:96px 1fr;gap:10px 12px;align-items:center;font-size:12.5px}
+.spanel>label{color:var(--body);font-weight:600}
+.spanel .in{height:32px;font-size:12.5px}
+.spanel .sp-check{font-weight:500;font-size:12.5px}
+.spanel .sp-act{grid-column:1/-1;display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
+/* The command bar's slot. */
+.wm-cmdbar{display:flex;align-items:center;gap:2px;padding:6px 12px;background:var(--surface);border-bottom:1px solid var(--line);flex:0 0 auto;position:relative;z-index:20}
+/* Panes */
+.wm-panes{display:flex;flex-wrap:wrap;align-items:stretch;flex-grow:1;position:relative}
+/* Folder pane */
+.fpane{width:var(--fp);flex:0 0 var(--fp);background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;transition:width .15s,flex-basis .15s}
+.fp-head{display:flex;align-items:flex-end;justify-content:flex-end;gap:6px;padding:10px 10px 6px 12px}
+.mo-wrap{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.mo-l{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding-left:2px}
+.mo-wrap select.chip.mailof{width:100%;min-width:0;height:34px;padding:0 26px 0 8px;background-position:right 8px center;background-size:14px 14px;font-size:12.5px;font-weight:700}
+.mo-wrap select.chip.mailof:hover{background-color:var(--pane)}
+.icon-btn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border:0;border-radius:7px;background:none;color:var(--muted);flex:0 0 auto;padding:0}
+.icon-btn:hover:not(:disabled){background:var(--tint);color:var(--purple)}
+.icon-btn:disabled{opacity:.4;cursor:not-allowed}
+.icon-btn svg{width:16px;height:16px}
+.fp-head .icon-btn{margin-bottom:2px}
+.fp-scroll{flex:1;overflow-y:auto;padding:4px 8px 8px}
+.fsec{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:12px 8px 6px;display:flex;align-items:center;gap:4px}
+.wm .fsec .ico{width:12px;height:12px}
+.wm .fold{display:flex;align-items:center;gap:10px;width:100%;height:32px;padding:0 8px 0 10px;border:0;border-radius:7px;background:none;font-size:13px;font-weight:400;color:var(--text);text-align:left;position:relative;text-decoration:none}
+.wm .fold .ico{color:var(--muted)}
+.wm .fold:hover{background:var(--pane);color:var(--text)}
+.wm .fold.on{background:var(--tint);font-weight:600;color:#4B0A9A}
+.wm .fold.on::before{content:"";position:absolute;left:0;top:7px;bottom:7px;width:3px;border-radius:3px;background:var(--purple)}
+.wm .fold.on .ico{color:var(--purple)}
+.fold-l{min-width:0;line-height:1.2}
+.wm .fold .n{margin-left:auto;font-size:12px;font-weight:700;color:var(--purple)}
+.wm .fold .n.mute{font-weight:500;color:var(--faint)}
+.wm .fold .n.hot{background:var(--peach);color:var(--ink);border-radius:999px;padding:0 7px;line-height:18px;font-size:11px}
+.fp-foot{padding:10px 14px 12px;border-top:1px solid var(--line-2);font-size:11.5px;color:var(--muted);line-height:1.5;position:relative;display:flex;gap:4px;align-items:flex-start}
+.fp-foot>svg{width:13px;height:13px;flex:none;margin-top:2px;color:var(--faint)}
+.mail-why-btn{border:0;background:none;padding:0;font:inherit;font-weight:600;color:var(--purple);cursor:pointer}
+.mail-why-pop{position:fixed;width:300px;max-width:calc(100vw - 16px);background:var(--surface);border:1px solid var(--field);border-radius:10px;box-shadow:0 12px 34px rgba(31,2,73,.18);padding:12px 14px;font-size:12px;color:var(--body);z-index:60;line-height:1.5}
+.mail-why-pop strong{color:var(--text)}
+.mail-why-pop ul{margin:6px 0;padding-left:16px}
 @media (min-width:761px){
-  .folders.collapsed{flex:0 0 44px;padding:12px 8px;align-items:center}
-  .folders.collapsed .folders-toggle{transform:rotate(180deg)}
-  .folders.collapsed .folders-head{margin:0}
-  .folders.collapsed .folders-list{display:none}
+  .fpane.collapsed{width:48px;flex-basis:48px}
+  .fpane.collapsed .mo-wrap,.fpane.collapsed .fsec,.fpane.collapsed .fold-l,.fpane.collapsed .fold .n,.fpane.collapsed .fp-foot{display:none}
+  .fpane.collapsed .fp-head{padding:10px 9px 6px;justify-content:center}
+  .fpane.collapsed .fp-toggle{transform:rotate(180deg)}
+  .wm .fpane.collapsed .fold{justify-content:center;padding:0}
+  .fpane.collapsed .fp-scroll{padding:4px 6px}
 }
-/* Phone: the folders are a row of chips above the list; folding does not apply there (review M-6). */
-@media (max-width:760px){.folders-head{display:none}}
-.fold{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;font-size:13px;font-weight:500;color:var(--body);border:0;background:none;text-align:left;cursor:pointer;text-decoration:none}
-.fold.on{background:var(--tint);color:#4B0A9A;font-weight:600}
-.fold .cnt{margin-left:auto;font-size:11px;background:#822CDB;color:#fff;border-radius:999px;padding:1px 7px}
-.fold .cnt.hot{background:var(--peach);color:var(--ink)}
+/* Phone: the folder pane is a block above the list; folding does not apply there (review M-6). */
+@media (max-width:760px){
+  .wm .topbar.wm-top{flex-wrap:wrap;padding:10px 16px}
+  .msearch{order:3;flex:1 1 100%}
+  .fpane{width:auto;flex:1 1 100%;border-right:0;border-bottom:1px solid var(--line)}
+  .fp-toggle{display:none}
+  .fp-scroll{max-height:220px}
+}
+/* Message list and reading pane (release 2B-2; prototype .msglist, .msg, .reader, .mailside). */
 .mail-sec{color:var(--muted)}
-.mail-oft{font-size:10px;color:var(--muted)}
-.mail-manage{color:var(--purple)}
 .msglist{flex:1 1 300px;max-width:400px;min-width:0;border-right:1px solid var(--line);background:var(--surface)}
-.msglist-head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+.msglist-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--muted)}
 .msglist-head strong{color:var(--text)}
+.wm-linkchip{height:26px;padding:0 10px;font-size:12px;font-weight:600;color:var(--text);max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wm-linkchip:hover{background:var(--tint);color:var(--text)}
 /* Owner request (23 Nov 2026): no page numbers; the next 50 load when the list is scrolled near this row. */
 .msglist-more{padding:12px 14px;font-size:12px;color:var(--muted);text-align:center}
-/* Desktop (owner, 23 Nov 2026): the Email screen fits the window — the mail area takes the height left under the
-   header and filters, and each column scrolls on its own. */
+/* Desktop (owner, 23 Nov 2026): the Email screen fits the window — the panes take the height left under the top bar
+   and the command bar, and each pane scrolls on its own. */
 @media (min-width:1100px){
-  main:has(> .mail){height:100vh;overflow:hidden}
-  .mail{flex:1 1 0;min-height:0}
-  .folders,.reader,.mailside{overflow-y:auto;min-height:0}
+  main:has(> .wm){height:100vh;overflow:hidden}
+  .wm{min-height:0}
+  .wm-panes{flex:1 1 0;min-height:0;flex-wrap:nowrap}
+  .reader,.mailside{overflow-y:auto;min-height:0}
   .msglist{display:flex;flex-direction:column;min-height:0}
   .msglist-head{flex:none}
   .msglist-rows{flex:1 1 auto;min-height:0;overflow-y:auto}
+  .reader{flex-shrink:1}
 }
 .msg{display:flex;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line-2);cursor:pointer;color:var(--text);width:100%;text-align:left;text-decoration:none}
 .msg.on{background:var(--tint)}
@@ -765,37 +821,19 @@ td.nowrap{white-space:nowrap}
 .mail-loop .sw{font-size:12.5px}.mail-loop .dim{color:var(--muted)}
 .mail-context{font-size:12.5px;color:var(--body);padding-top:9px}
 @media (max-width:760px){
-  .mail-filters{padding:10px 16px}
-  .folders{flex:1 1 100%;flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--line)}
-  .folders .navsec{flex-basis:100%}
   .msglist{max-width:none;flex-basis:100%;border-right:0}
   .mailside{flex-basis:100%;border-left:0;border-top:1px solid var(--line)}
 }
-/* From 1100 px the four columns share one row; at 1280 px the list, reader and Linked records narrow a little
-   instead of Linked records dropping under the others (review #31). */
-@media (min-width:1100px){.mail{flex-wrap:nowrap}.reader{flex-shrink:1}}
 /* 761–1099 px (review M-5): folders, list and reader share the first row (the reader may narrow to 280 px) and
    Linked records takes its own row under them, instead of four squeezed columns. */
 @media (min-width:761px) and (max-width:1099.98px){.reader{flex-basis:280px}.msglist{max-width:none}.mailside{flex:1 1 100%;border-left:0;border-top:1px solid var(--line)}}
-/* Web-mail release 1 (mockup 2026-11-26-outlook-mail state 5): "Mail of:" picker, the team view's mailbox on each row,
-   view only (banner and footer pill), and the folder column's "what the CRM keeps" note with its Why? popover. */
-.mail-of{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
-.mail-of label{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding-left:2px}
-.mail-of select.chip{width:100%;min-width:0;padding:0 26px 0 8px;background-position:right 8px center;font-size:12.5px;font-weight:700}
-.folders-head:has(.mail-of){align-items:flex-end;gap:6px;margin:-6px -4px 8px}
-@media (min-width:761px){.folders.collapsed .mail-of{display:none}.folders.collapsed .folders-head:has(.mail-of){margin:0}}
+/* Web-mail release 1 (mockup 2026-11-26-outlook-mail state 5): the team view's mailbox on each row and view only
+   (banner and footer pill). */
 .mail-mbx{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;align-self:center}
 .viewonly{display:flex;align-items:center;gap:10px;margin:14px 24px 0;padding:9px 12px;border-radius:8px;background:var(--warn-bg);border:1px solid #F0C98A;color:var(--warn-fg);font-size:12.5px;font-weight:500}
 .viewonly svg{width:16px;height:16px;flex:none}
 .vo-pill{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 12px;border-radius:8px;background:var(--grey-bg);color:var(--grey-fg);font-size:12.5px;font-weight:600}
 .vo-pill svg{width:15px;height:15px;flex:none}
-.mail-why{position:relative;margin-top:auto;padding:14px 4px 0;font-size:11.5px;line-height:1.5;color:var(--muted);display:flex;gap:6px;align-items:flex-start}
-.mail-why > svg{width:13px;height:13px;flex:none;margin-top:2px}
-.mail-why-btn{border:0;background:none;padding:0;font:inherit;font-weight:700;color:var(--purple);cursor:pointer}
-.mail-why-pop{position:fixed;width:300px;max-width:calc(100vw - 16px);background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 34px rgba(31,2,73,.18);padding:12px 14px;font-size:12px;color:var(--body);z-index:60;line-height:1.5}
-.mail-why-pop strong{color:var(--text)}
-.mail-why-pop ul{margin:6px 0;padding-left:16px}
-@media (max-width:760px){.mail-why{flex-basis:100%;margin-top:6px}}
 .mail-connect{margin:16px 28px 0;padding:12px 16px;border:1px solid #F0C98A;background:#FFF8EC;border-radius:10px;font-size:13px;color:var(--body);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 @media (max-width:760px){.mail-connect{margin:12px 16px 0}}
 
