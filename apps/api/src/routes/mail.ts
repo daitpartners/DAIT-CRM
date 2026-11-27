@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
 import { Prisma, type EmailMessage, type Lead } from '@prisma/client';
-import { LeadCreate, MailCompose, MailLink, MailListQuery, MailRead, MailReply, can, checkDomain, domainOf, isFreeMail, pageArgs } from '@dait-crm/shared';
+import { LeadCreate, MailBulk, MailChange, MailCompose, MailLink, MailListQuery, MailRead, MailReply, can, checkDomain, domainOf, isFreeMail, pageArgs } from '@dait-crm/shared';
 import { audit } from '../audit.js';
 import { enqueue } from '../jobs/queue.js';
 import { BODY_MAX } from '../jobs/handlers/syncMailbox.js';
@@ -20,6 +20,7 @@ import { assertLeadVisible, canSeeLead, leadWhere } from '../leads/visibility.js
 import { assertCompanyVisible } from '../companies/visibility.js';
 import { matchMail } from '../mail/match.js';
 import { canSeeTeamMail, mailScope, messageFor, teamReadableWhere } from '../mail/access.js';
+import { changeMany, changeMessage } from '../mail/changes.js';
 import { assertProjectFor, queueOutgoing } from '../mail/outgoing.js';
 import { FORMATTED_BODY_LIMIT, outgoingBody, perUser } from '../mail/formatted.js';
 import { outgoingWithFiles } from '../mail/templateFiles.js';
@@ -37,7 +38,7 @@ const PREVIEW = 120;
 /** `GET /mail/meta`: only the list's scope. */
 const MailMetaQuery = MailListQuery.pick({ mailOf: true });
 const DAY_MS = 86_400_000;
-/** Mailbox changes are retried a little (2, 4 minutes); the next sync shows Outlook's state anyway. */
+/** Opening a message marks it read in the mailbox through a job, retried a little (2, 4 minutes); the next sync shows Outlook's state anyway. */
 const ACTION_ATTEMPTS = 3;
 
 const leadRef = { select: { id: true, number: true, status: true, priority: true, nextFollowUp: true, companyId: true, companyName: true, assignedToId: true } } as const;
@@ -152,7 +153,7 @@ async function linkConversation(db: Tx | typeof prisma, m: EmailMessage, lead: P
   }
 }
 
-/** Queues the same change in the user's mailbox (messages that came from it only). */
+/** Queues the change in the user's mailbox (messages that came from it only); used when a message is opened. */
 async function tellMailbox(db: Tx | typeof prisma, m: EmailMessage, action: MailActionPayload['action']) {
   if (m.graphId) await enqueue(db, 'mail_action', { emailMessageId: m.id, action }, { maxAttempts: ACTION_ATTEMPTS });
 }
@@ -251,6 +252,7 @@ async function lockedLead(tx: Tx, user: AuthUser, leadId: number): Promise<Lead>
  * mail, view only: they may open it (never marking it read, audited), log it and add a task, but every change to
  * another user's mailbox (reply, read/unread, archive, link, create lead) is 403 view_only. Everyone else reaches
  * only their own messages (another user's is 404). Enforced here, on every route.
+ * Web-mail release 2: mailbox changes go to Outlook first, inline; a refusal changes nothing.
  */
 export const mailRoutes: FastifyPluginAsync = async (app) => {
   const pre = { preHandler: [requireRight('use_email')] };
@@ -443,32 +445,49 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
     });
   });
 
-  // Read / unread and archive change the owner's mailbox: your own messages only (another user's is 403 view_only).
+  // Mailbox changes (web-mail release 2, mail/changes.ts) go to Outlook first, inline; a refusal changes nothing (the
+  // answer says why: mailbox_not_connected, outlook_refused, outlook_busy, sending, draft). Your own messages only:
+  // another user's is 403 view_only and Outlook is never asked. Delete moves to Deleted items; Delete in Deleted items
+  // deletes for good (the screen confirms first).
+  app.post<{ Params: { id: string } }>('/mail/:id/change', pre, async (request, reply) => {
+    const change = parseBody(MailChange, request.body);
+    const user = request.user!;
+    return guard(reply, async () => {
+      const { m } = await messageFor(prisma, user, request.params.id, 'change');
+      return changeMessage(app.graph, user, m, change);
+    });
+  });
+
+  // The same change to a selection or a conversation's messages (at most BULK_MAX): always 200, each id done or failed
+  // with its reason (view_only, not_found or a change error). The log carries counts and reasons only.
+  app.post('/mail/bulk', pre, async (request) => {
+    const { ids, change } = parseBody(MailBulk, request.body);
+    const result = await changeMany(app.graph, request.user!, ids, change);
+    if (result.failed.length) {
+      const reasons: Record<string, number> = {};
+      for (const f of result.failed) reasons[f.error] = (reasons[f.error] ?? 0) + 1;
+      request.log.warn({ change: change.type, done: result.done.length, failed: result.failed.length, reasons }, 'bulk mailbox change partly refused');
+    }
+    return result;
+  });
+
+  // Read / unread and archive (release 2B-2 answers kept), now through Outlook inline as /change.
   app.post<{ Params: { id: string } }>('/mail/:id/read', pre, async (request, reply) => {
     const { isRead } = parseBody(MailRead, request.body);
+    const user = request.user!;
     return guard(reply, async () => {
-      const { m } = await messageFor(prisma, request.user!, request.params.id, 'change');
-      if (m.isRead === isRead) return { id: m.id, isRead };
-      const updated = await prisma.$transaction(async (tx) => {
-        const u = await tx.emailMessage.update({ where: { id: m.id }, data: { isRead } });
-        await tellMailbox(tx, u, isRead ? 'read' : 'unread');
-        return u;
-      });
-      return { id: updated.id, isRead: updated.isRead };
+      const { m } = await messageFor(prisma, user, request.params.id, 'change');
+      const changed = await changeMessage(app.graph, user, m, { type: 'read', isRead });
+      return { id: changed.id, isRead: changed.isRead };
     });
   });
 
   app.post<{ Params: { id: string } }>('/mail/:id/archive', pre, async (request, reply) => {
+    const user = request.user!;
     return guard(reply, async () => {
-      const { m } = await messageFor(prisma, request.user!, request.params.id, 'change');
-      if (m.folder === 'drafts') return reply.code(409).send({ error: 'draft' });
-      if (m.folder !== 'archive') {
-        await prisma.$transaction(async (tx) => {
-          const u = await tx.emailMessage.update({ where: { id: m.id }, data: { folder: 'archive' } });
-          await tellMailbox(tx, u, 'archive');
-        });
-      }
-      return { id: m.id, folder: 'archive' };
+      const { m } = await messageFor(prisma, user, request.params.id, 'change');
+      const changed = await changeMessage(app.graph, user, m, { type: 'move', folder: 'archive' });
+      return { id: changed.id, folder: changed.folder };
     });
   });
 

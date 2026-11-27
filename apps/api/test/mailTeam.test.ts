@@ -196,7 +196,7 @@ describe('team mail (web-mail release 1)', () => {
     expect(await prisma.job.count()).toBe(0);
   });
 
-  it("reply, read, archive, link and create-lead on another user's message are 403 view_only and change nothing", async () => {
+  it("reply, read, archive, change, link and create-lead on another user's message are 403 view_only and change nothing; bulk fails it view_only", async () => {
     const f = await setup();
     const { proposal: m, contactOnly } = await mailbox(f);
     const before = await prisma.emailMessage.findMany({ orderBy: { id: 'asc' } });
@@ -207,12 +207,19 @@ describe('team mail (web-mail release 1)', () => {
         [`/api/mail/${m.id}/reply`, { cc: [], body: 'x' }],
         [`/api/mail/${m.id}/read`, { isRead: true }],
         [`/api/mail/${m.id}/archive`, undefined],
+        [`/api/mail/${m.id}/change`, { type: 'delete' }],
+        [`/api/mail/${m.id}/change`, { type: 'move', folder: 'archive' }],
+        [`/api/mail/${m.id}/change`, { type: 'flag', flag: 'today' }],
+        [`/api/mail/${m.id}/change`, { type: 'read', isRead: true }],
         [`/api/mail/${contactOnly.id}/link`, { leadId: f.leadA.id }],
         [`/api/mail/${contactOnly.id}/create-lead`, undefined],
       ] as const) {
         const res = await call('POST', url, cookie, payload);
         expect([url, res.statusCode, res.json()]).toEqual([url, 403, { error: 'view_only' }]);
       }
+      // The app's Graph fake fails any mailbox change loudly, so Outlook was never asked.
+      const bulk = await call('POST', '/api/mail/bulk', cookie, { ids: [m.id, contactOnly.id], change: { type: 'delete' } });
+      expect([bulk.statusCode, bulk.json()]).toEqual([200, { done: [], failed: [{ id: m.id, error: 'view_only' }, { id: contactOnly.id, error: 'view_only' }] }]);
     }
     expect(await prisma.emailMessage.findMany({ orderBy: { id: 'asc' } })).toEqual(before);
     expect(await prisma.lead.count()).toBe(leads);
@@ -229,6 +236,8 @@ describe('team mail (web-mail release 1)', () => {
       for (const action of ['log', 'task', 'archive', 'read']) {
         expect((await call('POST', `/api/mail/${m.id}/${action}`, cookie, action === 'read' ? { isRead: true } : undefined)).statusCode).toBe(404);
       }
+      expect((await call('POST', `/api/mail/${m.id}/change`, cookie, { type: 'delete' })).statusCode).toBe(404);
+      expect((await call('POST', '/api/mail/bulk', cookie, { ids: [m.id], change: { type: 'delete' } })).json()).toEqual({ done: [], failed: [{ id: m.id, error: 'not_found' }] });
     }
     expect(bodies.calls).toEqual([]);
     expect(await prisma.auditLog.count({ where: { action: 'view' } })).toBe(0);

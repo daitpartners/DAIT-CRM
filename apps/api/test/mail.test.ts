@@ -29,6 +29,8 @@ vi.mock('../src/routes/leads', async (importOriginal) => {
 
 /** The routes' Graph client: each test may answer messageBody; by default Microsoft is unreachable. */
 const bodies = vi.hoisted(() => ({ calls: [] as { accountId: number; graphId: string; timeoutMs?: number }[], answer: null as null | GraphClient['messageBody'] }));
+/** Mailbox changes the routes made in Outlook, inline (web-mail release 2). */
+const changes = vi.hoisted(() => ({ calls: [] as [string, string, unknown][] }));
 let app: FastifyInstance;
 beforeAll(async () => {
   process.env.TEST_LOGIN = '1';
@@ -39,6 +41,12 @@ beforeAll(async () => {
         if (!bodies.answer) throw new GraphError('graph_request_failed status=503', 503);
         return bodies.answer(account, graphId);
       },
+      async markRead(_account, graphId, isRead) {
+        changes.calls.push(['markRead', graphId, isRead]);
+      },
+      async moveTo(_account, graphId, folder) {
+        changes.calls.push(['moveTo', graphId, folder]);
+      },
     }),
   });
 });
@@ -47,6 +55,7 @@ beforeEach(async () => {
   lockFault.error = null;
   bodies.calls = [];
   bodies.answer = null;
+  changes.calls = [];
   resetBodyFetchBackoff();
   await resetDb();
   await seedLookups();
@@ -514,14 +523,17 @@ describe('reading mail on the Email screen (2B-2)', () => {
     expect(await prisma.job.count({ where: { type: 'mail_action' } })).toBe(0);
   });
 
-  it('read and archive change your message at once and queue the mailbox change; others get 404', async () => {
+  it('read and archive change Outlook inline (no mail_action job), then your message, with the same answers; others get 404', async () => {
     const { rep, admin, box } = await setup();
     const m = await synced(rep.id, box.id, { isRead: true });
     const cookie = await signIn(app, rep);
-    expect((await call('POST', `/api/mail/${m.id}/read`, cookie, { isRead: false })).statusCode).toBe(200);
-    expect((await call('POST', `/api/mail/${m.id}/archive`, cookie)).statusCode).toBe(200);
+    const read = await call('POST', `/api/mail/${m.id}/read`, cookie, { isRead: false });
+    expect([read.statusCode, read.json()]).toEqual([200, { id: m.id, isRead: false }]);
+    const archive = await call('POST', `/api/mail/${m.id}/archive`, cookie);
+    expect([archive.statusCode, archive.json()]).toEqual([200, { id: m.id, folder: 'archive' }]);
     expect(await prisma.emailMessage.findUniqueOrThrow({ where: { id: m.id } })).toMatchObject({ isRead: false, folder: 'archive' });
-    expect((await prisma.job.findMany({ where: { type: 'mail_action' }, orderBy: { id: 'asc' } })).map((j) => (j.payload as { action: string }).action)).toEqual(['unread', 'archive']);
+    expect(changes.calls).toEqual([['markRead', m.graphId, false], ['moveTo', m.graphId, 'archive']]);
+    expect(await prisma.job.count({ where: { type: 'mail_action' } })).toBe(0);
     const adminCookie = await signIn(app, admin);
     for (const [url, payload] of [[`/api/mail/${m.id}/read`, { isRead: true }], [`/api/mail/${m.id}/archive`, undefined], [`/api/mail/${m.id}/log`, undefined], [`/api/mail/${m.id}/task`, undefined], [`/api/mail/${m.id}/create-lead`, undefined]] as const) {
       expect((await call('POST', url, adminCookie, payload)).statusCode).toBe(404);

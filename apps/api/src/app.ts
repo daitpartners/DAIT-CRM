@@ -34,6 +34,7 @@ import { settingsRoutes } from './routes/settings.js';
 import { researchRoutes } from './routes/research.js';
 import { NotFoundError, ValidationError } from './validate.js';
 import { MailAccessError } from './mail/access.js';
+import { MailChangeError } from './mail/changes.js';
 import { registerAuth } from './plugins/auth.js';
 import { createMsalClient, type MicrosoftClient } from './auth/microsoft.js';
 import { createGraphClient, type GraphClient } from './graph/client.js';
@@ -138,6 +139,13 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
     if (error instanceof ValidationError) return reply.code(400).send({ error: 'validation', issues: error.issues });
     if (error instanceof NotFoundError) return reply.code(404).send({ error: 'not_found' });
     if (error instanceof MailAccessError) return reply.code(error.status).send({ error: error.code });
+    if (error instanceof MailChangeError) {
+      // The reason, the Graph status and the error's kind only: never its message, subject or addresses.
+      if (error.status !== 409 || error.graphStatus !== undefined) {
+        request.log.warn({ code: error.code, graphStatus: error.graphStatus, errName: error.errName }, 'mailbox change refused');
+      }
+      return reply.code(error.status).send({ error: error.code });
+    }
     if (error instanceof FormattedBodyError || error instanceof AttachmentError) return reply.code(error.status).send({ error: error.code });
     // A server error is logged in full and answered without its message (which can name server paths; review I4).
     const status = (error as { statusCode?: number }).statusCode ?? 500;
