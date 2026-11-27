@@ -212,6 +212,40 @@ describe('useAutoSave (web-mail release 3)', () => {
     expect(result.current.savedAt).toBe('2026-11-27T15:20:00.000Z');
   });
 
+  it('nothing outlives the editor: a save out at unmount that fails is not retried, and nothing more is sent', async () => {
+    const out = later();
+    const answers = [out.answer];
+    const calls = stubFetch(() => answers.shift() ?? { status: 200, body: { savedAt: 'x' } });
+    const { rerender, unmount } = mount();
+    rerender({ f: fields('<p>Old words</p>'), id: 7, on: true });
+    await tick(2000);
+    rerender({ f: fields('<p>Old words, more</p>'), id: 7, on: true });
+    await tick(2000); // queued behind the save out
+    expect(calls).toHaveLength(1);
+    unmount();
+    await act(async () => out.release({ status: 503, body: { error: 'outlook_busy' } }));
+    await tick(120_000);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('Outlook refusing, a mailbox to reconnect and an ended session stop saving; flush reports the code', async () => {
+    // On the sign-in page, so the 401 does not send this jsdom window to /sign-in.
+    const start = window.location.pathname;
+    window.history.pushState({}, '', '/sign-in');
+    for (const [status, code] of [[502, 'outlook_refused'], [409, 'mailbox_not_connected'], [401, 'unauthenticated']] as const) {
+      const calls = stubFetch(() => ({ status, body: { error: code } }));
+      const { result, rerender, unmount } = mount();
+      rerender({ f: fields('<p>A</p>'), id: 7, on: true });
+      expect(await act(async () => result.current.flush())).toEqual({ ok: false, code });
+      rerender({ f: fields('<p>AB</p>'), id: 7, on: true });
+      await tick(120_000);
+      expect(await act(async () => result.current.flush())).toEqual({ ok: false, code });
+      expect(calls, code).toHaveLength(1);
+      unmount();
+    }
+    window.history.pushState({}, '', start);
+  });
+
   it('a passing failure (Outlook busy) is reported and the next change saves again, clearing it', async () => {
     let busy = true;
     const calls = stubFetch(() => (busy ? { status: 503, body: { error: 'outlook_busy' } } : { status: 200, body: { savedAt: '2026-11-27T14:40:00.000Z' } }));

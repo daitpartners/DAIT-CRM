@@ -69,7 +69,11 @@ export const AUTO_SAVE_MS = 2000;
 export const SUGGEST_MS = 250;
 
 /** Codes after which saving again cannot succeed: auto-save stops until the draft is opened again (or re-enabled). */
-const FINAL = new Set(['draft_gone', 'mailbox_changed', 'not_draft', 'already_sent', 'view_only', 'not_found', 'forbidden', 'no_mailbox']);
+const FINAL = new Set([
+  'draft_gone', 'mailbox_changed', 'not_draft', 'already_sent', 'view_only', 'not_found', 'forbidden', 'no_mailbox',
+  // Outlook refused the change, the mailbox needs reconnecting, the session ended: retrying would not help.
+  'outlook_refused', 'mailbox_not_connected', 'unauthenticated',
+]);
 /** Codes the same fields would meet again: not retried by themselves, saved again on the next change or flush. */
 const NO_RETRY = new Set(['validation', 'message_too_long', 'html_too_complex', 'attachments_too_large']);
 /** Waits before retrying a passing failure (Outlook busy, the network, the rate limit): 2 s, doubling, at most 30 s. */
@@ -152,7 +156,8 @@ export type FlushResult = { ok: true } | { ok: false; code: string };
  *   does meanwhile (a change while one is out is saved, with the latest fields, once it answers).
  * - A passing failure (`outlook_busy`, `try_again`: the network, the rate limit, a server error) is retried by itself
  *   after 2 s, then 4, 8… up to 30 s, while the change is still unsaved. A final code (`draft_gone`, `already_sent`,
- *   `mailbox_changed`, `not_draft`, `view_only`, `not_found`, `forbidden`, `no_mailbox`) stops saving. A refusal the same
+ *   `mailbox_changed`, `not_draft`, `view_only`, `not_found`, `forbidden`, `no_mailbox`, `outlook_refused`,
+ *   `mailbox_not_connected`, `unauthenticated`) stops saving. Nothing is sent or retried once the editor unmounts. A refusal the same
  *   fields would meet again (`validation`, `message_too_long`…) waits for the next change or flush.
  * - `flush()` saves now and **never rejects**: it resolves `{ ok: true }` once everything held is saved (or there is
  *   nothing to save: disabled, no draft), else `{ ok: false, code }` with the failure's code (errorText, context 'draft').
@@ -179,13 +184,15 @@ export function useAutoSave(id: number | null, fields: DraftFields, opts: { enab
   const running = useRef<Promise<void> | null>(null);
   const again = useRef(false);
   const retry = useRef<{ timer: ReturnType<typeof setTimeout> | null; delay: number }>({ timer: null, delay: AUTO_SAVE_MS });
+  /** False once the editor is gone: a save still out then neither retries nor sends anything more. */
+  const alive = useRef(true);
 
   const clearRetry = () => {
     if (retry.current.timer) clearTimeout(retry.current.timer);
     retry.current.timer = null;
   };
 
-  const dirty = () => enabled.current && draftId.current !== null && !stopped.current && latest.current.text !== saved.current;
+  const dirty = () => alive.current && enabled.current && draftId.current !== null && !stopped.current && latest.current.text !== saved.current;
 
   const save = useCallback((): Promise<void> => {
     if (running.current) {
@@ -209,7 +216,7 @@ export function useAutoSave(id: number | null, fields: DraftFields, opts: { enab
           retry.current.delay = AUTO_SAVE_MS;
           setState({ savedAt: r.savedAt, saving: false, error: null });
         } catch (err) {
-          if (generation.current !== gen) continue;
+          if (generation.current !== gen || !alive.current) continue;
           const code = codeOf(err);
           lastError.current = code;
           setState((s) => ({ ...s, saving: false, error: code }));
@@ -217,7 +224,7 @@ export function useAutoSave(id: number | null, fields: DraftFields, opts: { enab
             stopped.current = true;
             return;
           }
-          if (!NO_RETRY.has(code)) {
+          if (!NO_RETRY.has(code) && alive.current) {
             const delay = retry.current.delay;
             retry.current.delay = Math.min(delay * 2, RETRY_MAX_MS);
             retry.current.timer = setTimeout(() => {
@@ -258,7 +265,13 @@ export function useAutoSave(id: number | null, fields: DraftFields, opts: { enab
     return () => clearTimeout(timer);
   }, [text, id, opts.enabled, save]);
 
-  useEffect(() => clearRetry, []);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      clearRetry();
+    };
+  }, []);
 
   const flush = useCallback(async (): Promise<FlushResult> => {
     if (!enabled.current || draftId.current === null) return { ok: true };
