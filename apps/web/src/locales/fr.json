@@ -2234,5 +2234,6 @@
   "Template:": "Modèle :",
   "fields filled from {lead}": "champs remplis depuis {lead}",
   "Change": "Modifier",
-  "Add people": "Ajouter des personnes"
+  "Add people": "Ajouter des personnes",
+  "Leave without saving": "Quitter sans enregistrer"
 }

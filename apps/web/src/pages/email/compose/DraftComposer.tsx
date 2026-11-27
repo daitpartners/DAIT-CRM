@@ -28,10 +28,11 @@ export type SentInfo = { result: SendResult; to: string };
 
 /**
  * The open composer's guarded close, for the screen: calling it saves what the editor holds and answers true, or shows
- * why the save failed and answers false (see `release`); `pending()` says whether leaving now could lose anything (a
+ * why the save failed and answers false (see `release`; `leaving`: the user is leaving the Email screen, and any failed
+ * save offers `Leave without saving`); `pending()` says whether leaving now could lose anything (a
  * change not saved yet, a save under way, or a failed save shown).
  */
-export type ComposerGuard = { (): Promise<boolean>; pending(): boolean };
+export type ComposerGuard = { (opts?: { leaving?: boolean }): Promise<boolean>; pending(): boolean };
 
 /** What the full page asks of its composer (the Lead and Project rows, the template bar). */
 export type ComposerControl = {
@@ -136,6 +137,8 @@ export function DraftComposer({
   const [rows, setRows] = useState<{ cc: boolean; bcc: boolean; focus: 'cc' | 'bcc' | null }>({ cc: draft.cc.length > 0, bcc: draft.bcc.length > 0, focus: null });
   const [problem, setProblem] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
+  /** Leaving the Email screen waits on a failed save: `Leave without saving` lets it go, whatever the failure. */
+  const [leaving, setLeaving] = useState(false);
   const [templatesAt, setTemplatesAt] = useState<{ x: number; y: number } | null>(null);
 
   const sendHtml = useMemo(() => toSendHtml(body.html ?? ''), [body.html]);
@@ -164,6 +167,7 @@ export function DraftComposer({
     waiting.current?.(false);
     waiting.current = null;
     leave.current = null;
+    setLeaving(false);
   };
   const touch = () => {
     touched.current = true;
@@ -333,15 +337,19 @@ export function DraftComposer({
   }
 
   /** Before the screen replaces the editor: everything saved (true), or the failure shown and the editor kept (false). */
-  async function release(): Promise<boolean> {
+  async function release(opts: { leaving?: boolean } = {}): Promise<boolean> {
     if (closing) return false;
     dropWaiting();
     setProblem(null);
     const saved = await auto.flush();
     if (saved.ok) return true;
     setProblem(saved.code);
-    if (!isFinalSaveCode(saved.code)) return false;
-    // Saving cannot work again: the switch waits for `Close without saving` (or is dropped by a change or another ask).
+    // Leaving the Email screen (the sidebar, Back, signing out) is never trapped: any failure (offline, a server error)
+    // offers `Leave without saving`. The screen's own switches keep the rule below.
+    if (opts.leaving) setLeaving(true);
+    else if (!isFinalSaveCode(saved.code)) return false;
+    // Saving cannot work again (or the user is leaving): the switch waits for `Close without saving` / `Leave without
+    // saving` (or is dropped by a change or another ask).
     return new Promise<boolean>((resolve) => {
       waiting.current = resolve;
       leave.current = () => {
@@ -368,7 +376,7 @@ export function DraftComposer({
   unsaved.current = () => !closed.current && (auto.pending() || auto.saving || (problem ?? auto.error) !== null);
   useEffect(() => {
     if (!guard) return;
-    const fn: ComposerGuard = Object.assign(() => releaseRef.current(), { pending: () => unsaved.current() });
+    const fn: ComposerGuard = Object.assign((o?: { leaving?: boolean }) => releaseRef.current(o), { pending: () => unsaved.current() });
     guard.current = fn;
     return () => {
       if (guard.current === fn) guard.current = null;
@@ -477,7 +485,9 @@ export function DraftComposer({
           {error === 'draft_gone' ? (
             <button type="button" className="btn sm" disabled={closing} onClick={() => void saveAsNew()}>{t('Save as a new draft')}</button>
           ) : null}
-          {isFinalSaveCode(error) ? (
+          {leaving ? (
+            <button type="button" className="btn sm" disabled={closing} onClick={closeWithoutSaving}>{t('Leave without saving')}</button>
+          ) : isFinalSaveCode(error) ? (
             <button type="button" className="btn sm" disabled={closing} onClick={closeWithoutSaving}>{t('Close without saving')}</button>
           ) : null}
         </div>

@@ -182,6 +182,7 @@ function showApp(entries: string[]) {
       { path: '/email/new', element: <EmailPage /> },
       { path: '/email/:id', element: <EmailPage /> },
       { path: '/leads', element: <p>Leads page</p> },
+      { path: '/sign-in', element: <p>Sign in</p> },
     ],
   }], { initialEntries: entries, initialIndex: entries.length - 1 });
   render(
@@ -454,7 +455,7 @@ describe('Full-page New message (web-mail release 3, state 3)', () => {
     expect(api.of('/api/mail/drafts/50', 'DELETE')).toHaveLength(0);
   });
 
-  it('the sidebar with a failed save keeps the page and says why; Close without saving then goes', async () => {
+  it('the sidebar with a failed save keeps the page and says why; Leave without saving then goes', async () => {
     const user = userEvent.setup();
     stub({ saveErrors: ['mailbox_changed', 'mailbox_changed'] });
     showApp(['/email', '/email/new']);
@@ -465,8 +466,37 @@ describe('Full-page New message (web-mail release 3, state 3)', () => {
     expect(await within(f).findByRole('alert')).toHaveTextContent('This draft is in a mailbox that is no longer connected. Open it in Outlook.');
     expect(where()).toBe('/email/new?draft=50');
     expect(within(f).getByRole('textbox', { name: 'Subject' })).toHaveValue('Not lost');
-    await user.click(within(f).getByRole('button', { name: 'Close without saving' }));
+    await user.click(within(f).getByRole('button', { name: 'Leave without saving' }));
     await waitFor(() => expect(where()).toBe('/leads'));
+  });
+
+  it('the sidebar while saves keep failing for a passing reason (offline): Leave without saving still lets the user go', async () => {
+    const user = userEvent.setup();
+    stub({ saveErrors: Array(10).fill('try_again') });
+    showApp(['/email', '/email/new']);
+    const f = await form();
+    await waitFor(() => expect(where()).toBe('/email/new?draft=50'));
+    await user.type(within(f).getByRole('textbox', { name: 'Subject' }), 'Offline');
+    await user.click(screen.getByRole('link', { name: 'Sidebar Leads' }));
+    expect(await within(f).findByRole('alert')).toBeInTheDocument();
+    expect(where()).toBe('/email/new?draft=50');
+    // Going on writing drops the wait; asking again offers the way out again.
+    await user.click(screen.getByRole('link', { name: 'Sidebar Leads' }));
+    await user.click(await within(f).findByRole('button', { name: 'Leave without saving' }));
+    await waitFor(() => expect(where()).toBe('/leads'));
+  });
+
+  it('signing out is never held by an unsaved message', async () => {
+    const user = userEvent.setup();
+    stub({ saveErrors: Array(10).fill('try_again') });
+    const router = showApp(['/email', '/email/new']);
+    const f = await form();
+    await waitFor(() => expect(where()).toBe('/email/new?draft=50'));
+    await user.type(within(f).getByRole('textbox', { name: 'Subject' }), 'Unsaved');
+    await act(async () => {
+      await router.navigate('/sign-in');
+    });
+    await waitFor(() => expect(where()).toBe('/sign-in'));
   });
 
   it('browser Back while a change is unsaved saves first; with nothing unsaved it goes at once', async () => {

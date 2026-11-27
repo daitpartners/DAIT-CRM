@@ -7,8 +7,9 @@ type Props = { guard: MutableRefObject<ComposerGuard | null> };
 /**
  * Leaving the Email screen while a composer (the New message page, an inline Reply) holds something unsaved — the
  * sidebar, the browser's Back, any other in-app navigation: the navigation waits for the composer's guarded close. A
- * good save lets it go on; a failed one keeps the editor where it is with the reason (and `Close without saving` on a
- * save that cannot work again, which then lets it go on). Nothing is held when nothing is unsaved. Only under the app's
+ * good save lets it go on; a failed one, whatever the failure (offline, a server error, a mailbox gone), keeps the
+ * editor where it is with the reason and `Leave without saving`, which then lets it go on, so the user is never
+ * trapped. Going on writing (or asking again) drops the wait. Signing out is never held. Nothing is held when nothing is unsaved. Only under the app's
  * data router (useBlocker needs one); elsewhere (screen tests in a plain MemoryRouter) it does nothing.
  */
 export function LeaveGuard({ guard }: Props) {
@@ -17,8 +18,11 @@ export function LeaveGuard({ guard }: Props) {
 }
 
 function Blocker({ guard }: Props) {
+  // Signing out is never held (the session ends; what is unsaved gets the composer's last-resort save).
   const blocker = useBlocker(({ currentLocation, nextLocation }) => (
-    (currentLocation.pathname !== nextLocation.pathname || currentLocation.search !== nextLocation.search) && !!guard.current?.pending()
+    nextLocation.pathname !== '/sign-in'
+    && (currentLocation.pathname !== nextLocation.pathname || currentLocation.search !== nextLocation.search)
+    && !!guard.current?.pending()
   ));
 
   useEffect(() => {
@@ -29,7 +33,7 @@ function Blocker({ guard }: Props) {
       return;
     }
     let live = true;
-    void release().then((ok) => {
+    void release({ leaving: true }).then((ok) => {
       if (!live) return;
       if (ok) blocker.proceed();
       else blocker.reset();

@@ -439,7 +439,7 @@ describe('Inline Reply, Reply all and Forward (web-mail release 3, state 2)', ()
     expect(api.of('/api/mail/drafts/50', 'PATCH')[0]!.body!.bodyHtml).toContain('Saved on the way out');
   });
 
-  it('leaving by the sidebar with a failed save keeps the reply and says why; Close without saving then goes', async () => {
+  it('leaving by the sidebar with a failed save keeps the reply and says why; Leave without saving then goes', async () => {
     const user = userEvent.setup();
     stub({ saveErrors: ['mailbox_changed', 'mailbox_changed'] });
     showApp();
@@ -448,7 +448,20 @@ describe('Inline Reply, Reply all and Forward (web-mail release 3, state 2)', ()
     await user.click(screen.getByRole('link', { name: 'Sidebar Leads' }));
     expect(await within(form).findByRole('alert')).toHaveTextContent('This draft is in a mailbox that is no longer connected. Open it in Outlook.');
     expect(screen.getByTestId('where')).toHaveTextContent('/email/1');
-    await user.click(within(form).getByRole('button', { name: 'Close without saving' }));
+    await user.click(within(form).getByRole('button', { name: 'Leave without saving' }));
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/leads'));
+  });
+
+  it('leaving by the sidebar while saves keep failing (offline): Leave without saving still goes', async () => {
+    const user = userEvent.setup();
+    stub({ saveErrors: Array(10).fill('try_again') });
+    showApp();
+    const form = await openReply(user);
+    await typeMessage(form, '<p>Not lost</p>');
+    await user.click(screen.getByRole('link', { name: 'Sidebar Leads' }));
+    expect(await within(form).findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByTestId('where')).toHaveTextContent('/email/1');
+    await user.click(within(form).getByRole('button', { name: 'Leave without saving' }));
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/leads'));
   });
 
