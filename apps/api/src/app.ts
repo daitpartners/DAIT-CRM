@@ -28,6 +28,7 @@ import { reportRoutes } from './routes/reports.js';
 import { emailTemplateRoutes } from './routes/emailTemplates.js';
 import { leadEmailRoutes } from './routes/leadEmails.js';
 import { mailRoutes } from './routes/mail.js';
+import { mailDraftRoutes } from './routes/mailDrafts.js';
 import { mailerRoutes } from './routes/mailer.js';
 import { quotationRoutes } from './routes/quotations.js';
 import { projectRoutes } from './routes/projects.js';
@@ -36,6 +37,7 @@ import { researchRoutes } from './routes/research.js';
 import { NotFoundError, ValidationError } from './validate.js';
 import { MailAccessError } from './mail/access.js';
 import { MailChangeError } from './mail/changes.js';
+import { DraftError } from './mail/drafts.js';
 import { registerAuth } from './plugins/auth.js';
 import { createMsalClient, type MicrosoftClient } from './auth/microsoft.js';
 import { createGraphClient, type GraphClient } from './graph/client.js';
@@ -147,7 +149,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
       }
       return reply.code(error.status).send({ error: error.code });
     }
-    if (error instanceof FormattedBodyError || error instanceof AttachmentError || error instanceof AttachmentTooLargeError) {
+    if (error instanceof DraftError || error instanceof FormattedBodyError || error instanceof AttachmentError || error instanceof AttachmentTooLargeError) {
       return reply.code(error.status).send({ error: error.code });
     }
     // A server error is logged in full and answered without its message (which can name server paths; review I4).
@@ -178,6 +180,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await app.register(reportRoutes, { prefix: '/api' });
   await app.register(emailTemplateRoutes, { prefix: '/api' });
   await app.register(leadEmailRoutes, { prefix: '/api' });
+  await app.register(mailDraftRoutes, { prefix: '/api' });
   await app.register(mailRoutes, { prefix: '/api' });
   await app.register(mailerRoutes, { prefix: '/api' });
   await app.register(quotationRoutes, { prefix: '/api' });

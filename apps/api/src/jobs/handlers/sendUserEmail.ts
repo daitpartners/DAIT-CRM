@@ -5,8 +5,8 @@ import { isAuthFailure } from '../../graph/client.js';
 import type { SendUserEmailPayload } from '../types.js';
 import type { JobContext } from '../runner.js';
 import { onQuotationSendFailed, onQuotationSent } from '../../quotations/send.js';
-import { localNow } from '@dait-crm/shared';
 import { textToHtml } from '../../mail/html.js';
+import { quoteHeader } from '../../mail/drafts.js';
 
 /**
  * A message that will not be sent: marked `failed`, and its "Email sent" history line removed (it never left; the
@@ -25,26 +25,13 @@ const INTERRUPTED = 'interrupted_may_have_sent';
 /** A queued reply's Graph call besides a plain reply (SendUserEmailPayload.replyMode). */
 const REPLY_MODES: readonly unknown[] = ['replyAll', 'forward'];
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-/** "26 Nov 2026, 14:05": 24-hour, in the sender's time zone (UTC for an unknown zone). */
-function sentAt(at: Date, timezone: string): string {
-  const { day, time } = localNow(timezone, at);
-  const [y, m, d] = day.split('-');
-  return `${Number(d)} ${MONTHS[Number(m) - 1]} ${y}, ${time}`;
-}
-
 /**
  * A forward of a message only the CRM has (no Graph id, so Graph forward cannot add it): the user's text, then the
- * original under a "Forwarded message" header (From, Date in the sender's time zone, Subject, To) and its stored,
- * already sanitised HTML.
+ * original under a "Forwarded message" header (quoteHeader: From, Sent in the sender's time zone, To, Subject) and its
+ * stored, already sanitised HTML.
  */
 function withForwarded(html: string, text: string, original: EmailMessage, timezone: string): { html: string; text: string } {
-  const from = original.fromName ? `${original.fromName} <${original.fromAddress}>` : original.fromAddress;
-  const header = [
-    '---------- Forwarded message ---------', `From: ${from}`, `Date: ${sentAt(original.occurredAt, timezone)}`,
-    `Subject: ${original.subject}`, `To: ${(original.toAddresses as string[]).join(', ')}`,
-  ].join('\n');
+  const header = `---------- Forwarded message ---------\n${quoteHeader(original, timezone)}`;
   return {
     html: `${html}<br>${textToHtml(header)}<br>${original.bodyHtml || textToHtml(original.bodyText)}`,
     text: `${text}\n\n${header}\n\n${original.bodyText}`,

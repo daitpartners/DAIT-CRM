@@ -295,9 +295,9 @@ describe('Reply all and Forward (web-mail release 2)', () => {
     expect(sends[0]!.html).toContain('<div>See below</div>');
     expect(sends[0]!.html).toContain('Forwarded message');
     expect(sends[0]!.html).toContain('Subject: Price list');
-    // 10:00 UTC in the sender's time zone (India, +5:30), 24-hour.
-    expect(sends[0]!.html).toContain('Date: 20 Nov 2026, 15:30');
-    expect(sends[0]!.text).toContain('Date: 20 Nov 2026, 15:30');
+    // 10:00 UTC in the sender's time zone (India, +5:30), 24-hour (quoteHeader's Sent line, shared with draft quotes).
+    expect(sends[0]!.html).toContain('Sent: 20 Nov 2026, 15:30');
+    expect(sends[0]!.text).toContain('Sent: 20 Nov 2026, 15:30');
     expect(sends[0]!.html).toContain('<div>Our prices &lt;2027&gt;</div>');
     expect(sends[0]!.text).toContain('See below');
     expect(sends[0]!.text).toContain('Our prices <2027>');
