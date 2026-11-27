@@ -59,6 +59,10 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
   const me = useCurrentUser();
   const lookup = useLookupText(useLang());
   const reply = start.replyTo !== undefined;
+  // Web-mail release 2: Reply and Reply all go to the recipients the server works out (To read-only); Forward to the
+  // addresses typed in To (required). The subject is fixed in all three.
+  const mode: ReplyMode = start.mode ?? 'reply';
+  const forward = reply && mode === 'forward';
   const [companyId, setCompanyId] = useState<number | undefined>(start.companyId);
   const [leadId, setLeadId] = useState<number | undefined>(start.leadId);
   const [to, setTo] = useState(start.to ?? '');
@@ -158,6 +162,8 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
     setError(null);
     const target = toValue.trim().toLowerCase();
     if (!reply && !EMAIL_RE.test(target)) return setError(t('Enter a valid To address.'));
+    const forwardTo = splitList(toValue);
+    if (forward && (!forwardTo.length || forwardTo.some((x) => !EMAIL_RE.test(x)))) return setError(t('Enter a valid To address.'));
     const badCc = ccList.find((x) => !EMAIL_RE.test(x));
     if (badCc) return setError(t('“{value}” is not an email address.', { value: badCc }));
     if (!subject.trim() || !body.text.trim()) return setError(t('Subject and message are required.'));
@@ -167,7 +173,10 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
     };
     const fail = (err: unknown) => setError(err instanceof ApiError ? errorText(t, err.code) : t('Something went wrong. Try again.'));
     if (reply) {
-      answer.mutate({ id: start.replyTo!, cc: ccList, body: body.text.trim(), bodyHtml: body.html }, { onSuccess: done, onError: fail });
+      answer.mutate(
+        { id: start.replyTo!, mode, to: forward ? forwardTo : [], cc: ccList, body: body.text.trim(), bodyHtml: body.html },
+        { onSuccess: done, onError: fail },
+      );
     } else {
       compose.mutate(
         {
@@ -182,7 +191,7 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
   const pending = compose.isPending || answer.isPending;
   return (
     <Modal
-      title={reply ? t('Reply') : t('Compose email')}
+      title={reply ? { reply: t('Reply'), replyAll: t('Reply all'), forward: t('Forward') }[mode] : t('Compose email')}
       onClose={onClose}
       focusDialog
       actions={
@@ -252,8 +261,10 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
             id="cm-to"
             className="in"
             value={toValue}
-            readOnly={reply}
-            placeholder={companyId ? t('no email on the lead contact') : t('choose a client or type an address')}
+            readOnly={reply && !forward}
+            required={forward}
+            aria-required={forward || undefined}
+            placeholder={forward ? undefined : companyId ? t('no email on the lead contact') : t('choose a client or type an address')}
             onChange={(e) => {
               setToTouched(true);
               setTo(e.target.value);

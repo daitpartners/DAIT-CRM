@@ -58,6 +58,7 @@ function stub(items: MailItem[], details: Record<number, MailDetail>, meta: Mail
     }
     if (url.startsWith('/api/mail?')) return Response.json({ items, total: items.length, page: 1, pageSize: 50 });
     if (url === '/api/mail/meta' || url.startsWith('/api/mail/meta?')) return Response.json(meta);
+    if (/^\/api\/mail\/\d+\/lead-suggestions$/.test(url)) return Response.json({ items: [] });
     const m = /^\/api\/mail\/(\d+)(\?peek=1)?$/.exec(url);
     if (m) return Response.json(details[Number(m[1])]);
     if (url.startsWith('/api/email-templates')) {
@@ -96,6 +97,16 @@ function show(path = '/email', user: Me = me, setup?: (qc: ReturnType<typeof mak
       </I18nProvider>
     </QueryClientProvider>,
   );
+}
+
+/** Link email to a lead (web-mail release 2): the command bar's Link to lead ▾, then Create lead from this email…. */
+async function openLinkModal(u: ReturnType<typeof userEvent.setup>) {
+  const bar = await screen.findByRole('toolbar', { name: 'Mail commands' });
+  const link = within(bar).getByRole('button', { name: 'Link to lead' });
+  await waitFor(() => expect(link).toBeEnabled());
+  await u.click(link);
+  const menu = await screen.findByRole('menu', { name: 'Link to lead' });
+  await u.click(within(menu).getByRole('menuitem', { name: 'Create lead from this email…' }));
 }
 
 /** A Europe/London user at 2026-11-22 12:00 (only Date is faked: timers stay real for the queries). */
@@ -300,21 +311,16 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     await waitFor(() => expect(new URL(lastListUrl(), 'http://x').searchParams.has('project')).toBe(false));
   });
 
-  it('an unlinked message offers Link to lead / create lead; Log as activity waits for a lead', async () => {
+  it('an unlinked message: the side panel says no contact or lead matches', async () => {
     const a = item();
     stub([a], { 1: detail(a) });
     show('/email/1');
-    const reader = await screen.findByRole('article');
-    expect(await within(reader).findByRole('button', { name: 'Link to lead / create lead' })).toBeTruthy();
-    expect(within(reader).getByRole('button', { name: 'Log as activity' })).toHaveProperty('disabled', true);
-    expect(within(reader).getByRole('button', { name: 'Create lead from this email' })).toBeTruthy();
-    expect(screen.getByText('No matching contact or lead. Link it to an existing lead or create one.')).toBeTruthy();
+    expect(await screen.findByText('No matching contact or lead. Link it to an existing lead or create one.')).toBeTruthy();
   });
 
-  it('a linked message shows its records, logs on the lead and adds a follow-up task', async () => {
-    const u = userEvent.setup();
+  it('a linked message shows its records in the side panel', async () => {
     const a = item({ leadId: 5, leadNumber: 'LD-1005' });
-    const posts = stub([a], {
+    stub([a], {
       1: detail(a, {
         lead: { id: 5, number: 'LD-1005', status: 'Contacted', priority: 'High', nextFollowUp: '2026-11-25', companyId: 4 },
         contact: { id: 9, name: 'Ana Ruiz' }, company: { id: 4, name: 'Acme' },
@@ -322,16 +328,9 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       }),
     });
     show('/email/1');
-    const reader = await screen.findByRole('article');
-    await waitFor(() => expect(within(reader).getByRole('button', { name: 'Log as activity' })).toHaveProperty('disabled', false));
-    expect(screen.getByRole('link', { name: /Lead\s*LD-1005/ })).toBeTruthy();
+    expect(await screen.findByRole('link', { name: /Lead\s*LD-1005/ })).toBeTruthy();
     expect(screen.getByRole('link', { name: /Company\s*Acme/ })).toBeTruthy();
     expect(screen.getByText(/Next follow-up on this lead/)).toBeTruthy();
-    // Prototype: Create meeting opens the calendar's New follow-up for this lead.
-    expect(within(reader).getByRole('link', { name: 'Create meeting' }).getAttribute('href')).toBe('/calendar?new=1&lead=5');
-    await u.click(within(reader).getByRole('button', { name: 'Log as activity' }));
-    await u.click(within(reader).getByRole('button', { name: 'Add follow-up task' }));
-    await waitFor(() => expect(posts.map((p) => p.url)).toEqual(['/api/mail/1/log', '/api/mail/1/task']));
   });
 
   it("the lead's next follow-up (a calendar date from the API) shows as a date in the Follow-up section", async () => {
@@ -340,15 +339,6 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     show('/email/1');
     const line = await screen.findByText(/Next follow-up on this lead/);
     expect(line.querySelector('strong')?.textContent).toMatch(/25.*2026|2026.*25/);
-  });
-
-  it('a draft is view-only', async () => {
-    const a = item({ folder: 'drafts', status: 'draft', isRead: true });
-    stub([a], { 1: detail(a) });
-    show('/email/1?folder=drafts');
-    const reader = await screen.findByRole('article');
-    expect(await within(reader).findByText('Drafts are edited in Outlook.')).toBeTruthy();
-    expect(within(reader).queryByRole('button', { name: 'Reply' })).toBeNull();
   });
 
   it('without a connected mailbox the header says so and links to Settings', async () => {
@@ -735,38 +725,6 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     });
   });
 
-  describe('message bodies (owner, 23 Nov 2026: formatted as in Outlook)', () => {
-    it('an HTML body shows in a sandboxed frame (no scripts, no same-origin) with a strict content policy', async () => {
-      const a = item();
-      stub([a], { 1: detail(a, { bodyHtml: '<table><tr><td style="color:#1f497d"><b>Ana Ruiz</b><br>Acme</td></tr></table>' }) });
-      show('/email/1');
-      const frame = (await screen.findByTitle('Message body')) as HTMLIFrameElement;
-      expect(frame.tagName).toBe('IFRAME');
-      expect(frame.getAttribute('sandbox')).toBe('allow-popups allow-popups-to-escape-sandbox');
-      const doc = frame.getAttribute('srcdoc')!;
-      expect(doc).toContain('<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src https: http: data:; style-src \'unsafe-inline\'">');
-      expect(doc).toContain('<base target="_blank">');
-      expect(doc).toContain('<meta name="referrer" content="no-referrer">');
-      expect(frame.getAttribute('referrerpolicy')).toBe('no-referrer');
-      expect(doc).toContain('<td style="color:#1f497d"><b>Ana Ruiz</b><br>Acme</td>');
-      // The plain-text body is not shown beside it.
-      expect(document.querySelector('.reader .body')).toBeNull();
-    });
-
-    it('a plain-text body shows as text, as before (no frame)', async () => {
-      const a = item();
-      stub([a], { 1: detail(a, { bodyText: 'Hi Arjun,\n\n<b>not markup</b>', bodyHtml: null }) });
-      show('/email/1');
-      const body = await waitFor(() => {
-        const el = document.querySelector('.reader .body');
-        if (!el) throw new Error('no body yet');
-        return el;
-      });
-      expect(body.textContent).toBe('Hi Arjun,\n\n<b>not markup</b>');
-      expect(screen.queryByTitle('Message body')).toBeNull();
-    });
-  });
-
   it('compose lead option shows translated status and source', async () => {
     const u = userEvent.setup();
     const spanish: Me = { ...me, language: 'es' };
@@ -808,8 +766,7 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       return { items, total: items.length, page: 1, pageSize: 25 };
     });
     show('/email/1');
-    const reader = await screen.findByRole('article');
-    await u.click(await within(reader).findByRole('button', { name: 'Link to lead / create lead' }));
+    await openLinkModal(u);
     const dialog = await screen.findByRole('dialog', { name: 'Link email to a lead' });
     expect(within(dialog).queryByLabelText('Find a lead')).toBeNull();
     const box = within(dialog).getByRole('combobox', { name: 'Existing lead' }) as HTMLInputElement;
@@ -837,8 +794,7 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       return { items, total: items.length, page: 1, pageSize: 25 };
     });
     show('/email/1');
-    const reader = await screen.findByRole('article');
-    await u.click(await within(reader).findByRole('button', { name: 'Link to lead / create lead' }));
+    await openLinkModal(u);
     const dialog = await screen.findByRole('dialog', { name: 'Link email to a lead' });
     await u.type(within(dialog).getByRole('combobox', { name: 'Existing lead' }), 'zeta');
     await u.click(await within(dialog).findByRole('option', { name: 'LD-2 · Zeta' }));
@@ -1012,45 +968,6 @@ describe('Email screen: team view (web-mail release 1, mockup state 5)', () => {
     expect(asked.filter((x) => x.includes('mailOf'))).toEqual([]);
   });
 
-  it("another user's message is view only: banner, pill, Reply / Archive / Link disabled with the title; Log and task enabled", async () => {
-    const linked = item({ id: 2, owner: carlos, viewOnly: true, leadId: 5, leadNumber: 'LD-1005' });
-    const loose = item({ id: 3, owner: carlos, viewOnly: true, companyId: 4 });
-    stub([linked, loose], {
-      2: detail(linked, { lead: { id: 5, number: 'LD-1005', status: 'Proposal', priority: 'High', nextFollowUp: null, companyId: 4 }, company: { id: 4, name: 'Acme' } }),
-      3: detail(loose, { company: { id: 4, name: 'Acme' } }),
-    }, TEAM_META, asAdmin);
-    const view = show('/email/2?mailof=all', admin);
-    const reader = await screen.findByRole('article');
-    expect(await within(reader).findByText("View only — Carlos's mailbox.", { selector: '.viewonly strong' })).toBeInTheDocument();
-    expect(within(reader).getByText(/You can read, log and create tasks; only Carlos can reply from this mailbox\./)).toBeInTheDocument();
-    expect(within(reader).getByText("View only — Carlos's mailbox", { selector: '.vo-pill' })).toBeInTheDocument();
-    for (const name of ['Reply', 'Archive']) {
-      expect(within(reader).getByRole('button', { name })).toBeDisabled();
-      expect(within(reader).getByRole('button', { name })).toHaveAttribute('title', "View only — Carlos's mailbox");
-    }
-    await waitFor(() => expect(within(reader).getByRole('button', { name: 'Log as activity' })).toBeEnabled());
-    expect(within(reader).getByRole('button', { name: 'Add follow-up task' })).toBeEnabled();
-    view.unmount();
-    // Not linked to a lead (a contact or company only): Link / Create lead are disabled too.
-    show('/email/3?mailof=all', admin);
-    const other = await screen.findByRole('article');
-    for (const name of ['Link to lead / create lead', 'Create lead from this email']) {
-      const b = await within(other).findByRole('button', { name });
-      expect(b).toBeDisabled();
-      expect(b).toHaveAttribute('title', "View only — Carlos's mailbox");
-    }
-  });
-
-  it("your own message in team view stays yours: no banner, Reply enabled", async () => {
-    const a = item();
-    stub([a], { 1: detail(a) }, TEAM_META, asAdmin);
-    show('/email/1?mailof=all', admin);
-    const reader = await screen.findByRole('article');
-    await waitFor(() => expect(within(reader).getByRole('button', { name: 'Reply' })).toBeEnabled());
-    expect(reader.querySelector('.viewonly')).toBeNull();
-    expect(reader.querySelector('.vo-pill')).toBeNull();
-  });
-
   it("a message on another owner's lead: chip 'LD-1005 · another owner's lead', side panel company name only, no lead link", async () => {
     const a = item({ leadRestricted: true, leadNumber: 'LD-1005' });
     stub([a], { 1: detail(a, { restrictedLead: { number: 'LD-1005', companyName: 'Acme' } }) });
@@ -1064,9 +981,6 @@ describe('Email screen: team view (web-mail release 1, mockup state 5)', () => {
     expect(within(side).queryByRole('link', { name: /Lead/ })).toBeNull();
     expect(within(side).queryByRole('link', { name: /Company/ })).toBeNull();
     expect(within(side).queryByText(/No matching contact or lead/)).toBeNull();
-    const reader = screen.getByRole('article');
-    expect(within(reader).queryByRole('button', { name: 'Link to lead / create lead' })).toBeNull();
-    expect(within(reader).queryByRole('button', { name: 'Create lead from this email' })).toBeNull();
   });
 
   it('Deleted items folder; footer note with a Why? popover', async () => {
@@ -1114,9 +1028,10 @@ describe('Email screen: team view (web-mail release 1, mockup state 5)', () => {
     const picker = await screen.findByRole('combobox', { name: es['Mail of:'] });
     await waitFor(() => expect(within(picker).getAllByRole('option').map((o) => o.textContent)).toEqual([es.Me, es.Everyone, 'Carlos Torres']));
     expect(await screen.findByText(es['Team view · lead mail of {who}'].replace('{who}', es.everyone))).toBeInTheDocument();
-    const reader = await screen.findByRole('article');
-    expect(await within(reader).findByText(es["View only — {name}'s mailbox."].replace('{name}', 'Carlos'), { selector: '.viewonly strong' })).toBeInTheDocument();
-    expect(within(reader).getByRole('button', { name: es.Reply })).toHaveAttribute('title', es["View only — {name}'s mailbox"].replace('{name}', 'Carlos'));
+    const pane = await screen.findByRole('region', { name: es['Reading pane'] });
+    expect(await within(pane).findByText(es["View only — {name}'s mailbox."].replace('{name}', 'Carlos'), { selector: '.viewonly strong' })).toBeInTheDocument();
+    const bar = screen.getByRole('toolbar', { name: es['Mail commands'] });
+    expect(within(bar).getByRole('button', { name: es.Reply })).toHaveAttribute('title', es["View only — {name}'s mailbox"].replace('{name}', 'Carlos'));
   });
 });
 

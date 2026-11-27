@@ -9,7 +9,8 @@ import { ComposeModal, type ComposeStart } from './ComposeModal';
 import { FolderPane, viewLabel } from './FolderPane';
 import { MailTopBar, type MailSearch } from './MailTopBar';
 import { MessageList } from './MessageList';
-import { Reader } from './Reader';
+import { MailSide } from './MailSide';
+import { ReadingPane } from './ReadingPane';
 import { CommandBar } from './CommandBar';
 import { rowTarget, useMailCommands, type MailTarget } from './useMailCommands';
 
@@ -73,9 +74,12 @@ export function EmailPage() {
   const [compose, setCompose] = useState<ComposeStart | null>(null);
 
   const selectedId = num(id ?? null) ?? items[0]?.id ?? null;
-  // The message opened from a link (the Reader's own query): a list answered before the open marked it read
+  // The message opened from a link (the reading pane's own query): a list answered before the open marked it read
   // still shows its row as read.
   const { data: opened } = useMailMessage(num(id ?? null) ?? null);
+  // The reading pane's message (its own query, shared): the side panel shows its linked records.
+  const peek = num(id ?? null) === undefined;
+  const { data: shown } = useMailMessage(selectedId, peek);
   const mailbox = meta?.mailbox ?? null;
   const connected = mailbox?.status === 'connected';
 
@@ -214,15 +218,12 @@ export function EmailPage() {
         />
 
         {selectedId !== null ? (
-          <Reader
-            id={selectedId}
-            peek={num(id ?? null) === undefined}
-            connected={connected}
-            onReply={(start) => setCompose(start)}
-            onArchived={() => navigate(href({}, false))}
-          />
+          <>
+            <ReadingPane key={selectedId} id={selectedId} peek={peek} teamView={teamView} commands={commands} />
+            {shown && shown.id === selectedId ? <MailSide m={shown} /> : null}
+          </>
         ) : (
-          <div className="reader empty">{t('Select a message.')}</div>
+          <section className="rpane empty" aria-label={t('Reading pane')}>{t('Select a message.')}</section>
         )}
       </div>
 
