@@ -10,7 +10,8 @@ import { errorText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
 
 type Props = {
-  message: MailDetail;
+  /** The message to link (only its id is used: the list's right-click menu opens this too). */
+  message: Pick<MailDetail, 'id'>;
   onClose: () => void;
   onLinked: (leadNumber: string) => void;
   onCreated: (leadId: number) => void;

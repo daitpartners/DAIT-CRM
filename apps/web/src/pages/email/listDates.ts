@@ -44,6 +44,11 @@ export function rowTime(iso: string, timezone: string, language: string, now: Da
     if (group === 'today') return time;
     return `${cap(new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(-1, 'day'))} ${time}`;
   }
+  return weekdayDayMonth(at, timezone, locale);
+}
+
+/** `Fri 20 Nov` (in `locale`) of the instant `at` in `timezone` (UTC for an unknown zone). */
+function weekdayDayMonth(at: Date, timezone: string, locale: string): string {
   let parts: Intl.DateTimeFormatPart[];
   try {
     parts = new Intl.DateTimeFormat(locale, { timeZone: timezone, weekday: 'short', day: 'numeric', month: 'short' }).formatToParts(at);
@@ -52,4 +57,9 @@ export function rowTime(iso: string, timezone: string, language: string, now: Da
   }
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? '';
   return `${cap(noDot(part('weekday')))} ${part('day')} ${noDot(part('month'))}`;
+}
+
+/** A calendar day (`YYYY-MM-DD`) as the Flag menu shows its due day: `Thu 26 Nov`, in `language`. */
+export function dayLabel(day: string, language: string): string {
+  return weekdayDayMonth(new Date(`${day}T12:00:00Z`), 'UTC', LOCALES[language] ?? LOCALES.en!);
 }

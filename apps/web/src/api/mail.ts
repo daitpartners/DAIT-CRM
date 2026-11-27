@@ -396,15 +396,23 @@ const fields = (p: Patch): Partial<Changeable> => {
   return rest;
 };
 
+/** Whether a list of `f` still holds a message after patch `p` (a flag cleared or completed leaves Flagged, as in Outlook). */
+function listHolds(f: MailFilter | undefined, p: Patch): boolean {
+  if (p.removed) return false;
+  if (p.folder !== undefined && !viewHolds(f?.view ?? 'inbox', p.folder)) return false;
+  const flaggedOnly = f?.view === 'flagged' || f?.chip === 'flagged';
+  return !(flaggedOnly && p.flagStatus !== undefined && p.flagStatus !== 'flagged');
+}
+
 /**
  * `patchOf` applied to every cached list batch and open message: a move or delete drops the row from lists whose view
- * no longer holds it (the first batch's `total` follows); read and flag change it in place. `patchOf` answers null for
- * a message the change does not touch.
+ * no longer holds it, and a cleared or completed flag from Flagged lists (the first batch's `total` follows); read and
+ * flag change it in place otherwise. `patchOf` answers null for a message the change does not touch.
  */
 function applyPatches(qc: QueryClient, patchOf: (m: Pick<MailItem, 'id' | 'folder'>) => Patch | null) {
   for (const [key, data] of qc.getQueriesData<ListCache>({ queryKey: [...ROOT, 'list'] })) {
     if (!data) continue;
-    const view = (key[2] as MailFilter | undefined)?.view ?? 'inbox';
+    const filter = key[2] as MailFilter | undefined;
     let dropped = 0;
     let touched = false;
     const pages = data.pages.map((page) => ({
@@ -413,7 +421,7 @@ function applyPatches(qc: QueryClient, patchOf: (m: Pick<MailItem, 'id' | 'folde
         const p = patchOf(m);
         if (!p) return [m];
         touched = true;
-        if (p.removed || (p.folder !== undefined && !viewHolds(view, p.folder))) {
+        if (!listHolds(filter, p)) {
           dropped += 1;
           return [];
         }
@@ -514,10 +522,21 @@ function useOptimisticMail() {
       const byId = new Map(done.map((c) => [c.id, fromServer(c)]));
       applyPatches(qc, (m) => byId.get(m.id) ?? null);
     },
-    /** Counts on the folders and the sidebar badge. */
-    settle() {
+    /**
+     * Counts on the folders and the sidebar badge; after a move or delete, the lists of the folder the messages went to
+     * are marked stale, so that folder shows them when opened (loaded again then, not now).
+     */
+    settle(change: MailChange) {
       void qc.invalidateQueries({ queryKey: [...ROOT, 'meta'] });
       void qc.invalidateQueries({ queryKey: keys.navCounts });
+      const to = change.type === 'move' ? change.folder : change.type === 'delete' ? 'deleted' : null;
+      if (to) {
+        void qc.invalidateQueries({
+          queryKey: [...ROOT, 'list'],
+          predicate: (q) => viewHolds((q.queryKey[2] as MailFilter | undefined)?.view ?? 'inbox', to),
+          refetchType: 'none',
+        });
+      }
     },
   };
 }
@@ -545,7 +564,7 @@ export function useMailChange() {
       if (snapshot) optimistic.restore(snapshot, [v.id]);
       failed(err);
     },
-    onSettled: () => optimistic.settle(),
+    onSettled: (_r, _e, v) => optimistic.settle(v.change),
   });
 }
 
@@ -573,7 +592,7 @@ export function useBulkMailChange() {
       if (snapshot) optimistic.restore(snapshot, v.ids);
       failed(err);
     },
-    onSettled: () => optimistic.settle(),
+    onSettled: (_r, _e, v) => optimistic.settle(v.change),
   });
 }
 

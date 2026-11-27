@@ -357,7 +357,7 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     expect(await screen.findByText('Mailbox not connected')).toBeTruthy();
     expect(await screen.findByText('Connect your mailbox to send and receive from the CRM.')).toBeTruthy();
     for (const link of screen.getAllByRole('link', { name: 'Connect Microsoft 365' })) expect(link.getAttribute('href')).toBe('/settings/connections');
-    expect(await screen.findByText('Nothing here.')).toBeTruthy();
+    expect(await screen.findByText('No lead mail matches this filter.')).toBeTruthy();
   });
 
   it('list row shows time of day for today', async () => {
@@ -369,10 +369,10 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     ], { 1: detail(item({ id: 1 })) }, META, (url) => (url === '/api/me' ? london : undefined));
     show('/email', london);
     const list = screen.getByRole('region', { name: 'Message list' });
-    // Prototype row: rel(e.at).replace(/, /, ' ').
-    expect(await within(list).findByText('Today 09:05')).toBeTruthy();
+    // Web-mail release 2 (mockup rows): 24-hour time today, "Yesterday 17:00", then the weekday and date.
+    expect(await within(list).findByText('09:05')).toBeTruthy();
     expect(within(list).getByText('Yesterday 17:00')).toBeTruthy();
-    expect(within(list).getByText('01/11/2026 08:00')).toBeTruthy();
+    expect(within(list).getByText('Sun 1 Nov')).toBeTruthy();
   });
 
   it('list row days and times follow the user time zone (Asia/Kolkata, UTC+5:30)', async () => {
@@ -388,8 +388,8 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     ], { 1: detail(item({ id: 1 })) }, META, (url) => (url === '/api/me' ? kolkata : undefined));
     show('/email', kolkata);
     const list = screen.getByRole('region', { name: 'Message list' });
-    expect(await within(list).findByText('Today 20:00')).toBeTruthy();
-    expect(within(list).getByText('Today 00:30')).toBeTruthy();
+    expect(await within(list).findByText('20:00')).toBeTruthy();
+    expect(within(list).getByText('00:30')).toBeTruthy();
     expect(within(list).getByText('Yesterday 01:30')).toBeTruthy();
   });
 
@@ -415,7 +415,7 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     });
     show('/email/7');
     const list = screen.getByRole('region', { name: 'Message list' });
-    const row = (await within(list).findByText('Unread one')).closest('a')!;
+    const row = (await within(list).findByText('Unread one')).closest('.mrow')!;
     expect(row.className).not.toMatch(/\bunread\b/);
   });
 
@@ -435,9 +435,9 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     });
     show();
     const list = screen.getByRole('region', { name: 'Message list' });
-    const row = (await within(list).findByText('Unread one')).closest('a')!;
+    const row = (await within(list).findByText('Unread one')).closest('.mrow')!;
     expect(row.className).toMatch(/\bunread\b/);
-    await u.click(row);
+    await u.click(row.querySelector('a')!);
     await waitFor(() => expect(row.className).not.toMatch(/\bunread\b/));
     const folders = screen.getByRole('navigation', { name: 'Mail folders' });
     await waitFor(() => expect(within(folders).getByRole('link', { name: /Inbox\s*2/ })).toBeTruthy());
@@ -493,7 +493,7 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       show();
       const list = screen.getByRole('region', { name: 'Message list' });
       expect(await within(list).findByText('Message 1')).toBeTruthy();
-      expect(within(list).getByText(/Inbox/).parentElement!.textContent).toMatch(/Inbox · 120 messages/);
+      expect(within(list).getByRole('heading', { level: 2 }).parentElement!.textContent).toMatch(/^Inbox3 unread/);
       expect(within(list).queryByRole('navigation', { name: 'Pagination' })).toBeNull();
       expect(within(list).queryByRole('combobox')).toBeNull();
       expect(lists.at(-1)!.get('pageSize')).toBe('50');
@@ -504,10 +504,10 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       expect(await within(list).findByText('Message 51')).toBeTruthy();
       expect(lists.at(-1)!.get('page')).toBe('2');
       expect(within(list).getByText('Message 1')).toBeTruthy();
-      expect(list.querySelectorAll('a.msg')).toHaveLength(100);
+      expect(list.querySelectorAll('.mrow')).toHaveLength(100);
       w.reach();
       expect(await within(list).findByText('Message 120')).toBeTruthy();
-      expect(list.querySelectorAll('a.msg')).toHaveLength(120);
+      expect(list.querySelectorAll('.mrow')).toHaveLength(120);
       // Everything is loaded: no Loading… row, nothing watched.
       await waitFor(() => expect(within(list).queryByRole('status')).toBeNull());
       expect(w.live()).toHaveLength(0);
@@ -547,9 +547,9 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       const list = screen.getByRole('region', { name: 'Message list' });
       expect(await within(list).findByText('Message 1')).toBeTruthy();
       w.reach();
-      const row = (await within(list).findByText('Message 56')).closest('a')!;
+      const row = (await within(list).findByText('Message 56')).closest('.mrow')!;
       expect(row.className).toMatch(/\bunread\b/);
-      await u.click(row);
+      await u.click(row.querySelector('a')!);
       await waitFor(() => expect(row.className).not.toMatch(/\bunread\b/));
     });
 
@@ -588,7 +588,7 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       w.reach();
       expect(await within(list).findByText('Message 51')).toBeTruthy();
       expect(lists.at(-1)!.get('count')).toBe('0');
-      expect(within(list).getByText(/Inbox/).parentElement!.textContent).toMatch(/Inbox · 120 messages/);
+      expect(within(list).getByRole('heading', { level: 2 }).parentElement!.textContent).toMatch(/^Inbox3 unread/);
     });
 
     it('the periodic refresh asks for the first batch only and merges it: new mail on top, the loaded rows kept', async () => {
@@ -621,8 +621,8 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       // Rows from the second batch are still there (51–100), Message 51 included, and the open message stays selected.
       expect(within(list).getByText('Message 51')).toBeTruthy();
       expect(within(list).getByText('Message 100')).toBeTruthy();
-      expect(list.querySelectorAll('a.msg')).toHaveLength(100);
-      expect(within(list).getByText(/Inbox/).parentElement!.textContent).toMatch(/Inbox · 120 messages/);
+      expect(list.querySelectorAll('.mrow')).toHaveLength(100);
+      expect(within(list).getByRole('heading', { level: 2 }).parentElement!.textContent).toMatch(/^Inbox3 unread/);
       expect(within(list).getByText('Message 1').closest('a')!.getAttribute('aria-current')).toBe('true');
     });
 
@@ -644,7 +644,7 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       await waitFor(() => expect(w.live()).toHaveLength(1));
       w.reach();
       expect(await within(list).findByText('Message 100')).toBeTruthy();
-      expect(list.querySelectorAll('a.msg')).toHaveLength(100);
+      expect(list.querySelectorAll('.mrow')).toHaveLength(100);
     });
 
     it('the refresh is skipped while a batch is loading, and merges on the next tick', async () => {
@@ -718,20 +718,20 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
       expect(w.live()).toHaveLength(1);
     });
 
-    it('a short list: the total in words, no Loading… row; an empty one says so', async () => {
-      const a = item();
+    it('a short list: the total in words outside the Inbox (which shows its unread count), no Loading… row; an empty one says so', async () => {
+      const a = item({ folder: 'sent', status: 'sent' });
       stub([a], { 1: detail(a) });
       watcher();
-      const { unmount } = show();
+      const { unmount } = show('/email?folder=sent');
       const list = screen.getByRole('region', { name: 'Message list' });
-      expect(await within(list).findByText('Proposal', { selector: '.sub' })).toBeTruthy();
-      expect(within(list).getByText(/Inbox/).parentElement!.textContent).toMatch(/Inbox · 1 message$/);
+      expect(await within(list).findByText('Proposal', { selector: '.rsubj' })).toBeTruthy();
+      expect(within(list).getByRole('heading', { level: 2 }).parentElement!.textContent).toMatch(/^Sent items1 message/);
       expect(within(list).queryByRole('status')).toBeNull();
       unmount();
       stub([], {});
-      show();
-      expect(await screen.findByText('Nothing here.')).toBeTruthy();
-      expect(screen.getByRole('region', { name: 'Message list' }).querySelector('.msglist-head')!.textContent).toMatch(/Inbox · 0 messages/);
+      show('/email?folder=sent');
+      expect(await screen.findByText('No lead mail matches this filter.')).toBeTruthy();
+      expect(screen.getByRole('region', { name: 'Message list' }).querySelector('.ml-head')!.textContent).toMatch(/^Sent items0 messages/);
     });
   });
 

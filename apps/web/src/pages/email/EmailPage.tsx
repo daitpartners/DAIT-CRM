@@ -1,19 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { MAIL_CHIPS, MAIL_SORTS, MAIL_VIEWS, useMailList, useMailMessage, useMailMeta, type ListSort, type MailChip, type MailFilter, type MailItem, type MailView } from '../../api/mail';
+import { MAIL_CHIPS, MAIL_SORTS, MAIL_VIEWS, useMailList, useMailMessage, useMailMeta, type ListSort, type MailChip, type MailFilter } from '../../api/mail';
 import { clientName } from '../../api/companies';
 import { useCurrentUser } from '../../api/useCurrentUser';
-import { useFormatDate } from '../../hooks/useFormatDate';
 import { useStoredFlag } from '../../hooks/useStoredFlag';
-import { firstName, initials } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
 import { ComposeModal, type ComposeStart } from './ComposeModal';
 import { FolderPane, viewLabel } from './FolderPane';
 import { MailTopBar, type MailSearch } from './MailTopBar';
+import { MessageList } from './MessageList';
 import { Reader } from './Reader';
-
-/** Where the Email screen fits the window and the list scrolls in its own column (app.css). */
-const WIDE = '(min-width:1100px)';
+import { useMailCommands } from './useMailCommands';
 
 const num = (v: string | null) => (v && /^\d+$/.test(v) ? Number(v) : undefined);
 const oneOf = <T extends string>(list: readonly T[], v: string | null): T | undefined => ((list as readonly string[]).includes(v ?? '') ? (v as T) : undefined);
@@ -70,45 +67,9 @@ export function EmailPage() {
   const filter = filterFrom(params, mailOf);
   const view = filter.view;
   const { data: meta } = useMailMeta(mailOf);
-  const { items, total, isLoading, hasNextPage, isFetchingNextPage, isPlaceholderData, fetchNextPage } = useMailList(filter);
+  const list = useMailList(filter);
+  const { items } = list;
   const [compose, setCompose] = useState<ComposeStart | null>(null);
-  const rowsRef = useRef<HTMLDivElement>(null);
-  const moreRef = useRef<HTMLDivElement>(null);
-
-  // Another folder, filter or search starts at the top of the list (on desktop its rows scroll inside their column).
-  const listKey = JSON.stringify(filter);
-  useEffect(() => {
-    if (rowsRef.current) rowsRef.current.scrollTop = 0;
-  }, [listKey]);
-
-  // Desktop or not (the 1100 px breakpoint where the rows start scrolling in their own column), followed on resize.
-  const [wide, setWide] = useState(() => window.matchMedia?.(WIDE).matches ?? false);
-  useEffect(() => {
-    const media = window.matchMedia?.(WIDE);
-    if (!media) return;
-    const change = () => setWide(media.matches);
-    media.addEventListener('change', change);
-    return () => media.removeEventListener('change', change);
-  }, []);
-
-  /**
-   * The next batch loads when the list's foot comes near: within the rows' own column on desktop (owner, 23 Nov 2026:
-   * the screen fits the window), within the window where the page itself scrolls (chosen again when the window crosses
-   * the breakpoint). Watching again after each batch keeps loading while the foot is still in view (a tall screen).
-   * Nothing is watched while the previous filter's rows stand in for the new ones, so its first batch is asked once.
-   */
-  const loaded = items.length;
-  useEffect(() => {
-    const foot = moreRef.current;
-    if (!foot || !hasNextPage || isFetchingNextPage || isPlaceholderData || typeof IntersectionObserver === 'undefined') return;
-    const rows = rowsRef.current;
-    const root = rows && getComputedStyle(rows).overflowY !== 'visible' ? rows : null;
-    const watch = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) void fetchNextPage();
-    }, { root, rootMargin: '0px 0px 300px 0px' });
-    watch.observe(foot);
-    return () => watch.disconnect();
-  }, [hasNextPage, isFetchingNextPage, isPlaceholderData, loaded, listKey, wide, fetchNextPage]);
 
   const selectedId = num(id ?? null) ?? items[0]?.id ?? null;
   // The message opened from a link (the Reader's own query): a list answered before the open marked it read
@@ -128,6 +89,17 @@ export function EmailPage() {
     return `/email${keepId && id ? `/${id}` : ''}${s ? `?${s}` : ''}`;
   };
   const setQuery = (change: Record<string, string | undefined>) => navigate(href(change));
+
+  // The screen's commands (rows, menus, the bulk bar); a message moved or deleted while open leaves the reading pane.
+  const commands = useMailCommands({
+    connected,
+    ownAddress: mailbox?.address ?? null,
+    onCompose: setCompose,
+    onGone: (ids) => {
+      const open = num(id ?? null);
+      if (open !== undefined && ids.includes(open)) navigate(href({}, false));
+    },
+  });
 
   /** The Filters panel's Search (and Clear filters): its fields and the search box go in the address. */
   const applySearch = (f: MailSearch) => {
@@ -211,38 +183,25 @@ export function EmailPage() {
           href={(change) => href(change)}
         />
 
-        <section className="msglist" aria-label={t('Message list')}>
-          <div className="msglist-head">
-            <strong>{viewLabel(t, view, teamView)}</strong> · {total === 1 ? t('1 message') : t('{n} messages', { n: total })}
-            {linked ? (
+        <MessageList
+          view={view}
+          teamView={teamView}
+          filter={filter}
+          unread={meta?.counts.inbox}
+          list={list}
+          selectedId={selectedId}
+          opened={opened}
+          rowHref={(rowId) => `/email/${rowId}${params.toString() ? `?${params.toString()}` : ''}`}
+          setQuery={setQuery}
+          commands={commands}
+          extra={linked ? (
+            <div className="ml-row3">
               <Link className="chip wm-linkchip" to={href({ company: undefined, lead: undefined, project: undefined })} title={t('Clear')}>
                 {chipName || t('Linked records')} ✕
               </Link>
-            ) : null}
-          </div>
-          {/* The rows scroll on their own on desktop. */}
-          <div className="msglist-rows" ref={rowsRef}>
-            {items.map((m) => (
-              <MessageRow
-                key={m.id}
-                m={opened?.id === m.id && opened.isRead ? { ...m, isRead: true } : m}
-                on={m.id === selectedId}
-                team={teamView}
-                to={`/email/${m.id}${params.toString() ? `?${params.toString()}` : ''}`}
-              />
-            ))}
-            {!isLoading && items.length === 0 ? (
-              <div className="empty">
-                {linked ? t('No messages for this filter in {folder}.', { folder: viewLabel(t, view, teamView) }) : t('Nothing here.')}
-              </div>
-            ) : null}
-            {hasNextPage ? (
-              <div className="msglist-more" ref={moreRef} role="status">
-                {t('Loading…')}
-              </div>
-            ) : null}
-          </div>
-        </section>
+            </div>
+          ) : null}
+        />
 
         {selectedId !== null ? (
           <Reader
@@ -257,41 +216,8 @@ export function EmailPage() {
         )}
       </div>
 
+      {commands.dialog}
       {compose ? <ComposeModal start={compose} connected={connected} from={mailbox?.address ?? null} onClose={() => setCompose(null)} /> : null}
     </div>
-  );
-}
-
-/** `team`: the team view, where each row shows whose mailbox it is in (mockup state 5). */
-function MessageRow({ m, on, to, team }: { m: MailItem; on: boolean; to: string; team: boolean }) {
-  const t = useT();
-  const { relative } = useFormatDate();
-  // Prototype list row: rel(e.at).replace(/, /, ' ') — "Today 09:05", no comma.
-  const outbound = m.status !== 'received';
-  const who = outbound ? t('To: {to}', { to: m.toAddresses.join(', ') }) : m.fromName || m.fromAddress;
-  return (
-    <Link className={`msg${on ? ' on' : ''}${m.isRead ? '' : ' unread'}`} to={to} aria-current={on ? 'true' : undefined}>
-      <span className="av" aria-hidden="true">{initials(m.fromName || m.fromAddress)}</span>
-      <span className="msg-main">
-        <span className="who">
-          <span className="msg-who">{who}</span> <span className="t">{relative(m.occurredAt).replace(', ', ' ')}</span>
-        </span>
-        <span className="sub">{m.subject || t('(no subject)')}</span>
-        <span className="pre">{m.preview}</span>
-        <span className="msg-tags">
-          {m.leadRestricted && m.leadNumber ? (
-            <span className="badge b-grey">{t("{lead} · another owner's lead", { lead: m.leadNumber })}</span>
-          ) : m.leadNumber ? (
-            <span className="badge b-purple">{m.leadNumber}</span>
-          ) : (
-            <span className="badge b-warn">{t('Unlinked · create lead?')}</span>
-          )}
-          {m.projectNumber ? <span className="badge b-ok">{m.projectNumber}</span> : null}
-          {m.status === 'failed' ? <span className="badge b-bad">{t('Failed')}</span> : null}
-          {m.status === 'queued' || m.status === 'sending' ? <span className="badge b-grey">{t('Sending')}</span> : null}
-          {team ? <span className="mail-mbx">{m.viewOnly ? t("{name}'s mailbox", { name: firstName(m.owner.name) }) : t('Your mailbox')}</span> : null}
-        </span>
-      </span>
-    </Link>
   );
 }

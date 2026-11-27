@@ -688,7 +688,7 @@ td.nowrap{white-space:nowrap}
 /* Email screen (web-mail release 2, mockup 2026-11-26-outlook-mail): the .wm root holds the top bar with the lead-mail
    search and its Filters panel, the command bar, and the panes (folder pane, message list, reading pane). The mockup's
    own sizes are variables on .wm; colours, fonts and components are the live CRM's. */
-.wm{--fp:196px;--ml:322px;--pane:#F7F4FC;display:flex;flex-direction:column;flex:1 1 auto;min-width:0}
+.wm{--fp:196px;--ml:322px;--pane:#F7F4FC;--row-hover:#F6F2FD;display:flex;flex-direction:column;flex:1 1 auto;min-width:0}
 @media (max-width:1360px){.wm{--fp:184px;--ml:300px}}
 .wm .ico{display:inline-flex;width:16px;height:16px;flex:0 0 auto}
 .wm .ico svg{width:100%;height:100%;display:block}
@@ -767,8 +767,6 @@ td.nowrap{white-space:nowrap}
 /* Message list and reading pane (release 2B-2; prototype .msglist, .msg, .reader, .mailside). */
 .mail-sec{color:var(--muted)}
 .msglist{flex:1 1 300px;max-width:400px;min-width:0;border-right:1px solid var(--line);background:var(--surface)}
-.msglist-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--muted)}
-.msglist-head strong{color:var(--text)}
 .wm-linkchip{height:26px;padding:0 10px;font-size:12px;font-weight:600;color:var(--text);max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wm-linkchip:hover{background:var(--tint);color:var(--text)}
 /* Owner request (23 Nov 2026): no page numbers; the next 50 load when the list is scrolled near this row. */
@@ -781,23 +779,10 @@ td.nowrap{white-space:nowrap}
   .wm-panes{flex:1 1 0;min-height:0;flex-wrap:nowrap}
   .reader,.mailside{overflow-y:auto;min-height:0}
   .msglist{display:flex;flex-direction:column;min-height:0}
-  .msglist-head{flex:none}
+  .wm .msglist{flex:0 0 var(--ml);max-width:none}
   .msglist-rows{flex:1 1 auto;min-height:0;overflow-y:auto}
   .reader{flex-shrink:1}
 }
-.msg{display:flex;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line-2);cursor:pointer;color:var(--text);width:100%;text-align:left;text-decoration:none}
-.msg.on{background:var(--tint)}
-/* The open (and hovered) row keeps its dark text, as the prototype's selected row (review #20). */
-.msg:hover,.msg.on{color:var(--text)}
-.msg.unread .who{font-weight:800}
-.msg .av{flex:0 0 auto}
-.msg-main{min-width:0;flex-grow:1}
-.msg .who{font-size:13px;font-weight:600;display:flex;justify-content:space-between;gap:8px}
-.msg-who{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.msg .sub{display:block;font-size:12.5px;margin-top:2px}
-.msg .pre{display:block;font-size:12px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.msg .t{font-size:11.5px;color:var(--muted);font-weight:500;white-space:nowrap}
-.msg-tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
 .reader{flex:999 1 420px;min-width:0;display:flex;flex-direction:column;background:var(--surface)}
 .reader.empty{align-items:center;justify-content:center}
 .reader-head{padding:18px 24px 14px;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start}
@@ -827,9 +812,100 @@ td.nowrap{white-space:nowrap}
 /* 761–1099 px (review M-5): folders, list and reader share the first row (the reader may narrow to 280 px) and
    Linked records takes its own row under them, instead of four squeezed columns. */
 @media (min-width:761px) and (max-width:1099.98px){.reader{flex-basis:280px}.msglist{max-width:none}.mailside{flex:1 1 100%;border-left:0;border-top:1px solid var(--line)}}
+/* Message list (web-mail release 2, mockup "Message list"): header with the view's name, Conversation view and sort,
+   the quick filter chips, the bulk bar, date groups, and rows in the stretched-link pattern (the row's link covers it;
+   the avatar's checkbox and the hover actions sit above). */
+.wm .ml-head{padding:10px 12px 8px 14px;border-bottom:1px solid var(--line-2);display:flex;flex-direction:column;gap:8px;flex:none}
+.wm .ml-row1{display:flex;align-items:center;gap:6px;min-width:0}
+.wm .ml-row1 h2{font-size:15px;font-weight:800;margin:0;white-space:nowrap;flex:none;color:var(--text)}
+.wm .ml-row1 .cnt-t{font-size:12px;color:var(--muted);font-weight:500;white-space:nowrap}
+/* At the mockup's list width the count does not fit beside the switch and the sort button (the mockup hides it there;
+   the folder pane still shows the Inbox's): it shows once the list is wider. */
+.wm .msglist{container-type:inline-size}
+@container (max-width:359.98px){.wm .ml-row1 .cnt-t{display:none}}
+.wm .ml-row1 .grow{flex:1}
+.wm .convsw{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);font-weight:500;white-space:nowrap;cursor:pointer}
+.wm .convsw input{appearance:none;width:28px;height:16px;border-radius:999px;background:var(--field);position:relative;margin:0;cursor:pointer;flex:none}
+.wm .convsw input::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:left .15s}
+.wm .convsw input:checked{background:#822CDB}
+.wm .convsw input:checked::after{left:14px}
+.wm .convsw input:focus-visible{outline:2px solid var(--purple);outline-offset:2px}
+.wm .sortbtn{display:inline-flex;align-items:center;gap:3px;border:0;background:none;font-size:12px;font-weight:600;color:var(--muted);padding:4px;border-radius:6px;white-space:nowrap}
+.wm .sortbtn:hover{background:var(--tint);color:var(--purple)}
+.wm .sortbtn .ico{width:12px;height:12px}
+.wm .ml-row2{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.wm .fchip{height:26px;padding:0 10px;border-radius:999px;border:1px solid var(--line);background:var(--surface);font-size:12px;font-weight:600;color:var(--body);white-space:nowrap}
+.wm .fchip:hover{border-color:var(--field);background:var(--pane)}
+.wm .fchip.on{background:var(--tint);border-color:var(--purple);color:#4B0A9A}
+.wm .ml-row3{display:flex;min-width:0}
+.wm .ml-bulk{flex-direction:row;flex-wrap:wrap;align-items:center;background:var(--tint);font-size:13px}
+.wm .ml-bulk strong{color:var(--text);white-space:nowrap}
+.wm .ml-bulk-acts{display:flex;flex-wrap:wrap;gap:4px}
+.wm .ml-bulk .btn{height:28px;padding:0 8px;font-size:12px;gap:5px}
+.wm .ml-bulk .btn .ico{width:14px;height:14px;color:var(--purple)}
+.wm .grp{display:flex;align-items:center;gap:6px;margin:0;padding:10px 14px 6px;font-size:12px;font-weight:700;color:var(--text);background:var(--surface);position:sticky;top:0;z-index:3}
+.wm .grp .ico{width:12px;height:12px;color:var(--muted)}
+.wm .mrow{display:grid;grid-template-columns:38px minmax(0,1fr);gap:0 8px;padding:9px 12px 9px 10px;border-bottom:1px solid var(--line-2);position:relative;user-select:none}
+.wm .mrow:hover,.wm .mrow.hov{background:var(--row-hover)}
+.wm .mrow.sel{background:var(--tint)}
+.wm .mrow.sel::after{content:"";position:absolute;inset:0;border:1px solid #C9B2F2;pointer-events:none}
+.wm .mrow.unread::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--purple)}
+.wm .mrow:has(.mrow-link:focus-visible){outline:2px solid var(--purple);outline-offset:-2px}
+.wm .mrow-link{display:block;min-width:0;color:var(--text);text-decoration:none}
+.wm .mrow-link:hover{color:var(--text)}
+.wm .mrow-link:focus-visible{outline:none}
+.wm .mrow-link::after{content:"";position:absolute;inset:0;z-index:1}
+.wm .avw{position:relative;width:32px;height:32px;margin-top:2px}
+.wm .mrow .av{width:32px;height:32px}
+.wm .mrow .ck{position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;border-radius:50%;background:var(--surface);border:1.5px solid var(--field);opacity:0}
+.wm .mrow:hover .ck,.wm .mrow.hov .ck,.wm .mrow.checked .ck,.wm .mrow.selecting .ck,.wm .mrow .ck:focus-within{opacity:1}
+.wm .mrow .ck input{appearance:none;width:16px;height:16px;border:1.5px solid var(--muted);border-radius:4px;margin:0;cursor:pointer;background:var(--surface)}
+.wm .mrow .ck input:checked{background:var(--purple);border-color:var(--purple);background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12l5 5 9-10'/></svg>");background-size:12px;background-position:center;background-repeat:no-repeat}
+.wm .mrow .ck input:focus-visible{outline:2px solid var(--purple);outline-offset:2px}
+.wm .ownr{position:absolute;right:-5px;bottom:-4px;width:17px;height:17px;border-radius:50%;font-size:8px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px var(--surface);background:var(--grey-bg);color:var(--grey-fg)}
+.wm .ownr.me{background:var(--peach);color:var(--ink)}
+.wm .rl1,.wm .rl2,.wm .rl4{display:flex;align-items:center;gap:6px;min-width:0}
+.wm .rl1{height:19px}
+.wm .rfrom{font-size:13.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+.wm .mrow.unread .rfrom{font-weight:700;color:var(--ink)}
+.wm .ricons{display:flex;align-items:center;gap:5px;color:var(--muted);flex:0 0 auto}
+.wm .ricons .ico{width:13px;height:13px}
+.wm .ricons .flag{color:var(--bad-fg)}
+.wm .rsubj{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;color:var(--text)}
+.wm .mrow.unread .rsubj{color:var(--purple);font-weight:600}
+.wm .rcount{flex:0 0 auto;font-size:11px;font-weight:600;color:var(--muted);background:var(--grey-bg);border-radius:999px;padding:0 6px;line-height:16px}
+.wm .rtime{flex:0 0 auto;font-size:11.5px;color:var(--muted);white-space:nowrap}
+.wm .mrow.unread .rtime{color:var(--purple);font-weight:600}
+.wm .rprev{display:block;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.wm .rl4{margin-top:5px;flex-wrap:wrap}
+.wm .rl4:empty{display:none}
+.wm .lchip{display:inline-flex;align-items:center;gap:5px;height:19px;padding:0 8px;border-radius:999px;background:var(--pane);border:1px solid var(--line);font-size:11px;font-weight:600;color:var(--body);white-space:nowrap}
+.wm .lchip i{width:6px;height:6px;border-radius:50%;background:var(--purple)}
+.wm .lchip.st-New i{background:var(--faint)}.wm .lchip.st-Contacted i{background:var(--purple)}.wm .lchip.st-Qualified i{background:var(--orange)}
+.wm .lchip.st-Proposal i{background:#B26A00}.wm .lchip.st-Negotiation i{background:#822CDB}.wm .lchip.st-Won i{background:#1E8A4C}
+.wm .mbx{font-size:11px;color:var(--muted);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.wm .hacts{position:absolute;right:8px;top:6px;display:none;gap:2px;background:inherit;padding-left:6px;z-index:2}
+.wm .mrow:hover .hacts,.wm .mrow.hov .hacts,.wm .mrow:focus-within .hacts{display:flex}
+.wm .mrow:hover .ricons,.wm .mrow.hov .ricons,.wm .mrow:focus-within .ricons{visibility:hidden}
+.wm .hacts button{width:26px;height:26px;border:0;border-radius:6px;background:var(--surface);color:var(--body);display:inline-flex;align-items:center;justify-content:center;padding:0;box-shadow:0 0 0 1px var(--line)}
+.wm .hacts button:hover:not(:disabled){color:var(--purple);background:var(--tint)}
+.wm .hacts button .ico{width:14px;height:14px}
+.wm .hacts button:disabled{opacity:.35;cursor:not-allowed}
+/* Menus (mockup "Menus"): dropdowns, the sort menu and the right-click menu, with submenus. */
+.wm .mm{position:fixed;z-index:90;min-width:200px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 34px rgba(31,2,73,.18);padding:6px;font-size:13px}
+.wm .mm .mi{display:flex;align-items:center;gap:10px;width:100%;border:0;background:none;padding:7px 10px;border-radius:6px;text-align:left;color:var(--text);font-size:13px;font-weight:400;white-space:nowrap;position:relative}
+.wm .mm .mi .ico{width:16px;height:16px;color:var(--purple)}
+.wm .mm .mi.crm .ico{color:var(--orange)}
+.wm .mm .mi:hover:not(:disabled),.wm .mm .mi.hl,.wm .mm .mi:focus-visible{background:var(--tint);outline:none}
+.wm .mm .mi .k{margin-left:auto;padding-left:18px;color:var(--faint);font-size:11.5px}
+.wm .mm .mi .sub-car{margin-left:auto;padding-left:18px;color:var(--muted)}
+.wm .mm .mi.danger,.wm .mm .mi.danger .ico{color:var(--bad-fg)}
+.wm .mm .mi:disabled{color:var(--faint);cursor:not-allowed}
+.wm .mm .mi:disabled .ico{color:var(--field)}
+.wm .mm .msep{height:1px;background:var(--line-2);margin:5px 4px}
+.wm .mm .mhd{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);padding:6px 10px 4px}
 /* Web-mail release 1 (mockup 2026-11-26-outlook-mail state 5): the team view's mailbox on each row and view only
    (banner and footer pill). */
-.mail-mbx{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;align-self:center}
 .viewonly{display:flex;align-items:center;gap:10px;margin:14px 24px 0;padding:9px 12px;border-radius:8px;background:var(--warn-bg);border:1px solid #F0C98A;color:var(--warn-fg);font-size:12.5px;font-weight:500}
 .viewonly svg{width:16px;height:16px;flex:none}
 .vo-pill{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 12px;border-radius:8px;background:var(--grey-bg);color:var(--grey-fg);font-size:12.5px;font-weight:600}

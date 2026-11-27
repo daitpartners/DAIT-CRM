@@ -29,16 +29,16 @@ async function fits(page: Page, width: number, height: number) {
   await expect(list.getByText('Fit check 1', { exact: true })).toBeVisible();
   // No page scroll: the document is the window's height.
   expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(height + 1);
-  // No pager: the header gives the total, the rows scroll on their own.
+  // No pager: the rows scroll on their own.
   await expect(list.getByRole('navigation', { name: 'Pagination' })).toHaveCount(0);
-  await expect(list.locator('.msglist-head')).toContainText('60 messages');
+  await expect(list.locator('.mrow')).toHaveCount(50);
   const rows = list.locator('.msglist-rows');
   expect(await rows.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
   await expect(list.getByText('Fit check 51', { exact: true })).toHaveCount(0);
   // Scrolled to its foot, the list loads the next batch under the first, in the same column.
   await rows.evaluate((el) => el.scrollTo(0, el.scrollHeight));
   await expect(list.getByText('Fit check 51', { exact: true })).toBeAttached();
-  await expect(list.locator('a.msg')).toHaveCount(60);
+  await expect(list.locator('.mrow')).toHaveCount(60);
   await expect(list.getByRole('status')).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(height + 1);
   expect(await page.evaluate(() => window.scrollY)).toBe(0);

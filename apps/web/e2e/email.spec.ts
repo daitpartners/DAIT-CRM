@@ -15,7 +15,9 @@ test('Email screen: read, log on the lead, add a task; team mail is view only fo
 
   const folders = page.getByRole('navigation', { name: 'Mail folders' });
   const list = page.getByRole('region', { name: 'Message list' });
-  await expect(list.getByRole('link', { name: /Website enquiry/ })).toContainText('Unlinked · create lead?');
+  // Web-mail release 2: an unlinked row no longer carries release 1's "Unlinked · create lead?" badge.
+  await expect(list.getByRole('link', { name: /Website enquiry/ })).toBeVisible();
+  await expect(list).not.toContainText('Unlinked · create lead?');
 
   // Open Orbit's reply: linked records, thread history, attachments; it is now read.
   await list.getByRole('link', { name: /Re: Orbit proposal/ }).click();
@@ -39,10 +41,10 @@ test('Email screen: read, log on the lead, add a task; team mail is view only fo
   await folders.getByRole('link', { name: 'Sent items' }).click();
   await expect(list.getByRole('link', { name: /Orbit proposal/ })).toBeVisible();
   await folders.getByRole('link', { name: /^Inbox/ }).click();
-  await expect(list).toContainText(/^Inbox · 2/);
+  await expect(list.locator('.mrow')).toHaveCount(2);
   await page.getByRole('searchbox', { name: 'Search lead mail' }).fill('website');
   await page.getByRole('searchbox', { name: 'Search lead mail' }).press('Enter');
-  await expect(list).toContainText(/^Inbox · 1/);
+  await expect(list.locator('.mrow')).toHaveCount(1);
   await expect(list).toContainText('Website enquiry');
 
   // An administrator's own mailbox is empty (Mail of: Me). Mail of: Neha Kapoor shows her lead mail, view only, and
@@ -50,7 +52,7 @@ test('Email screen: read, log on the lead, add a task; team mail is view only fo
   await signInAs(page, MAYA);
   await page.goto('/email');
   const mayaList = page.getByRole('region', { name: 'Message list' });
-  await expect(mayaList).toContainText('Nothing here.');
+  await expect(mayaList).toContainText('No lead mail matches this filter.');
   const mailOf = page.getByRole('combobox', { name: 'Mail of:' });
   await expect(mailOf.getByRole('option', { name: 'Neha Kapoor' })).toBeAttached();
   await mailOf.selectOption({ label: 'Neha Kapoor' });
