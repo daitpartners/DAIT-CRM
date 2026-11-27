@@ -45,6 +45,32 @@ test('changing the language to Spanish translates the interface', async ({ page 
   await expect(page.getByRole('navigation').getByRole('link', { name: 'Settings', exact: true })).toBeVisible();
 });
 
+/** Web-mail release 3: the Email signature card under Preferences saves, sanitised, with Add automatically. */
+test('the Email signature card saves the signature and Add automatically', async ({ page }) => {
+  await signInAs(page, ARJUN);
+  await page.goto('/settings');
+  const card = page.getByRole('region', { name: 'Email signature' });
+  await expect(card).toContainText('Added to new emails and replies you write in the CRM.');
+  const body = card.frameLocator('iframe#signature-editor').locator('body');
+  await body.click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.type('Arjun Mehta · DAIT Partners');
+  const auto = card.getByRole('checkbox', { name: 'Add automatically' });
+  await expect(auto).toBeChecked();
+  await auto.uncheck();
+  await card.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Signature saved' })).toBeVisible();
+  const saved = (await (await page.request.get('/api/me/signature')).json()) as { html: string | null; auto: boolean };
+  expect(saved.html).toContain('Arjun Mehta · DAIT Partners');
+  expect(saved.auto).toBe(false);
+  // Read back after a reload.
+  await page.reload();
+  await expect(page.getByRole('region', { name: 'Email signature' }).frameLocator('iframe#signature-editor').locator('body')).toContainText('Arjun Mehta · DAIT Partners');
+  await expect(page.getByRole('region', { name: 'Email signature' }).getByRole('checkbox', { name: 'Add automatically' })).not.toBeChecked();
+  // Left as it was for other specs (no signature).
+  expect((await page.request.put('/api/me/signature', { data: { html: null, auto: true } })).status()).toBe(200);
+});
+
 test('an administrator adds a lookup value', async ({ page }) => {
   await signInAs(page, MAYA);
   await page.goto('/settings/lookups');

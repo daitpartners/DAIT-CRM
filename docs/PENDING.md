@@ -3,13 +3,14 @@
 Kept here at the owner's request; picked up when the owner says so. Items that were fixed are no longer listed (they are
 in the git history).
 
-## Where things stand (27 Nov 2026)
+## Where things stand (28 Nov 2026)
 
 - **Live** at crm.daitpartners.com: release `70ec558`, web-mail release 2 (the Microsoft 365-style Email screen;
   live since 27 Nov 2026; owner checked every Outlook action on his own mailbox, all worked). Web-mail release 1's
   backfill and clean-up have finished.
-- **In progress:** branch `web-mail-r3` — web-mail release 3 (inline reply, full-page New message, signature, Schedule
-  send, Undo send, follow-up box after Send, task priority and note).
+- **Ready, waiting for deploy:** branch `web-mail-r3` — web-mail release 3 (inline reply, full-page New message,
+  drafts in Outlook, signature, Schedule send, Undo send, follow-up box after Send, task priority and note). See
+  "Ready, waiting for deploy: web-mail release 3" below; it goes live only when you say "deploy".
 - **There is no test copy on the server.** Each release was checked on the developer's machine (automatic tests and
   side-by-side screenshots against the prototype) and then put live by hand, only after you said "deploy". How that is
   done, and how to undo it, is in `docs/DEPLOYMENT.md`.
@@ -41,6 +42,74 @@ in the git history).
 | Leads delete, import follow-ups | Delete leads with their company (Administrators), Download all leads, update rows through Import leads, Do not email list | `7d1d8c2` (live 26 Nov) |
 | Web-mail release 1 | Lead mail only, 12-month backfill, team view (view only) for Administrators and Managers | `2f981c2` (live 27 Nov; clean-up done 27 Nov) |
 | Web-mail release 2 | Microsoft 365-style Email screen; Delete, Archive, Move, Flag, Read change Outlook too; Reply all, Forward, attachments, lead panel | `70ec558` (live 27 Nov; backup `dait_crm-pre-web-mail-r2.dump`) |
+
+## Ready, waiting for deploy: web-mail release 3 (branch `web-mail-r3`)
+
+Design: `docs/superpowers/specs/2026-11-26-web-mail-email-design.md` (mockup 2026-11-26-outlook-mail, states 2, 3
+and 6). Checked on the developer's machine with the automatic tests (screen by screen, against a stand-in for
+Outlook); not yet on live. Goes live only when you say "deploy".
+
+**What changes for users:**
+- **Reply, Reply all and Forward open inside the conversation** (no pop-up window): recipients with their lead tag,
+  a formatting toolbar (font, size, bold, italic, underline, colour, highlight, lists, indent, link, picture, attach,
+  Template, Signature), the original message folded underneath, Send ▾, Discard and "Draft saved". The pop-out button
+  continues the same message on a full page.
+- **New message is a full page** (`Email / New message`, with ← Back to Inbox): From, To, Cc, **Bcc**, Subject, Lead
+  (with a search), Project when the client has projects, your templates, the toolbar, the message with your
+  signature, attachments, and the chosen lead's summary on the right.
+- **Everything you write is an Outlook draft.** It is saved by itself every few seconds into your Outlook Drafts, so
+  you can carry on in the CRM or in Outlook. Drafts show in the CRM's Drafts folder; open one to carry on. A draft you
+  open and leave without typing anything is removed again.
+- **Formatting, pictures and attachments** in every message. Files go straight onto the Outlook draft; the CRM does not
+  keep a copy.
+- **Your email signature** (Settings → Email signature): formatted text and links, added by itself to new messages and
+  replies when "Add automatically" is ticked (it is by default), or with the Signature button.
+- **Schedule send:** Send ▾ → Later today 17:00 (before 17:00 only), Tomorrow morning 08:00, Monday morning 08:00, or
+  a date and 24-hour time of your choice. When the lead's company is in another time zone, the box also shows the
+  recipient's time. Waiting mail is in the **Scheduled** folder with **Edit**, **Send now** and **Cancel** (Cancel puts
+  it back in Drafts).
+- **Undo send:** after Send, a toast `Sent · follow-up added for …` (or `Sent`) with **Undo** for 10 seconds. Undo
+  brings the message back into the editor; nothing has left.
+- **"Set the next follow-up" after Send**, for mail to an open lead: Tomorrow 09:00, In 3 working days 09:00 (the
+  default; working days skip Saturday and Sunday), In 1 week, In 2 weeks, or a date and time; the task title
+  (`Follow up: <subject>`), who does it, Email / Call / Meeting, **Priority** (Normal / High), a **Note**, and "Also
+  update the lead's next follow-up" (ticked). Or **Send without follow-up**. The task and the lead's date are added when
+  the mail actually leaves (after the 10 seconds, or at the scheduled time).
+- **Tasks:** a High task shows a **High** badge, and a task's note shows as a grey line under its title. Priority and
+  Note can be set in the task dialog too.
+- **The lead page's Email tab sends the same way** (an Outlook draft, the follow-up box, Schedule send, Undo); its own
+  form layout stays. The old "follow-up in N days" choice there is gone (the follow-up box replaces it).
+
+**Deliberate differences from the mockup (tell us if you want any changed):**
+- **New message has no Client picker; it keeps a Project field.** The Lead picker replaces the Client picker (links
+  from a company still narrow the leads offered), and the Project field keeps project tagging and the Projects list's
+  Email button working.
+- **Attachments from the CRM:** each file at most 2.5 MB, PDF, pictures or Office files only, at most 20 per message.
+  Anything bigger or of another kind (zip, CSV …) is attached in Outlook; the message says so.
+- **The signature has no pictures** (formatting and links only, at most 20 000 characters). A logo in the signature
+  would need a later change.
+- **One-to-one emails are not blocked for addresses on the Do not email list** (unchanged from before; the Mailer
+  still skips them). Please decide whether a one-to-one email to such an address should be refused.
+
+**Calls made for you (short; tell us if you want any changed):**
+- Schedule send and Undo run on the CRM's own queue, not Outlook's delayed delivery, so the CRM can still edit, send
+  now or cancel the mail. In Outlook a scheduled mail looks like an ordinary draft until it goes; if the CRM's
+  background worker is down at that moment, the mail leaves when it is back (late, never lost, never sent twice).
+- The follow-up box also opens for a scheduled send, and its choices count from the scheduled day. It opens only for
+  an open lead you can see; closed leads get a plain send.
+- An email follow-up task on the same day as the lead's next follow-up stands in for the lead's own follow-up task (no
+  second task for the same follow-up).
+- A send that fails (even hours later, for a scheduled one) stays in Drafts marked Failed, and you get a notification.
+- Editing the same draft in Outlook and in the CRM at the same time: the last save wins.
+
+**The deploy** (runbook: `docs/DEPLOYMENT.md`, "Web mail release 3: deploy runbook"): migration 28
+(`20261214100000_web_mail_writing`, adds columns only), the usual worker restart, and a live check on Deepak's own
+mailbox with Outlook on the web beside it: a new message saved into Outlook Drafts and discarded; reply / reply all /
+forward drafts in the right Outlook conversation (a forward keeps its pictures); attachments and pictures; Send with
+Undo (Undo once, then for real); Schedule send (it goes at its time; Cancel puts it back in Drafts; Send now); the
+follow-up task in Tasks with its priority and note and the lead's next follow-up; the signature; the lead page send.
+Any Outlook refusal, repeated "Outlook is busy", Failed send or server error means going back to release 2 (`70ec558`);
+the new columns stay and release 2 runs on them.
 
 ## Live: web-mail release 2 (`70ec558`, since 27 Nov 2026)
 

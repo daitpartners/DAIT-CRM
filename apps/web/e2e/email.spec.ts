@@ -39,6 +39,15 @@ test('Email screen: read the conversation, log on the lead, create a task; team 
   await expect(panel).toContainText('LD-1003');
   await expect(folders.getByRole('link', { name: /^Inbox\s*1$/ })).toBeVisible();
 
+  // Web-mail release 3: Reply opens the inline editor at the top of the conversation (no dialog); Discard on the
+  // untouched draft closes it and removes the draft.
+  await reader.locator('.msg-foot').getByRole('button', { name: 'Reply', exact: true }).first().click();
+  const replyForm = reader.getByRole('form', { name: 'Reply' });
+  await expect(replyForm.getByText(/^Draft saved \d\d:\d\d$/)).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await replyForm.getByRole('button', { name: 'Discard' }).click();
+  await expect(replyForm).toHaveCount(0);
+
   await panel.getByRole('button', { name: 'Log as activity' }).click();
   await expect(page.getByRole('status').filter({ hasText: /Logged on LD-/ })).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Log as activity' })).toBeDisabled();

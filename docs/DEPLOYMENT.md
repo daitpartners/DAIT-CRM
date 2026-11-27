@@ -429,6 +429,103 @@ Anything else means stop and ask. There is one one-time step (1), one read-only 
    API log lines from that minute (`pm2 logs crm-live --lines 200 --nostream`; they carry the reason and Graph's status,
    never the message itself).
 
+## Web mail release 3: deploy runbook
+
+Only after the owner says "deploy". Web mail release 3 (branch `web-mail-r3`: writing and follow-up) builds on
+release 2 (live since 27 Nov 2026 as `70ec558`; the owner live-checked every Outlook action, all worked). Follow
+"Deploying a release to live" (backup first, named `dait_crm-pre-web-mail-r3.dump`), with these additions:
+
+1. **Check the migration state before installing** (after step 3, as `daitcrm` in `~/build/<sha>`; read only, as in
+   release 1's step 2):
+
+   ```
+   node --env-file=$HOME/live/shared/.env node_modules/prisma/build/index.js migrate status --schema prisma/schema.prisma
+   ```
+
+   The only migration listed as not yet applied must be `20261214100000_web_mail_writing` (number 28). It only adds
+   columns: `signature_html` and `signature_auto` on `users`, `priority` and `note` on `tasks`, `scheduled_at`,
+   `quoted_html` and `draft_files` on `email_messages`. Anything else (a failed or unknown migration, or 1–27 missing)
+   means stop and ask.
+2. **The worker restart is part of the deploy.** Sending now runs on the worker's job queue in its own `send` lane
+   (the 10-second Undo window and Schedule send wait there). `release.sh install live` reloads both `crm-live` and
+   `crm-live-worker`, so the new lane starts with the release; check in `pm2 ls` that `crm-live-worker` restarted (its
+   uptime is as short as `crm-live`'s). If it did not, `sudo -iu daitcrm pm2 restart crm-live-worker`. Until the
+   worker runs the new release, nothing sent from the CRM leaves (it waits, it is not lost).
+3. **Keep the API as one process (PM2 fork mode, as `deploy/ecosystem.config.cjs` has it). Never start `crm-live` in
+   cluster mode or with more than one instance.** The API keeps a per-draft lock in memory, so a save and a Send on the
+   same draft never overlap; with two API processes they could, and an edit made just before Send could be lost.
+4. **Read-only check** (as root; a count only):
+
+   ```
+   sudo -u postgres psql -d dait_crm -c "SELECT count(*) FROM email_accounts WHERE kind = 'personal' AND send_as IS NOT NULL;"
+   ```
+
+   If it is not 0, a mailbox sends as another address: add live check (f) below for that user.
+5. **Install and check** (steps 4–5 of "Deploying a release to live").
+6. **Live check of the new Outlook writes, on Deepak's own mailbox, right after step 5 "Check from outside".** Every
+   new Graph write in this release (drafts, reply drafts, saving, attachments, sending a draft) has only met test
+   fakes. Signed in to the CRM as Deepak, with Outlook on the web open beside it, on a throw-away lead email (send one
+   to Deepak from a lead address first if needed). Send test mail only to Deepak's own second address or a colleague
+   who expects it.
+   - **(a) New message, auto-save, files, Discard.** Email screen → New mail. The full page opens. Type a subject and a
+     line: within a few seconds a draft with that subject is in Outlook's Drafts. Change the text: Outlook's draft
+     changes too (the CRM saves by itself; "Draft saved hh:mm" updates). Attach a small PDF and paste or insert a
+     small picture into the message: both are on the Outlook draft (the picture shows inside the message). Remove the
+     PDF: it leaves the Outlook draft. Discard: the draft leaves Outlook's Drafts.
+   - **(b) Reply, Reply all, Forward.** On a lead email, Reply: the inline editor opens at the top of the conversation
+     and the draft sits in the same conversation in Outlook's Drafts. Do the same with Reply all on a message with
+     another recipient (Outlook fills both) and Forward; discard those two. **Forward a message that has a picture
+     inside it** (a logo in the body): the picture still shows in the forward, in the CRM editor and in Outlook's
+     draft. If instead the picture is missing or comes as a separate attachment, look in the API log
+     (`pm2 logs crm-live --lines 200 --nostream`) for the line
+     `graph: getDraft refused the attachment contentId select (400); drafts are read without content-ids` and tell the
+     developer (no rollback for this alone: mail still sends, only pictures in forwarded drafts are affected).
+   - **(c) Send with Undo, then send for real.** On the reply from (b): Send → the "Set the next follow-up" box (the
+     lead is open) → choose **In 3 working days**, Priority **High**, a short Note → Send and add follow-up. The toast
+     says `Sent · follow-up added for …` with Undo and a bar running out. **Click Undo within 10 seconds:** nothing
+     arrives, no task is added in Tasks, the editor is back with the text, the draft is still in Outlook's Drafts.
+     Send again → Send and add follow-up → wait 10 seconds: it arrives, it is in Outlook's Sent Items in the same
+     conversation, the task is in Tasks (`Follow up: …`, the High badge, the note) and the lead's Next follow-up is that
+     day. After the next sync (at most 5 minutes, or Sync now) the CRM shows **one** row for it in Sent items, not two.
+   - **(d) Schedule send, Cancel, Send now.** New mail to the same address, choose the lead, Send ▾ → Schedule send →
+     a custom time **5 minutes ahead** (24-hour) → Schedule → Send without follow-up. It is in the CRM's Scheduled
+     folder (`Scheduled · …`) and in Outlook's Drafts. It arrives after 5 minutes (± 1 minute) and moves to Sent items.
+     Schedule another one 10 minutes ahead with a follow-up: open it in Scheduled → **Cancel**: it is back in Drafts
+     (CRM and Outlook) and nothing arrives; open it from Drafts, schedule it again (with a follow-up), then in Scheduled
+     → **Send now**: it arrives
+     within a few seconds and its follow-up task is in Tasks with its time.
+   - **(e) Signature and the lead page.** Settings → Email signature: write a two-line signature (one bold word, one
+     link), Add automatically ticked → Save. New mail: the signature is already in the message. Then on a lead page,
+     Email tab: write a short email and Send → the follow-up box → Send without follow-up → the Undo toast → it arrives
+     after 10 seconds with the signature, is in Outlook's Sent Items, and shows on the lead's Emails tab and timeline
+     ("Email sent"). Set the signature back as Deepak wants it.
+   - **(f) Send-as**, only if the read-only check (4) found a mailbox: the user of that mailbox sends one reply from the
+     CRM; it arrives from the send-as address, as release 2 did.
+
+   **Any "Outlook refused the change", "Outlook is busy" that does not clear on a second try, a send that ends Failed
+   (marked Failed in Drafts, with a notification), a duplicate row in Sent items, or a 500 / 502 answer (browser
+   developer tools, Network): stop and roll back** to release 2 (`70ec558`) as in "Rolling back", as `daitcrm`:
+
+   ```
+   sudo -iu daitcrm
+   ln -sfn ~/live/releases/70ec558 ~/live/current
+   pm2 startOrReload ~/live/current/deploy/ecosystem.config.cjs --only crm-live,crm-live-worker --update-env
+   curl -s http://127.0.0.1:3090/api/health      # shows 70ec558
+   ```
+
+   **First list any mail still waiting to be sent** (as root; ids and times only) **and tell the senders**: release 2
+   does not send mail scheduled or queued by release 3.
+
+   ```
+   sudo -u postgres psql -d dait_crm -c "SELECT id, user_id, scheduled_at FROM email_messages WHERE status = 'queued' AND source = 'crm';"
+   ```
+
+   Migration 28 stays: it only added columns, so release 2 runs against it. Drafts the CRM made stay in each user's
+   Outlook Drafts and can be sent or deleted there. Then send the developer which step failed and the time, and the
+   API and worker log lines from that minute (`pm2 logs crm-live --lines 200 --nostream`,
+   `pm2 logs crm-live-worker --lines 200 --nostream`; they carry the reason and Graph's status, never the message
+   itself).
+
 ## One-time steps after a release
 
 All of these have already been run on live; they are kept for reference and for a rebuild.

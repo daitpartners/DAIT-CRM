@@ -57,6 +57,15 @@ const ORIGINALS: Record<string, { conversationId: string; subject: string; fromN
     conversationId: 'e2e-act-thread-1', subject: 'Action check one', fromName: 'Act Client', from: 'client@act.example',
     to: ['neha.kapoor@daitpartners.com'], text: 'About item 1',
   },
+  // web/e2e/emailWrite.spec.ts adds this message (linked to a lead of its own) for its inline Reply and send.
+  'e2e-write-1': {
+    conversationId: 'e2e-write-thread-1', subject: 'Write check', fromName: 'Wren Client', from: 'client@write.example',
+    to: ['neha.kapoor@daitpartners.com'], text: 'Can we meet next week?',
+  },
+  'e2e-write-2': {
+    conversationId: 'e2e-write-thread-2', subject: 'Write keys', fromName: 'Wren Client', from: 'client@write.example',
+    to: ['neha.kapoor@daitpartners.com'], text: 'One more question.',
+  },
 };
 
 /** Drafts made through the fake, by id (`e2e-draft-<n>`); attachment ids are `e2e-att-<n>`. */

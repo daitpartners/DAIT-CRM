@@ -36,3 +36,26 @@ test('follow-up date creates a task that appears under Upcoming and can be ticke
   await expect(task).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Completed' }).getByRole('listitem').filter({ hasText: `Follow up · ${company}` })).toBeVisible();
 });
+
+/** Web-mail release 3: a task's priority and note, set in the task dialog (plan decision 14), shown on its row. */
+test('a High task shows the High badge and its note on the row', async ({ page }) => {
+  const title = `Prio check ${Date.now()}`;
+  await signInAs(page, MAYA);
+  await page.goto('/tasks');
+  await page.getByRole('button', { name: 'New task' }).click();
+  const dialog = page.getByRole('dialog', { name: 'New task' });
+  await dialog.getByLabel('Title').fill(title);
+  await dialog.getByLabel('Due date').fill(inDays(2));
+  await dialog.getByLabel('Priority').selectOption({ label: 'High' });
+  await dialog.getByLabel('Note').fill('Ask whether the CTO has reviewed the examples');
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Task added' })).toBeVisible();
+
+  const task = page.getByRole('region', { name: 'Upcoming' }).getByRole('listitem').filter({ hasText: title });
+  await expect(task.locator('.task-prio')).toHaveText('High');
+  await expect(task.locator('.task-note')).toHaveText('Ask whether the CTO has reviewed the examples');
+
+  // Ticked done so the list stays as other specs expect it.
+  await task.getByRole('checkbox', { name: /Mark done/ }).click();
+  await expect(task).toHaveCount(0);
+});
