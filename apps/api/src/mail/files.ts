@@ -120,6 +120,28 @@ export interface CheckedFile {
   data: Buffer;
 }
 
+/** One uploaded file checked (a draft's attachment or inline picture, a template's file): its bytes, name and type. */
+export interface CheckedUpload {
+  fileName: string;
+  contentType: string;
+  size: number;
+  data: Buffer;
+}
+
+/**
+ * One uploaded file checked: base64 that decodes (422 `attachment_invalid`), at most TEMPLATE_ATTACHMENTS_MAX_BYTES (413
+ * `attachments_too_large`), a type sniff() knows from its bytes, a picture when it is to be shown inline (422
+ * `attachment_type`); the name cleaned for its type.
+ */
+export function checkUpload(file: { name: string; data: string; inline: boolean }): CheckedUpload {
+  const data = Buffer.from(file.data, 'base64');
+  if (!data.length) throw new AttachmentError('attachment_invalid', 422);
+  if (data.length > TEMPLATE_ATTACHMENTS_MAX_BYTES) throw tooLarge();
+  const kind = sniff(data, file.name);
+  if (!kind || (file.inline && !kind.image)) throw new AttachmentError('attachment_type', 422);
+  return { fileName: cleanFileName(file.name, kind), contentType: kind.contentType, size: data.length, data };
+}
+
 /**
  * The template's uploaded files checked: base64 that decodes, a known type (an inline file must be a picture), each
  * and all together within TEMPLATE_ATTACHMENTS_MAX_BYTES (413 `attachments_too_large`), at most
@@ -130,12 +152,9 @@ export function checkUploads(files: TemplateAttachmentUpload[]): CheckedFile[] {
   const cids = new Set<string>();
   let total = 0;
   return files.map((f) => {
-    const data = Buffer.from(f.data, 'base64');
-    if (!data.length) throw new AttachmentError('attachment_invalid', 422);
-    total += data.length;
-    if (data.length > TEMPLATE_ATTACHMENTS_MAX_BYTES || total > TEMPLATE_ATTACHMENTS_MAX_BYTES) throw tooLarge();
-    const kind = sniff(data, f.name);
-    if (!kind || (f.inline && !kind.image)) throw new AttachmentError('attachment_type', 422);
+    const { fileName, contentType, size, data } = checkUpload(f);
+    total += size;
+    if (total > TEMPLATE_ATTACHMENTS_MAX_BYTES) throw tooLarge();
     let contentId: string | null = null;
     if (f.inline) {
       contentId = cleanCid(f.contentId);
@@ -143,7 +162,7 @@ export function checkUploads(files: TemplateAttachmentUpload[]): CheckedFile[] {
       cids.add(contentId.toLowerCase());
     }
     return {
-      fileName: cleanFileName(f.name, kind), contentType: kind.contentType, size: data.length, contentId, isInline: f.inline,
+      fileName, contentType, size, contentId, isInline: f.inline,
       sha256: createHash('sha256').update(data).digest('hex'), data,
     };
   });
@@ -224,10 +243,15 @@ export async function filesToSend(stored: StoredFile[], html: string | null | un
   if (picked.reduce((n, f) => n + f.size, 0) > TEMPLATE_ATTACHMENTS_MAX_BYTES) throw tooLarge();
   // The whole Graph request must fit (security review I1): checked before anything is read or queued.
   if (picked.length) checkRequestSize(picked.reduce((n, f) => n + base64Length(f.size), 0), html);
-  return Promise.all(picked.map(async (f) => ({
+  return Promise.all(picked.map(storedAttachment));
+}
+
+/** A stored file read from disk as Graph sends it (inline with its content-id); gone from disk → 409 `template_files_missing`. */
+export async function storedAttachment(f: StoredFile): Promise<MailAttachment> {
+  return {
     name: f.fileName,
     contentType: f.contentType,
     contentBase64: (await readStoredFile(f.storagePath)).toString('base64'),
     ...(f.isInline && f.contentId ? { isInline: true, contentId: f.contentId } : {}),
-  })));
+  };
 }

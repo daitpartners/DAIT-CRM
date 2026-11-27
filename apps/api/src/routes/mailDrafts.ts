@@ -1,18 +1,22 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { DraftCreate, DraftSave, RecipientQuery, RecipientResolve } from '@dait-crm/shared';
+import { DraftAttachmentUpload, DraftCreate, DraftSave, DraftTemplateApply, RecipientQuery, RecipientResolve } from '@dait-crm/shared';
 import { requireRight } from '../plugins/auth.js';
-import { parseBody, parseQuery } from '../validate.js';
+import { NotFoundError, parseBody, parseQuery } from '../validate.js';
 import { FORMATTED_BODY_LIMIT, perUser } from '../mail/formatted.js';
 import {
-  createDraft, discardDraft, draftFor, draftView, openDraft, resolveRecipients, saveDraft, suggestRecipients,
+  addDraftFile, applyTemplateFiles, createDraft, discardDraft, draftFor, draftView, openDraft, removeDraftFile, resolveRecipients, saveDraft,
+  suggestRecipients,
 } from '../mail/drafts.js';
 import { guard } from './leads.js';
 
 /**
  * Drafts in the user's own Outlook (web-mail release 3, mail/drafts.ts): start one (new, reply, reply all, forward),
- * open, auto-save and discard it, and the To / Cc / Bcc suggestions. Only the caller's own connected mailbox and own
+ * open, auto-save and discard it, its files (attachments, inline pictures, a template's files: straight onto the Outlook
+ * draft), and the To / Cc / Bcc suggestions. Only the caller's own connected mailbox and own
  * drafts: another user's message or draft is 403 view_only (team view) or 404, enforced on every route.
  */
+const FILE_ID = /^[A-Za-z0-9+/=_-]{1,1024}$/;
+
 export const mailDraftRoutes: FastifyPluginAsync = async (app) => {
   const pre = { preHandler: [requireRight('use_email')] };
 
@@ -21,7 +25,7 @@ export const mailDraftRoutes: FastifyPluginAsync = async (app) => {
     const user = request.user!;
     return guard(reply, async () => {
       const m = await createDraft(app.graph, user, body);
-      return reply.code(201).send(await draftView(user, m));
+      return reply.code(201).send(await draftView(user, m, app.graph));
     });
   });
 
@@ -43,6 +47,30 @@ export const mailDraftRoutes: FastifyPluginAsync = async (app) => {
       await discardDraft(app.graph, user, await draftFor(user, request.params.id));
       return reply.code(204).send();
     });
+  });
+
+  // A file for the draft (base64 in JSON: up to 2.5 MB, so the larger request limit), at most 60 a minute.
+  app.post<{ Params: { id: string } }>('/mail/drafts/:id/files', { ...pre, bodyLimit: FORMATTED_BODY_LIMIT, config: perUser(60) }, async (request, reply) => {
+    const body = parseBody(DraftAttachmentUpload, request.body);
+    const user = request.user!;
+    return guard(reply, async () => reply.code(201).send(await addDraftFile(app.graph, user, await draftFor(user, request.params.id), body)));
+  });
+
+  app.delete<{ Params: { id: string; fileId: string } }>('/mail/drafts/:id/files/:fileId', pre, async (request, reply) => {
+    const user = request.user!;
+    return guard(reply, async () => {
+      const m = await draftFor(user, request.params.id);
+      // A Graph attachment id (base64, URL-safe or not); anything else names no file.
+      if (!FILE_ID.test(request.params.fileId)) throw new NotFoundError();
+      await removeDraftFile(app.graph, user, m, request.params.fileId);
+      return reply.code(204).send();
+    });
+  });
+
+  app.post<{ Params: { id: string } }>('/mail/drafts/:id/template', pre, async (request, reply) => {
+    const body = parseBody(DraftTemplateApply, request.body);
+    const user = request.user!;
+    return guard(reply, async () => ({ files: await applyTemplateFiles(app.graph, user, await draftFor(user, request.params.id), body) }));
   });
 
   app.get('/mail/recipients', pre, async (request) => {

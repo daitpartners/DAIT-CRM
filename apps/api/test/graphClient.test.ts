@@ -683,18 +683,24 @@ describe('graph client — drafts, draft attachments, sending a draft (web-mail 
     expect(reply).toMatchObject({ id: 'R1', conversationId: 'CONV1', subject: 'RE: Proposal', html: '<div id="divRplyFwdMsg">quote</div>' });
   });
 
-  test('getDraft reads the draft with its attachments', async () => {
+  test('getDraft reads the draft with its attachments and their content-ids', async () => {
     const fetchMock = vi.fn(async () => json(draftAnswer({
-      attachments: [{ '@odata.type': '#microsoft.graph.fileAttachment', id: 'A+1=', name: 'logo.png', contentType: 'image/png', size: 1200, isInline: true }],
+      attachments: [
+        { '@odata.type': '#microsoft.graph.fileAttachment', id: 'A+1=', name: 'logo.png', contentType: 'image/png', size: 1200, isInline: true, contentId: ' image001.png@01DB ' },
+        { '@odata.type': '#microsoft.graph.fileAttachment', id: 'A+2=', name: 'a.pdf', contentType: 'application/pdf', size: 10, isInline: false, contentId: null },
+      ],
     })));
     vi.stubGlobal('fetch', fetchMock);
     const draft = await createGraphClient(env).getDraft(await account(), 'AAMkD=');
     const [url, init] = call(fetchMock);
-    expect(url).toBe('https://graph.microsoft.com/v1.0/me/messages/AAMkD%3D?$select=subject,body,toRecipients,ccRecipients,bccRecipients,conversationId,lastModifiedDateTime,isDraft&$expand=attachments($select=id,name,contentType,size,isInline)');
+    expect(url).toBe('https://graph.microsoft.com/v1.0/me/messages/AAMkD%3D?$select=subject,body,toRecipients,ccRecipients,bccRecipients,conversationId,lastModifiedDateTime,isDraft&$expand=attachments($select=id,name,contentType,size,isInline,microsoft.graph.fileAttachment/contentId)');
     expect(init.method).toBe('GET');
     expect(headers(init).Prefer).toContain('IdType="ImmutableId"');
     expect(headers(init).Prefer).toContain('outlook.body-content-type="html"');
-    expect(draft.attachments).toEqual([{ id: 'A+1=', name: 'logo.png', contentType: 'image/png', size: 1200, isInline: true, kind: 'file' }]);
+    expect(draft.attachments).toEqual([
+      { id: 'A+1=', name: 'logo.png', contentType: 'image/png', size: 1200, isInline: true, contentId: 'image001.png@01DB', kind: 'file' },
+      { id: 'A+2=', name: 'a.pdf', contentType: 'application/pdf', size: 10, isInline: false, kind: 'file' },
+    ]);
     expect(draft.to).toEqual(['ana@acme.com']);
   });
 

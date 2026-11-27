@@ -56,7 +56,8 @@ beforeEach(async () => {
   g.replyHtml = '<p></p><hr><div id="divRplyFwdMsg"><b>From:</b> Ana Ruiz</div><div>Looks good</div><script>x()</script>';
   g.updateError = null;
   g.deleteError = null;
-  g.getDraft = null;
+  // The reply draft as Graph lists it right after createReply (no files unless a test says so).
+  g.getDraft = async (id) => draft({ id });
   await resetDb();
   await seedLookups();
 });
@@ -150,6 +151,7 @@ describe('drafts API (web-mail release 3)', () => {
     const body = res.json();
     expect(g.calls).toEqual([
       ['createReplyDraft', original.graphId, 'replyAll'],
+      ['getDraft', 'D1'],
       ['updateDraft', 'D1', expect.objectContaining({ to: ['ana@acme.com', 'bo@acme.com'], cc: ['cy@acme.com'], subject: 'Re: Proposal' })],
     ]);
     expect(body).toMatchObject({

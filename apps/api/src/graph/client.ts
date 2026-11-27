@@ -67,6 +67,11 @@ export interface GraphAttachment {
   contentType: string;
   size: number;
   isInline: boolean;
+  /**
+   * Web-mail release 3: what the HTML's `cid:` refers to (a fileAttachment's contentId), read only by getDraft; absent
+   * or null otherwise.
+   */
+  contentId?: string | null;
   /** file = bytes (fileAttachment), item = an attached message or event, reference = a link to a cloud file. */
   kind: 'file' | 'item' | 'reference';
 }
@@ -184,7 +189,7 @@ export interface GraphClient {
   createDraft(account: EmailAccount, d: DraftFields): Promise<GraphDraft>;
   /** A reply, reply all or forward draft of a message, with Outlook's recipients, subject and quoted original. */
   createReplyDraft(account: EmailAccount, graphId: string, kind: 'reply' | 'replyAll' | 'forward'): Promise<GraphDraft>;
-  /** A draft with its attachments; a message that is no longer a draft (sent in Outlook) is `GraphError('not_a_draft', 409)`. */
+  /** A draft with its attachments (with their content-ids); a message that is no longer a draft (sent in Outlook) is `GraphError('not_a_draft', 409)`. */
   getDraft(account: EmailAccount, draftId: string): Promise<GraphDraft>;
   updateDraft(account: EmailAccount, draftId: string, d: DraftFields): Promise<void>;
   /** A file (or inline picture) uploaded to a draft. */
@@ -321,6 +326,7 @@ function toAttachment(v: Record<string, unknown>): GraphAttachment | null {
     contentType: str(v.contentType) || 'application/octet-stream',
     size: typeof v.size === 'number' && Number.isFinite(v.size) && v.size >= 0 ? v.size : 0,
     isInline: v.isInline === true,
+    ...(typeof v.contentId === 'string' && v.contentId.trim() ? { contentId: v.contentId.trim() } : {}),
     kind: ATTACHMENT_KINDS[str(v['@odata.type']) ?? ''] ?? 'file',
   };
 }
@@ -713,7 +719,7 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
     },
 
     async getDraft(account, draftId) {
-      const url = `${messageUrl(draftId)}?$select=${DRAFT_SELECT}&$expand=attachments($select=id,name,contentType,size,isInline)`;
+      const url = `${messageUrl(draftId)}?$select=${DRAFT_SELECT}&$expand=attachments($select=id,name,contentType,size,isInline,microsoft.graph.fileAttachment/contentId)`;
       const res = await mailCall(account, url, 'GET', undefined, `${IMMUTABLE}, ${HTML_BODY}`);
       const v = (await res.json()) as Record<string, unknown>;
       if (v.isDraft === false) throw new GraphError('not_a_draft', 409);
