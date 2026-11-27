@@ -480,7 +480,15 @@ export function errorText(t: TFn, code: string, vars: Record<string, string | nu
     case 'no_lead':
       return t('Link this email to a lead first.');
     case 'draft':
-      return t('Drafts are edited in Outlook.');
+      return t('Drafts can only be deleted here.');
+    case 'outlook_refused':
+      return t('Outlook refused the change. Nothing was changed.');
+    case 'outlook_busy':
+      return t('Outlook is busy. Try again in a moment.');
+    case 'mailbox_not_connected':
+      return t('Your mailbox needs reconnecting in Settings.');
+    case 'attachment_too_large':
+      return t('This file is too large to open here. Open it in Outlook.');
     case 'not_connected':
       return t('Your mailbox needs reconnecting in Settings → Email & calendar connections.');
     case 'nothing_to_send':
@@ -522,6 +530,14 @@ export function errorText(t: TFn, code: string, vars: Record<string, string | nu
     default:
       return t('Something went wrong. Please try again.');
   }
+}
+
+/**
+ * errorText for the Email screen's mailbox changes (web-mail release 2): `sending` there means an email still being
+ * sent, not a quotation.
+ */
+export function mailErrorText(t: TFn, code: string): string {
+  return code === 'sending' ? t('This email is still being sent.') : errorText(t, code);
 }
 
 export function initials(name: string): string {

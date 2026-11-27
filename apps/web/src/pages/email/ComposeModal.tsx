@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { ReplyMode } from '@dait-crm/shared';
 import { Link } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import { clientName } from '../../api/companies';
@@ -34,7 +35,11 @@ export type ComposeStart = {
   templateId?: number;
   /** Reply mode: the message answered (To and Subject are fixed, Graph keeps the conversation). */
   replyTo?: number;
+  /** Web-mail release 2: Reply (the default), Reply all or Forward of `replyTo`. */
+  mode?: ReplyMode;
   to?: string;
+  /** Web-mail release 2: Cc pre-filled (Reply all: the original Cc without your own address). */
+  cc?: string[];
 };
 
 const EMAIL_RE = /^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]{2,}$/;

@@ -2037,5 +2037,15 @@
   "Personal and other work mail stays in Outlook only.": "El correo personal y el resto del correo de trabajo se quedan solo en Outlook.",
   "{name}'s mailbox": "Buzón de {name}",
   "Your mailbox": "Tu buzón",
-  "View only: only the mailbox owner can do this.": "Solo lectura: solo el propietario del buzón puede hacerlo."
+  "View only: only the mailbox owner can do this.": "Solo lectura: solo el propietario del buzón puede hacerlo.",
+  "Drafts can only be deleted here.": "Los borradores solo se pueden eliminar aquí.",
+  "Outlook refused the change. Nothing was changed.": "Outlook rechazó el cambio. No se ha cambiado nada.",
+  "Outlook is busy. Try again in a moment.": "Outlook está ocupado. Vuelva a intentarlo en un momento.",
+  "Your mailbox needs reconnecting in Settings.": "Su buzón necesita reconectarse en Ajustes.",
+  "This file is too large to open here. Open it in Outlook.": "Este archivo es demasiado grande para abrirlo aquí. Ábralo en Outlook.",
+  "This email is still being sent.": "Este correo aún se está enviando.",
+  "{n} could not be changed in Outlook": "{n} no se pudieron cambiar en Outlook",
+  "Scheduled|mail": "Programados",
+  "Flagged": "Marcados",
+  "Follow-up due today": "Seguimiento para hoy"
 }

@@ -36,8 +36,6 @@ test('Email screen: read, log on the lead, add a task; team mail is view only fo
   await expect(page.getByRole('status').filter({ hasText: 'Task created' })).toBeVisible();
 
   // Smart views and search.
-  await folders.getByRole('link', { name: /^Unlinked/ }).click();
-  await expect(list).toContainText(/^Unlinked · 1/);
   await folders.getByRole('link', { name: 'Sent' }).click();
   await expect(list.getByRole('link', { name: /Orbit proposal/ })).toBeVisible();
   await folders.getByRole('link', { name: /^Inbox/ }).click();
@@ -74,7 +72,7 @@ test('Email screen: read, log on the lead, add a task; team mail is view only fo
 
 test('an unlinked email becomes a lead', async ({ page }) => {
   await signInAs(page, NEHA);
-  await page.goto('/email?folder=unlinked');
+  await page.goto('/email?folder=inbox');
   const list = page.getByRole('region', { name: 'Message list' });
   await list.getByRole('link', { name: /Website enquiry/ }).click();
   await page.getByRole('article', { name: 'Website enquiry' }).getByRole('button', { name: 'Create lead from this email' }).click();

@@ -2037,5 +2037,15 @@
   "Personal and other work mail stays in Outlook only.": "Les e-mails personnels et les autres e-mails professionnels restent uniquement dans Outlook.",
   "{name}'s mailbox": "Boîte de {name}",
   "Your mailbox": "Votre boîte",
-  "View only: only the mailbox owner can do this.": "Lecture seule : seul le propriétaire de la boîte peut le faire."
+  "View only: only the mailbox owner can do this.": "Lecture seule : seul le propriétaire de la boîte peut le faire.",
+  "Drafts can only be deleted here.": "Ici, les brouillons peuvent seulement être supprimés.",
+  "Outlook refused the change. Nothing was changed.": "Outlook a refusé la modification. Rien n'a été modifié.",
+  "Outlook is busy. Try again in a moment.": "Outlook est occupé. Réessayez dans un instant.",
+  "Your mailbox needs reconnecting in Settings.": "Votre boîte doit être reconnectée dans Paramètres.",
+  "This file is too large to open here. Open it in Outlook.": "Ce fichier est trop volumineux pour être ouvert ici. Ouvrez-le dans Outlook.",
+  "This email is still being sent.": "Cet e-mail est encore en cours d'envoi.",
+  "{n} could not be changed in Outlook": "{n} n'ont pas pu être modifiés dans Outlook",
+  "Scheduled|mail": "Planifiés",
+  "Flagged": "Avec indicateur",
+  "Follow-up due today": "Relance prévue aujourd'hui"
 }

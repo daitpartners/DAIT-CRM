@@ -23,14 +23,22 @@ const me = { ...rep, rights: [...rep.rights, 'use_email' as const] };
 const item = (over: Partial<MailItem> = {}): MailItem => ({
   id: 1, owner: { id: 2, name: 'Arjun Mehta' }, viewOnly: false, leadRestricted: false, folder: 'inbox', status: 'received', fromAddress: 'ana@acme.com', fromName: 'Ana Ruiz', toAddresses: ['arjun@daitpartners.com'],
   subject: 'Proposal', preview: 'Looks good', occurredAt: '2026-11-20T10:00:00.000Z', isRead: false, leadId: null, leadNumber: null,
-  companyId: null, hasAttachments: false, projectId: null, projectNumber: null, ...over,
+  companyId: null, hasAttachments: false, projectId: null, projectNumber: null,
+  flagStatus: 'notFlagged', flagDue: null, replied: false, conversationCount: 1, leadStatus: null, ...over,
 });
-const detail = (m: MailItem, over: Partial<MailDetail> = {}): MailDetail => ({
-  ...m, ccAddresses: [], bodyText: 'Looks good', bodyHtml: null, attachmentNames: [], loggedAt: null, lead: null, contact: null, company: null, restrictedLead: null, thread: [], ...over,
+type ThreadEntry = MailDetail['thread'][number];
+/** A thread entry with release 1's fields; the reading pane's (web-mail release 2) default to an empty message. */
+type ThreadIn = Omit<ThreadEntry, 'fromName' | 'fromAddress' | 'toAddresses' | 'ccAddresses' | 'preview' | 'hasAttachments' | 'folder' | 'isRead'> & Partial<ThreadEntry>;
+const detail = (m: MailItem, over: Omit<Partial<MailDetail>, 'thread'> & { thread?: ThreadIn[] } = {}): MailDetail => ({
+  ...m, ccAddresses: [], bodyText: 'Looks good', bodyHtml: null, attachmentNames: [], loggedAt: null, lead: null, contact: null, company: null, restrictedLead: null,
+  leadPanel: null, ...over,
+  thread: (over.thread ?? []).map((t) => ({
+    fromName: null, fromAddress: '', toAddresses: [], ccAddresses: [], preview: '', hasAttachments: false, folder: 'inbox', isRead: true, ...t,
+  })),
 });
 const META: MailMeta = {
   mailbox: { id: 7, address: 'arjun@daitpartners.com', status: 'connected', lastSyncAt: '2026-11-22T09:00:00.000Z' },
-  unread: 3, unlinked: 2, companies: [{ id: 4, name: 'Acme', legalName: null, isClient: true }, { id: 6, name: 'Bolt', legalName: 'Bolt Industries Ltd', isClient: false }], leads: [{ id: 5, number: 'LD-1005', companyId: 4, companyName: 'Acme', status: 'New' }],
+  unread: 3, counts: { inbox: 3, drafts: 0, scheduled: 0, flagged: 0, awaiting: 0, due: 0, leads: 0 }, leadOwners: [], companies: [{ id: 4, name: 'Acme', legalName: null, isClient: true }, { id: 6, name: 'Bolt', legalName: 'Bolt Industries Ltd', isClient: false }], leads: [{ id: 5, number: 'LD-1005', companyId: 4, companyName: 'Acme', status: 'New' }],
   projects: [{ id: 3, number: 'PRJ-3', name: 'Website rebuild', companyId: 4 }, { id: 8, number: 'PRJ-8', name: 'Brand refresh', companyId: 6 }],
   mailUsers: [],
 };
@@ -110,7 +118,8 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     expect(await screen.findByText(/arjun@daitpartners.com · Microsoft 365/)).toBeTruthy();
     const folders = screen.getByRole('navigation', { name: 'Mail folders' });
     expect(within(folders).getByRole('link', { name: /Inbox\s*3/ })).toBeTruthy();
-    expect(within(folders).getByRole('link', { name: /Unlinked\s*2/ })).toBeTruthy();
+    // Web-mail release 2: no Unlinked folder (spec non-goal).
+    expect(within(folders).queryByRole('link', { name: /Unlinked/ })).toBeNull();
     for (const name of ['Sent', 'Drafts', 'Archive', 'Deleted items', 'Awaiting reply', 'My leads']) expect(within(folders).getByRole('link', { name })).toBeTruthy();
     expect(await within(folders).findByRole('button', { name: 'Intro' })).toBeTruthy();
     const list = screen.getByRole('region', { name: 'Message list' });
@@ -219,7 +228,7 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
   });
 
   it('without a connected mailbox the header says so and links to Settings', async () => {
-    stub([], {}, { ...META, mailbox: null, unread: 0, unlinked: 0 });
+    stub([], {}, { ...META, mailbox: null, unread: 0 });
     show();
     expect(await screen.findByText('Mailbox not connected')).toBeTruthy();
     expect(await screen.findByText('Connect your mailbox to send and receive from the CRM.')).toBeTruthy();

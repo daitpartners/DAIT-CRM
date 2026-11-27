@@ -25,9 +25,11 @@ function viewLabel(t: TFn, v: MailView): string {
     case 'inbox': return t('Inbox');
     case 'sent': return t('Sent');
     case 'drafts': return t('Drafts');
+    case 'scheduled': return t('Scheduled|mail');
+    case 'flagged': return t('Flagged');
     case 'archive': return t('Archive');
     case 'deleted': return t('Deleted items');
-    case 'unlinked': return t('Unlinked');
+    case 'due': return t('Follow-up due today');
     case 'awaiting': return t('Awaiting reply');
     case 'mine': return t('My leads');
   }
@@ -340,7 +342,6 @@ export function EmailPage() {
             {folder('archive')}
             {folder('deleted')}
             <div className="navsec mail-sec">{t('Smart views')}</div>
-            {folder('unlinked', meta?.unlinked, true)}
             {folder('awaiting')}
             {folder('mine')}
             <div className="navsec mail-sec">{t('Templates')}</div>

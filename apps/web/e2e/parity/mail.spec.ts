@@ -62,7 +62,7 @@ test('mail parity: app side', async ({ page }) => {
 
   // 3. Link email to a lead. In the full run email.spec has already made a lead from this message; unlink it again.
   sql(`update email_messages set lead_id=null, contact_id=null, company_id=null where subject='Website enquiry' and user_id=${me.id}`);
-  await page.goto('/email?folder=unlinked');
+  await page.goto('/email?folder=inbox');
   await page.getByRole('region', { name: 'Message list' }).getByRole('link', { name: /Website enquiry/ }).click();
   await page.getByRole('article', { name: 'Website enquiry' }).getByRole('button', { name: 'Link to lead / create lead' }).click();
   await expect(page.getByRole('dialog', { name: 'Link email to a lead' })).toBeVisible();
