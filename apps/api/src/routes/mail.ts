@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
 import { Prisma, type EmailMessage, type Lead } from '@prisma/client';
-import { BULK_MAX, LeadCreate, MailBulk, MailChange, MailCompose, MailLink, MailListQuery, MailRead, MailReply, can, replyRecipients, replySubject, checkDomain, domainOf, isFreeMail, pageArgs } from '@dait-crm/shared';
+import { BULK_MAX, LeadCreate, MailBulk, MailChange, MailCompose, MailFollowUp, MailLink, MailListQuery, MailRead, MailReply, can, replyRecipients, replySubject, checkDomain, domainOf, isFreeMail, pageArgs } from '@dait-crm/shared';
 import { audit } from '../audit.js';
 import { enqueue } from '../jobs/queue.js';
 import { BODY_MAX } from '../jobs/handlers/syncMailbox.js';
@@ -25,6 +25,7 @@ import { AttachmentTooLargeError, attachmentFile, attachmentHeaders, attachments
 import { LIST_CANDIDATES_MAX, conversationKey, countKey, decorate, listWhere, orderCandidates, type Candidate } from '../mail/list.js';
 import { assertProjectFor, queueOutgoing } from '../mail/outgoing.js';
 import { leadPanel } from '../mail/leadPanel.js';
+import { setLeadFollowUp, suggestLeads } from '../mail/crm.js';
 import { participantsOf } from '../mail/leadMail.js';
 import { FORMATTED_BODY_LIMIT, outgoingBody, perUser } from '../mail/formatted.js';
 import { outgoingWithFiles } from '../mail/templateFiles.js';
@@ -595,6 +596,44 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
         return u;
       });
       return { id: updated.id, leadId: updated.leadId };
+    });
+  });
+
+  // Unlink (web-mail release 2): this message only loses its lead, contact and company; the conversation's other
+  // messages and the lead stay as they are. Your own messages only (another user's is 403 view_only).
+  app.post<{ Params: { id: string } }>('/mail/:id/unlink', pre, async (request, reply) => {
+    const user = request.user!;
+    return guard(reply, async () => {
+      const { m } = await messageFor(prisma, user, request.params.id, 'change');
+      const updated = await prisma.emailMessage.update({ where: { id: m.id }, data: { leadId: null, contactId: null, companyId: null } });
+      return { id: updated.id, leadId: null };
+    });
+  });
+
+  // Link to lead suggestions (web-mail release 2): leads you can see, matched on the message's addresses and domains.
+  // Your own messages only, as Link (another user's is 403 view_only).
+  app.get<{ Params: { id: string } }>('/mail/:id/lead-suggestions', pre, async (request, reply) => {
+    const user = request.user!;
+    return guard(reply, async () => {
+      const { m } = await messageFor(prisma, user, request.params.id, 'change');
+      return { items: await suggestLeads(prisma, user, m) };
+    });
+  });
+
+  // Follow-up (web-mail release 2): the message's lead's next follow-up day, and the time on its assignee's follow-up
+  // task; { clear: true } removes both. Needs manage_leads; also on another user's lead mail in team view (a CRM-side
+  // action, the owner's mailbox is not changed). No lead, or one you cannot see, is 409 no_lead.
+  app.post<{ Params: { id: string } }>('/mail/:id/follow-up', pre, async (request, reply) => {
+    const body = parseBody(MailFollowUp, request.body);
+    const user = request.user!;
+    return guard(reply, async () => {
+      const { m } = await messageFor(prisma, user, request.params.id, 'crm');
+      if (!can(user.role, 'manage_leads')) return reply.code(403).send({ error: 'forbidden' });
+      if (!m.leadId || !(await canSeeLead(prisma, user, m.leadId))) return reply.code(409).send({ error: 'no_lead' });
+      const leadId = m.leadId;
+      const v = 'clear' in body ? null : { date: body.date, time: body.time };
+      const result = await prisma.$transaction((tx) => setLeadFollowUp(tx, user, leadId, v, m.id));
+      return { leadId, ...result };
     });
   });
 
