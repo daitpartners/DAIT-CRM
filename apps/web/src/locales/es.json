@@ -2146,7 +2146,6 @@
   "Added to new emails and replies you write in the CRM.": "Se añade a los correos nuevos y a las respuestas que escribes en el CRM.",
   "Add automatically": "Añadir automáticamente",
   "Signature saved": "Firma guardada",
-  "The signature is too long.": "La firma es demasiado larga.",
   "Files over 2.5 MB can be attached in Outlook.": "Los archivos de más de 2,5 MB se pueden adjuntar en Outlook.",
   "This type of file cannot be attached here. Attach it in Outlook.": "Este tipo de archivo no se puede adjuntar aquí. Adjúntelo en Outlook.",
   "This draft was removed in Outlook.": "Este borrador se eliminó en Outlook.",
@@ -2156,5 +2155,9 @@
   "Choose a follow-up time after the email is sent.": "Elija una hora de seguimiento posterior al envío del correo.",
   "This draft is in a mailbox that is no longer connected. Open it in Outlook.": "Este borrador está en un buzón que ya no está conectado. Ábralo en Outlook.",
   "This email is no longer a draft.": "Este correo ya no es un borrador.",
-  "Sending was interrupted and the email may have left. Check Sent Items before sending it again.": "El envío se interrumpió y es posible que el correo haya salido. Revise Elementos enviados antes de volver a enviarlo."
+  "Sending was interrupted and the email may have left. Check Sent Items before sending it again.": "El envío se interrumpió y es posible que el correo haya salido. Revise Elementos enviados antes de volver a enviarlo.",
+  "The pictures and attachments are too large to send (2.5 MB at most together). Remove an attachment and try again.": "Las imágenes y los adjuntos son demasiado grandes para enviarlos (2,5 MB como máximo en total). Quite un adjunto e inténtelo de nuevo.",
+  "One of the files is not a type the CRM can send (pictures, PDF, Word, Excel or PowerPoint).": "Uno de los archivos no es de un tipo que el CRM pueda enviar (imágenes, PDF, Word, Excel o PowerPoint).",
+  "The signature is too long (20 000 characters at most).": "La firma es demasiado larga (20 000 caracteres como máximo).",
+  "This file can't be attached: a message can have up to 20 files, and the file must be readable.": "No se puede adjuntar este archivo: un mensaje puede tener hasta 20 archivos y el archivo debe poder leerse."
 }

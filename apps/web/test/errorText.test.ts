@@ -26,14 +26,29 @@ describe('errorText — web-mail release 3 (writing and sending)', () => {
       schedule_time: 'Choose a time at least a minute from now and within a year.',
       follow_up_time: 'Choose a follow-up time after the email is sent.',
       no_mailbox: 'Connect your Microsoft 365 mailbox in Settings to send email from the CRM.',
-      attachment_type: 'This type of file cannot be attached here. Attach it in Outlook.',
-      attachments_too_large: 'Files over 2.5 MB can be attached in Outlook.',
-      signature_too_long: 'The signature is too long.',
+      signature_too_long: 'The signature is too long (20 000 characters at most).',
       mailbox_changed: 'This draft is in a mailbox that is no longer connected. Open it in Outlook.',
       not_draft: 'This email is no longer a draft.',
       interrupted_may_have_sent: 'Sending was interrupted and the email may have left. Check Sent Items before sending it again.',
       mailbox_needs_reconnect: 'Your mailbox needs reconnecting in Settings → Email & calendar connections, then send again.',
     };
     for (const [code, text] of Object.entries(expected)) expect(errorText(t, code), code).toBe(text);
+  });
+});
+
+describe('errorText — file refusals by screen (web-mail release 3)', () => {
+  it('the mail editor (draft context) points to Outlook and names the 20-file limit', () => {
+    const draft = { context: 'draft' as const };
+    expect(errorText(t, 'attachments_too_large', {}, draft)).toBe('Files over 2.5 MB can be attached in Outlook.');
+    expect(errorText(t, 'attachment_type', {}, draft)).toBe('This type of file cannot be attached here. Attach it in Outlook.');
+    expect(errorText(t, 'attachment_invalid', {}, draft)).toBe("This file can't be attached: a message can have up to 20 files, and the file must be readable.");
+    // Other codes read the same in the editor.
+    expect(errorText(t, 'draft_gone', {}, draft)).toBe('This draft was removed in Outlook.');
+  });
+
+  it('templates and the Mailer (no context) keep their upload texts', () => {
+    expect(errorText(t, 'attachments_too_large')).toBe('The pictures and attachments are too large to send (2.5 MB at most together). Remove an attachment and try again.');
+    expect(errorText(t, 'attachment_type')).toBe('One of the files is not a type the CRM can send (pictures, PDF, Word, Excel or PowerPoint).');
+    expect(errorText(t, 'attachment_invalid')).toBe('One of the template’s files could not be read. Upload the .oft again.');
   });
 });

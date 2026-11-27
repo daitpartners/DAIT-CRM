@@ -2146,7 +2146,6 @@
   "Added to new emails and replies you write in the CRM.": "Ajoutée aux nouveaux e-mails et aux réponses que vous rédigez dans le CRM.",
   "Add automatically": "Ajouter automatiquement",
   "Signature saved": "Signature enregistrée",
-  "The signature is too long.": "La signature est trop longue.",
   "Files over 2.5 MB can be attached in Outlook.": "Les fichiers de plus de 2,5 Mo peuvent être joints dans Outlook.",
   "This type of file cannot be attached here. Attach it in Outlook.": "Ce type de fichier ne peut pas être joint ici. Joignez-le dans Outlook.",
   "This draft was removed in Outlook.": "Ce brouillon a été supprimé dans Outlook.",
@@ -2156,5 +2155,9 @@
   "Choose a follow-up time after the email is sent.": "Choisissez une heure de relance après l’envoi de l’e-mail.",
   "This draft is in a mailbox that is no longer connected. Open it in Outlook.": "Ce brouillon se trouve dans une boîte aux lettres qui n’est plus connectée. Ouvrez-le dans Outlook.",
   "This email is no longer a draft.": "Cet e-mail n’est plus un brouillon.",
-  "Sending was interrupted and the email may have left. Check Sent Items before sending it again.": "L’envoi a été interrompu et l’e-mail est peut-être parti. Vérifiez les Éléments envoyés avant de le renvoyer."
+  "Sending was interrupted and the email may have left. Check Sent Items before sending it again.": "L’envoi a été interrompu et l’e-mail est peut-être parti. Vérifiez les Éléments envoyés avant de le renvoyer.",
+  "The pictures and attachments are too large to send (2.5 MB at most together). Remove an attachment and try again.": "Les images et pièces jointes sont trop volumineuses pour être envoyées (2,5 Mo au maximum au total). Retirez une pièce jointe et réessayez.",
+  "One of the files is not a type the CRM can send (pictures, PDF, Word, Excel or PowerPoint).": "L’un des fichiers n’est pas d’un type que le CRM peut envoyer (images, PDF, Word, Excel ou PowerPoint).",
+  "The signature is too long (20 000 characters at most).": "La signature est trop longue (20 000 caractères maximum).",
+  "This file can't be attached: a message can have up to 20 files, and the file must be readable.": "Impossible de joindre ce fichier : un message peut contenir jusqu’à 20 fichiers, et le fichier doit être lisible."
 }

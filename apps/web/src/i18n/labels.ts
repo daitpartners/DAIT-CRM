@@ -398,7 +398,23 @@ export function taskWhenText(
 }
 
 /** Friendly text for API error codes; `vars` fills codes that carry values (csv_too_large: rows, max). */
-export function errorText(t: TFn, code: string, vars: Record<string, string | number> = {}): string {
+/**
+ * Where an error shows, when the same code needs other words there. `draft`: the mail editor (web-mail release 3), whose
+ * files go straight onto the Outlook draft, so a refused file can still be attached in Outlook.
+ */
+export type ErrorContext = 'draft';
+
+export function errorText(t: TFn, code: string, vars: Record<string, string | number> = {}, opts: { context?: ErrorContext } = {}): string {
+  if (opts.context === 'draft') {
+    switch (code) {
+      case 'attachments_too_large':
+        return t('Files over 2.5 MB can be attached in Outlook.');
+      case 'attachment_type':
+        return t('This type of file cannot be attached here. Attach it in Outlook.');
+      case 'attachment_invalid':
+        return t("This file can't be attached: a message can have up to 20 files, and the file must be readable.");
+    }
+  }
   switch (code) {
     case 'email_taken':
       return t('That email is already in use');
@@ -407,15 +423,15 @@ export function errorText(t: TFn, code: string, vars: Record<string, string | nu
     case 'message_too_long':
       return t('This message is too long to send. Shorten it, or remove large pictures or formatting.');
     case 'signature_too_long':
-      return t('The signature is too long.');
+      return t('The signature is too long (20 000 characters at most).');
     case 'try_again':
       return t('The server is busy. Try again in a moment.');
     case 'html_too_complex':
       return t('The formatting is too complex to read. Simplify it, or remove the formatting.');
     case 'attachments_too_large':
-      return t('Files over 2.5 MB can be attached in Outlook.');
+      return t('The pictures and attachments are too large to send (2.5 MB at most together). Remove an attachment and try again.');
     case 'attachment_type':
-      return t('This type of file cannot be attached here. Attach it in Outlook.');
+      return t('One of the files is not a type the CRM can send (pictures, PDF, Word, Excel or PowerPoint).');
     case 'template_files_missing':
       return t('This template’s files have changed or are missing. Pick the template again (or upload the .oft again).');
     case 'attachment_invalid':
