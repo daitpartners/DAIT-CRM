@@ -3,7 +3,7 @@ import { act, renderHook } from '@testing-library/react';
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import {
-  resolveRecipients, useAutoSave, useDraftFile, useRecipientSuggestions, useSendDraft, useUnsend, type DraftFields, type DraftView,
+  resolveRecipients, useApplyTemplateFiles, useAutoSave, useDraftFile, useRecipientSuggestions, useSendDraft, useUnsend, type DraftFields, type DraftView,
 } from '../src/api/drafts';
 import { keys } from '../src/api/queries';
 import { makeClient } from './leadFixture';
@@ -107,8 +107,109 @@ describe('useAutoSave (web-mail release 3)', () => {
 
     rerender({ f: fields('<p>Hi An</p>'), id: 7, on: true });
     await tick(5000);
-    await act(async () => result.current.flush());
+    const flushed = await act(async () => result.current.flush());
+    expect(flushed).toEqual({ ok: false, code: 'draft_gone' });
     expect(calls).toHaveLength(1);
+  });
+
+  it('flush reports a failed save (never resolving as saved), a passing failure is retried by itself with a growing wait, and the next flush saves', async () => {
+    let answers: Answer[] = [{ status: 503, body: { error: 'outlook_busy' } }, { status: 503, body: { error: 'outlook_busy' } }, { status: 503, body: { error: 'outlook_busy' } }];
+    const calls = stubFetch(() => answers.shift() ?? { status: 200, body: { savedAt: '2026-11-27T15:00:00.000Z' } });
+    const { result, rerender } = mount();
+    rerender({ f: fields('<p>Last words</p>'), id: 7, on: true });
+    expect(await act(async () => result.current.flush())).toEqual({ ok: false, code: 'outlook_busy' });
+    expect(calls).toHaveLength(1);
+    // Retried by itself after 2 s, then after 4 s.
+    await tick(1999);
+    expect(calls).toHaveLength(1);
+    await tick(1);
+    expect(calls).toHaveLength(2);
+    await tick(3999);
+    expect(calls).toHaveLength(2);
+    await tick(1);
+    expect(calls).toHaveLength(3);
+    // Outlook answers again: the next flush saves and reports it.
+    answers = [];
+    expect(await act(async () => result.current.flush())).toEqual({ ok: true });
+    expect(calls).toHaveLength(4);
+    expect(result.current).toMatchObject({ error: null, savedAt: '2026-11-27T15:00:00.000Z' });
+    await tick(60_000);
+    expect(calls).toHaveLength(4);
+  });
+
+  it('a network failure, the rate limit and a body over the limit get our codes; only the passing ones are retried by themselves', async () => {
+    const answers: (Answer | 'network')[] = ['network', { status: 429, body: { error: 'Too Many Requests' } }, { status: 413, body: { error: 'Payload Too Large' } }];
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      const a = answers.shift() ?? { status: 200, body: { savedAt: 'x' } };
+      calls.push('call');
+      if (a === 'network') throw new TypeError('Failed to fetch');
+      return Response.json(a.body, { status: a.status });
+    }));
+    const { result, rerender } = mount();
+    rerender({ f: fields('<p>A</p>'), id: 7, on: true });
+    expect(await act(async () => result.current.flush())).toEqual({ ok: false, code: 'try_again' });
+    await tick(2000);
+    expect(result.current.error).toBe('try_again'); // 429
+    await tick(4000);
+    expect(result.current.error).toBe('message_too_long'); // 413: the same body would meet it again
+    await tick(60_000);
+    expect(calls).toHaveLength(3);
+  });
+
+  it('a save queued while one is out is not sent once saving is turned off (sending); turned back on, saving starts afresh', async () => {
+    const first = later();
+    const answers = [first.answer, Promise.resolve({ status: 200, body: { savedAt: '2026-11-27T15:10:00.000Z' } })];
+    const calls = stubFetch(() => answers.shift()!);
+    const { result, rerender } = mount();
+    rerender({ f: fields('<p>One</p>'), id: 7, on: true });
+    await tick(2000);
+    rerender({ f: fields('<p>Two</p>'), id: 7, on: true });
+    await tick(2000); // queued behind the first
+    rerender({ f: fields('<p>Two</p>'), id: 7, on: false });
+    await act(async () => first.release({ status: 200, body: { savedAt: '2026-11-27T15:05:00.000Z' } }));
+    await tick(10_000);
+    expect(calls).toHaveLength(1);
+    // Undo: the draft is back and saving is on again; what the editor holds counts as saved.
+    rerender({ f: fields('<p>Two</p>'), id: 7, on: true });
+    await tick(10_000);
+    expect(calls).toHaveLength(1);
+    expect(result.current.error).toBeNull();
+    rerender({ f: fields('<p>Two!</p>'), id: 7, on: true });
+    await tick(2000);
+    expect(calls.map((c) => c.body)).toEqual([fields('<p>One</p>'), fields('<p>Two!</p>')]);
+  });
+
+  it('another draft opened: a late answer for the first is ignored, the new one starts afresh, and saves never overlap (A → B → A)', async () => {
+    const forA = later();
+    const answers = [forA.answer, Promise.resolve({ status: 200, body: { savedAt: '2026-11-27T15:20:00.000Z' } })];
+    const calls = stubFetch(() => answers.shift()!);
+    const { result, rerender } = mount();
+    rerender({ f: fields('<p>A edited</p>'), id: 7, on: true });
+    await tick(2000);
+    expect(calls).toHaveLength(1);
+    // Draft 8 opened, then draft 7 again, while 7's save is still out.
+    rerender({ f: fields('<p>B</p>'), id: 8, on: true });
+    await tick(3000);
+    rerender({ f: fields('<p>A again</p>'), id: 7, on: true });
+    rerender({ f: fields('<p>A again, edited</p>'), id: 7, on: true });
+    await tick(2000);
+    expect(calls).toHaveLength(1); // no second PATCH for 7 while the first is out
+    let flushed: unknown;
+    act(() => {
+      void result.current.flush().then((r) => {
+        flushed = r;
+      });
+    });
+    await act(async () => forA.release({ status: 200, body: { savedAt: '2026-11-27T15:15:00.000Z' } }));
+    await tick(0);
+    // The late answer did not count as this opening's save; the edit after reopening is saved next.
+    expect(calls.map((c) => [c.url, c.body])).toEqual([
+      ['/api/mail/drafts/7', fields('<p>A edited</p>')],
+      ['/api/mail/drafts/7', fields('<p>A again, edited</p>')],
+    ]);
+    expect(flushed).toEqual({ ok: true });
+    expect(result.current.savedAt).toBe('2026-11-27T15:20:00.000Z');
   });
 
   it('a passing failure (Outlook busy) is reported and the next change saves again, clearing it', async () => {
@@ -131,10 +232,10 @@ describe('useAutoSave (web-mail release 3)', () => {
     const calls = stubFetch(() => answers.shift()!);
     const { result, rerender } = mount();
     rerender({ f: fields('<p>One</p>'), id: 7, on: true });
-    let flushed = false;
+    let flushed: unknown = null;
     act(() => {
-      void result.current.flush().then(() => {
-        flushed = true;
+      void result.current.flush().then((r) => {
+        flushed = r;
       });
     });
     await tick(0);
@@ -145,11 +246,11 @@ describe('useAutoSave (web-mail release 3)', () => {
     });
     await tick(0);
     expect(calls).toHaveLength(1);
-    expect(flushed).toBe(false);
+    expect(flushed).toBeNull();
     await act(async () => first.release({ status: 200, body: { savedAt: '2026-11-27T14:32:00.000Z' } }));
     await tick(0);
     expect(calls.map((c) => c.body)).toEqual([fields('<p>One</p>'), fields('<p>Two</p>')]);
-    expect(flushed).toBe(true);
+    expect(flushed).toEqual({ ok: true });
     expect(result.current.savedAt).toBe('2026-11-27T14:33:00.000Z');
   });
 
@@ -158,7 +259,7 @@ describe('useAutoSave (web-mail release 3)', () => {
     const off = mount(7, false);
     off.rerender({ f: fields('<p>A</p>'), id: 7, on: false });
     await tick(3000);
-    await act(async () => off.result.current.flush());
+    expect(await act(async () => off.result.current.flush())).toEqual({ ok: true });
     const none = mount(null, true);
     none.rerender({ f: fields('<p>A</p>'), id: null, on: true });
     await tick(3000);
@@ -203,6 +304,19 @@ describe('send hooks (web-mail release 3)', () => {
       await result.current.remove('AAMk/x=');
     });
     expect(calls[1]).toMatchObject({ url: '/api/mail/drafts/7/files/AAMk%2Fx%3D', method: 'DELETE' });
+  });
+
+  it('file hooks without a draft refuse without a request', async () => {
+    const calls = stubFetch(() => ({ status: 201, body: {} }));
+    const qc = makeClient();
+    const files = renderHook(() => useDraftFile(null), { wrapper: wrap(qc) });
+    const template = renderHook(() => useApplyTemplateFiles(null), { wrapper: wrap(qc) });
+    await act(async () => {
+      await expect(files.result.current.add(new File(['x'], 'a.pdf'), false)).rejects.toThrow('No draft yet');
+      await expect(files.result.current.remove('AAMk=')).rejects.toThrow('No draft yet');
+      await expect(template.result.current.mutateAsync({ templateId: 1, attachmentIds: [] })).rejects.toThrow('No draft yet');
+    });
+    expect(calls).toHaveLength(0);
   });
 });
 

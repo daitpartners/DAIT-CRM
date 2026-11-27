@@ -42,6 +42,12 @@ describe('errorText — file refusals by screen (web-mail release 3)', () => {
     expect(errorText(t, 'attachments_too_large', {}, draft)).toBe('Files over 2.5 MB can be attached in Outlook.');
     expect(errorText(t, 'attachment_type', {}, draft)).toBe('This type of file cannot be attached here. Attach it in Outlook.');
     expect(errorText(t, 'attachment_invalid', {}, draft)).toBe("This file can't be attached: a message can have up to 20 files, and the file must be readable.");
+    expect(errorText(t, 'draft', {}, draft)).toBe('A draft cannot be answered. Open it to go on writing.');
+    expect(errorText(t, 'not_found', {}, draft)).toBe('This draft no longer exists. It may have been sent or deleted.');
+    expect(errorText(t, 'validation', {}, draft)).toBe('This email could not be saved. Check that every recipient is a valid email address.');
+    // Elsewhere these keep their usual words.
+    expect(errorText(t, 'not_found')).toBe('Not found');
+    expect(errorText(t, 'validation')).toBe('Please check the highlighted fields');
     // Other codes read the same in the editor.
     expect(errorText(t, 'draft_gone', {}, draft)).toBe('This draft was removed in Outlook.');
   });

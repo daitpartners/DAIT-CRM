@@ -400,7 +400,8 @@ export function taskWhenText(
 /** Friendly text for API error codes; `vars` fills codes that carry values (csv_too_large: rows, max). */
 /**
  * Where an error shows, when the same code needs other words there. `draft`: the mail editor (web-mail release 3), whose
- * files go straight onto the Outlook draft, so a refused file can still be attached in Outlook.
+ * files go straight onto the Outlook draft (a refused file can still be attached in Outlook), and where there are no
+ * highlighted fields and "not found" means the draft itself.
  */
 export type ErrorContext = 'draft';
 
@@ -413,6 +414,12 @@ export function errorText(t: TFn, code: string, vars: Record<string, string | nu
         return t('This type of file cannot be attached here. Attach it in Outlook.');
       case 'attachment_invalid':
         return t("This file can't be attached: a message can have up to 20 files, and the file must be readable.");
+      case 'draft':
+        return t('A draft cannot be answered. Open it to go on writing.');
+      case 'not_found':
+        return t('This draft no longer exists. It may have been sent or deleted.');
+      case 'validation':
+        return t('This email could not be saved. Check that every recipient is a valid email address.');
     }
   }
   switch (code) {

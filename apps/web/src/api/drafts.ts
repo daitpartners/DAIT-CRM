@@ -68,10 +68,22 @@ export const AUTO_SAVE_MS = 2000;
 /** Recipient suggestions wait this long after the last key. */
 export const SUGGEST_MS = 250;
 
-/** Codes after which saving again cannot succeed: auto-save stops until another draft is opened. */
+/** Codes after which saving again cannot succeed: auto-save stops until the draft is opened again (or re-enabled). */
 const FINAL = new Set(['draft_gone', 'mailbox_changed', 'not_draft', 'already_sent', 'view_only', 'not_found', 'forbidden', 'no_mailbox']);
+/** Codes the same fields would meet again: not retried by themselves, saved again on the next change or flush. */
+const NO_RETRY = new Set(['validation', 'message_too_long', 'html_too_complex', 'attachments_too_large']);
+/** Waits before retrying a passing failure (Outlook busy, the network, the rate limit): 2 s, doubling, at most 30 s. */
+const RETRY_MAX_MS = 30_000;
 
-const codeOf = (err: unknown) => (err instanceof ApiError ? err.code : 'try_again');
+/**
+ * The code of a failed request. Fastify's own refusals carry no code of ours: a body over the limit (413) reads as
+ * message_too_long, the rate limit (429) and a server error as try_again; anything not from the API (the network) too.
+ */
+function codeOf(err: unknown): string {
+  if (!(err instanceof ApiError)) return 'try_again';
+  if (/^[a-z_]+$/.test(err.code) && err.code !== 'server_error') return err.code;
+  return err.status === 413 ? 'message_too_long' : 'try_again';
+}
 
 /** After a send, Undo, Cancel or Send now: the mail screen, the sidebar badges and, with one, the lead page. */
 function refreshAfterSend(qc: QueryClient, leadId: number | null | undefined) {
@@ -131,13 +143,23 @@ export function useDiscardDraft() {
   });
 }
 
+/** What `flush()` answers: everything the editor holds is saved, or the code of the failure that left it unsaved. */
+export type FlushResult = { ok: true } | { ok: false; code: string };
+
 /**
- * Auto-save of draft `id` while `enabled`: the whole draft is saved AUTO_SAVE_MS after the last change, one request at
- * a time (a change while one is saving is saved once it answers), and `flush()` saves now (resolving once everything
- * held is saved, or the save failed). `savedAt` is the server's time of the last save; `error` the code of the last
- * failure (`draft_gone`, `outlook_busy`…), cleared by the next save. After a final code (the draft is gone in Outlook,
- * already sent, from another mailbox) nothing more is saved. Opening another draft (`id`) starts afresh, taking the
- * fields at that moment as saved.
+ * Auto-save of draft `id` while `enabled`.
+ * - The whole draft is saved AUTO_SAVE_MS after the last change, one request at a time for the hook, whatever the id
+ *   does meanwhile (a change while one is out is saved, with the latest fields, once it answers).
+ * - A passing failure (`outlook_busy`, `try_again`: the network, the rate limit, a server error) is retried by itself
+ *   after 2 s, then 4, 8… up to 30 s, while the change is still unsaved. A final code (`draft_gone`, `already_sent`,
+ *   `mailbox_changed`, `not_draft`, `view_only`, `not_found`, `forbidden`, `no_mailbox`) stops saving. A refusal the same
+ *   fields would meet again (`validation`, `message_too_long`…) waits for the next change or flush.
+ * - `flush()` saves now and **never rejects**: it resolves `{ ok: true }` once everything held is saved (or there is
+ *   nothing to save: disabled, no draft), else `{ ok: false, code }` with the failure's code (errorText, context 'draft').
+ *   An editor closing calls `await flush()` and stays open on `ok: false`.
+ * - `savedAt` is the server's time of the last save; `error` the last failure's code, cleared by the next save.
+ * - A new `id`, or `enabled` turning back on, starts afresh: the fields at that moment count as saved, the error and the
+ *   stop are cleared, and an answer still out for before is ignored.
  */
 export function useAutoSave(id: number | null, fields: DraftFields, opts: { enabled: boolean }) {
   const [state, setState] = useState<{ savedAt: string | null; saving: boolean; error: string | null }>({ savedAt: null, saving: false, error: null });
@@ -145,56 +167,90 @@ export function useAutoSave(id: number | null, fields: DraftFields, opts: { enab
   const latest = useRef({ fields, text });
   latest.current = { fields, text };
   const draftId = useRef(id);
-  /** The fields as the server last saved them (JSON). */
-  const saved = useRef(text);
-  const running = useRef<Promise<void> | null>(null);
-  const again = useRef(false);
-  const stopped = useRef(false);
+  draftId.current = id;
   const enabled = useRef(opts.enabled);
   enabled.current = opts.enabled;
+  /** Bumped by a new id or by re-enabling: an answer for an older generation is ignored. */
+  const generation = useRef(0);
+  /** The fields as the server last saved them (JSON), for this generation. */
+  const saved = useRef(text);
+  const lastError = useRef<string | null>(null);
+  const stopped = useRef(false);
+  const running = useRef<Promise<void> | null>(null);
+  const again = useRef(false);
+  const retry = useRef<{ timer: ReturnType<typeof setTimeout> | null; delay: number }>({ timer: null, delay: AUTO_SAVE_MS });
 
-  useEffect(() => {
-    draftId.current = id;
-    saved.current = latest.current.text;
-    again.current = false;
-    stopped.current = false;
-    running.current = null;
-    setState({ savedAt: null, saving: false, error: null });
-  }, [id]);
+  const clearRetry = () => {
+    if (retry.current.timer) clearTimeout(retry.current.timer);
+    retry.current.timer = null;
+  };
 
-  const loop = useCallback(async () => {
-    const forId = draftId.current;
-    do {
-      again.current = false;
-      const { fields: body, text: bodyText } = latest.current;
-      if (forId === null || stopped.current || bodyText === saved.current) return;
-      setState((s) => ({ ...s, saving: true }));
-      try {
-        const r = await api<{ savedAt: string }>(`/api/mail/drafts/${forId}`, { method: 'PATCH', body });
-        if (draftId.current !== forId) return;
-        saved.current = bodyText;
-        setState({ savedAt: r.savedAt, saving: false, error: null });
-      } catch (err) {
-        if (draftId.current !== forId) return;
-        const code = codeOf(err);
-        if (FINAL.has(code)) stopped.current = true;
-        setState((s) => ({ ...s, saving: false, error: code }));
-        return;
-      }
-    } while (again.current);
-  }, []);
+  const dirty = () => enabled.current && draftId.current !== null && !stopped.current && latest.current.text !== saved.current;
 
   const save = useCallback((): Promise<void> => {
     if (running.current) {
       again.current = true;
       return running.current;
     }
-    const run: Promise<void> = loop().finally(() => {
-      if (running.current === run) running.current = null;
+    const run: Promise<void> = (async () => {
+      do {
+        again.current = false;
+        if (!dirty()) return;
+        clearRetry();
+        const forId = draftId.current!;
+        const gen = generation.current;
+        const { fields: body, text: bodyText } = latest.current;
+        setState((s) => ({ ...s, saving: true }));
+        try {
+          const r = await api<{ savedAt: string }>(`/api/mail/drafts/${forId}`, { method: 'PATCH', body });
+          if (generation.current !== gen) continue; // opened afresh meanwhile: look again for the current draft
+          saved.current = bodyText;
+          lastError.current = null;
+          retry.current.delay = AUTO_SAVE_MS;
+          setState({ savedAt: r.savedAt, saving: false, error: null });
+        } catch (err) {
+          if (generation.current !== gen) continue;
+          const code = codeOf(err);
+          lastError.current = code;
+          setState((s) => ({ ...s, saving: false, error: code }));
+          if (FINAL.has(code)) {
+            stopped.current = true;
+            return;
+          }
+          if (!NO_RETRY.has(code)) {
+            const delay = retry.current.delay;
+            retry.current.delay = Math.min(delay * 2, RETRY_MAX_MS);
+            retry.current.timer = setTimeout(() => {
+              retry.current.timer = null;
+              void save();
+            }, delay);
+          }
+          return;
+        }
+      } while (again.current);
+    })().finally(() => {
+      running.current = null;
+      setState((s) => (s.saving ? { ...s, saving: false } : s));
     });
     running.current = run;
     return run;
-  }, [loop]);
+    // Reads only refs: one function for the hook's life.
+  }, []);
+
+  // A new draft, or saving turned back on: start afresh (declared before the timer, so opening is not a change).
+  useEffect(() => {
+    if (!opts.enabled) {
+      clearRetry();
+      return;
+    }
+    generation.current += 1;
+    saved.current = latest.current.text;
+    lastError.current = null;
+    stopped.current = false;
+    retry.current.delay = AUTO_SAVE_MS;
+    clearRetry();
+    setState({ savedAt: null, saving: false, error: null });
+  }, [id, opts.enabled]);
 
   useEffect(() => {
     if (!opts.enabled || id === null || stopped.current || text === saved.current) return;
@@ -202,12 +258,25 @@ export function useAutoSave(id: number | null, fields: DraftFields, opts: { enab
     return () => clearTimeout(timer);
   }, [text, id, opts.enabled, save]);
 
-  const flush = useCallback(async () => {
-    if (!enabled.current || draftId.current === null) return;
+  useEffect(() => clearRetry, []);
+
+  const flush = useCallback(async (): Promise<FlushResult> => {
+    if (!enabled.current || draftId.current === null) return { ok: true };
+    // Joins a save already out (the run then goes on with the latest fields, whatever draft it was for); a run that
+    // ended without trying this draft's fields (it was for an older opening) is followed by one more.
     await save();
+    if (dirty() && lastError.current === null) await save();
+    if (!dirty() && !stopped.current) return { ok: true };
+    return { ok: false, code: lastError.current ?? 'try_again' };
   }, [save]);
 
   return { ...state, flush };
+}
+
+/** Draft `id` in a request path; a file change before the draft exists is a caller's mistake, refused without a request. */
+function draftPath(id: number | null): number {
+  if (id === null) throw new Error('No draft yet: create the draft before changing its files.');
+  return id;
 }
 
 /** A file's bytes as base64 (no `data:` prefix), as the upload takes them. */
@@ -227,10 +296,10 @@ function fileBase64(file: File): Promise<string> {
 export function useDraftFile(id: number | null) {
   const adding = useMutation({
     mutationFn: async (v: { file: File; inline: boolean }) =>
-      api<DraftFileView>(`/api/mail/drafts/${id}/files`, { method: 'POST', body: { name: v.file.name, data: await fileBase64(v.file), inline: v.inline } }),
+      api<DraftFileView>(`/api/mail/drafts/${draftPath(id)}/files`, { method: 'POST', body: { name: v.file.name, data: await fileBase64(v.file), inline: v.inline } }),
   });
   const removing = useMutation({
-    mutationFn: (fileId: string) => api<void>(`/api/mail/drafts/${id}/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' }),
+    mutationFn: async (fileId: string) => api<void>(`/api/mail/drafts/${draftPath(id)}/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' }),
   });
   const { mutateAsync: addAsync } = adding;
   const { mutateAsync: removeAsync } = removing;
@@ -242,8 +311,8 @@ export function useDraftFile(id: number | null) {
 /** Copies a template's files (its inline pictures, the attachments kept) onto draft `id`, replacing a template's before. */
 export function useApplyTemplateFiles(id: number | null) {
   return useMutation({
-    mutationFn: (v: { templateId: number; attachmentIds: number[] }) =>
-      api<{ files: DraftFileView[] }>(`/api/mail/drafts/${id}/template`, { method: 'POST', body: v }).then((r) => r.files),
+    mutationFn: async (v: { templateId: number; attachmentIds: number[] }) =>
+      api<{ files: DraftFileView[] }>(`/api/mail/drafts/${draftPath(id)}/template`, { method: 'POST', body: v }).then((r) => r.files),
   });
 }
 
