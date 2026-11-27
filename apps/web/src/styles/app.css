@@ -690,6 +690,9 @@ td.nowrap{white-space:nowrap}
    own sizes are variables on .wm; colours, fonts and components are the live CRM's. */
 .wm{--fp:196px;--ml:322px;--lp:236px;--pane:#F7F4FC;--row-hover:#F6F2FD;display:flex;flex-direction:column;flex:1 1 auto;min-width:0}
 @media (max-width:1360px){.wm{--fp:184px;--ml:300px}}
+/* at 1280 the list header (Inbox, Conversation view, By date) and the chips (All · Unread · Flagged · Attachments)
+   each stay on one line in the 300 px list, as the mockup (which overflows its padding by a few pixels instead) */
+@media (max-width:1360px){.wm .ml-row2 .fchip{padding:0 7px}.wm .ml-head .ml-row1{column-gap:4px}}
 .wm .ico{display:inline-flex;width:16px;height:16px;flex:0 0 auto}
 .wm .ico svg{width:100%;height:100%;display:block}
 /* Top bar: title, search (Outlook puts it centred at the top), sync */
@@ -762,7 +765,7 @@ td.nowrap{white-space:nowrap}
 .fp-scroll{flex:1;overflow-y:auto;padding:4px 8px 8px}
 .fsec{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:12px 8px 6px;display:flex;align-items:center;gap:4px}
 .wm .fsec .ico{width:12px;height:12px}
-.wm .fold{display:flex;align-items:center;gap:10px;width:100%;height:32px;padding:0 8px 0 10px;border:0;border-radius:7px;background:none;font-size:13px;font-weight:400;color:var(--text);text-align:left;position:relative;text-decoration:none}
+.wm .fold{display:flex;align-items:center;gap:10px;width:100%;min-height:32px;padding:4px 8px 4px 10px;border:0;border-radius:7px;background:none;font-size:13px;font-weight:400;color:var(--text);text-align:left;position:relative;text-decoration:none}
 .wm .fold .ico{color:var(--muted)}
 .wm .fold:hover{background:var(--pane);color:var(--text)}
 .wm .fold.on{background:var(--tint);font-weight:600;color:#4B0A9A}
@@ -790,6 +793,8 @@ td.nowrap{white-space:nowrap}
 @media (max-width:760px){
   .wm .topbar.wm-top{flex-wrap:wrap;padding:10px 16px}
   .msearch{order:3;flex:1 1 100%}
+  /* the search box is the top bar's last line here: the Filters panel opens under it instead of over it */
+  .wm-top .spanel{top:calc(100% + 4px)}
   .fpane{width:auto;flex:1 1 100%;border-right:0;border-bottom:1px solid var(--line)}
   .fp-toggle{display:none}
   .fp-scroll{max-height:220px}
@@ -833,7 +838,8 @@ td.nowrap{white-space:nowrap}
 .wm .lp-kv dd.due{color:var(--bad-fg);font-weight:700}
 .wm .lp-role{display:block;color:var(--muted);font-weight:400}
 .wm .lp-acts{display:flex;flex-direction:column;gap:6px}
-.wm .lp-acts .btn{justify-content:flex-start;height:32px;font-size:12.5px}
+.wm .lp-acts .btn{justify-content:flex-start;height:auto;min-height:32px;padding-top:5px;padding-bottom:5px;font-size:12.5px;white-space:normal;text-align:left;line-height:1.3}
+.wm .lp-acts .btn .ico{flex:none}
 .wm .lp-acts .btn .ico{width:15px;height:15px;color:var(--orange)}
 .wm .lp-acts .btn.primary .ico{color:#fff}
 .wm .lp-sec{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:4px}
@@ -868,7 +874,9 @@ td.nowrap{white-space:nowrap}
    the quick filter chips, the bulk bar, date groups, and rows in the stretched-link pattern (the row's link covers it;
    the avatar's checkbox and the hover actions sit above). */
 .wm .ml-head{padding:10px 12px 8px 14px;border-bottom:1px solid var(--line-2);display:flex;flex-direction:column;gap:8px;flex:none}
-.wm .ml-row1{display:flex;align-items:center;gap:6px;min-width:0}
+.wm .ml-row1{display:flex;align-items:center;gap:4px 6px;min-width:0;flex-wrap:wrap}
+/* a long translated folder name (fr "Boîte de réception") moves the switch and the sort button to a second line
+   instead of clipping them */
 .wm .ml-row1 h2{font-size:15px;font-weight:800;margin:0;white-space:nowrap;flex:none;color:var(--text)}
 .wm .ml-row1 .cnt-t{font-size:12px;color:var(--muted);font-weight:500;white-space:nowrap}
 /* At the mockup's list width the count does not fit beside the switch and the sort button (the mockup hides it there;
@@ -935,10 +943,12 @@ td.nowrap{white-space:nowrap}
 .wm .lchip i{width:6px;height:6px;border-radius:50%;background:var(--purple)}
 .wm .lchip.st-New i{background:var(--faint)}.wm .lchip.st-Contacted i{background:var(--purple)}.wm .lchip.st-Qualified i{background:var(--orange)}
 .wm .lchip.st-Proposal i{background:#B26A00}.wm .lchip.st-Negotiation i{background:#822CDB}.wm .lchip.st-Won i{background:#1E8A4C}
-.wm .mbx{font-size:11px;color:var(--muted);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.wm .mbx{font-size:11px;color:var(--body);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+/* the mailbox name shortens with … instead of wrapping under the lead chip (mockup state 5) */
+.wm .rl4 .mbx{flex:1 1 0}
 .wm .hacts{position:absolute;right:8px;top:6px;display:none;gap:2px;background:inherit;padding-left:6px;z-index:2}
-.wm .mrow:hover .hacts,.wm .mrow.hov .hacts,.wm .mrow:focus-within .hacts{display:flex}
-.wm .mrow:hover .ricons,.wm .mrow.hov .ricons,.wm .mrow:focus-within .ricons{visibility:hidden}
+.wm .mrow:hover .hacts,.wm .mrow.hov .hacts,.wm .mrow:has(:focus-visible) .hacts{display:flex}
+.wm .mrow:hover .ricons,.wm .mrow.hov .ricons,.wm .mrow:has(:focus-visible) .ricons{visibility:hidden}
 .wm .hacts button{width:26px;height:26px;border:0;border-radius:6px;background:var(--surface);color:var(--body);display:inline-flex;align-items:center;justify-content:center;padding:0;box-shadow:0 0 0 1px var(--line)}
 .wm .hacts button:hover:not(:disabled){color:var(--purple);background:var(--tint)}
 .wm .hacts button .ico{width:14px;height:14px}
