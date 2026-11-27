@@ -63,3 +63,11 @@ function weekdayDayMonth(at: Date, timezone: string, locale: string): string {
 export function dayLabel(day: string, language: string): string {
   return weekdayDayMonth(new Date(`${day}T12:00:00Z`), 'UTC', LOCALES[language] ?? LOCALES.en!);
 }
+
+/** A calendar day (`YYYY-MM-DD`) as the Follow-up menu shows it: `27 Nov`, in `language`. */
+export function dayMonthLabel(day: string, language: string): string {
+  const parts = new Intl.DateTimeFormat(LOCALES[language] ?? LOCALES.en!, { timeZone: 'UTC', day: 'numeric', month: 'short' })
+    .formatToParts(new Date(`${day}T12:00:00Z`));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${part('day')} ${noDot(part('month'))}`;
+}

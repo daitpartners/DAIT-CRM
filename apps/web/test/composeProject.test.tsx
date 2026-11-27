@@ -97,7 +97,7 @@ describe('Compose: Client → Lead → Project (release 3B, prototype V.compose)
     const u = userEvent.setup();
     stub();
     show('/email');
-    await u.click(await screen.findByRole('button', { name: '+ Compose' }));
+    await u.click(await screen.findByRole('button', { name: 'New mail' }));
     const dialog = await screen.findByRole('dialog', { name: 'Compose email' });
     const pick = within(dialog).getByRole('combobox', { name: 'Project' }) as HTMLSelectElement;
     expect(pick.disabled).toBe(true);
@@ -108,7 +108,7 @@ describe('Compose: Client → Lead → Project (release 3B, prototype V.compose)
     const u = userEvent.setup();
     const { posts } = stub();
     show('/email?company=4');
-    await u.click(await screen.findByRole('button', { name: '+ Compose' }));
+    await u.click(await screen.findByRole('button', { name: 'New mail' }));
     const dialog = await screen.findByRole('dialog', { name: 'Compose email' });
     const pick = within(dialog).getByRole('combobox', { name: 'Project' }) as HTMLSelectElement;
     await within(dialog).findByRole('option', { name: 'PRJ-3 · Website rebuild' });
@@ -130,7 +130,7 @@ describe('Compose: Client → Lead → Project (release 3B, prototype V.compose)
     const u = userEvent.setup();
     stub();
     show('/email?company=4');
-    await u.click(await screen.findByRole('button', { name: '+ Compose' }));
+    await u.click(await screen.findByRole('button', { name: 'New mail' }));
     const dialog = await screen.findByRole('dialog', { name: 'Compose email' });
     await within(dialog).findByRole('option', { name: 'PRJ-3 · Website rebuild' });
     const pick = within(dialog).getByRole('combobox', { name: 'Project' });
@@ -144,7 +144,7 @@ describe('Compose: Client → Lead → Project (release 3B, prototype V.compose)
     const u = userEvent.setup();
     stub({ items: [], isClient: true });
     show('/email?company=4');
-    await u.click(await screen.findByRole('button', { name: '+ Compose' }));
+    await u.click(await screen.findByRole('button', { name: 'New mail' }));
     const dialog = await screen.findByRole('dialog', { name: 'Compose email' });
     const pick = within(dialog).getByRole('combobox', { name: 'Project' }) as HTMLSelectElement;
     await waitFor(() => expect(pick.selectedOptions[0]!.textContent).toBe('no projects yet'));
@@ -167,7 +167,7 @@ describe('Compose: Client → Lead → Project (release 3B, prototype V.compose)
     const u = userEvent.setup();
     stub(undefined, { ...META, companies: [{ id: 4, name: 'Acme', legalName: 'Acme Holdings Pvt Ltd', isClient: true }] });
     const view = show('/email?company=4');
-    await u.click(await screen.findByRole('button', { name: '+ Compose' }));
+    await u.click(await screen.findByRole('button', { name: 'New mail' }));
     const dialog = await screen.findByRole('dialog', { name: 'Compose email' });
     await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Client' })).toHaveValue('Acme Holdings Pvt Ltd · client'));
     view.unmount();

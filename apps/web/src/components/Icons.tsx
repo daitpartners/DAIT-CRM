@@ -145,9 +145,12 @@ export const Icons: Record<string, ReactElement> = {
       <path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z" />
     </svg>
   ),
+  // Web-mail release 2: the mockup's "…" (three filled dots).
   more: (
-    <svg {...base} strokeWidth={2.4}>
-      <path d="M5 12h.01M12 12h.01M19 12h.01" />
+    <svg {...base}>
+      <circle cx="5" cy="12" r="1.3" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.3" fill="currentColor" />
+      <circle cx="19" cy="12" r="1.3" fill="currentColor" />
     </svg>
   ),
   send: (

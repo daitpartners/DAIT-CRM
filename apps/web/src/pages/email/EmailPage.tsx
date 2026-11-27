@@ -10,7 +10,8 @@ import { FolderPane, viewLabel } from './FolderPane';
 import { MailTopBar, type MailSearch } from './MailTopBar';
 import { MessageList } from './MessageList';
 import { Reader } from './Reader';
-import { useMailCommands } from './useMailCommands';
+import { CommandBar } from './CommandBar';
+import { rowTarget, useMailCommands, type MailTarget } from './useMailCommands';
 
 const num = (v: string | null) => (v && /^\d+$/.test(v) ? Number(v) : undefined);
 const oneOf = <T extends string>(list: readonly T[], v: string | null): T | undefined => ((list as readonly string[]).includes(v ?? '') ? (v as T) : undefined);
@@ -95,6 +96,7 @@ export function EmailPage() {
     connected,
     ownAddress: mailbox?.address ?? null,
     onCompose: setCompose,
+    newStart: () => ({ companyId: filter.company, companyName, leadId: filter.lead, projectId: filter.project }),
     onGone: (ids) => {
       const open = num(id ?? null);
       if (open !== undefined && ids.includes(open)) navigate(href({}, false));
@@ -133,6 +135,8 @@ export function EmailPage() {
   // Owner addition (23 Nov 2026): the folder pane folds to a strip, remembered in this browser. The folder and filters
   // live in the address, so folding loses neither.
   const [foldersClosed, setFoldersClosed] = useStoredFlag('dait-mail-folders-collapsed');
+  // The lead panel starts folded in a window narrower than 1400 px, and is toggled for this visit (View tab).
+  const [leadPanelClosed, setLeadPanelClosed] = useState(() => window.innerWidth < 1400);
 
   // A link's client / lead / project (release 1's "Show mail for" left the screen): one removable chip naming them
   // ("Linked records" while the names load, or for a record the meta does not list).
@@ -143,6 +147,12 @@ export function EmailPage() {
   const linked = filter.company || filter.lead || filter.project;
   const chipName = [companyName, leadNumber, metaProject ? `${metaProject.number} · ${metaProject.name}` : undefined].filter(Boolean).join(' · ');
   const teamView = mailOf !== undefined;
+
+  // What the command bar and the shortcuts act on: the open message (the fresher reading-pane copy when loaded), with
+  // its row's conversation in the view (F24).
+  const row = items.find((m) => m.id === selectedId);
+  const openItem = opened && opened.id === selectedId ? opened : row;
+  const target: MailTarget | null = openItem ? { ids: row ? rowTarget(row).ids : [openItem.id], item: openItem } : null;
 
   return (
     <div className="wm">
@@ -161,16 +171,16 @@ export function EmailPage() {
         </div>
       ) : null}
 
-      {/* The command bar's slot: Compose until the full command bar arrives. */}
-      <div className="wm-cmdbar">
-        <button
-          type="button"
-          className="btn sm primary"
-          onClick={() => setCompose({ companyId: filter.company, companyName, leadId: filter.lead, projectId: filter.project })}
-        >
-          {t('+ Compose')}
-        </button>
-      </div>
+      <CommandBar
+        target={target}
+        commands={commands}
+        onCompose={setCompose}
+        view={{
+          conv: filter.conv !== false, sort: filter.sort ?? 'date', dir: filter.dir ?? 'desc', setQuery,
+          foldersClosed, onToggleFolders: () => setFoldersClosed(!foldersClosed),
+          leadPanelClosed, onToggleLeadPanel: () => setLeadPanelClosed(!leadPanelClosed),
+        }}
+      />
 
       <div className="wm-panes">
         <FolderPane

@@ -713,8 +713,38 @@ td.nowrap{white-space:nowrap}
 .spanel .in{height:32px;font-size:12.5px}
 .spanel .sp-check{font-weight:500;font-size:12.5px}
 .spanel .sp-act{grid-column:1/-1;display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
-/* The command bar's slot. */
-.wm-cmdbar{display:flex;align-items:center;gap:2px;padding:6px 12px;background:var(--surface);border-bottom:1px solid var(--line);flex:0 0 auto;position:relative;z-index:20}
+/* Command bar (mockup "Command bar", Outlook "Home" / "View"). */
+.wm-cmdbar{display:flex;align-items:center;gap:2px;padding:6px 12px;background:var(--surface);border-bottom:1px solid var(--line);flex:0 0 auto;position:relative;z-index:20;min-width:0}
+.wm-cmdbar .cmd-tabs{display:flex;gap:2px;margin-right:8px;padding-right:10px;border-right:1px solid var(--line);flex:0 0 auto}
+.wm-cmdbar .cmd-tabs button{font-size:12.5px;font-weight:600;color:var(--muted);padding:6px 8px;border:0;border-radius:6px;background:none}
+.wm-cmdbar .cmd-tabs button:hover{color:var(--purple)}
+.wm-cmdbar .cmd-tabs button.on{color:var(--purple);box-shadow:inset 0 -2px 0 var(--purple);border-radius:0}
+.wm-cmdbar .cmd-row{display:flex;align-items:center;gap:2px;flex:1 1 auto;min-width:0}
+.wm-cmdbar .cmd-items{display:flex;align-items:center;gap:2px;flex:1 1 auto;min-width:0;overflow:hidden}
+.wm-cmdbar .cmd{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 8px;border:0;border-radius:6px;background:none;font-size:12.5px;font-weight:500;color:var(--text);white-space:nowrap;flex:0 0 auto;cursor:pointer}
+.wm-cmdbar .cmd .ico{color:var(--purple)}
+.wm-cmdbar .cmd:hover:not(:disabled){background:var(--tint)}
+.wm-cmdbar .cmd:disabled{color:var(--faint);cursor:not-allowed}
+.wm-cmdbar .cmd:disabled .ico{color:var(--field)}
+.wm-cmdbar .cmd .car{width:12px;height:12px;color:var(--muted)}
+.wm-cmdbar .cmd.crm .ico{color:var(--orange)}
+.wm-cmdbar .cmd[hidden],.wm-cmdbar .cmd-sep[hidden]{display:none}
+.wm-cmdbar .cmd[aria-pressed="true"]{background:var(--tint);color:#4B0A9A}
+.wm-cmdbar .cmd.convsw input{margin:0}
+.wm-cmdbar .cmd-sep{width:1px;height:22px;background:var(--line);margin:0 4px;flex:0 0 auto}
+.wm-cmdbar .cmd-more{flex:0 0 auto}
+.wm-cmdbar .split{display:inline-flex;align-items:stretch;border-radius:8px;flex:0 0 auto;margin-right:6px}
+.wm-cmdbar .split .btn{border-radius:8px 0 0 8px;height:32px;padding:0 12px}
+.wm-cmdbar .split .btn+.btn{border-radius:0 8px 8px 0;padding:0 7px;border-left:1px solid rgba(255,255,255,.35)}
+.wm-cmdbar .split .btn .ico{width:15px;height:15px}
+.wm-cmdbar.compact .cmd[data-short] .lb{display:none}
+.wm-cmdbar.compact .cmd[data-short]{padding:0 7px}
+/* Menus of the command bar: Link to lead's search, the Follow-up note, the date and time dialog. */
+.wm .mm .mm-top{padding:4px 4px 6px}
+.wm .mm .mm-top .in{height:32px;font-size:12.5px;width:100%}
+.wm .mm.mm-link{width:290px}
+.wm .mm .mnote{font-size:11.5px;color:var(--muted);padding:4px 10px 6px;white-space:normal;max-width:240px;line-height:1.45}
+.wm-fu-pick{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 /* Panes */
 .wm-panes{display:flex;flex-wrap:wrap;align-items:stretch;flex-grow:1;position:relative}
 /* Folder pane */

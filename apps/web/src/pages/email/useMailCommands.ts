@@ -2,7 +2,7 @@ import { createElement, useState, type ReactElement } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BULK_MAX, type FlagPreset, type ReplyMode } from '@dait-crm/shared';
 import { ApiError, api } from '../../api/client';
-import { useBulkMailChange, useMailAction, useMailChange, useMailFollowUp, type MailChange, type MailDetail, type MailItem } from '../../api/mail';
+import { useBulkMailChange, useMailAction, useMailChange, useMailFollowUp, useUnlinkMail, type MailChange, type MailDetail, type MailItem } from '../../api/mail';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { useToast } from '../../components/Toast';
@@ -10,6 +10,7 @@ import { firstName, mailErrorText } from '../../i18n/labels';
 import { useT, type TFn } from '../../i18n/useT';
 import type { ComposeStart } from './ComposeModal';
 import { LinkLeadModal } from './LinkLeadModal';
+import { followUpWhen, LinkMenu } from './menus';
 import { replyStart } from './replyStart';
 
 export type CommandId =
@@ -79,6 +80,8 @@ export type MailCommandsContext = {
   /** Your mailbox address (Reply all leaves it out of Cc). */
   ownAddress: string | null;
   onCompose: (s: ComposeStart) => void;
+  /** What New mail starts with (a link's client, lead and project); empty when not given. */
+  newStart?: () => ComposeStart;
   /** Messages moved or deleted: the screen lets go of the open one if it is among them. */
   onGone?: (ids: number[]) => void;
 };
@@ -89,11 +92,12 @@ export type FlagChoice = FlagPreset | 'complete' | 'clear';
 /**
  * The Email screen's commands for any target (F10: rows, menus and per-message buttons act on a message other than
  * the open one): `state(id, target)` as commandState, `run(id, target, arg?)` does it (nothing when disabled), and
- * `dialog` is the Link to lead window the page renders once. Mailbox changes go through useMailChange (one message) or
+ * `dialog` is the Link to lead ▾ menu (or its Create lead window) the page renders once. Mailbox changes go through useMailChange (one message) or
  * useBulkMailChange (a conversation or a selection), which update the screen at once and toast their own failures.
  * Delete inside Deleted items deletes for good, after "Delete permanently?". `arg`: the folder for `move`, the
  * FlagChoice for `flag` (none toggles: flagged → Clear flag, else Today), `isRead` for `toggleRead` (Ctrl+U passes
- * false), `{ date, time }` or `{ clear: true }` for `followUp`.
+ * false), `{ date, time }` or `{ clear: true }` for `followUp` (toasts "Follow-up set for {when}"), the point where
+ * Link to lead ▾ opens for `link`.
  */
 export function useMailCommands(ctx: MailCommandsContext): {
   state: (id: CommandId, target: MailTarget | null) => CommandState;
@@ -109,6 +113,9 @@ export function useMailCommands(ctx: MailCommandsContext): {
   const many = useBulkMailChange();
   const action = useMailAction();
   const followUp = useMailFollowUp();
+  const unlink = useUnlinkMail();
+  /** Link to lead ▾ open for a message (where it opened), or its Link email to a lead window (Create lead…). */
+  const [linkMenu, setLinkMenu] = useState<{ item: MailItem | MailDetail; at: { x: number; y: number } } | null>(null);
   const [linking, setLinking] = useState<number | null>(null);
   const rules: Rules = { connected: ctx.connected, canFollowUp: me.can('manage_leads') };
   const state = (id: CommandId, target: MailTarget | null) => commandState(id, target, rules, t);
@@ -136,7 +143,7 @@ export function useMailCommands(ctx: MailCommandsContext): {
   const run = (id: CommandId, target: MailTarget | null, arg?: unknown) => {
     if (!state(id, target).enabled) return;
     if (id === 'new') {
-      ctx.onCompose({});
+      ctx.onCompose(ctx.newStart?.() ?? {});
       return;
     }
     if (!target) return;
@@ -179,12 +186,19 @@ export function useMailCommands(ctx: MailCommandsContext): {
       case 'reply': case 'replyAll': case 'forward':
         compose(m, id).catch(failed);
         return;
-      case 'followUp':
-        followUp.mutate({ id: m.id, ...(arg as { date: string; time: string } | { clear: true }) });
+      case 'followUp': {
+        const when = arg as { date: string; time: string } | { clear: true };
+        followUp.mutate({ id: m.id, ...when }, {
+          onSuccess: () => toast('clear' in when ? t('Follow-up cleared') : t('Follow-up set for {when}', { when: followUpWhen(when.date, when.time, me.language) })),
+        });
         return;
-      case 'link':
-        setLinking(m.id);
+      }
+      case 'link': {
+        // `arg` is where Link to lead ▾ opens (under its button, or where the right-click menu was).
+        const at = (arg as { x: number; y: number } | undefined) ?? { x: window.innerWidth / 2 - 145, y: 120 };
+        setLinkMenu({ item: m, at });
         return;
+      }
       case 'log':
         action.mutate({ id: m.id, action: 'log' }, { onSuccess: () => toast(t('Logged on {lead}', { lead: m.leadNumber ?? '' })), onError: failed });
         return;
@@ -200,8 +214,22 @@ export function useMailCommands(ctx: MailCommandsContext): {
     }
   };
 
+  const menu = linkMenu
+    ? createElement(LinkMenu, {
+      at: linkMenu.at,
+      item: linkMenu.item,
+      onClose: () => setLinkMenu(null),
+      onLink: (lead: { id: number; number: string }) => action.mutate(
+        { id: linkMenu.item.id, action: 'link', body: { leadId: lead.id } },
+        { onSuccess: () => toast(t('Linked to {lead}', { lead: lead.number })), onError: failed },
+      ),
+      // useUnlinkMail toasts its own failure.
+      onUnlink: () => unlink.mutate(linkMenu.item.id, { onSuccess: () => toast(t('Unlinked from {lead}', { lead: linkMenu.item.leadNumber ?? '' })) }),
+      onCreate: () => setLinking(linkMenu.item.id),
+    })
+    : null;
   const dialog = linking === null
-    ? null
+    ? menu
     : createElement(LinkLeadModal, {
       message: { id: linking },
       onClose: () => setLinking(null),

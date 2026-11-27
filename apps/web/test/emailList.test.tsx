@@ -352,7 +352,7 @@ describe('Email message list (web-mail release 2, mockup states 1, 4, 5)', () =>
     await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/leads/5'));
   });
 
-  it('right-click: CRM commands wait for a lead; Link to lead opens the link window', async () => {
+  it('right-click: CRM commands wait for a lead; Link to lead opens Link to lead ▾ (F12), whose Create lead… opens the link window', async () => {
     const u = userEvent.setup();
     stub([item({ id: 1, subject: 'First' })]);
     show();
@@ -364,6 +364,9 @@ describe('Email message list (web-mail release 2, mockup states 1, 4, 5)', () =>
       expect(within(menu).getByRole('menuitem', { name })).toHaveAttribute('title', 'Link it to a lead first');
     }
     await u.click(within(menu).getByRole('menuitem', { name: 'Link to lead' }));
+    const link = screen.getByRole('menu', { name: 'Link to lead' });
+    expect(within(link).getByRole('searchbox', { name: 'Search leads by LD number or company' })).toHaveFocus();
+    await u.click(within(link).getByRole('menuitem', { name: 'Create lead from this email…' }));
     expect(await screen.findByRole('dialog', { name: 'Link email to a lead' })).toBeInTheDocument();
   });
 

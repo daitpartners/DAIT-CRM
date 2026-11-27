@@ -52,7 +52,7 @@ test('mail parity: app side', async ({ page }) => {
 
   // 2. Compose with a lead chosen.
   await page.goto(`/email?company=${ob.companyId}&lead=${ob.id}`);
-  await page.getByRole('button', { name: '+ Compose' }).click();
+  await page.getByRole('button', { name: 'New mail', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await shot(page, 'compose-open-app');
   // The dialog opens with nothing focused (as the prototype); a click on the title leaves it unchanged.

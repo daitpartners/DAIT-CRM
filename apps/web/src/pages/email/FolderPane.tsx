@@ -45,7 +45,7 @@ export function FolderPane({ view, meta, mailOf, team, collapsed, onToggle, href
   const navigate = useNavigate();
   const teamView = mailOf !== undefined;
   const counts = meta?.counts;
-  const foldName = collapsed ? t('Expand folders') : t('Collapse folders');
+  const foldName = collapsed ? t('Expand folder pane') : t('Collapse folder pane');
 
   const folder = (v: MailView, icon: ReactNode, count?: number, tone: '' | 'mute' | 'hot' = '') => {
     const name = viewLabel(t, v, teamView);

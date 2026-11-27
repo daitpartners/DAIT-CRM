@@ -64,9 +64,10 @@ export function ComposeModal({ start, connected, from, onClose }: Props) {
   const [to, setTo] = useState(start.to ?? '');
   const [toTouched, setToTouched] = useState(!!start.to);
   const [projectId, setProjectId] = useState<number | undefined>(start.projectId);
-  const [cc, setCc] = useState('');
-  // Cc follows the project's stakeholders until the user edits it (types, or ticks Keep in the loop).
-  const [ccTouched, setCcTouched] = useState(false);
+  const [cc, setCc] = useState((start.cc ?? []).join(', '));
+  // Cc follows the project's stakeholders until the user edits it (types, or ticks Keep in the loop); a Reply all's
+  // pre-filled Cc counts as edited.
+  const [ccTouched, setCcTouched] = useState(!!start.cc?.length);
   const [subject, setSubject] = useState(start.subject ?? '');
   const [body, setBody] = useState<MessageValue>({
     text: start.body ?? `${t('Hi,')}\n\n\n\n${t('Best regards,')}\n${me.name}`, html: start.bodyHtml ?? null,

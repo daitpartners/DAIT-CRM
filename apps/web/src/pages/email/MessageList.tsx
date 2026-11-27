@@ -1,11 +1,11 @@
 import { Fragment, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
-import { MAIL_CHIPS, MAIL_SORTS, type ListSort, type MailChip, type MailDetail, type MailFilter, type MailItem, type MailView } from '../../api/mail';
+import { MAIL_CHIPS, type ListSort, type MailChip, type MailDetail, type MailFilter, type MailItem, type MailView } from '../../api/mail';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Icons } from '../../components/Icons';
 import { useT, type TFn } from '../../i18n/useT';
 import { viewLabel } from './FolderPane';
 import { dateGroup, type DateGroup } from './listDates';
-import { FlagMenu, Menu, MoveMenu, RowMenu, type MenuEntry } from './menus';
+import { FlagMenu, Menu, MoveMenu, RowMenu, sortEntries } from './menus';
 import { MessageRow } from './MessageRow';
 import { rowTarget, selectionTarget, type CommandId, type useMailCommands } from './useMailCommands';
 
@@ -38,9 +38,6 @@ const groupText = (t: TFn, g: DateGroup) => ({
   today: t('Today'), yesterday: t('Yesterday'), thisWeek: t('This week'), lastWeek: t('Last week'), older: t('Older'),
 })[g];
 const chipText = (t: TFn, c: MailChip) => ({ all: t('All'), unread: t('Unread'), flagged: t('Flagged'), attachments: t('Attachments') })[c];
-const sortText = (t: TFn, k: ListSort) => ({ date: t('Date'), from: t('From'), lead: t('Lead'), stage: t('Lead stage'), size: t('Size') })[k];
-/** From and Lead sort by name: their directions read A to Z / Z to A. */
-const BY_NAME: readonly ListSort[] = ['from', 'lead'];
 
 function sortButtonText(t: TFn, sort: ListSort): string {
   switch (sort) {
@@ -135,21 +132,7 @@ export function MessageList({ view, teamView, filter, unread, list, selectedId, 
   };
   const menuRow = rowMenu ? items.find((m) => m.id === rowMenu.id) : undefined;
 
-  const sortItems: MenuEntry[] = [
-    ...MAIL_SORTS.map((k): MenuEntry => ({
-      key: k, label: sortText(t, k), checked: sort === k,
-      onSelect: () => setQuery({ sort: k === 'date' ? undefined : k, dir: BY_NAME.includes(k) ? 'asc' : undefined }),
-    })),
-    { kind: 'sep', key: 'sep' },
-    ...(['desc', 'asc'] as const).map((d): MenuEntry => ({
-      key: d,
-      label: BY_NAME.includes(sort) ? (d === 'asc' ? t('A to Z') : t('Z to A')) : d === 'desc' ? t('Newest on top') : t('Oldest on top'),
-      checked: dir === d,
-      onSelect: () => setQuery({ dir: d === 'desc' ? undefined : 'asc' }),
-    })),
-  ];
-  // A to Z first for names (Outlook).
-  if (BY_NAME.includes(sort)) sortItems.push(...sortItems.splice(sortItems.length - 2, 1));
+  const sortItems = sortEntries(t, sort, dir, setQuery);
 
   const bulk = (id: CommandId, icon: ReactNode, label: string, arg?: unknown) => {
     const s = commands.state(id, selection);

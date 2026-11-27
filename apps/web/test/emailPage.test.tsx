@@ -791,7 +791,7 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
         contact_type: [{ ...lookup('contact_type', 'Decision Maker', 3), labelEs: 'Decisor' }],
       }),
     );
-    await u.click(await screen.findByRole('button', { name: es['+ Compose'] }));
+    await u.click(await screen.findByRole('button', { name: es['New mail'] }));
     const dialog = await screen.findByRole('dialog', { name: es['Compose email'] });
     expect(await within(dialog).findByRole('option', { name: `LD-1005 · Recomendación · ${es['Contacted|lead']}` })).toBeTruthy();
     expect(await within(dialog).findByText(/· Decisor/)).toBeTruthy();
@@ -916,7 +916,7 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     const u = userEvent.setup();
     stub([], {});
     show('/email?company=4');
-    await u.click(await screen.findByRole('button', { name: '+ Compose' }));
+    await u.click(await screen.findByRole('button', { name: 'New mail' }));
     const dialog = await screen.findByRole('dialog', { name: 'Compose email' });
     const client = within(dialog).getByRole('combobox', { name: 'Client' }) as HTMLInputElement;
     // The companies search answers nothing here: the name comes from the screen's own client filter.
@@ -933,16 +933,16 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     stub([item()], {});
     const first = show('/email?folder=sent&company=4');
     const folders = screen.getByRole('navigation', { name: 'Mail folders' });
-    const fold = within(folders).getByRole('button', { name: 'Collapse folders' });
+    const fold = within(folders).getByRole('button', { name: 'Collapse folder pane' });
     expect(fold).toHaveAttribute('aria-expanded', 'true');
     // From the keyboard: the same button stays focused in both states (review M-3).
     fold.focus();
     await u.keyboard('{Enter}');
     expect(folders).toHaveClass('collapsed');
-    expect(document.activeElement).toBe(within(folders).getByRole('button', { name: 'Expand folders' }));
+    expect(document.activeElement).toBe(within(folders).getByRole('button', { name: 'Expand folder pane' }));
     // Folded, the names and counts are hidden by CSS (wider screens only; a phone always shows the folders).
     expect(folders.querySelector('.fp-scroll')).toBeTruthy();
-    expect(within(folders).getByRole('button', { name: 'Expand folders' })).toHaveAttribute('aria-expanded', 'false');
+    expect(within(folders).getByRole('button', { name: 'Expand folder pane' })).toHaveAttribute('aria-expanded', 'false');
     // The list keeps the open folder and filter.
     expect(screen.getByTestId('where').textContent).toBe('/email?folder=sent&company=4');
     expect(within(screen.getByRole('region', { name: 'Message list' })).getByText('Sent items')).toBeTruthy();
@@ -952,7 +952,7 @@ describe('Email screen (release 2B-2, prototype V.email)', () => {
     show('/email?folder=sent');
     const again = screen.getByRole('navigation', { name: 'Mail folders' });
     expect(again).toHaveClass('collapsed');
-    await u.click(within(again).getByRole('button', { name: 'Expand folders' }));
+    await u.click(within(again).getByRole('button', { name: 'Expand folder pane' }));
     expect(within(again).getByRole('link', { name: 'Sent items' })).toHaveAttribute('aria-current', 'page');
     expect(localStorage.getItem('dait-mail-folders-collapsed')).toBe('0');
   });
