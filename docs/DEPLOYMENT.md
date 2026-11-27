@@ -361,10 +361,14 @@ Anything else means stop and ask. There is one one-time step (1) and one read-on
 1. **Re-read the mailboxes once, so flags already set in Outlook show** (sync stores Outlook flags from release 2 on,
    but a delta link only returns messages changed since it was taken, so flags set before the release would never
    reach rows already stored). **Only after the web mail release 1 backfill has finished** (`mail-backfill.js
-   --status` shows `queued` and `running` at 0; see "One-time steps"), clear the stored delta links (as root):
+   --status` shows `queued` and `running` at 0; see "One-time steps"), clear the stored delta links (as root). Stop
+   the worker first: a sync run already going when the links are cleared writes its own new delta link when it ends,
+   which would undo the clear for that mailbox. So stop the worker, clear, then start it again:
 
    ```
+   sudo -iu daitcrm pm2 stop crm-live-worker
    sudo -u postgres psql -d dait_crm -c "UPDATE email_accounts SET sync_state = '{}' WHERE kind = 'personal';"
+   sudo -iu daitcrm pm2 start crm-live-worker
    ```
 
    The next sync of each mailbox then reads its 12 months again (lead mail only, at most 20 pages per folder per run,
@@ -439,7 +443,7 @@ All of these have already been run on live; they are kept for reference and for 
   `--status` total, which sums all rows.
 
 - **Web mail release 2 — re-read of the mailboxes** (not yet run on live): after the release 1 backfill has finished,
-  clear `email_accounts.sync_state` so flags already set in Outlook reach stored mail; the command and how to tell it
+  stop the worker, clear `email_accounts.sync_state`, start the worker, so flags already set in Outlook reach stored mail; the command and how to tell it
   has finished are in "Web mail release 2: deploy runbook", step 1. Then that runbook's step 2 (flag due-date check).
 
 ## Setting the server up from scratch (reference)
