@@ -6,14 +6,19 @@ const CSP = "default-src 'none'; img-src https: http: data:; style-src 'unsafe-i
 /** The Email screen's frame (same-origin, to size it to its content): the same policy with scripts refused in so many words (F34). */
 const CSP_AUTO = "default-src 'none'; script-src 'none'; img-src https: http: data:; style-src 'unsafe-inline'";
 
-/** Every link opens in a new tab without telling the page who opened it (an inert parse: nothing in it runs or loads). */
+/**
+ * Every link opens in a new tab without telling the page who opened it. Parsed into a `<template>` (inert: nothing in
+ * it runs or loads), which keeps the markup where it was, the email's own `<style>` blocks included (a document parse
+ * would move a leading `<style>` into a head that is then dropped, losing Outlook / Word formatting).
+ */
 function linksOutward(html: string): string {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  for (const a of doc.querySelectorAll('a[href], area[href]')) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  for (const a of tpl.content.querySelectorAll('a[href], area[href]')) {
     a.setAttribute('target', '_blank');
     a.setAttribute('rel', 'noopener noreferrer');
   }
-  return doc.body.innerHTML;
+  return tpl.innerHTML;
 }
 
 /**

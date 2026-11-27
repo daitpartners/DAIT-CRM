@@ -205,6 +205,18 @@ describe('Reading pane (web-mail release 2, mockup states 1 and 5)', () => {
     expect(doc).toContain('html{overflow:hidden}');
   });
 
+  it("the email's own <style> blocks stay in the frame (Outlook / Word formatting), with its links still opening outward", async () => {
+    const outlook = '<style>p.MsoNormal{margin:0;font-family:Calibri}.x_sig{color:#1f497d}</style><p class="MsoNormal">Hi <a href="https://acme.com">Acme</a></p><p class="x_sig">Ana</p>';
+    stub([newest], { ...DETAILS, 1: { ...DETAILS[1]!, bodyHtml: outlook } });
+    show();
+    const p = await pane();
+    const doc = ((await within(p).findByTitle('Message body')) as HTMLIFrameElement).getAttribute('srcdoc')!;
+    expect(doc).toContain('<body><style>p.MsoNormal{margin:0;font-family:Calibri}.x_sig{color:#1f497d}</style><p class="MsoNormal">Hi <a href="https://acme.com" target="_blank" rel="noopener noreferrer">Acme</a></p><p class="x_sig">Ana</p></body>');
+    // Style blocks are allowed by the policy; scripts are not.
+    expect(doc).toContain("script-src 'none'");
+    expect(doc).toContain("style-src 'unsafe-inline'");
+  });
+
   it('the frame height follows the content on load and when the body resizes', async () => {
     // Other parts of the screen watch their own sizes too: keep the callback of whoever observes the frame's body.
     const watchers = new Map<Element, () => void>();
