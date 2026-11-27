@@ -695,8 +695,8 @@ td.nowrap{white-space:nowrap}
 /* at 1280 the list header (Inbox, Conversation view, By date) and the chips (All · Unread · Flagged · Attachments)
    each stay on one line in the 300 px list, as the mockup (which overflows its padding by a few pixels instead) */
 @media (max-width:1360px){.wm .ml-row2 .fchip{padding:0 7px}.wm .ml-head .ml-row1{column-gap:4px}}
-.wm .ico{display:inline-flex;width:16px;height:16px;flex:0 0 auto}
-.wm .ico svg{width:100%;height:100%;display:block}
+.wm .ico,.wm-send .ico{display:inline-flex;width:16px;height:16px;flex:0 0 auto}
+.wm .ico svg,.wm-send .ico svg{width:100%;height:100%;display:block}
 /* Top bar: title, search (Outlook puts it centred at the top), sync */
 .wm .topbar.wm-top{gap:16px;padding:10px 20px;position:relative;flex-wrap:nowrap}
 .wm-top>.grow{display:none}
@@ -745,10 +745,10 @@ td.nowrap{white-space:nowrap}
 .wm-cmdbar.compact .cmd[data-short] .lb{display:none}
 .wm-cmdbar.compact .cmd[data-short]{padding:0 7px}
 /* Menus of the command bar: Link to lead's search, the Follow-up note, the date and time dialog. */
-.wm .mm .mm-top{padding:4px 4px 6px}
-.wm .mm .mm-top .in{height:32px;font-size:12.5px;width:100%}
-.wm .mm.mm-link{width:290px}
-.wm .mm .mnote{font-size:11.5px;color:var(--muted);padding:4px 10px 6px;white-space:normal;max-width:240px;line-height:1.45}
+.wm .mm .mm-top,.wm-send .mm .mm-top{padding:4px 4px 6px}
+.wm .mm .mm-top .in,.wm-send .mm .mm-top .in{height:32px;font-size:12.5px;width:100%}
+.wm .mm.mm-link,.wm-send .mm.mm-link{width:290px}
+.wm .mm .mnote,.wm-send .mm .mnote{font-size:11.5px;color:var(--muted);padding:4px 10px 6px;white-space:normal;max-width:240px;line-height:1.45}
 .wm-fu-pick{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 /* Panes */
 .wm-panes{display:flex;flex-wrap:wrap;align-items:stretch;flex-grow:1;position:relative}
@@ -940,10 +940,10 @@ td.nowrap{white-space:nowrap}
 .wm .rprev{display:block;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
 .wm .rl4{margin-top:5px;flex-wrap:wrap}
 .wm .rl4:empty{display:none}
-.wm .lchip{display:inline-flex;align-items:center;gap:5px;height:19px;padding:0 8px;border-radius:999px;background:var(--pane);border:1px solid var(--line);font-size:11px;font-weight:600;color:var(--body);white-space:nowrap}
-.wm .lchip i{width:6px;height:6px;border-radius:50%;background:var(--purple)}
-.wm .lchip.st-New i{background:var(--faint)}.wm .lchip.st-Contacted i{background:var(--purple)}.wm .lchip.st-Qualified i{background:var(--orange)}
-.wm .lchip.st-Proposal i{background:#B26A00}.wm .lchip.st-Negotiation i{background:#822CDB}.wm .lchip.st-Won i{background:#1E8A4C}
+.wm .lchip,.wm-send .lchip{display:inline-flex;align-items:center;gap:5px;height:19px;padding:0 8px;border-radius:999px;background:var(--pane);border:1px solid var(--line);font-size:11px;font-weight:600;color:var(--body);white-space:nowrap}
+.wm .lchip i,.wm-send .lchip i{width:6px;height:6px;border-radius:50%;background:var(--purple)}
+.wm .lchip.st-New i,.wm-send .lchip.st-New i{background:var(--faint)}.wm .lchip.st-Contacted i,.wm-send .lchip.st-Contacted i{background:var(--purple)}.wm .lchip.st-Qualified i,.wm-send .lchip.st-Qualified i{background:var(--orange)}
+.wm .lchip.st-Proposal i,.wm-send .lchip.st-Proposal i{background:#B26A00}.wm .lchip.st-Negotiation i,.wm-send .lchip.st-Negotiation i{background:#822CDB}.wm .lchip.st-Won i,.wm-send .lchip.st-Won i{background:#1E8A4C}
 .wm .mbx{font-size:11px;color:var(--body);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 /* the mailbox name shortens with … instead of wrapping under the lead chip (mockup state 5) */
 .wm .rl4 .mbx{flex:1 1 0}
@@ -955,18 +955,18 @@ td.nowrap{white-space:nowrap}
 .wm .hacts button .ico{width:14px;height:14px}
 .wm .hacts button:disabled{opacity:.35;cursor:not-allowed}
 /* Menus (mockup "Menus"): dropdowns, the sort menu and the right-click menu, with submenus. */
-.wm .mm{position:fixed;z-index:90;min-width:200px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 34px rgba(31,2,73,.18);padding:6px;font-size:13px}
-.wm .mm .mi{display:flex;align-items:center;gap:10px;width:100%;border:0;background:none;padding:7px 10px;border-radius:6px;text-align:left;color:var(--text);font-size:13px;font-weight:400;white-space:nowrap;position:relative}
-.wm .mm .mi .ico{width:16px;height:16px;color:var(--purple)}
-.wm .mm .mi.crm .ico{color:var(--orange)}
-.wm .mm .mi:hover:not(:disabled),.wm .mm .mi.hl,.wm .mm .mi:focus-visible{background:var(--tint);outline:none}
-.wm .mm .mi .k{margin-left:auto;padding-left:18px;color:var(--faint);font-size:11.5px}
-.wm .mm .mi .sub-car{margin-left:auto;padding-left:18px;color:var(--muted)}
-.wm .mm .mi.danger,.wm .mm .mi.danger .ico{color:var(--bad-fg)}
-.wm .mm .mi:disabled{color:var(--faint);cursor:not-allowed}
-.wm .mm .mi:disabled .ico{color:var(--field)}
-.wm .mm .msep{height:1px;background:var(--line-2);margin:5px 4px}
-.wm .mm .mhd{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);padding:6px 10px 4px}
+.wm .mm,.wm-send .mm{position:fixed;z-index:90;min-width:200px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 34px rgba(31,2,73,.18);padding:6px;font-size:13px}
+.wm .mm .mi,.wm-send .mm .mi{display:flex;align-items:center;gap:10px;width:100%;border:0;background:none;padding:7px 10px;border-radius:6px;text-align:left;color:var(--text);font-size:13px;font-weight:400;white-space:nowrap;position:relative}
+.wm .mm .mi .ico,.wm-send .mm .mi .ico{width:16px;height:16px;color:var(--purple)}
+.wm .mm .mi.crm .ico,.wm-send .mm .mi.crm .ico{color:var(--orange)}
+.wm .mm .mi:hover:not(:disabled),.wm .mm .mi.hl,.wm .mm .mi:focus-visible,.wm-send .mm .mi:hover:not(:disabled),.wm-send .mm .mi.hl,.wm-send .mm .mi:focus-visible{background:var(--tint);outline:none}
+.wm .mm .mi .k,.wm-send .mm .mi .k{margin-left:auto;padding-left:18px;color:var(--faint);font-size:11.5px}
+.wm .mm .mi .sub-car,.wm-send .mm .mi .sub-car{margin-left:auto;padding-left:18px;color:var(--muted)}
+.wm .mm .mi.danger,.wm .mm .mi.danger .ico,.wm-send .mm .mi.danger,.wm-send .mm .mi.danger .ico{color:var(--bad-fg)}
+.wm .mm .mi:disabled,.wm-send .mm .mi:disabled{color:var(--faint);cursor:not-allowed}
+.wm .mm .mi:disabled .ico,.wm-send .mm .mi:disabled .ico{color:var(--field)}
+.wm .mm .msep,.wm-send .mm .msep{height:1px;background:var(--line-2);margin:5px 4px}
+.wm .mm .mhd,.wm-send .mm .mhd{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);padding:6px 10px 4px}
 /* Web-mail release 1 (mockup 2026-11-26-outlook-mail state 5): the team view's mailbox on each row and view only
    (banner and footer pill). */
 .viewonly{display:flex;align-items:center;gap:10px;margin:14px 24px 0;padding:9px 12px;border-radius:8px;background:var(--warn-bg);border:1px solid #F0C98A;color:var(--warn-fg);font-size:12.5px;font-weight:500}
@@ -1231,3 +1231,52 @@ select.in.pj-locked:disabled{opacity:1;color:var(--text);-webkit-text-fill-color
 .wm .msg-editor.mail .msg-link{padding:6px 12px 0;margin-bottom:0}
 .wm iframe.rbody{display:block;width:100%;height:240px;min-height:120px;border:0;padding:0;background:#fff;resize:vertical}
 .wm iframe.rbody.err{box-shadow:inset 0 0 0 1px var(--bad-fg)}
+/* Web-mail release 3: the send flow, on the Email screen and the lead page alike (.wm-send) — the split Send button
+   (mockup .split), Schedule send (.schedpop), "Set the next follow-up" (.modal.fu, .fu-*) and the Undo toast (.utoast). */
+.wm-send{--pane:#F7F4FC}
+.wm-send.send-split{position:relative;display:inline-flex;flex:0 0 auto}
+.wm-send .split{display:inline-flex;align-items:stretch;border-radius:8px;flex:0 0 auto}
+.wm-send .split .btn{border-radius:8px 0 0 8px;height:32px;padding:0 12px}
+.wm-send .split .btn+.btn{border-radius:0 8px 8px 0;padding:0 7px;border-left:1px solid rgba(255,255,255,.35)}
+.wm-send .split .btn .ico{width:15px;height:15px}
+.wm-send .split .btn:disabled{opacity:.5;cursor:not-allowed;filter:none}
+.wm-send .schedpop{position:absolute;top:calc(100% + 8px);left:0;width:320px;max-width:calc(100vw - 32px);background:var(--surface);border:1px solid var(--field);border-radius:10px;box-shadow:0 16px 44px rgba(31,2,73,.22);padding:8px;z-index:60;font-size:12.5px}
+.wm-send .schedpop h4{margin:4px 8px 6px;font-size:12.5px;font-weight:700}
+.wm-send .schedpop .opt{display:flex;justify-content:space-between;gap:10px;width:100%;border:0;background:none;padding:8px;border-radius:6px;font-size:12.5px;color:var(--text);text-align:left;white-space:nowrap}
+.wm-send .schedpop .opt span{color:var(--muted);white-space:nowrap}
+.wm-send .schedpop .opt:hover,.wm-send .schedpop .opt.hl{background:var(--tint)}
+.wm-send .schedpop .custom{display:grid;grid-template-columns:1fr 92px;gap:6px;padding:6px 8px 4px;border-top:1px solid var(--line-2);margin-top:4px}
+.wm-send .schedpop .custom .in{height:30px;font-size:12px;padding:0 8px}
+.wm-send .schedpop .err{padding:2px 8px 4px;font-size:11.5px;color:var(--bad-fg)}
+.wm-send .schedpop .tz{padding:2px 8px 6px;font-size:11px;color:var(--muted)}
+.wm-send .schedpop .act{display:flex;justify-content:flex-end;gap:6px;padding:4px 8px 4px}
+.wm-send .modal.fu{width:640px;gap:12px;padding:20px 22px}
+.wm-send .fu-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.wm-send .fu-h h2{font-size:17px;font-weight:800;flex:1}
+.wm-send .fu-opts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.wm-send .fu-opts .radio-card{padding:10px 12px;gap:10px;align-items:flex-start}
+.wm-send .fu-opts .radio-card.fu-custom{grid-column:span 2}
+.wm-send .fu-opts .fu-txt{min-width:0;flex:1}
+.wm-send .fu-opts .radio-card b{font-size:13px}
+.wm-send .fu-opts .radio-card small{margin-top:1px;font-size:12px}
+.wm-send .fu-opts .radio-card .def{display:inline-block;margin-left:6px;font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--grad);color:#fff;vertical-align:1px}
+.wm-send .fu-opts .custom-row{display:flex;gap:6px;margin-top:6px}
+.wm-send .fu-opts .custom-row .in{height:30px;font-size:12.5px;padding:0 8px;width:160px;flex:0 0 auto}
+.wm-send .fu-opts .custom-row .in.fu-time{width:80px}
+.wm-send .fu-q{margin:13px 0;font-size:13.5px;color:var(--text)}
+.wm-send .fu-hint{margin-top:-4px;font-size:13.5px;color:var(--text)}
+.wm-send .fu .grid3{gap:10px 12px}.wm-send .fu .lbl{margin-bottom:4px;font-size:12px}
+.wm-send .fu .in{height:34px;font-size:13px}
+.wm-send .fu textarea.in{height:auto;padding:8px 12px;resize:vertical}
+.wm-send .fu .actions{align-items:center}
+.wm-send .fu .actions .ico{width:15px;height:15px}
+.wm-send .fu .linkbtn{border:0;background:none;color:var(--purple);font-weight:600;font-size:13px;padding:0 8px;margin-right:auto}
+.wm-send .fu .linkbtn:hover:not(:disabled){text-decoration:underline}
+.wm-send .fu .btn.primary:disabled{opacity:.5;cursor:not-allowed;filter:none}
+@media (max-width:640px){.wm-send .fu-opts{grid-template-columns:minmax(0,1fr)}.wm-send .fu-opts .radio-card.fu-custom{grid-column:auto}.wm-send .fu .grid3{grid-template-columns:minmax(0,1fr)}}
+.wm-send .utoast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--ink);color:#fff;border-radius:10px;box-shadow:0 12px 34px rgba(31,2,73,.35);padding:10px 10px 10px 16px;display:flex;align-items:center;gap:14px;font-size:13px;z-index:80;min-width:320px;max-width:calc(100vw - 32px);overflow:hidden}
+.wm-send .utoast .ico{width:16px;height:16px;color:var(--peach)}
+.wm-send .utoast .grow{flex:1}
+.wm-send .utoast button{height:30px;padding:0 14px;border-radius:7px;border:1px solid #5A2BB0;background:#3A1A78;color:#fff;font-weight:700;font-size:12.5px}
+.wm-send .utoast button:hover:not(:disabled){background:#5A2BB0}
+.wm-send .utoast .prog{position:absolute;left:0;bottom:0;height:3px;background:var(--peach);width:100%}
