@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { isClosedStatus, localNow } from '@dait-crm/shared';
 import { ApiError, api } from '../../../api/client';
 import {
@@ -44,6 +44,12 @@ type Props = {
   start?: DraftStart;
   /** The draft id now edited (it changes after `Save as a new draft`). */
   onDraftId?(id: number): void;
+  /**
+   * Set while the composer is open: the screen calls it before replacing the editor (another message, another reply,
+   * Continue editing). It saves what the editor holds and answers true, or shows why the save failed and answers false
+   * (the screen then keeps the editor where it is).
+   */
+  guard?: MutableRefObject<(() => Promise<boolean>) | null>;
 };
 
 /** Codes saying the draft itself is gone: discarding then just closes. */
@@ -68,7 +74,7 @@ function signatureOf(html: string): string {
  * Closing (Discard, Pop out) saves first and stays open when that fails. A draft the screen just created and the user
  * never touched is discarded when the composer goes; a touched one is saved once more and stays in Drafts.
  */
-export function DraftComposer({ draft, variant, label, onClose, onUndone, header, lead, created = false, start, onDraftId }: Props) {
+export function DraftComposer({ draft, variant, label, onClose, onUndone, header, lead, created = false, start, onDraftId, guard }: Props) {
   const t = useT();
   const me = useCurrentUser();
   const toast = useToast();
@@ -108,11 +114,17 @@ export function DraftComposer({ draft, variant, label, onClose, onUndone, header
     touched.current = true;
   };
 
-  // Leaving: a just-created draft never touched is discarded; a touched one is saved once more (an edit made within the
-  // last 2 s is not lost). Deferred a tick, so the development double mount does not count as leaving.
+  // Leaving. The screen's own switches go through `guard` first (saved, or kept open). What is left here: a
+  // just-created draft never touched is discarded; a change still unsaved when the composer goes some other way (the
+  // route changed) gets a last-resort save, and its failure is said. Deferred a tick, so the development double mount
+  // does not count as leaving.
   const mounted = useRef(true);
   const discardMutate = useRef(discardDraft.mutate);
   discardMutate.current = discardDraft.mutate;
+  const pending = useRef(auto.pending);
+  pending.current = auto.pending;
+  const say = useRef((code: string) => toast(errorText(t, code, {}, { context: 'draft' }), 'warn'));
+  say.current = (code: string) => toast(errorText(t, code, {}, { context: 'draft' }), 'warn');
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -122,8 +134,8 @@ export function DraftComposer({ draft, variant, label, onClose, onUndone, header
         const { id: draftId, fields: last } = latest.current;
         if (!touched.current) {
           if (created) discardMutate.current(draftId);
-        } else {
-          void api(`/api/mail/drafts/${draftId}`, { method: 'PATCH', body: last }).catch(() => {});
+        } else if (pending.current()) {
+          void api(`/api/mail/drafts/${draftId}`, { method: 'PATCH', body: last }).catch((err: unknown) => say.current(codeOf(err)));
         }
       }, 0);
     };
@@ -249,6 +261,26 @@ export function DraftComposer({ draft, variant, label, onClose, onUndone, header
     closed.current = true;
     onClose(reason);
   }
+
+  /** Before the screen replaces the editor: everything saved (true), or the failure shown and the editor kept (false). */
+  async function release(): Promise<boolean> {
+    if (closing) return false;
+    setProblem(null);
+    const saved = await auto.flush();
+    if (saved.ok) return true;
+    setProblem(saved.code);
+    return false;
+  }
+  const releaseRef = useRef(release);
+  releaseRef.current = release;
+  useEffect(() => {
+    if (!guard) return;
+    const fn = () => releaseRef.current();
+    guard.current = fn;
+    return () => {
+      if (guard.current === fn) guard.current = null;
+    };
+  }, [guard]);
 
   /** The draft was removed in Outlook: a new one with what the editor holds (a reply again, for a reply). */
   async function saveAsNew() {

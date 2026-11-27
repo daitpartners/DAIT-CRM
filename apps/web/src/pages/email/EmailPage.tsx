@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { MAIL_CHIPS, MAIL_SORTS, MAIL_VIEWS, useMailList, useMailMessage, useMailMeta, type ListSort, type MailChip, type MailFilter } from '../../api/mail';
 import { clientName } from '../../api/companies';
@@ -74,6 +74,24 @@ export function EmailPage() {
   const [compose, setCompose] = useState<ComposeStart | null>(null);
   /** The inline Reply / Reply all / Forward (state 2), in the reading pane of message `paneId`. */
   const [composing, setComposing] = useState<(Composing & { paneId: number }) | null>(null);
+  const composingRef = useRef(composing);
+  composingRef.current = composing;
+  /** Each editor asked for gets its own number: a Reply after a send opens a fresh one. */
+  const seq = useRef(0);
+  /** The open composer's guarded close (DraftComposer): saves, or keeps the editor and says why. */
+  const guard = useRef<(() => Promise<boolean>) | null>(null);
+  /** Runs `then` once the open editor (if any) has saved what it holds; a failed save keeps everything where it is. */
+  const afterSave = (then: () => void) => {
+    const release = guard.current;
+    if (!release) {
+      then();
+      return;
+    }
+    void release().then((ok) => {
+      if (ok) then();
+    });
+  };
+  const openEditor = (paneId: number, c: Omit<Composing, 'seq'>) => setComposing({ ...c, paneId, seq: ++seq.current });
   /** The list's checked rows (MessageList resets them for another folder, filter or search). */
   const [checked, setChecked] = useState<Set<number>>(() => new Set());
 
@@ -104,14 +122,19 @@ export function EmailPage() {
     connected,
     onCompose: setCompose,
     // Reply to a message of the open conversation opens the editor there; another message (a list row) is opened first.
+    // The editor already open for the same reply stays; any other first saves the open one (kept on a failed save).
     onReply: (originalId, kind) => {
+      const c = composingRef.current;
+      if (c && !c.sent && c.draftId === undefined && c.originalId === originalId && c.kind === kind && c.paneId === selectedId) return;
       const here = selectedId !== null && (selectedId === originalId || (shown?.id === selectedId && shown.thread.some((e) => e.id === originalId)));
-      if (here) {
-        setComposing({ paneId: selectedId, originalId, kind });
-        return;
-      }
-      setComposing({ paneId: originalId, originalId, kind });
-      navigate(`/email/${originalId}${params.toString() ? `?${params.toString()}` : ''}`);
+      afterSave(() => {
+        if (here) {
+          openEditor(selectedId, { originalId, kind });
+          return;
+        }
+        openEditor(originalId, { originalId, kind });
+        navigate(`/email/${originalId}${params.toString() ? `?${params.toString()}` : ''}`);
+      });
     },
     newStart: () => ({ companyId: filter.company, companyName, leadId: filter.lead, projectId: filter.project }),
     onGone: (ids) => {
@@ -130,11 +153,31 @@ export function EmailPage() {
     });
   };
 
-  // Another message opened: the inline editor of the one before closes (its draft is saved, or discarded untouched).
+  // Another message opened: the inline editor of the one before closes (saved first when a link was followed, see
+  // below; discarded when untouched).
   useEffect(() => {
-    if (composing && composing.paneId !== selectedId) setComposing(null);
-    // Only the open message changing should trigger this.
+    const c = composingRef.current;
+    if (c && c.paneId !== selectedId) setComposing(null);
   }, [selectedId]);
+
+  // A link followed on the Email screen (another message, a folder, the lead) while an editor is open: the editor saves
+  // first; a failed save keeps the editor and the open message, and says why.
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    const click = (e: MouseEvent) => {
+      if (!guard.current || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = e.target instanceof Element ? e.target.closest('a[href]') : null;
+      const to = a?.getAttribute('href');
+      if (!a || !to || !to.startsWith('/') || a.getAttribute('target') === '_blank' || a.closest('form.reply')) return;
+      e.preventDefault();
+      afterSave(() => navigate(to));
+    };
+    el.addEventListener('click', click, true);
+    return () => el.removeEventListener('click', click, true);
+    // navigate and the refs are stable.
+  }, []);
 
   // ?page= and ?size= from the old pager (bookmarks, old links) mean nothing now: they leave the address.
   const oldPaging = params.has('page') || params.has('size');
@@ -181,7 +224,7 @@ export function EmailPage() {
   const target = selected.length ? selectionTarget(selected) : openTarget;
 
   return (
-    <div className="wm">
+    <div className="wm" ref={root}>
       <MailTopBar meta={meta} mailOf={mailOf} filter={filter} onSearch={(s) => setQuery({ s: s || undefined })} onFilters={applySearch} />
 
       {meta && !mailbox ? (
@@ -250,7 +293,12 @@ export function EmailPage() {
               teamView={teamView}
               commands={commands}
               composing={composing && composing.paneId === selectedId ? composing : null}
-              onCompose={(c) => setComposing(c ? { ...c, paneId: selectedId } : null)}
+              onCompose={(c) => {
+                if (!c) setComposing(null);
+                else afterSave(() => openEditor(selectedId, c));
+              }}
+              onSent={(sent) => setComposing((c) => (c ? { ...c, sent } : c))}
+              guard={guard}
             />
             {shown && shown.id === selectedId ? (
               <LeadPanel m={shown} commands={commands} collapsed={leadPanelClosed} onToggle={() => setLeadPanelClosed(!leadPanelClosed)} />

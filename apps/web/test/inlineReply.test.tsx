@@ -266,6 +266,90 @@ describe('Inline Reply, Reply all and Forward (web-mail release 3, state 2)', ()
     expect(api.of('/api/mail/drafts')).toHaveLength(1);
   });
 
+  it('after a send, Reply under the sent note opens a fresh editor; Forward then does too, footer hidden again', async () => {
+    const user = userEvent.setup();
+    const api = stub();
+    show();
+    const form = await openReply(user);
+    await user.click(within(form).getByRole('button', { name: 'Send' }));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Send without follow-up' }));
+    await screen.findByText("Reply sent to Maria Gómez · it will appear here and on LD-1178's timeline.");
+    await user.click(within(await footer()).getByRole('button', { name: 'Reply' }));
+    const again = await screen.findByRole('form', { name: 'Reply' });
+    expect(api.of('/api/mail/drafts')).toHaveLength(2);
+    expect(screen.queryByText(/Reply sent to/)).toBeNull();
+    expect(within(await pane()).getByRole('article').querySelector('.msg-foot')).toBeNull();
+    expect(within(again).getByText('Maria Gómez')).toBeInTheDocument();
+  });
+
+  it('a forward sent says Forwarded to …', async () => {
+    const user = userEvent.setup();
+    stub({ made: (n, body) => draftView({ id: n, subject: body.kind === 'forward' ? 'Fw: Proposal' : 'Re: Proposal' }) });
+    show();
+    const form = await openReply(user, 'Forward');
+    await user.click(within(form).getByRole('button', { name: 'Send' }));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Send without follow-up' }));
+    expect(await screen.findByText("Forwarded to Maria Gómez · it will appear here and on LD-1178's timeline.")).toHaveClass('sent-note');
+  });
+
+  it('opening another message saves the editor first; a failed save keeps the editor and the message, and says why', async () => {
+    const user = userEvent.setup();
+    const second = item({ id: 2, subject: 'Second', fromName: 'Tom Becker', occurredAt: '2026-11-21T10:00:00.000Z' });
+    const api = stub({ items: [item(), second], details: { 1: detail(item()), 2: detail(second) }, saveErrors: ['mailbox_changed'] });
+    show();
+    const form = await openReply(user);
+    await typeMessage(form, '<p>Not lost</p>');
+    await user.click(screen.getByRole('link', { name: /Second/ }));
+    expect(await within(form).findByRole('alert')).toHaveTextContent('This draft is in a mailbox that is no longer connected. Open it in Outlook.');
+    expect(screen.getByTestId('where')).toHaveTextContent('/email/1');
+    expect(screen.getByRole('form', { name: 'Reply' })).toBe(form);
+    expect(api.of('/api/mail/drafts/50', 'PATCH')).toHaveLength(1);
+  });
+
+  it('opening another message after a good save goes there, with no extra save on the way out', async () => {
+    const user = userEvent.setup();
+    const second = item({ id: 2, subject: 'Second', fromName: 'Tom Becker', occurredAt: '2026-11-21T10:00:00.000Z' });
+    const api = stub({ items: [item(), second], details: { 1: detail(item()), 2: detail(second) } });
+    show();
+    const form = await openReply(user);
+    await typeMessage(form, '<p>Saved before leaving</p>');
+    await user.click(screen.getByRole('link', { name: /Second/ }));
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/email/2'));
+    expect(screen.queryByRole('form')).toBeNull();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(api.of('/api/mail/drafts/50', 'PATCH')).toHaveLength(1);
+    expect(api.of('/api/mail/drafts/50', 'PATCH')[0]!.body!.bodyHtml).toContain('Saved before leaving');
+    expect(api.of('/api/mail/drafts/50', 'DELETE')).toHaveLength(0);
+  });
+
+  it('switching to another kind with a failing save keeps the editor and says why', async () => {
+    const user = userEvent.setup();
+    const api = stub({ saveErrors: ['outlook_busy', 'outlook_busy'] });
+    show();
+    const form = await openReply(user);
+    await typeMessage(form, '<p>Unsaved</p>');
+    const article = within(await pane()).getByRole('article');
+    await user.click(within(article.querySelector('.mh') as HTMLElement).getByRole('button', { name: 'Forward' }));
+    expect(await within(form).findByRole('alert')).toBeInTheDocument();
+    expect(screen.queryByRole('form', { name: 'Forward' })).toBeNull();
+    expect(screen.getByRole('form', { name: 'Reply' })).toBe(form);
+    expect(api.of('/api/mail/drafts')).toHaveLength(1);
+  });
+
+  it('Continue editing a forward draft opens it as Forward', async () => {
+    const user = userEvent.setup();
+    const m = item();
+    const draftRow = item({ id: 8, status: 'draft', folder: 'drafts', preview: 'FYI', occurredAt: '2026-11-22T15:00:00.000Z' });
+    stub({
+      details: { 1: detail(m, { thread: [entry(draftRow, { kind: 'draft', direction: 'out' }), entry(m)] }) },
+      drafts: { 8: draftView({ id: 8, subject: 'Fw: Proposal', to: [{ address: 'tom@x.com', name: null, leadNumber: null }] }) },
+    });
+    show();
+    const row = (await within(await pane()).findByText('Draft · FYI')).closest('.msg') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: 'Continue editing' }));
+    expect(await screen.findByRole('form', { name: 'Forward' })).toBeInTheDocument();
+  });
+
   it('Pop out goes to /email/new?draft=<id>', async () => {
     const user = userEvent.setup();
     stub();
@@ -376,6 +460,9 @@ describe('Inline Reply, Reply all and Forward (web-mail release 3, state 2)', ()
     expect(api.of('/api/mail/drafts').map((c) => c.body)).toEqual([{ kind: 'reply', replyToId: 1 }, { kind: 'reply', replyToId: 1 }]);
     expect(api.of('/api/mail/drafts/51', 'PATCH')[0]!.body!.bodyHtml).toContain('Keep this');
     await waitFor(() => expect(within(form).queryByRole('alert')).toBeNull());
+    // The editor now works on the new draft.
+    await user.click(within(form).getByRole('button', { name: 'Pop out' }));
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/email/new?draft=51'));
   });
 
   it('Template fills the message from the lead (subject kept) and puts its files on the draft', async () => {

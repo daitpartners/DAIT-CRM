@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState, type MutableRefObject, type ReactNode } from 'react';
 import { isClosedStatus } from '@dait-crm/shared';
 import { useMailMessage, type MailDetail } from '../../api/mail';
 import { Icons } from '../../components/Icons';
@@ -23,10 +23,18 @@ type Props = {
   composing?: Composing | null;
   /** Opens (a draft reply: Continue editing) or closes the inline editor. */
   onCompose?: (c: Composing | null) => void;
+  /** The slot now shows the sent note (true) or the editor again (false, after Undo). */
+  onSent?: (sent: boolean) => void;
+  /** The open composer's guarded close (see DraftComposer), set while it is open. */
+  guard?: MutableRefObject<(() => Promise<boolean>) | null>;
 };
 
-/** The inline editor of the reading pane: what it answers, how, and the draft reply opened again (Continue editing). */
-export type Composing = { originalId: number; kind: ReplyKind; draftId?: number };
+/**
+ * The inline editor of the reading pane: what it answers, how, the draft reply opened again (Continue editing), a
+ * number telling one request from the next (a Reply after a send opens a fresh editor), and whether the slot shows the
+ * sent note.
+ */
+export type Composing = { originalId: number; kind: ReplyKind; draftId?: number; seq: number; sent?: boolean };
 
 /** The opened message as a conversation entry, when the answer carries no thread (a message on its own). */
 const selfEntry = (m: MailDetail): ThreadEntry => ({
@@ -43,14 +51,14 @@ const selfEntry = (m: MailDetail): ThreadEntry => ({
  * click on their sender. Under the opened message: Reply, Reply all, Forward, or in another user's mailbox the
  * view-only pill with Log as activity and Create task. A draft shows "Drafts are edited in Outlook." instead.
  */
-export function ReadingPane({ id, peek = false, teamView = false, commands, composing = null, onCompose }: Props) {
+export function ReadingPane({ id, peek = false, teamView = false, commands, composing = null, onCompose, onSent, guard }: Props) {
   const t = useT();
   const { dateTime } = useFormatDate();
   const { data: m, isError } = useMailMessage(id, peek);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
   /** The draft the inline editor edits (its own row is left out of the conversation), and whether it shows the sent note. */
   const [editing, setEditing] = useState<number | null>(null);
-  const [sentNote, setSentNote] = useState(false);
+  const sentNote = composing?.sent === true;
   const label = t('Reading pane');
 
   if (isError) return <section className="rpane empty" aria-label={label}>{t('This message is not available.')}</section>;
@@ -138,18 +146,18 @@ export function ReadingPane({ id, peek = false, teamView = false, commands, comp
         ) : null}
         {composing && !viewOnly ? (
           <InlineReply
-            key={`${composing.originalId}-${composing.kind}-${composing.draftId ?? 'new'}`}
+            key={composing.seq}
             originalId={composing.originalId}
             kind={composing.kind}
             draftId={composing.draftId}
             lead={m.lead ? { id: m.lead.id, number: m.lead.number, company: company ?? '', status: m.lead.status, open: !isClosedStatus(m.lead.status) } : null}
             onClose={() => {
               setEditing(null);
-              setSentNote(false);
               onCompose?.(null);
             }}
             onDraft={setEditing}
-            onSent={setSentNote}
+            onSent={(v) => onSent?.(v)}
+            guard={guard}
           />
         ) : null}
         {thread.map((e) => {
@@ -160,7 +168,7 @@ export function ReadingPane({ id, peek = false, teamView = false, commands, comp
               <div key={e.id} className="msg col draft-row">
                 <span className="av" aria-hidden="true"><span className="ico">{Icons.draft}</span></span>
                 <span className="cprev">{t('Draft · {preview}', { preview: e.preview || t('(no text)') })}</span>
-                <button type="button" className="btn sm" onClick={() => onCompose?.({ originalId: m.id, kind: 'reply', draftId: e.id })}>
+                <button type="button" className="btn sm" onClick={() => onCompose?.({ originalId: m.id, kind: 'reply', draftId: e.id, seq: 0 })}>
                   {t('Continue editing')}
                 </button>
               </div>

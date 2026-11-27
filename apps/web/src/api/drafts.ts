@@ -283,7 +283,10 @@ export function useAutoSave(id: number | null, fields: DraftFields, opts: { enab
     return { ok: false, code: lastError.current ?? 'try_again' };
   }, [save]);
 
-  return { ...state, flush };
+  /** Whether the editor holds changes not saved yet (read once the editor is gone too: its last-resort save). */
+  const pending = useCallback(() => draftId.current !== null && !stopped.current && latest.current.text !== saved.current, []);
+
+  return { ...state, flush, pending };
 }
 
 /** Draft `id` in a request path; a file change before the draft exists is a caller's mistake, refused without a request. */
