@@ -164,7 +164,7 @@ type Call = { url: string; method: string; body: Record<string, unknown> | undef
  * drafts path — a new draft is 9 (then 10…), a template's files copied onto it, Send answers the Undo window (or the
  * scheduled time), Undo gives the draft back as it was sent. `sendError`: the first sends' refusal codes.
  */
-function mailStub(opts: { templates?: unknown[]; projects?: { items: unknown[]; isClient: boolean }; noMailbox?: boolean; sendError?: string[] } = {}) {
+function mailStub(opts: { templates?: unknown[]; projects?: { items: unknown[]; isClient: boolean }; noMailbox?: boolean; sendError?: string[]; signature?: { html: string | null; auto: boolean } } = {}) {
   const calls: Call[] = [];
   const sent: Record<number, Record<string, unknown>> = {};
   const sendErrors = [...(opts.sendError ?? [])];
@@ -201,6 +201,7 @@ function mailStub(opts: { templates?: unknown[]; projects?: { items: unknown[]; 
     }
     if (/^\/api\/mail\/drafts\/\d+\/files\//.test(url)) return new Response(null, { status: 204 });
     if (url === '/api/me') return Response.json(rep);
+    if (url === '/api/me/signature') return Response.json(opts.signature ?? { html: null, auto: true });
     if (url.startsWith('/api/email-templates/10/attachments/')) return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), { headers: { 'Content-Type': 'image/png' } });
     if (url.startsWith('/api/email-templates')) return Response.json({ items: opts.templates ?? [] });
     if (url === '/api/companies/4/projects') return Response.json(opts.projects ?? { items: [], isClient: false });
@@ -476,5 +477,58 @@ describe('lead email form: the one send path (web-mail release 3)', () => {
     expect(screen.getByRole('link', { name: 'Open Settings' })).toHaveAttribute('href', '/settings/connections');
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Send options' })).toBeDisabled();
+  });
+});
+
+describe('lead email form: the signature (Add automatically)', () => {
+  const lead = { ...baseLead, contact: { ...makeLead().contact!, firstName: 'Tom', email: 'tom@meridian.in' } };
+  const SIG = '<b>Arjun Mehta</b><br>DAIT Partners';
+  const frameHtml = () => (document.querySelector('iframe#em-body') as HTMLIFrameElement | null)?.contentDocument?.body.innerHTML ?? '';
+  const sigCount = (html: string) => html.split('dait-sig').length - 1;
+  const TPL = {
+    id: 8, name: 'Proposal', language: 'en', subject: 'Proposal', body: 'Hi', bodyHtml: '<p>Hi {first_name}</p>', sourceType: 'manual', fileName: null, fileSize: null,
+    attachments: [], createdBy: null, createdAt: '', updatedAt: '',
+  };
+  const SIGNED_TPL = { ...TPL, id: 9, name: 'Signed', bodyHtml: '<p>Hi {first_name}</p><p><b>Arjun Mehta</b><br>DAIT Partners</p>' };
+
+  it('on: shown under the intro (editable, formatted) and sent with it; a template gets it once, one already signed is not signed twice', async () => {
+    const u = userEvent.setup();
+    const api = mailStub({ signature: { html: SIG, auto: true }, templates: [TPL, SIGNED_TPL] });
+    renderEmailForm(lead);
+    await waitFor(() => expect(frameHtml()).toContain('<div class="dait-sig"><b>Arjun Mehta</b><br>DAIT Partners</div>'));
+    expect(frameHtml()).toMatch(/^<p>Hi Tom,<\/p>/);
+    expect(sigCount(frameHtml())).toBe(1);
+
+    const pick = screen.getByRole('combobox', { name: 'Template' });
+    await waitFor(() => expect(within(pick).getByRole('option', { name: 'Signed' })).toBeTruthy());
+    await u.selectOptions(pick, '8');
+    await waitFor(() => expect(frameHtml()).toBe('<p>Hi Tom</p><p><br></p><div class="dait-sig"><b>Arjun Mehta</b><br>DAIT Partners</div>'));
+    await u.selectOptions(pick, '9');
+    await waitFor(() => expect(frameHtml()).toBe('<p>Hi Tom</p><p><b>Arjun Mehta</b><br>DAIT Partners</p>'));
+    await u.selectOptions(pick, '');
+    await waitFor(() => expect(sigCount(frameHtml())).toBe(1));
+    expect(frameHtml()).toMatch(/^<p>Hi Tom,<\/p>/);
+
+    await sendWith(u);
+    await waitFor(() => expect(api.of('/api/mail/drafts/9/send')).toHaveLength(1));
+    const sent = api.of('/api/mail/drafts/9/send')[0]!.bodyHtml as string;
+    expect(sigCount(sent)).toBe(1);
+    expect(sent).toContain('<div class="dait-sig"><b>Arjun Mehta</b><br>DAIT Partners</div>');
+    // The form starts again signed.
+    await waitFor(() => expect(sigCount(frameHtml())).toBe(1));
+  });
+
+  it('off (or no signature): the intro stays plain and nothing is added', async () => {
+    const u = userEvent.setup();
+    const api = mailStub({ signature: { html: SIG, auto: false } });
+    renderEmailForm(lead);
+    expect((await screen.findByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toMatch(/^Hi Tom,/);
+    // The signature has been read (and its answer applied) before checking that nothing was added.
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some((c) => c[0] === '/api/me/signature')).toBe(true));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(document.querySelector('iframe#em-body')).toBeNull();
+    await sendWith(u);
+    await waitFor(() => expect(api.of('/api/mail/drafts/9/send')).toHaveLength(1));
+    expect(api.of('/api/mail/drafts/9/send')[0]!.bodyHtml).not.toContain('Arjun Mehta</b>');
   });
 });

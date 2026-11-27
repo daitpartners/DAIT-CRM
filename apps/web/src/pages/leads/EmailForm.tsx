@@ -5,6 +5,7 @@ import { ApiError } from '../../api/client';
 import { useApplyTemplateFiles, useCreateDraft, useDraftFile, type DraftFileView, type DraftView } from '../../api/drafts';
 import type { LeadFull } from '../../api/leads';
 import { useMailboxes } from '../../api/mailboxes';
+import { useSignature } from '../../api/signature';
 import { useContacts } from '../../api/contacts';
 import { useCompanyProjects, type ProjectRow } from '../../api/projects';
 import { useUsers } from '../../api/queries';
@@ -58,6 +59,21 @@ function textOf(html: string): string {
   const tpl = document.createElement('template');
   tpl.innerHTML = html;
   return editorText(tpl.content);
+}
+
+/**
+ * `base` with the user's signature under it (as the Email screen starts a new message: an empty line, then the
+ * signature), unless `sig` is null (none, or Add automatically off) or `base` already has it (a template that carries
+ * the signature, or the CRM's own signature block).
+ */
+function withSignature(base: MessageValue, sig: string | null): MessageValue {
+  if (!sig) return base;
+  const html = base.html ?? textToEditorHtml(base.text);
+  const sigText = textOf(sig).replace(/\s+/g, ' ').trim();
+  const has = html.includes('dait-sig') || (sigText !== '' && textOf(html).replace(/\s+/g, ' ').includes(sigText));
+  if (has) return base;
+  const out = `${html}<p><br></p><div class="dait-sig">${sig}</div>`;
+  return { text: textOf(out), html: out };
 }
 
 /**
@@ -129,6 +145,14 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
   const intro = useMemo(() => ({ subject, body }), []);
   // The template's pictures (shown in the message) and attachments (listed under it; the sender may remove them).
   const files = useTemplateFiles();
+  // The signature goes under the message when Add automatically is on (spec: inserted on new and reply), shown so the
+  // sender sees and can edit it: on the intro once it loads, and on each template (or the intro again) picked.
+  const { data: signature } = useSignature();
+  const sig = signature?.auto && signature.html ? signature.html : null;
+  const signed = (v: MessageValue) => withSignature(v, sig);
+  useEffect(() => {
+    if (sig && body === intro.body) setBody(signed(intro.body));
+  }, [sig]);
 
   // Review #12: fields the user must fix are marked (red border, message, aria-invalid), not only named in a toast.
   const [bad, setBad] = useState<Partial<Record<EmailField, string>>>({});
@@ -177,7 +201,7 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
     if (!tpl) {
       files.clear();
       setSubject(intro.subject);
-      setBody(intro.body);
+      setBody(signed(intro.body));
       return;
     }
     const ctx = { firstName: first, company, me: me.name, leadNumber: lead.number };
@@ -185,7 +209,7 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
     const html = await files.apply(tpl, tpl.bodyHtml ? fillTemplateHtml(tpl.bodyHtml, ctx) : null);
     // Another template was picked while this one's pictures loaded.
     if (html === undefined) return;
-    setBody({ text: fillTemplate(tpl.body, ctx), html });
+    setBody(signed({ text: fillTemplate(tpl.body, ctx), html }));
   }
 
   /** The message as it is sent: the template's pictures and those an Undo gave back as the draft's cid: pictures. */
@@ -226,7 +250,7 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
     setTemplateId('');
     files.clear();
     setSubject(intro.subject);
-    setBody(intro.body);
+    setBody(signed(intro.body));
   }
 
   /** Undo gave the draft back: the form shows it again, and the next Send uses it. */
