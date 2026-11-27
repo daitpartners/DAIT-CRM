@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { PagingQuery } from './paging.js';
 import { isoDate } from './common.js';
 import { FLAG_PRESETS } from '../mailDates.js';
+import { TASK_KINDS, TASK_PRIORITIES } from '../leads.js';
 
 /** `PATCH /mailboxes/:id` (prototype "Mailbox options"); every field optional. */
 export const MailboxOptions = z.object({
@@ -160,6 +161,92 @@ export const MailReply = z.object({
   }
 });
 export type MailReply = z.infer<typeof MailReply>;
+
+/** Seconds a sent message waits in the queue, so Undo can still take it back (web-mail release 3). */
+export const UNDO_SEND_SECONDS = 10;
+
+/** What a new Outlook draft starts as (web-mail release 3). */
+export const DRAFT_KINDS = ['new', 'reply', 'replyAll', 'forward'] as const;
+export type DraftKind = (typeof DRAFT_KINDS)[number];
+
+/** Starting a draft: a new message, or a reply / reply all / forward of `replyToId` (which a new message refuses). */
+export const DraftCreate = z.object({
+  kind: z.enum(DRAFT_KINDS).default('new'),
+  replyToId: z.number().int().positive().optional(),
+  leadId: z.number().int().positive().optional(),
+  projectId: z.number().int().positive().optional(),
+}).superRefine((v, ctx) => {
+  if (v.kind !== 'new' && v.replyToId === undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['replyToId'], message: 'reply_to_required' });
+  }
+  if (v.kind === 'new' && v.replyToId !== undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['replyToId'], message: 'reply_to_not_allowed' });
+  }
+});
+export type DraftCreate = z.infer<typeof DraftCreate>;
+
+const recipientList = z.array(mailAddress).max(50).default([]);
+
+/** Saving a draft (auto-save): the whole draft as the editor holds it. */
+export const DraftSave = z.object({
+  to: recipientList,
+  cc: recipientList,
+  bcc: recipientList,
+  subject: z.string().max(500).default(''),
+  bodyHtml: z.string().max(1_000_000),
+  leadId: z.number().int().positive().nullable().optional(),
+  projectId: z.number().int().positive().nullable().optional(),
+});
+export type DraftSave = z.infer<typeof DraftSave>;
+
+/**
+ * The send dialog's follow-up task: day and 24-hour time in the sender's zone, title, assignee, type, priority, an
+ * optional note, and whether the lead's next follow-up moves to that day too.
+ */
+export const SendFollowUp = z.object({
+  date: isoDate,
+  time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  title: z.string().trim().min(1).max(200),
+  assignedToId: z.number().int().positive(),
+  kind: z.enum(TASK_KINDS),
+  priority: z.enum(TASK_PRIORITIES).default('normal'),
+  note: z.string().trim().max(1000).optional(),
+  updateLead: z.boolean().default(true),
+});
+export type SendFollowUp = z.infer<typeof SendFollowUp>;
+
+/** Sending a draft: the draft, sent now (after the Undo window) or at `at`, with an optional follow-up. */
+export const DraftSend = DraftSave.extend({
+  at: z.string().datetime().nullable().default(null),
+  followUp: SendFollowUp.nullable().default(null),
+});
+export type DraftSend = z.infer<typeof DraftSend>;
+
+/** A draft attachment: one file (or an inline picture), uploaded straight to the Outlook draft. */
+export const DraftAttachmentUpload = TemplateAttachmentUpload.pick({ name: true, data: true }).extend({
+  inline: z.boolean().default(false),
+});
+export type DraftAttachmentUpload = z.infer<typeof DraftAttachmentUpload>;
+
+/** Applying a template to a draft: fill it from a template, with the template attachments the sender kept. */
+export const DraftTemplateApply = z.object({
+  templateId: z.number().int().positive(),
+  attachmentIds: z.array(z.number().int().positive()).max(TEMPLATE_ATTACHMENTS_MAX_COUNT).default([]),
+});
+export type DraftTemplateApply = z.infer<typeof DraftTemplateApply>;
+
+/** Characters of a saved signature's HTML at most (after the server sanitises it). */
+export const SIGNATURE_HTML_MAX = 20_000;
+/** The user's signature: its HTML (null removes it) and whether new messages add it themselves. */
+export const SignatureUpdate = z.object({ html: z.string().max(200_000).nullable(), auto: z.boolean() });
+export type SignatureUpdate = z.infer<typeof SignatureUpdate>;
+
+/** Recipient search: address suggestions for the To / Cc / Bcc lines. */
+export const RecipientQuery = z.object({ q: z.string().trim().min(1).max(100) });
+export type RecipientQuery = z.infer<typeof RecipientQuery>;
+/** Recipient lookup: who these addresses are (lead, contact, user), for the recipient chips. */
+export const RecipientResolve = z.object({ addresses: z.array(mailAddress).max(150) });
+export type RecipientResolve = z.infer<typeof RecipientResolve>;
 
 /** Folders a message can be moved to from the Email screen (web-mail release 2). */
 export const MOVE_FOLDERS = ['inbox', 'archive', 'deleted'] as const;

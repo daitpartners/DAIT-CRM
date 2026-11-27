@@ -16,7 +16,7 @@ describe('lead constants', () => {
   test('enumerations', () => {
     expect(LEAD_TYPES).toEqual(['Lead', 'Prospect']);
     expect(PRIORITIES).toEqual(['High', 'Medium', 'Low']);
-    expect(TASK_ORIGINS).toEqual(['follow_up', 'new_assignment', 'transfer', 'manual', 'quotation']);
+    expect(TASK_ORIGINS).toEqual(['follow_up', 'new_assignment', 'transfer', 'manual', 'quotation', 'email_follow_up']);
     expect(ACTIVITY_TYPES).toContain('call');
     expect(ACTIVITY_TYPES).toHaveLength(11);
   });

@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { TASK_TABS, TaskCreate, TaskKind, TaskOrigin, TaskUpdate } from '@dait-crm/shared';
+import type { TASK_TABS, TaskCreateInput, TaskKind, TaskOrigin, TaskUpdate } from '@dait-crm/shared';
 import { api } from './client';
 import { keys } from './queries';
 
@@ -73,7 +73,7 @@ function useRefresh() {
 export function useSaveTask() {
   const refresh = useRefresh();
   return useMutation({
-    mutationFn: (v: { id?: number; body: TaskCreate | TaskUpdate }) =>
+    mutationFn: (v: { id?: number; body: TaskCreateInput | TaskUpdate }) =>
       v.id
         ? api<TaskRow>(`/api/tasks/${v.id}`, { method: 'PATCH', body: v.body })
         : api<TaskRow>('/api/tasks', { method: 'POST', body: v.body }),

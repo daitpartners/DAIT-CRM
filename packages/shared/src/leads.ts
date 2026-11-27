@@ -10,12 +10,16 @@ export type Priority = (typeof PRIORITIES)[number];
 export const CLOSED_STATUSES = ['Won', 'Lost', 'Not Relevant'] as const;
 export type ClosedStatus = (typeof CLOSED_STATUSES)[number];
 
-export const TASK_ORIGINS = ['follow_up', 'new_assignment', 'transfer', 'manual', 'quotation'] as const;
+export const TASK_ORIGINS = ['follow_up', 'new_assignment', 'transfer', 'manual', 'quotation', 'email_follow_up'] as const;
 export type TaskOrigin = (typeof TASK_ORIGINS)[number];
 
 /** A task is a follow-up (default), or a call or meeting, which always has a time of day. */
 export const TASK_KINDS = ['followup', 'call', 'meeting'] as const;
 export type TaskKind = (typeof TASK_KINDS)[number];
+
+/** Task priority (web-mail release 3; the database does not enforce it, the schemas do). */
+export const TASK_PRIORITIES = ['normal', 'high'] as const;
+export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 /** Minutes a call or meeting lasts (set when the type is chosen). */
 export const TASK_DURATION: Record<'call' | 'meeting', number> = { call: 30, meeting: 60 };
 

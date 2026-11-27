@@ -1,5 +1,9 @@
 import { expect, test } from 'vitest';
-import { BULK_MAX, MAIL_SORTS, MAIL_VIEWS, MailBulk, MailChange, MailFollowUp, MailListQuery, MailReply } from '../src/index.js';
+import {
+  BULK_MAX, MAIL_SORTS, MAIL_VIEWS, MailBulk, MailChange, MailFollowUp, MailListQuery, MailReply,
+  DraftAttachmentUpload, DraftCreate, DraftSave, DraftSend, DraftTemplateApply, RecipientQuery, RecipientResolve,
+  SignatureUpdate, UNDO_SEND_SECONDS,
+} from '../src/index.js';
 
 test('MailChange accepts the four kinds and refuses an unknown folder', () => {
   expect(MailChange.parse({ type: 'move', folder: 'deleted' })).toEqual({ type: 'move', folder: 'deleted' });
@@ -56,4 +60,43 @@ test('MailListQuery takes the release 2 filters and refuses bad values', () => {
 test('the shared views and sorts lists', () => {
   expect(MAIL_VIEWS).toEqual(['inbox', 'sent', 'drafts', 'scheduled', 'flagged', 'archive', 'deleted', 'awaiting', 'due', 'mine']);
   expect(MAIL_SORTS).toEqual(['date', 'from', 'lead', 'stage', 'size']);
+});
+
+test('DraftCreate: replies need replyToId, new refuses it', () => {
+  expect(DraftCreate.safeParse({ kind: 'replyAll' }).success).toBe(false);
+  expect(DraftCreate.safeParse({ kind: 'new', replyToId: 4 }).success).toBe(false);
+  expect(DraftCreate.parse({}).kind).toBe('new');
+  const r = DraftCreate.safeParse({ kind: 'forward' });
+  expect(!r.success && r.error.issues[0]!.path).toEqual(['replyToId']);
+  expect(DraftCreate.parse({ kind: 'reply', replyToId: 4 })).toEqual({ kind: 'reply', replyToId: 4 });
+});
+test('DraftSend: at defaults to null; follow-up needs a 24-hour time and a title; note at most 1000', () => {
+  const base = { bodyHtml: '<p>x</p>' };
+  expect(DraftSend.parse(base)).toMatchObject({ at: null, followUp: null, to: [], bcc: [] });
+  const fu = { date: '2026-12-01', time: '09:00', title: 'Follow up: x', assignedToId: 1, kind: 'followup' };
+  expect(DraftSend.parse({ ...base, followUp: fu }).followUp).toMatchObject({ priority: 'normal', updateLead: true });
+  expect(DraftSend.safeParse({ ...base, followUp: { ...fu, time: '24:00' } }).success).toBe(false);
+  expect(DraftSend.safeParse({ ...base, followUp: { ...fu, note: 'n'.repeat(1001) } }).success).toBe(false);
+  expect(DraftSend.safeParse({ ...base, followUp: { ...fu, title: '  ' } }).success).toBe(false);
+  expect(DraftSend.safeParse({ ...base, at: 'tomorrow' }).success).toBe(false);
+  expect(DraftSend.parse({ ...base, at: '2026-12-01T08:00:00.000Z' }).at).toBe('2026-12-01T08:00:00.000Z');
+});
+test('DraftSave: up to 50 recipients a line, lower-cased; subject defaults to empty', () => {
+  const v = DraftSave.parse({ to: [' Ana@Example.COM '], bodyHtml: '' });
+  expect(v).toMatchObject({ to: ['ana@example.com'], cc: [], bcc: [], subject: '' });
+  const many = Array.from({ length: 51 }, (_, i) => `a${i}@x.com`);
+  expect(DraftSave.safeParse({ cc: many, bodyHtml: '' }).success).toBe(false);
+  expect(DraftSave.safeParse({ to: ['not-an-address'], bodyHtml: '' }).success).toBe(false);
+  expect(DraftSave.parse({ bodyHtml: '', leadId: null }).leadId).toBeNull();
+});
+test('draft attachments, template apply, signature and recipient queries', () => {
+  expect(UNDO_SEND_SECONDS).toBe(10);
+  expect(DraftAttachmentUpload.parse({ name: 'a.pdf', data: 'JVBERi0=' })).toEqual({ name: 'a.pdf', data: 'JVBERi0=', inline: false });
+  expect(DraftTemplateApply.parse({ templateId: 3 })).toEqual({ templateId: 3, attachmentIds: [] });
+  expect(DraftTemplateApply.safeParse({ templateId: 3, attachmentIds: Array.from({ length: 21 }, (_, i) => i + 1) }).success).toBe(false);
+  expect(SignatureUpdate.parse({ html: null, auto: false })).toEqual({ html: null, auto: false });
+  expect(SignatureUpdate.safeParse({ html: '<p>x</p>' }).success).toBe(false);
+  expect(RecipientQuery.safeParse({ q: '  ' }).success).toBe(false);
+  expect(RecipientQuery.parse({ q: ' ana ' }).q).toBe('ana');
+  expect(RecipientResolve.safeParse({ addresses: Array.from({ length: 151 }, (_, i) => `a${i}@x.com`) }).success).toBe(false);
 });

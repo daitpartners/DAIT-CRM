@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   can, UserCreate, UserUpdate, PreferencesUpdate, LookupValueCreate, LookupValueUpdate,
   AllocationRuleCreate, LOOKUP_GROUPS, t, formatDate, lookupLabel, taskEndTime, CalendarQuery,
+  TaskCreate, TaskUpdate, TASK_ORIGINS, TASK_PRIORITIES,
 } from '../src/index.js';
 
 describe('rights', () => {
@@ -113,5 +114,25 @@ describe('calendar', () => {
     expect(CalendarQuery.safeParse({ from: '2030-03-01', to: '2030-05-02' }).success).toBe(false);
     expect(CalendarQuery.safeParse({ from: '2030-03-02', to: '2030-03-01' }).success).toBe(false);
     expect(CalendarQuery.safeParse({ from: '2030-03-01', to: '2030-03-01', who: 'team' }).success).toBe(false);
+  });
+});
+
+describe('task priority and note (web-mail release 3)', () => {
+  it('tasks take priority (default normal) and a note; email_follow_up is an origin', () => {
+    expect(TaskCreate.parse({ title: 't', dueDate: '2026-12-01', assignedToId: 1 }).priority).toBe('normal');
+    expect(TaskUpdate.safeParse({ priority: 'urgent', updatedAt: new Date().toISOString() }).success).toBe(false);
+    expect(TASK_ORIGINS).toContain('email_follow_up');
+    expect(TASK_PRIORITIES).toEqual(['normal', 'high']);
+  });
+  it('note: trimmed, at most 1000 characters, empty becomes null; update leaves priority out when absent', () => {
+    const base = { title: 't', dueDate: '2026-12-01', assignedToId: 1 };
+    expect(TaskCreate.parse({ ...base, note: '  call first ' }).note).toBe('call first');
+    expect(TaskCreate.parse({ ...base, note: '   ' }).note).toBeNull();
+    expect(TaskCreate.safeParse({ ...base, note: 'n'.repeat(1001) }).success).toBe(false);
+    expect(TaskCreate.parse({ ...base, priority: 'high' }).priority).toBe('high');
+    const u = TaskUpdate.parse({ updatedAt: new Date().toISOString() });
+    expect(u.priority).toBeUndefined();
+    expect(TaskUpdate.parse({ note: '', updatedAt: new Date().toISOString() }).note).toBeNull();
+    expect(TaskUpdate.parse({ note: null, updatedAt: new Date().toISOString() }).note).toBeNull();
   });
 });
