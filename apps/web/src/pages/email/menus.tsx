@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type 
 import { useNavigate } from 'react-router-dom';
 import { FLAG_PRESETS, MAIL_SORTS, addDays, flagDueDay, followUpChoices, localNow, type FlagPreset, type FollowUpKey, type ListSort } from '@dait-crm/shared';
 import { useLeads } from '../../api/leads';
-import { useLeadSuggestions, type MailDetail, type MailItem } from '../../api/mail';
+import { isScheduled, useLeadSuggestions, type MailDetail, type MailItem } from '../../api/mail';
 import { useTemplates } from '../../api/templates';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Icons } from '../../components/Icons';
@@ -265,7 +265,7 @@ export function RowMenu({ at, target, commands, onClose }: { at: { x: number; y:
   };
   // A scheduled send's own three first (disabled with the view-only title in another user's mailbox).
   const m = target.item;
-  const scheduled: MenuEntry[] = m && m.status === 'queued' && m.scheduledAt !== null ? [
+  const scheduled: MenuEntry[] = m && isScheduled(m) ? [
     item('editScheduled', t('Edit'), Icons.pen),
     item('sendNow', t('Send now'), Icons.send),
     item('cancelScheduled', t('Cancel'), Icons.x),

@@ -143,9 +143,11 @@ export function EmailPage() {
       });
     },
     newStart: () => ({ company: filter.company, lead: filter.lead, project: filter.project }),
-    // A scheduled send's Edit (plan decision 17): back in Drafts, it opens in its editor — a reply in the inline editor
-    // of its conversation (the draft opened in the Drafts folder), any other draft on the New message page.
-    onEditDraft: (draft) => afterSave(() => {
+    // A scheduled send's Edit (plan decision 17): any open editor is saved first (afterSave), then the mail is back in
+    // Drafts and opens in its editor — a reply in the inline editor of its conversation (the draft opened in the Drafts
+    // folder), any other draft on the New message page.
+    afterSave,
+    onEditDraft: (draft) => {
       if (draft.replyToId === null) {
         navigate(newMessageHref({ draft: draft.id }));
         return;
@@ -154,7 +156,7 @@ export function EmailPage() {
       const q = new URLSearchParams(params);
       q.set('folder', 'drafts');
       navigate(`/email/${draft.id}?${q.toString()}`);
-    }),
+    },
     onGone: (ids) => {
       const open = num(id ?? null);
       if (open !== undefined && ids.includes(open)) navigate(href({}, false));
@@ -317,6 +319,7 @@ export function EmailPage() {
                   }}
                   onSent={(sent) => setComposing((c) => (c ? { ...c, sent } : c))}
                   guard={guard}
+                  onGone={() => navigate(href({}, false))}
                 />
                 {shown && shown.id === selectedId ? (
                   <LeadPanel m={shown} commands={commands} collapsed={leadPanelClosed} onToggle={() => setLeadPanelClosed(!leadPanelClosed)} />

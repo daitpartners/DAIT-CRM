@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { BULK_MAX, type FlagPreset } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
 import { useSendNow, useUnsend, type DraftView } from '../../api/drafts';
-import { useBulkMailChange, useMailAction, useMailChange, useMailFollowUp, useUnlinkMail, type MailChange, type MailDetail, type MailItem } from '../../api/mail';
+import { isScheduled, useBulkMailChange, useMailAction, useMailChange, useMailFollowUp, useUnlinkMail, type MailChange, type MailDetail, type MailItem } from '../../api/mail';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { useToast } from '../../components/Toast';
@@ -43,8 +43,6 @@ export function selectionTarget(rows: MailItem[]): MailTarget {
 const MAILBOX: readonly CommandId[] = ['delete', 'archive', 'move', 'reply', 'replyAll', 'forward', 'flag', 'toggleRead'];
 /** A scheduled send's own commands (one message, your own mailbox). */
 const SCHEDULED: readonly CommandId[] = ['editScheduled', 'sendNow', 'cancelScheduled'];
-/** Waiting for its scheduled time (Scheduled folder): Edit, Send now and Cancel apply. */
-export const isScheduled = (m: Pick<MailItem, 'status' | 'scheduledAt'>) => m.status === 'queued' && m.scheduledAt !== null;
 /** What a multi-selection can do. */
 const MULTI: readonly CommandId[] = ['delete', 'archive', 'move', 'flag', 'toggleRead'];
 
@@ -99,6 +97,11 @@ export type MailCommandsContext = {
   onGone?: (ids: number[]) => void;
   /** A scheduled send's Edit: it is a draft again (`draft`), to open in its editor. */
   onEditDraft?: (draft: DraftView) => void;
+  /**
+   * Runs `then` once an editor open on the screen has saved what it holds (or the user chose Close without saving);
+   * a failed save keeps everything where it is and `then` never runs. Edit asks this before it unsends.
+   */
+  afterSave?: (then: () => void) => void;
 };
 
 /** The flag a Flag command sets: a due-day preset, Mark complete or Clear flag. */
@@ -236,9 +239,14 @@ export function useMailCommands(ctx: MailCommandsContext): {
           onError: sendFailed,
         });
         return;
-      case 'editScheduled':
-        unsend.mutate(m.id, { onSuccess: (draft) => ctx.onEditDraft?.(draft), onError: sendFailed });
+      case 'editScheduled': {
+        // The open editor first: a failed save keeps the mail scheduled and the editor where it is.
+        const id = m.id;
+        (ctx.afterSave ?? ((then: () => void) => then()))(() => {
+          unsend.mutate(id, { onSuccess: (draft) => ctx.onEditDraft?.(draft), onError: sendFailed });
+        });
         return;
+      }
       case 'sendNow':
         sendNow.mutate({ id: m.id, leadId: m.leadId }, { onSuccess: () => toast(t('Sending…')), onError: sendFailed });
         return;

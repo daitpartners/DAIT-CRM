@@ -34,6 +34,9 @@ function sentText(t: TFn, kind: ReplyKind, name: string, lead: string | undefine
     : t("Reply sent to {name} · it will appear here and on {lead}'s timeline.", { name, lead });
 }
 
+/** Why the inline editor closed (see Props.onClose). */
+export type InlineCloseReason = 'discarded' | 'gone' | 'popout';
+
 type Props = {
   /** The message answered (or forwarded). */
   originalId: number;
@@ -43,8 +46,11 @@ type Props = {
   draftId?: number;
   /** The conversation's lead as the reading pane knows it (null: none, or not visible). */
   lead: SendFlowLead | null;
-  /** The editor closed (discarded, or popped out): the slot empties. */
-  onClose(): void;
+  /**
+   * The editor closed: the slot empties. `reason`: `discarded` (the draft was deleted), `gone` (it no longer exists),
+   * `popout` (it goes on on the full page); none when a new reply could not be started.
+   */
+  onClose(reason?: InlineCloseReason): void;
   /** The draft now edited (for the conversation to leave out its own row), null when none. */
   onDraft?(id: number | null): void;
   /** The slot shows the sent note (true) or the editor (false). */
@@ -123,7 +129,7 @@ export function InlineReply({ originalId, kind, draftId, lead, onClose, onDraft,
   useEffect(() => {
     if (!isError) return;
     toast(t('This draft no longer exists. It may have been sent or deleted.'), 'warn');
-    latest.current.onClose();
+    latest.current.onClose('gone');
   }, [isError]);
 
   if (sent) {
@@ -163,7 +169,7 @@ export function InlineReply({ originalId, kind, draftId, lead, onClose, onDraft,
           return;
         }
         if (reason === 'popout') navigate(`/email/new?draft=${id ?? draft.id}`);
-        latest.current.onClose();
+        latest.current.onClose(reason === 'popout' ? 'popout' : 'discarded');
       }}
       onUndone={(d: DraftView) => {
         setCreated(false);

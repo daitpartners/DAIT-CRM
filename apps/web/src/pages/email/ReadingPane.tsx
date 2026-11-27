@@ -1,17 +1,17 @@
 import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { isClosedStatus } from '@dait-crm/shared';
-import { useMailMessage, type MailDetail } from '../../api/mail';
+import { isScheduled, useMailMessage, type MailDetail } from '../../api/mail';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Icons } from '../../components/Icons';
 import { useFormatDate } from '../../hooks/useFormatDate';
 import { errorText, firstName, initials, leadStatusText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
-import { InlineReply, type ReplyKind } from './compose/InlineReply';
+import { InlineReply, type InlineCloseReason, type ReplyKind } from './compose/InlineReply';
 import { newMessageHref } from './compose/NewMessagePage';
 import { ConversationMessage } from './ConversationMessage';
 import { instantLabel } from './sendDates';
-import { isScheduled, type CommandId, type MailTarget, type useMailCommands } from './useMailCommands';
+import type { CommandId, MailTarget, useMailCommands } from './useMailCommands';
 import type { ComposerGuard } from './compose/DraftComposer';
 
 type Commands = ReturnType<typeof useMailCommands>;
@@ -32,6 +32,8 @@ type Props = {
   onSent?: (sent: boolean) => void;
   /** The open composer's guarded close (see DraftComposer), set while it is open. */
   guard?: MutableRefObject<ComposerGuard | null>;
+  /** The opened draft itself was discarded (or is gone) from its own editor: the screen lets go of the message. */
+  onGone?: () => void;
 };
 
 /**
@@ -60,7 +62,7 @@ const selfEntry = (m: MailDetail): ThreadEntry => ({
  * (`peek`) it offers Continue editing instead, with `Not sent: {reason}` for a Failed send. A scheduled send shows
  * `Scheduled for {when}` with Edit, Send now and Cancel (view only in another user's mailbox).
  */
-export function ReadingPane({ id, peek = false, teamView = false, commands, composing = null, onCompose, onSent, guard }: Props) {
+export function ReadingPane({ id, peek = false, teamView = false, commands, composing = null, onCompose, onSent, guard, onGone }: Props) {
   const t = useT();
   const me = useCurrentUser();
   const navigate = useNavigate();
@@ -195,9 +197,11 @@ export function ReadingPane({ id, peek = false, teamView = false, commands, comp
             kind={composing.kind}
             draftId={composing.draftId}
             lead={m.lead ? { id: m.lead.id, number: m.lead.number, company: company ?? '', status: m.lead.status, open: !isClosedStatus(m.lead.status) } : null}
-            onClose={() => {
+            onClose={(reason?: InlineCloseReason) => {
               setEditing(null);
               onCompose?.(null);
+              // The draft deleted was the opened message: nothing is left to show here (no "not available").
+              if (editingSelf && (reason === 'discarded' || reason === 'gone')) onGone?.();
             }}
             onDraft={setEditing}
             onSent={(v) => onSent?.(v)}

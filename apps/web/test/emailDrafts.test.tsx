@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
@@ -25,6 +25,8 @@ afterEach(() => {
 });
 
 const me: Me = { ...rep, timezone: 'Europe/London', rights: [...rep.rights, 'use_email' as const, 'view_all_leads' as const] };
+/** Kolkata is UTC+05:30: a time shown in UTC rather than in the user's zone would read 08:00, not 13:30. */
+const kolkata: Me = { ...me, timezone: 'Asia/Kolkata' };
 const admin: Me = { ...me, id: 1, name: 'Maya Iyer', role: 'Administrator', rights: [...me.rights, 'view_team_mail' as const] };
 
 const item = (over: Partial<MailItem> = {}): MailItem => ({
@@ -68,12 +70,20 @@ const DRAFTS: Record<number, DraftView> = {
   71: draftView({ id: 71, replyToId: null, subject: 'Intro', quotedHtml: null }),
 };
 
-function stub(opts: { items?: MailItem[]; details?: Record<number, MailDetail>; drafts?: Record<number, DraftView>; user?: Me } = {}) {
+function stub(opts: { items?: MailItem[]; details?: Record<number, MailDetail>; drafts?: Record<number, DraftView>; user?: Me; saveErrors?: string[] } = {}) {
   const items = opts.items ?? [scheduled];
-  const details = opts.details ?? DETAILS;
+  const details = { ...(opts.details ?? DETAILS) };
   const drafts = draftApi({ drafts: opts.drafts ?? DRAFTS });
+  const saveErrors = [...(opts.saveErrors ?? [])];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
+    const draftPath = /^\/api\/mail\/drafts\/(\d+)$/.exec(url);
+    if (draftPath && method === 'PATCH' && saveErrors.length) {
+      drafts.calls.push({ url, method, body: JSON.parse(String(init!.body)) });
+      return Response.json({ error: saveErrors.shift() }, { status: 503 });
+    }
+    // A discarded draft is gone: the message answers 404 from then on.
+    if (draftPath && method === 'DELETE') delete details[Number(draftPath[1])];
     const unsend = /^\/api\/mail\/(\d+)\/unsend$/.exec(url);
     if (unsend) {
       drafts.calls.push({ url, method, body: undefined });
@@ -86,12 +96,15 @@ function stub(opts: { items?: MailItem[]; details?: Record<number, MailDetail>; 
     const handled = drafts.handle(url, init);
     if (handled) return handled;
     if (url === '/api/me') return Response.json(opts.user ?? me);
-    if (url.startsWith('/api/mail?')) return Response.json({ items, total: items.length, page: 1, pageSize: 50 });
+    if (url.startsWith('/api/mail?')) {
+      const listed = items.filter((i) => details[i.id]);
+      return Response.json({ items: listed, total: listed.length, page: 1, pageSize: 50 });
+    }
     if (url.startsWith('/api/mail/meta')) return Response.json(META);
     if (url === '/api/email-templates') return Response.json({ items: [] });
     if (url === '/api/users') return Response.json({ items: [] });
     const m = /^\/api\/mail\/(\d+)(\?peek=1)?$/.exec(url);
-    if (m) return Response.json(details[Number(m[1])]);
+    if (m) return details[Number(m[1])] ? Response.json(details[Number(m[1])]) : Response.json({ error: 'not_found' }, { status: 404 });
     return Response.json({ items: [], total: 0, page: 1, pageSize: 25 });
   }));
   return drafts;
@@ -129,14 +142,15 @@ const pane = () => screen.findByRole('region', { name: 'Reading pane' });
 const where = () => screen.getByTestId('where');
 
 describe('Drafts and Scheduled folders (web-mail release 3, Task 14)', () => {
-  it('a scheduled message shows Scheduled · Mon 30 Nov, 08:00 and the banner with Edit, Send now, Cancel', async () => {
-    stub();
-    show('/email/60?folder=scheduled');
+  it('a scheduled message shows Scheduled · 30 Nov, 13:30 (title with the weekday) and the banner with Edit, Send now, Cancel', async () => {
+    stub({ user: kolkata });
+    show('/email/60?folder=scheduled', kolkata);
+    // 08:00 UTC is 13:30 in the user's own zone (Asia/Kolkata).
     const row = (await screen.findByRole('link', { name: /Re: Proposal/ })).closest('.mrow') as HTMLElement;
-    expect(within(row).getByText('Scheduled · Mon 30 Nov, 08:00')).toBeInTheDocument();
+    expect(within(row).getByText('Scheduled · 30 Nov, 13:30')).toHaveAttribute('title', 'Scheduled · Mon 30 Nov, 13:30');
     const p = await pane();
     const banner = await within(p).findByRole('status', { name: 'Scheduled send' });
-    expect(banner).toHaveTextContent('Scheduled for Mon 30 Nov 2026, 08:00');
+    expect(banner).toHaveTextContent('Scheduled for Mon 30 Nov 2026, 13:30');
     for (const name of ['Edit', 'Send now', 'Cancel']) expect(within(banner).getByRole('button', { name })).toBeEnabled();
     // The same three in the row's right-click menu.
     fireEvent.contextMenu(row);
@@ -204,6 +218,40 @@ describe('Drafts and Scheduled folders (web-mail release 3, Task 14)', () => {
     await user.click(screen.getByRole('link', { name: /Intro/ }));
     await waitFor(() => expect(where()).toHaveTextContent('/email/new?draft=71'));
     expect(screen.getByText('New message page')).toBeInTheDocument();
+  });
+
+  it('discarding the opened draft in its own editor leaves the message (no "not available")', async () => {
+    const user = userEvent.setup();
+    const api = stub({ items: [replyDraft, newDraft] });
+    show('/email/70?folder=drafts');
+    const form = await within(await pane()).findByRole('form', { name: 'Reply' });
+    await user.click(within(form).getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(where()).toHaveTextContent(/^\/email\?folder=drafts$/));
+    expect(api.of('/api/mail/drafts/70', 'DELETE')).toHaveLength(1);
+    // The list without it; the next draft is shown, never the deleted one's error.
+    expect(await within(await pane()).findByRole('heading', { name: 'Intro' })).toBeInTheDocument();
+    expect(screen.queryByText('This message is not available.')).toBeNull();
+  });
+
+  it('Edit saves an editor open elsewhere first: a failed save keeps the mail scheduled and the editor open', async () => {
+    const user = userEvent.setup();
+    const api = stub({ items: [original, scheduled], saveErrors: ['outlook_busy', 'outlook_busy', 'outlook_busy'] });
+    show('/email/1');
+    const article = await within(await pane()).findByRole('article');
+    await user.click(within(article.querySelector('.msg-foot') as HTMLElement).getByRole('button', { name: 'Reply' }));
+    const form = await screen.findByRole('form', { name: 'Reply' });
+    const frame = form.querySelector('iframe.rbody') as HTMLIFrameElement;
+    await waitFor(() => expect(frame.contentDocument!.body.innerHTML).toContain('dait-sig'));
+    act(() => {
+      frame.contentDocument!.body.innerHTML = '<p>Not saved yet</p>';
+      frame.contentDocument!.dispatchEvent(new Event('input'));
+    });
+    fireEvent.contextMenu(screen.getByRole('link', { name: /Re: Proposal/ }).closest('.mrow') as HTMLElement);
+    await user.click(within(await screen.findByRole('menu', { name: 'Message actions' })).getByRole('menuitem', { name: 'Edit' }));
+    expect(await within(form).findByRole('alert')).toBeInTheDocument();
+    expect(api.of('/api/mail/60/unsend')).toHaveLength(0);
+    expect(screen.getByRole('form', { name: 'Reply' })).toBe(form);
+    expect(where()).toHaveTextContent('/email/1');
   });
 
   it('a failed send in Drafts shows Not sent with the reason', async () => {

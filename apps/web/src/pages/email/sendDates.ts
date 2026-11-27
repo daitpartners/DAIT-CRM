@@ -9,13 +9,14 @@ import { localNow } from '@dait-crm/shared';
 const LOCALES: Record<string, string> = { en: 'en-GB', es: 'es-ES', fr: 'fr-FR' };
 const noDot = (s: string) => s.replace(/\.$/, '');
 
-/** `Tue 1 Dec` (in `lang`) of a calendar day, plus its year when `withYear`. */
-function dayText(day: string, lang: string, withYear: boolean): string {
+/** `Tue 1 Dec` (in `lang`) of a calendar day, plus its year when `withYear`; `1 Dec` without the weekday. */
+function dayText(day: string, lang: string, withYear: boolean, withWeekday = true): string {
   const parts = new Intl.DateTimeFormat(LOCALES[lang] ?? LOCALES.en!, {
     timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short', ...(withYear ? { year: 'numeric' } : {}),
   }).formatToParts(new Date(`${day}T12:00:00Z`));
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? '';
-  const text = `${noDot(part('weekday'))} ${part('day')} ${noDot(part('month'))}`;
+  const date = `${part('day')} ${noDot(part('month'))}`;
+  const text = withWeekday ? `${noDot(part('weekday'))} ${date}` : date;
   return withYear ? `${text} ${part('year')}` : text;
 }
 
@@ -45,6 +46,16 @@ export function savedLabel(iso: string, timezone: string): string {
 export function instantShort(iso: string, timezone: string, lang: string, now: Date = new Date()): string {
   const local = localNow(timezone, new Date(iso));
   return whenShort(local.day, local.time, timezone, lang, now);
+}
+
+/**
+ * The instant `iso` as a list row shows it, in `timezone`: `30 Nov, 08:00` (no weekday, so the row's subject keeps its
+ * room; the year when not this year). The row's title carries the whole `instantShort`.
+ */
+export function instantRow(iso: string, timezone: string, lang: string, now: Date = new Date()): string {
+  const local = localNow(timezone, new Date(iso));
+  const thisYear = localNow(timezone, now).day.slice(0, 4);
+  return `${dayText(local.day, lang, local.day.slice(0, 4) !== thisYear, false)}, ${local.time}`;
 }
 
 /** The instant `iso` as the long label, in `timezone`: `Mon 30 Nov 2026, 08:00`. */

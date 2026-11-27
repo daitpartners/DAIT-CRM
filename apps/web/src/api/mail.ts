@@ -75,6 +75,9 @@ export type MailItem = {
   conversationIds?: number[];
 };
 
+/** Waiting for its scheduled time (Scheduled folder): a scheduled send's Edit, Send now and Cancel apply. */
+export const isScheduled = (m: Pick<MailItem, 'status' | 'scheduledAt'>) => m.status === 'queued' && m.scheduledAt !== null;
+
 /** The reading pane's lead panel (mirror of the API's mail/leadPanel.ts LeadPanel). */
 export type LeadPanel = {
   company: { id: number; name: string; site: string | null; place: string | null } | null;

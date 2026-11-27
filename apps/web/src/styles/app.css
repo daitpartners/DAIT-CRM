@@ -1375,7 +1375,8 @@ select.in.pj-locked:disabled{opacity:1;color:var(--text);-webkit-text-fill-color
 .wm .tplbar .lk:hover{text-decoration:underline}
 /* Web-mail release 3: the Drafts and Scheduled folders — a scheduled row's `Scheduled · {when}` in place of its time,
    the reading pane's `Scheduled for {when}` bar with Edit / Send now / Cancel, a Failed draft's `Not sent: …`. */
-.wm .rtime.sched{color:var(--purple);font-weight:500}
+.wm .rtime.sched{color:var(--purple);font-weight:500;font-size:11px;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.wm .rl2:has(>.rtime.sched) .rsubj{min-width:64px}
 .wm .sched-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border:1px solid var(--tint-2);background:var(--tint);color:var(--ink);font-weight:500}
 .wm .sched-bar>.ico{width:16px;height:16px;color:var(--purple);flex:none}
 .wm .sched-bar .sched-when{flex:1 1 calc(100% - 32px)}

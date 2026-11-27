@@ -1,12 +1,12 @@
 import type { MouseEvent, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import type { MailItem } from '../../api/mail';
+import { isScheduled, type MailItem } from '../../api/mail';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { Icons } from '../../components/Icons';
 import { firstName, initials, leadStatusText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
 import { rowTime } from './listDates';
-import { instantShort } from './sendDates';
+import { instantRow, instantShort } from './sendDates';
 import { rowTarget, type CommandId, type useMailCommands } from './useMailCommands';
 
 type Props = {
@@ -30,7 +30,7 @@ type Props = {
  * A message list row (web-mail release 2, mockup `.row`), the stretched-link pattern: the row is a `div.mrow` whose
  * link, named by sender and subject, covers it, with the avatar's Select message checkbox (on hover, or once any row is
  * checked) and the hover actions above it. Sender (bold when unread), replied / attachment / flag icons, subject, the
- * conversation count, the 24-hour time (a scheduled send: `Scheduled · Mon 30 Nov, 08:00`), preview, the lead chip with its stage, the mailbox in team view.
+ * conversation count, the 24-hour time (a scheduled send: `Scheduled · 30 Nov, 08:00`), preview, the lead chip with its stage, the mailbox in team view.
  */
 export function MessageRow({ m, on, to, team, checked, selecting, menuOpen, onCheck, onMenu, commands }: Props) {
   const t = useT();
@@ -40,6 +40,16 @@ export function MessageRow({ m, on, to, team, checked, selecting, menuOpen, onCh
   const subject = m.subject || t('(no subject)');
   const mailbox = m.viewOnly ? t("{name}'s mailbox", { name: firstName(m.owner.name) }) : t('Your mailbox');
   const target = rowTarget(m);
+  /**
+   * A scheduled send's `Scheduled · 30 Nov, 08:00` (24-hour, your time zone) in place of the time; its title has the
+   * weekday too (`Scheduled · Mon 30 Nov, 08:00`), left out of the row so the subject stays readable.
+   */
+  const scheduled = isScheduled(m)
+    ? {
+      text: t('Scheduled · {when}', { when: instantRow(m.scheduledAt!, me.timezone, me.language) }),
+      title: t('Scheduled · {when}', { when: instantShort(m.scheduledAt!, me.timezone, me.language) }),
+    }
+    : null;
   const cls = ['mrow', m.isRead ? '' : 'unread', on ? 'sel' : '', checked ? 'checked' : '', selecting ? 'selecting' : '', menuOpen ? 'ctx' : '']
     .filter(Boolean).join(' ');
 
@@ -77,8 +87,8 @@ export function MessageRow({ m, on, to, team, checked, selecting, menuOpen, onCh
             <span className="rcount" title={t('{n} messages in this conversation', { n: m.conversationCount })}>{m.conversationCount}</span>
           ) : null}
           {/* A scheduled send shows when it leaves in place of the time (Scheduled folder). */}
-          {m.status === 'queued' && m.scheduledAt ? (
-            <span className="rtime sched">{t('Scheduled · {when}', { when: instantShort(m.scheduledAt, me.timezone, me.language) })}</span>
+          {scheduled ? (
+            <span className="rtime sched" title={scheduled.title}>{scheduled.text}</span>
           ) : (
             <span className="rtime">{rowTime(m.occurredAt, me.timezone, me.language)}</span>
           )}
