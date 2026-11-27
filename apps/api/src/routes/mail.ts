@@ -21,6 +21,7 @@ import { assertCompanyVisible } from '../companies/visibility.js';
 import { matchMail } from '../mail/match.js';
 import { canSeeTeamMail, mailScope, messageFor, teamReadableWhere } from '../mail/access.js';
 import { changeMany, changeMessage } from '../mail/changes.js';
+import { AttachmentTooLargeError, attachmentFile, attachmentHeaders, attachmentsOf } from '../mail/attachments.js';
 import { LIST_CANDIDATES_MAX, conversationKey, countKey, decorate, listWhere, orderCandidates, type Candidate } from '../mail/list.js';
 import { assertProjectFor, queueOutgoing } from '../mail/outgoing.js';
 import { leadPanel } from '../mail/leadPanel.js';
@@ -77,6 +78,8 @@ const isInbound = (m: EmailMessage) => m.status === 'received';
 const counterpart = (m: EmailMessage) => (isInbound(m) ? m.fromName || m.fromAddress : ((m.toAddresses as string[])[0] ?? ''));
 
 const THREAD_MAX = 50;
+/** A Graph attachment id as the screen sends it (base64 and URL-safe base64), else 404. */
+const ATTACHMENT_ID = /^[A-Za-z0-9+/=_-]{1,1024}$/;
 const REPLY_SUBJECT = /^\s*(re|aw|sv|rv)\s*:/i;
 
 /**
@@ -469,6 +472,39 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
         thread: threadHistory(owner.name, m, thread),
         leadPanel: panel,
       };
+    });
+  });
+
+  // Received attachments (web-mail release 2, mail/attachments.ts), read from the owner's Outlook on demand with the
+  // owner's mailbox, server-side (no token reaches the browser). Your own, or (Administrator / Manager) another user's
+  // team-readable message, view only; anyone else's is 404. Each team-view download is audited (who, which message,
+  // whose mailbox; never the file's name). Bytes are inline only for a real PDF or image when the screen asks
+  // (inline=1); everything else downloads (octet-stream, attachment, nosniff, a sandbox CSP).
+  const attachments = { ...pre, config: perUser(120) };
+  app.get<{ Params: { id: string } }>('/mail/:id/attachments', attachments, async (request, reply) => {
+    const user = request.user!;
+    return guard(reply, async () => {
+      const { m } = await messageFor(prisma, user, request.params.id, 'read');
+      return attachmentsOf(app.graph, m);
+    });
+  });
+
+  app.get<{ Params: { id: string }; Querystring: { att?: unknown; inline?: unknown } }>('/mail/:id/attachment', attachments, async (request, reply) => {
+    const user = request.user!;
+    const { att, inline } = request.query;
+    // Graph ids are base64 (`+`, `/`, `=`); the screen encodes them (a raw `+` arrives as a space and is refused here).
+    if (typeof att !== 'string' || !ATTACHMENT_ID.test(att)) throw new NotFoundError();
+    return guard(reply, async () => {
+      const { m, viewOnly } = await messageFor(prisma, user, request.params.id, 'read');
+      // Recorded before Outlook is asked, so a download is audited even when Microsoft fails.
+      if (viewOnly) await audit(prisma, { entityType: 'email_message', entityId: m.id, action: 'view', userId: user.id, after: { ownerId: m.userId, attachment: true } });
+      try {
+        const file = await attachmentFile(app.graph, m, att);
+        return reply.headers(attachmentHeaders(file.name, file.previewType, inline === '1')).send(file.data);
+      } catch (err) {
+        if (err instanceof AttachmentTooLargeError) return reply.code(err.status).send({ error: err.code });
+        throw err;
+      }
     });
   });
 

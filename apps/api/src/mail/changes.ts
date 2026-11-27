@@ -60,30 +60,39 @@ function flagFor(user: AuthUser, flag: Extract<MailChange, { type: 'flag' }>['fl
 }
 
 /** The row's own mailbox while it is still its owner's connected personal one, else null. */
-const ownMailbox = (m: EmailMessage) => (m.accountId === null
+export const ownMailbox = (m: EmailMessage) => (m.accountId === null
   ? null
   : prisma.emailAccount.findFirst({ where: { id: m.accountId, userId: m.userId, kind: 'personal', status: 'connected' } }));
 
-/** Runs the Outlook call; every failure becomes a MailChangeError (a revoked mailbox is put in error, as mailAction). */
+/** Runs the Outlook call; every failure becomes a MailChangeError (outlookFailure). */
 async function inOutlook(account: EmailAccount, call: () => Promise<void>): Promise<void> {
   try {
     await call();
   } catch (err) {
-    const errName = (err as Error | null)?.name;
-    if (isAuthFailure(err)) {
-      await prisma.emailAccount.updateMany({
-        where: { id: account.id, status: 'connected', refreshTokenEnc: account.refreshTokenEnc },
-        data: { status: 'error', lastError: errorMessage(err) },
-      });
-      throw new MailChangeError('mailbox_not_connected', 409, err instanceof GraphError ? err.status : undefined, errName);
-    }
-    if (err instanceof GraphError) {
-      const busy = err.status === 429 || err.status >= 500;
-      throw new MailChangeError(busy ? 'outlook_busy' : 'outlook_refused', busy ? 503 : 502, err.status, errName);
-    }
-    // Not from Graph (a network failure, an MSAL error other than a revoked consent): like throttling, try later.
-    throw new MailChangeError('outlook_busy', 503, undefined, errName);
+    await outlookFailure(account, err);
   }
+}
+
+/**
+ * A failed Outlook call on `account` as a MailChangeError: a revoked mailbox is put in error (as mailAction) and is
+ * 409 mailbox_not_connected; throttling or an outage 503 outlook_busy; any other Graph refusal 502 outlook_refused; a
+ * failure outside Graph (network, MSAL) 503 outlook_busy.
+ */
+export async function outlookFailure(account: EmailAccount, err: unknown): Promise<never> {
+  const errName = (err as Error | null)?.name;
+  if (isAuthFailure(err)) {
+    await prisma.emailAccount.updateMany({
+      where: { id: account.id, status: 'connected', refreshTokenEnc: account.refreshTokenEnc },
+      data: { status: 'error', lastError: errorMessage(err) },
+    });
+    throw new MailChangeError('mailbox_not_connected', 409, err instanceof GraphError ? err.status : undefined, errName);
+  }
+  if (err instanceof GraphError) {
+    const busy = err.status === 429 || err.status >= 500;
+    throw new MailChangeError(busy ? 'outlook_busy' : 'outlook_refused', busy ? 503 : 502, err.status, errName);
+  }
+  // Not from Graph (a network failure, an MSAL error other than a revoked consent): like throttling, try later.
+  throw new MailChangeError('outlook_busy', 503, undefined, errName);
 }
 
 /**
