@@ -503,26 +503,58 @@ release 2 (live since 27 Nov 2026 as `70ec558`; the owner live-checked every Out
      CRM; it arrives from the send-as address, as release 2 did.
 
    **Any "Outlook refused the change", "Outlook is busy" that does not clear on a second try, a send that ends Failed
-   (marked Failed in Drafts, with a notification), a duplicate row in Sent items, or a 500 / 502 answer (browser
-   developer tools, Network): stop and roll back** to release 2 (`70ec558`) as in "Rolling back", as `daitcrm`:
+   (marked Failed in Drafts, with a notification), a duplicate row in Sent items, or any 5xx answer (500, 502, 503,
+   504; browser developer tools, Network): stop and roll back** to release 2 (`70ec558`), in this order. Release 2's
+   worker runs the same `send_user_email` jobs but ignores release 3's draft fields, so mail release 3 queued or
+   scheduled would go out without its attachments, inline pictures or Bcc, with no follow-up task, while its copy stays
+   in Outlook's Drafts (and could be sent a second time from there). So the queue is emptied first:
 
-   ```
-   sudo -iu daitcrm
-   ln -sfn ~/live/releases/70ec558 ~/live/current
-   pm2 startOrReload ~/live/current/deploy/ecosystem.config.cjs --only crm-live,crm-live-worker --update-env
-   curl -s http://127.0.0.1:3090/api/health      # shows 70ec558
-   ```
+   1. **Stop the worker** (nothing is sent from here on):
 
-   **First list any mail still waiting to be sent** (as root; ids and times only) **and tell the senders**: release 2
-   does not send mail scheduled or queued by release 3.
+      ```
+      sudo -iu daitcrm pm2 stop crm-live-worker
+      ```
 
-   ```
-   sudo -u postgres psql -d dait_crm -c "SELECT id, user_id, scheduled_at FROM email_messages WHERE status = 'queued' AND source = 'crm';"
-   ```
+   2. **List the mail waiting to be sent** (as root; ids, users, states and times only, never content). Note the user
+      ids: they are the people to tell in step 5.
 
-   Migration 28 stays: it only added columns, so release 2 runs against it. Drafts the CRM made stay in each user's
-   Outlook Drafts and can be sent or deleted there. Then send the developer which step failed and the time, and the
-   API and worker log lines from that minute (`pm2 logs crm-live --lines 200 --nostream`,
+      ```
+      sudo -u postgres psql -d dait_crm -c "SELECT id, user_id, status, scheduled_at FROM email_messages WHERE folder = 'drafts' AND status IN ('queued', 'sending') ORDER BY user_id, id;"
+      ```
+
+   3. **Take them out of the queue, in one transaction** (as root). Their send jobs are deleted; a mail that was
+      waiting (`queued`) becomes a plain draft again; a mail caught mid-send (`sending`, rare) is marked Failed with
+      "may have been sent", so its sender checks Outlook's Sent Items before sending it again. Release 2's own
+      outgoing rows (folder `sent`) are not touched.
+
+      ```
+      sudo -u postgres psql -d dait_crm -v ON_ERROR_STOP=1 <<'SQL'
+      BEGIN;
+      DELETE FROM jobs WHERE type = 'send_user_email' AND status IN ('queued', 'running') AND payload->>'draft' = 'true';
+      UPDATE email_messages SET status = 'failed', last_error = 'interrupted_may_have_sent', scheduled_at = NULL WHERE folder = 'drafts' AND status = 'sending';
+      UPDATE email_messages SET status = 'draft', scheduled_at = NULL, last_error = NULL WHERE folder = 'drafts' AND status = 'queued';
+      COMMIT;
+      SQL
+      ```
+
+      Running step 2's query again must now list nothing.
+
+   4. **Switch back to release 2 and start both processes** (as `daitcrm`; `startOrReload` starts the stopped worker on
+      release 2):
+
+      ```
+      sudo -iu daitcrm
+      ln -sfn ~/live/releases/70ec558 ~/live/current
+      pm2 startOrReload ~/live/current/deploy/ecosystem.config.cjs --only crm-live,crm-live-worker --update-env
+      curl -s http://127.0.0.1:3090/api/health      # shows 70ec558
+      ```
+
+   5. **Tell the users from step 2** that their scheduled or just-sent mail did not go: it is in their Outlook Drafts,
+      to send (or delete) from Outlook. For a "may have been sent" one, they look in Sent Items first.
+
+   Migration 28 stays: it only added columns, so release 2 runs against it. Other drafts the CRM made stay in each
+   user's Outlook Drafts and can be sent or deleted there. Then send the developer which step failed and the time, and
+   the API and worker log lines from that minute (`pm2 logs crm-live --lines 200 --nostream`,
    `pm2 logs crm-live-worker --lines 200 --nostream`; they carry the reason and Graph's status, never the message
    itself).
 

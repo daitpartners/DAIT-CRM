@@ -46,8 +46,8 @@ in the git history).
 ## Ready, waiting for deploy: web-mail release 3 (branch `web-mail-r3`)
 
 Design: `docs/superpowers/specs/2026-11-26-web-mail-email-design.md` (mockup 2026-11-26-outlook-mail, states 2, 3
-and 6). Checked on the developer's machine with the automatic tests (screen by screen, against a stand-in for
-Outlook); not yet on live. Goes live only when you say "deploy".
+and 6). Checked on the developer's machine with the automatic tests (they use a stand-in for Outlook); not yet on
+live. Goes live only when you say "deploy".
 
 **What changes for users:**
 - **Reply, Reply all and Forward open inside the conversation** (no pop-up window): recipients with their lead tag,
@@ -109,7 +109,10 @@ forward drafts in the right Outlook conversation (a forward keeps its pictures);
 Undo (Undo once, then for real); Schedule send (it goes at its time; Cancel puts it back in Drafts; Send now); the
 follow-up task in Tasks with its priority and note and the lead's next follow-up; the signature; the lead page send.
 Any Outlook refusal, repeated "Outlook is busy", Failed send or server error means going back to release 2 (`70ec558`);
-the new columns stay and release 2 runs on them.
+the new columns stay and release 2 runs on them. Before going back, mail still waiting to be sent (scheduled, or in
+its 10 seconds) is taken out of the queue so release 2 does not send it the wrong way (it would leave without its
+attachments, pictures or Bcc); it stays in the sender's Outlook Drafts, and those people are told to send it from
+Outlook.
 
 ## Live: web-mail release 2 (`70ec558`, since 27 Nov 2026)
 
