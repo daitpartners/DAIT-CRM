@@ -1,6 +1,7 @@
 import { test, expect, beforeAll, afterAll, vi } from 'vitest';
 import { prisma } from '../src/db';
 import { databaseName, resetDb, seedLookups } from './helpers';
+import { makeUser } from './factory';
 
 beforeAll(async () => {
   await resetDb();
@@ -43,4 +44,12 @@ test('resetDb refuses to truncate a database that is not *_unit or *_e2e', async
   } finally {
     vi.unstubAllEnvs();
   }
+});
+
+test('email_messages has flag_status (default notFlagged), flag_due and size_bytes (default 0)', async () => {
+  const user = await makeUser();
+  const m = await prisma.emailMessage.create({
+    data: { userId: user.id, folder: 'inbox', status: 'received', fromAddress: 'a@b.co', subject: 's' },
+  });
+  expect(m).toMatchObject({ flagStatus: 'notFlagged', flagDue: null, sizeBytes: 0 });
 });

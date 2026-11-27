@@ -328,10 +328,13 @@ A user's mail (`user_id` = the mailbox owner). Lead mail belongs to the mailbox 
 | logged_at | timestamp | when it was logged on the lead ("Log as activity") |
 | last_error | text | |
 | lead_deleted_at | timestamp, nullable | set when the lead, contact or company it was linked to is deleted: kept with its owner, unlinked, never cleaned up as unrelated mail (web-mail release 1) |
+| flag_status | varchar(12) | Outlook flag: `notFlagged` (default) / `flagged` / `complete` (web-mail release 2) |
+| flag_due | date, nullable | the flag's due day (web-mail release 2) |
+| size_bytes | integer | message size in bytes, default 0; back-filled from the stored body length (web-mail release 2) |
 | created_at, updated_at | timestamp | |
 
 Indexes: unique (`user_id`, `graph_id`); (`user_id`, `thread_id`), (`user_id`, `lead_id`), (`user_id`, `folder`,
-`occurred_at`), (`user_id`, `project_id`). There is no `quotation_id`: a quotation's sent email is found through
+`occurred_at`), (`user_id`, `project_id`), (`user_id`, `flag_status`). There is no `quotation_id`: a quotation's sent email is found through
 `quotations.sending_message_id` while sending, and the timeline.
 
 ### mail_backfills (web-mail release 1)
@@ -606,5 +609,5 @@ users ← assigned_to / owner / manager / created_by / by_user / decided_by on t
 - `leads(status)`, `leads(assigned_to_id)`, `leads(company_id)`, `leads(created_at)`, `leads(next_follow_up)`,
   `leads(lead_type)`, `leads(country)`
 - `tasks(assigned_to_id, is_done, due_date)`
-- `email_messages(user_id, graph_id)` unique, `(user_id, thread_id)`, `(user_id, folder, occurred_at)`
+- `email_messages(user_id, graph_id)` unique, `(user_id, thread_id)`, `(user_id, folder, occurred_at)`, `(user_id, flag_status)`
 - `calendar_events(user_id, starts_at)`, `quotations(status)`, `jobs(status, run_at)`

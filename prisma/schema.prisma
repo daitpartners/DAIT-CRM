@@ -151,7 +151,7 @@ model EmailAccount {
 }
 
 /// A user's email (release 2B): sent from the CRM now, synced from their mailbox in 2B-2. Private to `userId`.
-/// Lead mail only (web-mail release 1); Administrators and Managers read it view only.
+/// Lead mail only (web-mail release 1); Administrators and Managers read it view only. Flags and size: web-mail release 2.
 model EmailMessage {
   id              Int       @id @default(autoincrement())
   userId          Int       @map("user_id")
@@ -195,6 +195,12 @@ model EmailMessage {
   /// When the lead, contact or company it was linked to was deleted (leads/delete.ts): kept with its owner, unlinked,
   /// and never cleaned up as unrelated mail.
   leadDeletedAt   DateTime? @map("lead_deleted_at")
+  /// Outlook flag: 'notFlagged' | 'flagged' | 'complete' (web-mail release 2).
+  flagStatus      String    @default("notFlagged") @map("flag_status") @db.VarChar(12)
+  /// The flag's due day, if any.
+  flagDue         DateTime? @map("flag_due") @db.Date
+  /// Message size in bytes (Graph size; back-filled from the stored body length).
+  sizeBytes       Int       @default(0) @map("size_bytes")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
@@ -215,6 +221,7 @@ model EmailMessage {
   @@index([userId, leadId])
   @@index([userId, folder, occurredAt])
   @@index([userId, projectId])
+  @@index([userId, flagStatus])
   @@map("email_messages")
 }
 

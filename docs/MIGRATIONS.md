@@ -34,6 +34,7 @@ previous release keeps working against it. Release shas are the commits that wer
 | 24 | `20261210100000_import_row_changes` | `import_rows.changes` (nullable jsonb: what an update row — Lead ID / Company ID from "Download all leads" — filled, for Undo, and the conflicts it did not apply) | Leads export (`a77eaf7`) |
 | 25 | `20261211100000_email_suppressions` | Table `email_suppressions` (lower-cased address, unique; reason `unsubscribed` / `do_not_email`; source, e.g. `lead_deleted`; created_at, created_by → users set null): addresses kept when a Do-not-email lead or an unsubscribed contact is deleted; the Mailer skips them and imports flag new leads / contacts for them | Delete leads (`03cd699`, live 26 Nov 2026) |
 | 26 | `20261212100000_web_mail_lead_only` | `email_messages.lead_deleted_at`; tables `mail_backfills` (one row per mailbox × lead/contact address: status, next link, found/stored counts, attempts, last error; unique mailbox + address) and `mail_backfill_addresses` (addresses already queued) | Web mail release 1 (not yet released) |
+| 27 | `20261213100000_web_mail_screen` | `email_messages.flag_status` (default `notFlagged`), `flag_due`, `size_bytes` (back-filled from the stored body length); index (`user_id`, `flag_status`) | Web mail release 2 (not yet released) |
 
 ## Known leftover
 
