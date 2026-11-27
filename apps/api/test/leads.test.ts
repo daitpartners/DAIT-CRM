@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { prisma } from '../src/db';
 import { buildApp } from '../src/app';
 import { todayIn } from '../src/leads/dates';
+import { standInFollowUps } from '../src/leads/service';
 import { mailUser } from '../src/mail/match';
 import { sendBlock } from '../src/mailer/rules';
 import { resetDb, seedLookups } from './helpers';
@@ -201,6 +202,29 @@ describe('leads API', () => {
     // A closed lead is not overdue.
     await prisma.lead.update({ where: { id: late.id }, data: { status: 'Lost' } });
     expect((await req('GET', '/api/leads', mgr.cookie)).json()).toMatchObject({ counts: { overdue: 1 }, tiles: { overdue: 1 } });
+  });
+
+  it('standInFollowUps finds the same stand-ins whatever the database session time zone', async () => {
+    const mgr = await as('MANAGER', 'Europe/London');
+    const today = todayIn('Europe/London');
+    const email = (leadId: number, due: string) =>
+      prisma.task.create({ data: { leadId, assignedToId: mgr.user.id, title: 'Follow up: Proposal', dueDate: day(due), origin: 'email_follow_up' } });
+    const dueToday = await makeLead({ assignedToId: mgr.user.id, nextFollowUp: day(today) });
+    await email(dueToday.id, today);
+    const late = await makeLead({ assignedToId: mgr.user.id, nextFollowUp: day(shift(today, -1)) });
+    await email(late.id, shift(today, -1));
+    const tomorrow = await makeLead({ assignedToId: mgr.user.id, nextFollowUp: day(shift(today, 1)) });
+    await email(tomorrow.id, shift(today, 1));
+
+    const leadsIn = (zone: string) => prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(`SET LOCAL TIME ZONE '${zone}'`);
+      return (await standInFollowUps(tx, today)).map((r) => r.leadId).sort((a, b) => a - b);
+    });
+    const expected = [dueToday.id, late.id].sort((a, b) => a - b);
+    expect(await leadsIn('UTC')).toEqual(expected);
+    expect(await leadsIn('America/Los_Angeles')).toEqual(expected);
+    expect(await leadsIn('Asia/Kolkata')).toEqual(expected);
+    expect(await leadsIn('Pacific/Kiritimati')).toEqual(expected);
   });
 
   it('overdue tab uses the user\'s timezone', async () => {

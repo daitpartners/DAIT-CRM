@@ -68,7 +68,7 @@ export async function standInFollowUps(db: Tx | PrismaClient, onOrBefore: string
   return db.$queryRaw<{ taskId: number; leadId: number; dueDate: Date }[]>`
     SELECT DISTINCT ON (t.lead_id) t.id AS "taskId", t.lead_id AS "leadId", t.due_date AS "dueDate"
     FROM tasks t JOIN leads l ON l.id = t.lead_id
-    WHERE t.origin = 'email_follow_up' AND NOT t.is_done AND t.due_date = l.next_follow_up AND t.due_date <= ${dateOnly(onOrBefore)}::date
+    WHERE t.origin = 'email_follow_up' AND NOT t.is_done AND t.due_date = l.next_follow_up AND t.due_date <= ${onOrBefore}::date
       AND NOT EXISTS (SELECT 1 FROM tasks f WHERE f.lead_id = t.lead_id AND f.origin = 'follow_up' AND NOT f.is_done)
     ORDER BY t.lead_id, t.id`;
 }
