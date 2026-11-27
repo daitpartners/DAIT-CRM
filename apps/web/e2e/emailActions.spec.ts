@@ -114,17 +114,24 @@ test('Reply all goes out through Outlook with the original recipients', async ({
   const reader = page.getByRole('region', { name: 'Reading pane' });
   await expect(reader.getByRole('heading', { name: SUBJECTS[0], level: 2 })).toBeVisible();
   await reader.locator('.msg-foot').getByRole('button', { name: 'Reply all' }).click();
-  const compose = page.getByRole('dialog', { name: 'Reply all' });
-  await compose.getByLabel('Message').fill('Thanks, both of you.');
-  await compose.getByRole('button', { name: 'Send' }).click();
-  await expect(compose).toHaveCount(0);
+  // Web-mail release 3: the inline editor at the top of the conversation, on a reply-all draft made in Outlook.
+  const editor = reader.getByRole('form', { name: 'Reply all' });
+  await expect(editor.getByText(/^Draft saved \d\d:\d\d$/)).toBeVisible();
+  await expect(editor.locator('.rcp').filter({ hasText: 'client@act.example' })).toBeVisible();
+  await expect(editor.locator('.rcp').filter({ hasText: 'colleague@act.example' })).toBeVisible();
+  const message = editor.frameLocator('iframe.rbody').locator('body');
+  await message.click({ position: { x: 24, y: 16 } });
+  await page.keyboard.type('Thanks, both of you.');
+  await editor.getByRole('button', { name: 'Send', exact: true }).click();
+  // No lead on these messages: no follow-up box, a plain send; the slot then says where the reply will show.
+  await expect(reader.locator('.sent-note')).toContainText('Reply sent to');
+  await expect(editor).toHaveCount(0);
 
   // The e2e server runs no worker: run the queued send against the fake Graph and read what it was given.
   const out = execFileSync('npx', ['tsx', 'test/e2e-send-jobs.ts'], { cwd: new URL('../../api/', import.meta.url), env: { ...process.env, DATABASE_URL: DB }, encoding: 'utf8' });
   const sent = out.split('\n').filter((l) => l.startsWith('e2e-sent: ')).map((l) => JSON.parse(l.slice('e2e-sent: '.length)) as { kind?: string; graphId?: string; to: string[]; cc?: string[]; html: string });
-  const replyAll = sent.find((s) => s.kind === 'replyAll');
+  const replyAll = sent.find((s) => s.kind === 'draft' && s.html.includes('Thanks, both of you.'));
   expect(replyAll).toBeDefined();
-  expect(replyAll!.graphId).toBe(`${TAG}1`);
   expect([...replyAll!.to, ...(replyAll!.cc ?? [])]).toEqual(expect.arrayContaining(['client@act.example', 'colleague@act.example']));
   expect(replyAll!.html).toContain('Thanks, both of you.');
 });

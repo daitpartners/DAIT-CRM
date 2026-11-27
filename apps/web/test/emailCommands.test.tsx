@@ -11,6 +11,7 @@ import { ToastProvider } from '../src/components/Toast';
 import { ConfirmProvider } from '../src/components/ConfirmDialog';
 import { I18nProvider } from '../src/i18n';
 import { shortcutFor } from '../src/pages/email/useMailShortcuts';
+import { draftApi } from './draftFixture';
 import { makeClient, rep } from './leadFixture';
 
 const widthGetter = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth')!;
@@ -47,7 +48,10 @@ const template = (over: Partial<EmailTemplate>): EmailTemplate => ({
 function stub(items: MailItem[], opts: { user?: Me; templates?: EmailTemplate[] } = {}) {
   const posts: { url: string; body: unknown }[] = [];
   const leadSearches: string[] = [];
+  const drafts = draftApi();
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    const draftAnswer = drafts.handle(url, init);
+    if (draftAnswer) return draftAnswer;
     if (init?.method === 'POST') {
       const body = init.body ? JSON.parse(String(init.body)) : undefined;
       posts.push({ url, body });
@@ -80,7 +84,7 @@ function stub(items: MailItem[], opts: { user?: Me; templates?: EmailTemplate[] 
     if (m) return Response.json(detail(items.find((x) => x.id === Number(m[1])) ?? item({ id: Number(m[1]) })));
     return Response.json({ items: [], total: 0, page: 1, pageSize: 25 });
   }));
-  return { posts, leadSearches };
+  return { posts, leadSearches, drafts };
 }
 
 function Where() {
@@ -254,21 +258,32 @@ describe('Email command bar, menus and shortcuts (web-mail release 2, Task 14)',
     expect(await screen.findByText('Unlinked from LD-1204')).toBeInTheDocument();
   });
 
-  it('Reply all and Forward open Compose with the computed To/Cc and subject', async () => {
+  it('Reply all and Forward open the inline editor; the server makes the draft (recipients, subject, quote)', async () => {
     const user = userEvent.setup();
-    stub([item()]);
+    const { drafts } = stub([item()]);
     show();
     await ready();
     await user.click(cmd('Reply all'));
-    let dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByLabelText('To')).toHaveValue('ana@acme.com, tom@acme.com');
-    expect(within(dialog).getByLabelText(/^Cc/)).toHaveValue('li@acme.com');
-    expect(within(dialog).getByLabelText('Subject')).toHaveValue('Re: Proposal');
-    await user.click(within(dialog).getByRole('button', { name: 'Discard' }));
+    const form = await screen.findByRole('form', { name: 'Reply all' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await user.click(within(form).getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(screen.queryByRole('form')).toBeNull());
     await user.click(cmd('Forward'));
-    dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByLabelText('To')).toHaveValue('');
-    expect(within(dialog).getByLabelText('Subject')).toHaveValue('Fw: Proposal');
+    await screen.findByRole('form', { name: 'Forward' });
+    expect(drafts.of('/api/mail/drafts').map((c) => c.body)).toEqual([{ kind: 'replyAll', replyToId: 1 }, { kind: 'forward', replyToId: 1 }]);
+  });
+
+  it('Reply from the right-click menu of another row opens that message with the editor at the top', async () => {
+    const user = userEvent.setup();
+    const { drafts } = stub([item(), item({ id: 2, subject: 'Second', occurredAt: '2026-11-25T10:00:00.000Z' })]);
+    show();
+    await ready();
+    const second = (await screen.findByRole('link', { name: /Second/ })).closest('.mrow') as HTMLElement;
+    await user.pointer({ keys: '[MouseRight]', target: within(second).getByRole('link') });
+    await user.click(within(screen.getByRole('menu', { name: 'Message actions' })).getByRole('menuitem', { name: 'Reply' }));
+    await waitFor(() => expect(where()).toBe('/email/2'));
+    await screen.findByRole('form', { name: 'Reply' });
+    expect(drafts.of('/api/mail/drafts').map((c) => c.body)).toEqual([{ kind: 'reply', replyToId: 2 }]);
   });
 
   it('Schedule meeting opens the calendar for the lead; Log as activity posts log', async () => {
@@ -290,11 +305,12 @@ describe('Email command bar, menus and shortcuts (web-mail release 2, Task 14)',
     await user.keyboard('{Control>}u{/Control}');
     await waitFor(() => expect(posts).toEqual([{ url: '/api/mail/1/change', body: { type: 'read', isRead: false } }]));
     await user.keyboard('{Shift>}R{/Shift}');
-    let dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByLabelText(/^Cc/)).toHaveValue('li@acme.com');
-    await user.click(within(dialog).getByRole('button', { name: 'Discard' }));
+    const form = await screen.findByRole('form', { name: 'Reply all' });
+    await user.click(within(form).getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(screen.queryByRole('form')).toBeNull());
+    await user.click(document.body);
     await user.keyboard('n');
-    dialog = await screen.findByRole('dialog', { name: 'Compose email' });
+    const dialog = await screen.findByRole('dialog', { name: 'Compose email' });
     await user.click(within(dialog).getByRole('button', { name: 'Discard' }));
     await user.keyboard('e');
     await waitFor(() => expect(posts).toContainEqual({ url: '/api/mail/1/change', body: { type: 'move', folder: 'archive' } }));
@@ -303,7 +319,7 @@ describe('Email command bar, menus and shortcuts (web-mail release 2, Task 14)',
     await waitFor(() => expect(posts.filter((p) => (p.body as { type?: string })?.type === 'delete')).toHaveLength(1));
   });
 
-  it('shortcuts never fire while typing in the search box, a filter field, the Link search or Compose (Review Focus 4)', async () => {
+  it('shortcuts never fire while typing in the search box, a filter field, the Link search or the inline Reply (Review Focus 4)', async () => {
     const user = userEvent.setup();
     const { posts } = stub([item()]);
     show();
@@ -314,10 +330,10 @@ describe('Email command bar, menus and shortcuts (web-mail release 2, Task 14)',
         await user.click(cmd('Link to lead'));
         return within(screen.getByRole('menu', { name: 'Link to lead' })).getByRole('searchbox');
       }, 0],
-      ['Compose', async () => {
+      ['inline Reply', async () => {
         await user.click(cmd('Reply'));
-        return within(await screen.findByRole('dialog')).getByLabelText('Message');
-      }, 1],
+        return within(await screen.findByRole('form', { name: 'Reply' })).getByRole('combobox', { name: 'Add recipient' });
+      }, 0],
       ['filter field', async () => {
         await user.click(screen.getByRole('button', { name: /Filters/ }));
         return within(screen.getByRole('group', { name: 'Search filters' })).getByLabelText('Subject');

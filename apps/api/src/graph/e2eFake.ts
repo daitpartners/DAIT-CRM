@@ -52,6 +52,11 @@ const ORIGINALS: Record<string, { conversationId: string; subject: string; fromN
     conversationId: 'e2e-conv-2', subject: 'Website enquiry', fromName: 'Sara Lind', from: 'sara@blue-river.example', to: ['neha@daitpartners.com'],
     text: 'We need a new website. Can you help?',
   },
+  // web/e2e/emailActions.spec.ts adds this message for its inline Reply all (web-mail release 3).
+  'e2e-act-1': {
+    conversationId: 'e2e-act-thread-1', subject: 'Action check one', fromName: 'Act Client', from: 'client@act.example',
+    to: ['neha.kapoor@daitpartners.com'], text: 'About item 1',
+  },
 };
 
 /** Drafts made through the fake, by id (`e2e-draft-<n>`); attachment ids are `e2e-att-<n>`. */

@@ -23,6 +23,9 @@ const MAIL_SIZES: MailFontSize[] = [11, 12, 14];
 /** A picture the composer hands back: a data:image address of a picture type the server takes. */
 const PICTURE_DATA = /^data:image\/(png|jpeg|gif);base64,[A-Za-z0-9+/=]+$/i;
 
+/** Where a quoted message starts in a draft made in Outlook (Outlook's reply header, Gmail's quote, a cited quote). */
+const QUOTE_START = '#appendonsend, #divRplyFwdMsg, [id^="divRplyFwdMsg"], .gmail_quote, blockquote[type="cite"]';
+
 /** The browser's editing commands on the frame's document (absent where there is no editing, e.g. jsdom). */
 const exec = (d: Document, cmd: string, arg?: string) => d.execCommand?.(cmd, false, arg);
 
@@ -78,6 +81,8 @@ type Props = {
   onTemplate?: (anchor: HTMLElement) => void;
   /** Mail: the user's signature HTML (server-sanitised); the Signature button is off without one. */
   signatureHtml?: string | null;
+  /** Mail: the message frame grows with what it holds (at least 120 px), as the mockup's inline reply does. */
+  autoGrow?: boolean;
 };
 
 /**
@@ -89,7 +94,7 @@ type Props = {
  * the HTML again when the message is sent.
  */
 export function MessageEditor(props: Props) {
-  const { id, label, value, onChange, rows = 7, disabled, invalid, aria, toolbar = 'basic', onPicture, onAttach, onTemplate, signatureHtml } = props;
+  const { id, label, value, onChange, rows = 7, disabled, invalid, aria, toolbar = 'basic', onPicture, onAttach, onTemplate, signatureHtml, autoGrow = false } = props;
   const t = useT();
   const mail = toolbar === 'mail';
   const frame = useRef<HTMLIFrameElement>(null);
@@ -125,6 +130,20 @@ export function MessageEditor(props: Props) {
     const html = d.body.innerHTML;
     shown.current = html;
     change.current({ text: editorText(d.body), html });
+    fit();
+  }
+
+  /**
+   * autoGrow: the frame as tall as its content (the last element's bottom plus the body's bottom padding), at least
+   * 120 px. Measured from the content, since the body's own height never drops below the frame's.
+   */
+  function fit() {
+    const f = frame.current;
+    const d = doc();
+    if (!autoGrow || !f || !d?.body) return;
+    const last = d.body.lastElementChild;
+    const bottom = last ? last.getBoundingClientRect().bottom + 6 : 0;
+    f.style.height = `${Math.max(120, Math.ceil(bottom))}px`;
   }
 
   /** The frame's head, listeners and editing switched on (again after a browser replaced its first blank document). */
@@ -173,6 +192,7 @@ export function MessageEditor(props: Props) {
     if (editorHtml !== shown.current) {
       d.body.innerHTML = editorHtml;
       shown.current = editorHtml;
+      fit();
     }
     if (pending.current) {
       const cmd = pending.current;
@@ -186,6 +206,20 @@ export function MessageEditor(props: Props) {
     if (editorHtml === null) shown.current = null;
     else sync();
   });
+
+  // autoGrow: a narrower or wider frame wraps its text again.
+  useEffect(() => {
+    const f = frame.current;
+    if (!autoGrow || !f || typeof ResizeObserver === 'undefined') return;
+    let width = f.clientWidth;
+    const watch = new ResizeObserver(() => {
+      if (f.clientWidth === width) return;
+      width = f.clientWidth;
+      fit();
+    });
+    watch.observe(f);
+    return () => watch.disconnect();
+  }, [autoGrow, formatted]);
 
   // An open palette closes on a click elsewhere on the page or on Escape.
   useEffect(() => {
@@ -251,7 +285,12 @@ export function MessageEditor(props: Props) {
   }
 
   async function addPicture(file: File) {
-    const got = await onPicture?.(file);
+    let got: { contentId: string; dataUrl: string } | null | undefined;
+    try {
+      got = await onPicture?.(file);
+    } catch {
+      return; // the composer says why (its onPicture shows the refusal)
+    }
     const d = doc();
     if (!got || !d?.body || !PICTURE_DATA.test(got.dataUrl)) return;
     const img = d.createElement('img');
@@ -261,14 +300,22 @@ export function MessageEditor(props: Props) {
     emit();
   }
 
-  /** Mail: the signature block at the end of the message, or the one already there put back as the signature. */
+  /**
+   * Mail: the signature block at the end of the user's own part, or the one already there put back as the signature. A
+   * quoted message (a draft made in Outlook opens whole, its quote under the user's part) is never touched: neither its
+   * own `.dait-sig` nor anything under where it starts.
+   */
   function addSignature() {
     const d = doc();
     if (!signatureHtml || !d?.body) return;
-    const blocks = d.body.querySelectorAll('.dait-sig');
-    const last = blocks[blocks.length - 1];
+    const quote = d.body.querySelector(QUOTE_START);
+    const own = Array.from(d.body.querySelectorAll('.dait-sig'))
+      .filter((el) => !quote || (!quote.contains(el) && (quote.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_PRECEDING) !== 0));
+    const last = own[own.length - 1];
+    const block = `<p><br></p><div class="dait-sig">${signatureHtml}</div>`;
     if (last) last.innerHTML = signatureHtml;
-    else d.body.insertAdjacentHTML('beforeend', `<p><br></p><div class="dait-sig">${signatureHtml}</div>`);
+    else if (quote) (quote.previousElementSibling?.tagName === 'HR' ? quote.previousElementSibling : quote).insertAdjacentHTML('beforebegin', block);
+    else d.body.insertAdjacentHTML('beforeend', block);
     emit();
   }
 
@@ -567,7 +614,7 @@ export function MessageEditor(props: Props) {
           ref={frame}
           id={id}
           title={label}
-          className={mail ? (invalid ? 'rbody err' : 'rbody') : invalid ? 'in msg-frame err' : 'in msg-frame'}
+          className={mail ? `rbody${autoGrow ? ' grow' : ''}${invalid ? ' err' : ''}` : invalid ? 'in msg-frame err' : 'in msg-frame'}
           // Same-origin so the CRM can edit it; no allow-scripts, so nothing in a message can run. Where supported,
           // `credentialless` also keeps the CRM's cookies off anything the frame loads (security review I1; the server
           // already removes pictures that point at the CRM).

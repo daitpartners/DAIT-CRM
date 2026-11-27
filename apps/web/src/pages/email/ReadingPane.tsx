@@ -1,9 +1,11 @@
 import { useState, type ReactNode } from 'react';
+import { isClosedStatus } from '@dait-crm/shared';
 import { useMailMessage, type MailDetail } from '../../api/mail';
 import { Icons } from '../../components/Icons';
 import { useFormatDate } from '../../hooks/useFormatDate';
 import { firstName, initials, leadStatusText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
+import { InlineReply, type ReplyKind } from './compose/InlineReply';
 import { ConversationMessage } from './ConversationMessage';
 import type { CommandId, MailTarget, useMailCommands } from './useMailCommands';
 
@@ -17,7 +19,14 @@ type Props = {
   /** Mail of: Everyone or one user (team view): the head names the mailbox. */
   teamView?: boolean;
   commands: Commands;
+  /** The inline Reply / Reply all / Forward open at the top of the conversation (state 2), or none. */
+  composing?: Composing | null;
+  /** Opens (a draft reply: Continue editing) or closes the inline editor. */
+  onCompose?: (c: Composing | null) => void;
 };
+
+/** The inline editor of the reading pane: what it answers, how, and the draft reply opened again (Continue editing). */
+export type Composing = { originalId: number; kind: ReplyKind; draftId?: number };
 
 /** The opened message as a conversation entry, when the answer carries no thread (a message on its own). */
 const selfEntry = (m: MailDetail): ThreadEntry => ({
@@ -34,11 +43,14 @@ const selfEntry = (m: MailDetail): ThreadEntry => ({
  * click on their sender. Under the opened message: Reply, Reply all, Forward, or in another user's mailbox the
  * view-only pill with Log as activity and Create task. A draft shows "Drafts are edited in Outlook." instead.
  */
-export function ReadingPane({ id, peek = false, teamView = false, commands }: Props) {
+export function ReadingPane({ id, peek = false, teamView = false, commands, composing = null, onCompose }: Props) {
   const t = useT();
   const { dateTime } = useFormatDate();
   const { data: m, isError } = useMailMessage(id, peek);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
+  /** The draft the inline editor edits (its own row is left out of the conversation), and whether it shows the sent note. */
+  const [editing, setEditing] = useState<number | null>(null);
+  const [sentNote, setSentNote] = useState(false);
   const label = t('Reading pane');
 
   if (isError) return <section className="rpane empty" aria-label={label}>{t('This message is not available.')}</section>;
@@ -67,7 +79,7 @@ export function ReadingPane({ id, peek = false, teamView = false, commands }: Pr
       </button>
     );
   };
-  const footer = (
+  const footer = composing && !sentNote ? null : (
     <div className="msg-foot">
       {m.status === 'draft' ? (
         <span className="msg-note">{t('Drafts are edited in Outlook.')}</span>
@@ -124,8 +136,36 @@ export function ReadingPane({ id, peek = false, teamView = false, commands }: Pr
             </span>
           </div>
         ) : null}
+        {composing && !viewOnly ? (
+          <InlineReply
+            key={`${composing.originalId}-${composing.kind}-${composing.draftId ?? 'new'}`}
+            originalId={composing.originalId}
+            kind={composing.kind}
+            draftId={composing.draftId}
+            lead={m.lead ? { id: m.lead.id, number: m.lead.number, company: company ?? '', status: m.lead.status, open: !isClosedStatus(m.lead.status) } : null}
+            onClose={() => {
+              setEditing(null);
+              setSentNote(false);
+              onCompose?.(null);
+            }}
+            onDraft={setEditing}
+            onSent={setSentNote}
+          />
+        ) : null}
         {thread.map((e) => {
           if (e.id === m.id) return <ConversationMessage key={e.id} m={m} viewOnly={viewOnly} commands={commands} footer={footer} />;
+          if (e.kind === 'draft' && e.id !== m.id) {
+            if (e.id === editing || viewOnly) return null;
+            return (
+              <div key={e.id} className="msg col draft-row">
+                <span className="av" aria-hidden="true"><span className="ico">{Icons.draft}</span></span>
+                <span className="cprev">{t('Draft · {preview}', { preview: e.preview || t('(no text)') })}</span>
+                <button type="button" className="btn sm" onClick={() => onCompose?.({ originalId: m.id, kind: 'reply', draftId: e.id })}>
+                  {t('Continue editing')}
+                </button>
+              </div>
+            );
+          }
           if (expanded.has(e.id)) return <OtherMessage key={e.id} entry={e} viewOnly={viewOnly} commands={commands} onCollapse={() => toggle(e.id, false)} />;
           const sender = e.fromName || e.fromAddress;
           return (

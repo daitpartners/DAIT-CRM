@@ -10,6 +10,7 @@ import { ToastProvider } from '../src/components/Toast';
 import { ConfirmProvider } from '../src/components/ConfirmDialog';
 import { I18nProvider } from '../src/i18n';
 import es from '../src/locales/es.json';
+import { draftApi } from './draftFixture';
 import { makeClient, rep } from './leadFixture';
 
 afterEach(() => {
@@ -70,7 +71,11 @@ const DETAILS: Record<number, MailDetail> = {
 function stub(items: MailItem[], details: Record<number, MailDetail>, opts: { user?: Me; meta?: MailMeta; attachments?: { available: boolean; items: MailAttachment[] } } = {}) {
   const posts: { url: string; body: unknown }[] = [];
   const asked: string[] = [];
+  const drafts = draftApi();
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    const draftAnswer = drafts.handle(url, init);
+    if (draftAnswer) return draftAnswer;
+    if (url === '/api/email-templates') return Response.json({ items: [] });
     if (init?.method === 'POST') {
       posts.push({ url, body: init.body ? JSON.parse(String(init.body)) : undefined });
       return Response.json({ id: 99, leadId: 5 }, { status: 201 });
@@ -85,7 +90,7 @@ function stub(items: MailItem[], details: Record<number, MailDetail>, opts: { us
     if (m) return Response.json(details[Number(m[1])]);
     return Response.json({ items: [], total: 0, page: 1, pageSize: 25 });
   }));
-  return { posts, asked };
+  return { posts, asked, drafts };
 }
 
 function show(path = '/email/1', user: Me = me) {
@@ -251,33 +256,32 @@ describe('Reading pane (web-mail release 2, mockup states 1 and 5)', () => {
     expect(within(p).queryByTitle('Message body')).toBeNull();
   });
 
-  it('per-message Reply all opens Compose for that message', async () => {
+  it('per-message Reply all opens the inline editor for that message, at the top of the conversation', async () => {
     const user = userEvent.setup();
-    stub([newest], DETAILS);
+    const { drafts } = stub([newest], DETAILS);
     show();
     const p = await pane();
     await user.click(await within(p).findByRole('button', { name: /Deepak Singh/ }));
     const older = (await within(p).findAllByRole('article'))[1]!;
     await user.click(within(older).getByRole('button', { name: 'Reply all' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Reply all' });
-    // Your own message: Reply all goes to its recipients; Cc keeps the original Cc.
-    expect(within(dialog).getByLabelText('To')).toHaveValue('maria@acme.com');
-    expect(within(dialog).getByLabelText(/^Cc/)).toHaveValue('li@acme.com');
-    expect(within(dialog).getByLabelText('Subject')).toHaveValue('Re: Proposal');
+    const form = await within(p).findByRole('form', { name: 'Reply all' });
+    // The server makes the reply-all draft of that message (its recipients, subject and quote).
+    expect(drafts.of('/api/mail/drafts').map((c) => c.body)).toEqual([{ kind: 'replyAll', replyToId: 3 }]);
+    expect(form.compareDocumentPosition(within(p).getAllByRole('article')[0]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('footer under the newest message: Reply, Reply all, Forward; Forward opens Compose with an empty To', async () => {
+  it('footer under the newest message: Reply, Reply all, Forward; Forward opens the inline editor', async () => {
     const user = userEvent.setup();
-    stub([newest], DETAILS);
+    const { drafts } = stub([newest], DETAILS);
     show();
     const p = await pane();
     const article = await within(p).findByRole('article');
     const foot = article.querySelector('.msg-foot') as HTMLElement;
     await waitFor(() => expect(within(foot).getAllByRole('button').map((b) => b.textContent)).toEqual(['Reply', 'Reply all', 'Forward']));
     await user.click(within(foot).getByRole('button', { name: 'Forward' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Forward' });
-    expect(within(dialog).getByLabelText('To')).toHaveValue('');
-    expect(within(dialog).getByLabelText('Subject')).toHaveValue('Fw: Proposal');
+    await within(p).findByRole('form', { name: 'Forward' });
+    expect(drafts.of('/api/mail/drafts').map((c) => c.body)).toEqual([{ kind: 'forward', replyToId: 1 }]);
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('More actions opens the message menu for that message', async () => {

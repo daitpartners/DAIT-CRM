@@ -1,7 +1,7 @@
 import { createElement, useState, type ReactElement } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BULK_MAX, type FlagPreset, type ReplyMode } from '@dait-crm/shared';
-import { ApiError, api } from '../../api/client';
+import { BULK_MAX, type FlagPreset } from '@dait-crm/shared';
+import { ApiError } from '../../api/client';
 import { useBulkMailChange, useMailAction, useMailChange, useMailFollowUp, useUnlinkMail, type MailChange, type MailDetail, type MailItem } from '../../api/mail';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { useConfirm } from '../../components/ConfirmDialog';
@@ -9,9 +9,9 @@ import { useToast } from '../../components/Toast';
 import { firstName, mailErrorText } from '../../i18n/labels';
 import { useT, type TFn } from '../../i18n/useT';
 import type { ComposeStart } from './ComposeModal';
+import type { ReplyKind } from './compose/InlineReply';
 import { LinkLeadModal } from './LinkLeadModal';
 import { followUpWhen, LinkMenu } from './menus';
-import { replyStart } from './replyStart';
 
 export type CommandId =
   | 'new' | 'delete' | 'archive' | 'move' | 'reply' | 'replyAll' | 'forward' | 'flag' | 'toggleRead'
@@ -77,9 +77,10 @@ export function commandState(id: CommandId, target: MailTarget | null, rules: Ru
 export type MailCommandsContext = {
   /** Your own mailbox is connected. */
   connected: boolean;
-  /** Your mailbox address (Reply all leaves it out of Cc). */
-  ownAddress: string | null;
+  /** New mail (and its templates). */
   onCompose: (s: ComposeStart) => void;
+  /** Reply, Reply all or Forward of message `originalId`: the inline editor opens at the top of its conversation. */
+  onReply: (originalId: number, kind: ReplyKind) => void;
   /** What New mail starts with (a link's client, lead and project); empty when not given. */
   newStart?: () => ComposeStart;
   /** Messages moved or deleted: the screen lets go of the open one if it is among them. */
@@ -134,12 +135,6 @@ export function useMailCommands(ctx: MailCommandsContext): {
     ctx.onGone?.(ids);
   };
 
-  const compose = async (m: MailItem | MailDetail, mode: ReplyMode) => {
-    // A list row has no Cc: Reply all reads the message first so Compose shows who it goes to.
-    const full = 'ccAddresses' in m ? m : await api<MailDetail>(`/api/mail/${m.id}?peek=1`);
-    ctx.onCompose(replyStart(full, mode, ctx.ownAddress));
-  };
-
   const run = (id: CommandId, target: MailTarget | null, arg?: unknown) => {
     if (!state(id, target).enabled) return;
     if (id === 'new') {
@@ -184,7 +179,8 @@ export function useMailCommands(ctx: MailCommandsContext): {
     if (!m) return;
     switch (id) {
       case 'reply': case 'replyAll': case 'forward':
-        compose(m, id).catch(failed);
+        // The server works out the recipients, subject and quote when it makes the draft.
+        ctx.onReply(m.id, id);
         return;
       case 'followUp': {
         const when = arg as { date: string; time: string } | { clear: true };

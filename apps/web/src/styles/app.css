@@ -1280,3 +1280,61 @@ select.in.pj-locked:disabled{opacity:1;color:var(--text);-webkit-text-fill-color
 .wm-send .utoast button{height:30px;padding:0 14px;border-radius:7px;border:1px solid var(--purple-2);background:var(--nav-on);color:#fff;font-weight:700;font-size:12.5px}
 .wm-send .utoast button:hover:not(:disabled){background:var(--purple)}
 .wm-send .utoast .prog{position:absolute;left:0;bottom:0;height:3px;background:var(--peach);width:100%}
+/* Web-mail release 3: the inline Reply / Reply all / Forward (mockup state 2) — DraftComposer's .reply, .rtop, .fld,
+   .rcp, .lead-tag, the folded quote, the file chips, and the note left after a send (.sent-note). */
+.wm .reply{background:var(--surface);border:1px solid var(--purple);border-radius:10px;box-shadow:0 4px 18px rgba(104,17,207,.12);display:flex;flex-direction:column;min-width:0}
+.wm .reply.loading{padding:14px;font-size:12.5px;color:var(--muted)}
+.wm .rtop{display:flex;align-items:center;gap:8px;padding:10px 12px 8px;flex-wrap:wrap}
+.wm .rtop .btn.sm{height:32px;border-radius:8px}
+.wm .rtop .btn.sm .ico{width:15px;height:15px}
+.wm .rtop .draft{margin-left:auto;font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.wm .rtop .draft .ico{width:13px;height:13px;color:#1E8A4C}
+.wm .rnote{margin:0 12px 8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.wm .fld{display:flex;align-items:center;gap:8px;padding:0 12px;min-height:36px;border-top:1px solid var(--line-2);font-size:12.5px}
+.wm .fld>label{width:42px;color:var(--muted);font-weight:600;flex:0 0 auto}
+.wm .fld .fv{flex:1;display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;padding:4px 0}
+.wm .fld .fv input{border:0;outline:0;background:transparent;font-size:12.5px;flex:1;min-width:80px;height:26px;width:100%;color:var(--text);font-family:inherit}
+.wm .fld .fv input.bad{color:var(--bad-fg);text-decoration:underline wavy var(--bad-fg)}
+.wm .fld .lk{font-size:12px;font-weight:600;color:var(--purple);border:0;background:none;padding:2px 4px}
+.wm .fld .lk:hover{text-decoration:underline}
+.wm .rcp{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 4px 0 3px;border-radius:999px;background:var(--tint);color:#4B0A9A;font-size:12px;font-weight:600;max-width:100%}
+.wm .rcp .av{width:18px;height:18px;font-size:8px;background:var(--surface)}
+.wm .rcp .x{border:0;background:none;padding:0;width:16px;height:16px;color:var(--muted);display:inline-flex;align-items:center;justify-content:center;border-radius:50%}
+.wm .rcp .x:hover{color:var(--purple)}
+.wm .rcp .x .ico{width:11px;height:11px}
+.wm .lead-tag{font-size:10px;font-weight:700;color:var(--orange);background:var(--surface);border-radius:999px;padding:0 5px}
+.wm .rcp-in{position:relative;flex:1;min-width:80px;display:flex}
+.wm .rcp-sug{position:absolute;top:calc(100% + 4px);left:0;z-index:60;min-width:260px;max-width:360px;list-style:none;margin:0;padding:6px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 34px rgba(31,2,73,.18)}
+.wm .rcp-sug li{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:12.5px}
+.wm .rcp-sug li:hover,.wm .rcp-sug li.hl{background:var(--tint)}
+.wm .rcp-sug .av{width:24px;height:24px;font-size:9px}
+.wm .rcp-sug .sn{flex:1;min-width:0;display:flex;flex-direction:column}
+.wm .rcp-sug .sn b{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wm .rcp-sug .sn small{color:var(--muted);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wm .reply .msg-editor.mail{margin:0}
+.wm .reply iframe.rbody{border-radius:0}
+.wm .quoted-tog{margin:2px 14px 12px;width:34px;height:20px;border-radius:5px;border:1px solid var(--line);background:var(--pane);color:var(--muted);display:inline-flex;align-items:center;justify-content:center;font-weight:800;letter-spacing:1px;padding:0 0 4px;align-self:flex-start}
+.wm .quoted-tog:hover{border-color:var(--field);color:var(--purple)}
+.wm .quoted{margin:0 14px 14px;padding-left:12px;border-left:3px solid var(--line)}
+.wm .quoted .canvas-wrap{margin:0}
+.wm .quoted .canvas{box-shadow:none}
+.wm .att-chips{display:flex;gap:8px;flex-wrap:wrap;padding:0 14px 12px;margin:0;list-style:none}
+.wm .att-chip{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 6px 0 4px;border:1px solid var(--line);border-radius:8px;font-size:12px;background:var(--surface);max-width:100%}
+.wm .att-chip .fi{width:22px;height:26px;border-radius:4px;font-size:7px;font-weight:800;color:#fff;display:flex;align-items:flex-end;justify-content:center;padding-bottom:3px;background:var(--muted);flex:0 0 auto}
+.wm .att-chip .fi.pdf{background:#C62828}.wm .att-chip .fi.xls{background:#1E7A45}.wm .att-chip .fi.doc{background:#2B5CB8}
+.wm .att-chip .an{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
+.wm .att-chip small{color:var(--muted)}
+.wm .att-chip .x{border:0;background:none;padding:0;width:20px;height:20px;color:var(--muted);display:inline-flex;align-items:center;justify-content:center;border-radius:5px}
+.wm .att-chip .x:hover:not(:disabled){background:var(--tint);color:var(--purple)}
+.wm .att-chip .x .ico{width:12px;height:12px}
+.wm .sent-note{display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:10px;border:1px dashed var(--field);background:var(--surface);font-size:12.5px;color:var(--muted)}
+.wm .sent-note .ico{width:15px;height:15px;color:var(--purple)}
+.wm .msg.col.draft-row{cursor:default}
+.wm .msg.col.draft-row .av{background:var(--tint)}
+.wm .msg.col.draft-row .av .ico{width:13px;height:13px;color:var(--bad-fg)}
+.wm .msg.col.draft-row .cprev{color:var(--bad-fg)}
+.wm .msg.col.draft-row .btn.sm{height:28px;flex:0 0 auto}
+.wm iframe.rbody.grow{resize:none;overflow:hidden}
+.wm .fld{align-items:flex-start}
+.wm .fld>label{line-height:36px}
+.wm .fld .lk{margin-top:8px}

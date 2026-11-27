@@ -9,7 +9,6 @@ import {
 import type { Me } from '../src/api/queries';
 import { ToastProvider } from '../src/components/Toast';
 import { I18nProvider } from '../src/i18n';
-import { replyStart } from '../src/pages/email/replyStart';
 import es from '../src/locales/es.json';
 import { makeClient, rep } from './leadFixture';
 
@@ -232,29 +231,6 @@ describe('list filters and attachment links', () => {
 });
 
 describe('replies', () => {
-  const original = {
-    id: 9, status: 'received', fromAddress: 'ana@acme.com', toAddresses: ['arjun@daitpartners.com', 'tom@acme.com'],
-    ccAddresses: ['ARJUN@daitpartners.com', 'li@acme.com'], subject: 'Proposal', leadId: 5, companyId: 4,
-  };
-
-  it('replyStart: Reply all to the sender and other To addresses without your own, Cc pre-filled; Forward empty To, Fw: subject', () => {
-    expect(replyStart(original, 'replyAll', 'arjun@daitpartners.com')).toEqual({
-      replyTo: 9, mode: 'replyAll', to: 'ana@acme.com, tom@acme.com', cc: ['li@acme.com'], subject: 'Re: Proposal', leadId: 5, companyId: 4,
-    });
-    expect(replyStart(original, 'forward', 'arjun@daitpartners.com')).toEqual({
-      replyTo: 9, mode: 'forward', to: '', cc: [], subject: 'Fw: Proposal', leadId: 5, companyId: 4,
-    });
-  });
-
-  it('replyStart: Reply goes to the sender only, no Cc; your own sent mail replies to its recipients; no lead stays unset', () => {
-    expect(replyStart({ ...original, subject: 'RE: Proposal' }, 'reply', 'arjun@daitpartners.com')).toEqual({
-      replyTo: 9, mode: 'reply', to: 'ana@acme.com', cc: [], subject: 'RE: Proposal', leadId: 5, companyId: 4,
-    });
-    expect(replyStart({ ...original, status: 'sent', fromAddress: 'arjun@daitpartners.com', leadId: null, companyId: null }, 'reply', null)).toEqual({
-      replyTo: 9, mode: 'reply', to: 'arjun@daitpartners.com, tom@acme.com', cc: [], subject: 'Re: Proposal',
-    });
-  });
-
   it('useReplyMail sends the mode and To (defaults: reply, no To)', async () => {
     const { posts } = stub([], () => ({ status: 201, body: item({ id: 50 }) }));
     function Send() {

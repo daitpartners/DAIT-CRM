@@ -2214,5 +2214,21 @@
   "Schedule send…": "Programar envío…",
   "Sent · follow-up added for {when}": "Enviado · seguimiento añadido para {when}",
   "Undo": "Deshacer",
-  "Scheduled for {when}": "Programado para {when}"
+  "Scheduled for {when}": "Programado para {when}",
+  "Draft · {preview}": "Borrador · {preview}",
+  "(no text)": "(sin texto)",
+  "Continue editing": "Seguir editando",
+  "Draft saved {time}": "Borrador guardado {time}",
+  "Pop out": "Abrir en página completa",
+  "Save as a new draft": "Guardar como borrador nuevo",
+  "Remove attachment": "Quitar adjunto",
+  "Reply sent to {name} · follow-up task added · it will appear here and on {lead}'s timeline.": "Respuesta enviada a {name} · tarea de seguimiento añadida · aparecerá aquí y en la cronología de {lead}.",
+  "Reply sent to {name} · it will appear here and on {lead}'s timeline.": "Respuesta enviada a {name} · aparecerá aquí y en la cronología de {lead}.",
+  "Reply sent to {name} · it will appear here.": "Respuesta enviada a {name} · aparecerá aquí.",
+  "Show quoted text": "Mostrar texto citado",
+  "Add recipient": "Añadir destinatario",
+  "Add Cc": "Añadir Cc",
+  "Add Bcc": "Añadir Cco",
+  "Remove": "Quitar",
+  "Suggestions": "Sugerencias"
 }

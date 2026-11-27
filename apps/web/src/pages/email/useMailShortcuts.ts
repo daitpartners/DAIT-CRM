@@ -3,8 +3,11 @@ import type { CommandId } from './useMailCommands';
 
 /** Focus in a field (typing there types, Review Focus 4). */
 const TYPING = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
-/** Focus in a menu or a dialog: its keys are its own (a row's right-click menu, Move to ▾, Flag ▾). */
-const OWN_KEYS = '[role="menu"], [role="menubar"], [role="dialog"], [role="alertdialog"]';
+/**
+ * Focus in a menu, a dialog or the mail editor: its keys are its own (a row's right-click menu, Move to ▾, Flag ▾, the
+ * inline Reply's buttons and fields).
+ */
+const OWN_KEYS = '[role="menu"], [role="menubar"], [role="dialog"], [role="alertdialog"], form.reply';
 
 /**
  * The command a key stands for (web-mail release 2, Outlook): Delete → delete, E → archive, Ctrl/⌘+U → mark unread

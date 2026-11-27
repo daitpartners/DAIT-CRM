@@ -256,6 +256,36 @@ describe('MessageEditor toolbar="mail" (web-mail release 3)', () => {
     expect(frameBody().querySelectorAll('.dait-sig')).toHaveLength(1);
   });
 
+  it('Signature touches only the user\'s part: a quoted message\'s signature in a draft made in Outlook stays as it is', async () => {
+    const quoted = '<div id="appendonsend"></div><hr><div id="divRplyFwdMsg"><b>From:</b> Ana</div><div class="dait-sig">Ana\'s signature</div>';
+    render(<Harness start={{ text: 'Hi', html: `<p>Hi</p>${quoted}` }} seen={[]} extra={{ toolbar: 'mail', signatureHtml: '<b>Maya</b>' }} />);
+    await waitFor(() => expect(frameBody().innerHTML).toContain('divRplyFwdMsg'));
+    await userEvent.click(screen.getByRole('button', { name: 'Signature' }));
+    expect(frameBody().innerHTML).toBe(`<p>Hi</p><p><br></p><div class="dait-sig"><b>Maya</b></div>${quoted}`);
+    // Once there, it is the one put back; the quoted one is never replaced.
+    frameBody().querySelector('.dait-sig')!.innerHTML = 'edited';
+    await userEvent.click(screen.getByRole('button', { name: 'Signature' }));
+    expect(frameBody().innerHTML).toBe(`<p>Hi</p><p><br></p><div class="dait-sig"><b>Maya</b></div>${quoted}`);
+  });
+
+  it('a picture upload that fails (onPicture rejects) inserts nothing and leaves no unhandled rejection', async () => {
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      const onPicture = vi.fn().mockRejectedValueOnce(new Error('attachment_type'));
+      render(<Harness start={{ text: 'Hi', html: '<p>Hi</p>' }} seen={[]} extra={{ toolbar: 'mail', onPicture }} />);
+      await waitFor(() => expect(frameBody().innerHTML).toBe('<p>Hi</p>'));
+      const input = document.querySelector<HTMLInputElement>('input[type="file"][accept="image/png,image/jpeg,image/gif"]')!;
+      await userEvent.upload(input, new File(['a'], 'a.png', { type: 'image/png' }));
+      await waitFor(() => expect(onPicture).toHaveBeenCalledTimes(1));
+      await new Promise((r) => setTimeout(r, 10));
+      expect(frameBody().innerHTML).toBe('<p>Hi</p>');
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+  });
+
   it('Signature, picture, attach and template stay disabled without what they need', () => {
     render(<MessageEditor toolbar="mail" id="b" label="Message" value={{ text: '', html: '<p></p>' }} onChange={() => {}} />);
     for (const name of ['Insert picture', 'Attach file', 'Template', 'Signature']) expect(screen.getByRole('button', { name })).toBeDisabled();

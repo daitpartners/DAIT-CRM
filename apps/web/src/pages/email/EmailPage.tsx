@@ -10,7 +10,7 @@ import { FolderPane, viewLabel } from './FolderPane';
 import { MailTopBar, type MailSearch } from './MailTopBar';
 import { LeadPanel } from './LeadPanel';
 import { MessageList } from './MessageList';
-import { ReadingPane } from './ReadingPane';
+import { ReadingPane, type Composing } from './ReadingPane';
 import { CommandBar } from './CommandBar';
 import { rowTarget, selectionTarget, useMailCommands, type MailTarget } from './useMailCommands';
 
@@ -72,6 +72,8 @@ export function EmailPage() {
   const list = useMailList(filter);
   const { items } = list;
   const [compose, setCompose] = useState<ComposeStart | null>(null);
+  /** The inline Reply / Reply all / Forward (state 2), in the reading pane of message `paneId`. */
+  const [composing, setComposing] = useState<(Composing & { paneId: number }) | null>(null);
   /** The list's checked rows (MessageList resets them for another folder, filter or search). */
   const [checked, setChecked] = useState<Set<number>>(() => new Set());
 
@@ -100,8 +102,17 @@ export function EmailPage() {
   // The screen's commands (rows, menus, the bulk bar); a message moved or deleted while open leaves the reading pane.
   const commands = useMailCommands({
     connected,
-    ownAddress: mailbox?.address ?? null,
     onCompose: setCompose,
+    // Reply to a message of the open conversation opens the editor there; another message (a list row) is opened first.
+    onReply: (originalId, kind) => {
+      const here = selectedId !== null && (selectedId === originalId || (shown?.id === selectedId && shown.thread.some((e) => e.id === originalId)));
+      if (here) {
+        setComposing({ paneId: selectedId, originalId, kind });
+        return;
+      }
+      setComposing({ paneId: originalId, originalId, kind });
+      navigate(`/email/${originalId}${params.toString() ? `?${params.toString()}` : ''}`);
+    },
     newStart: () => ({ companyId: filter.company, companyName, leadId: filter.lead, projectId: filter.project }),
     onGone: (ids) => {
       const open = num(id ?? null);
@@ -118,6 +129,12 @@ export function EmailPage() {
       since: custom ? f.since || undefined : undefined, until: custom ? f.until || undefined : undefined, att: f.att ? '1' : undefined,
     });
   };
+
+  // Another message opened: the inline editor of the one before closes (its draft is saved, or discarded untouched).
+  useEffect(() => {
+    if (composing && composing.paneId !== selectedId) setComposing(null);
+    // Only the open message changing should trigger this.
+  }, [selectedId]);
 
   // ?page= and ?size= from the old pager (bookmarks, old links) mean nothing now: they leave the address.
   const oldPaging = params.has('page') || params.has('size');
@@ -226,7 +243,15 @@ export function EmailPage() {
 
         {selectedId !== null ? (
           <>
-            <ReadingPane key={selectedId} id={selectedId} peek={peek} teamView={teamView} commands={commands} />
+            <ReadingPane
+              key={selectedId}
+              id={selectedId}
+              peek={peek}
+              teamView={teamView}
+              commands={commands}
+              composing={composing && composing.paneId === selectedId ? composing : null}
+              onCompose={(c) => setComposing(c ? { ...c, paneId: selectedId } : null)}
+            />
             {shown && shown.id === selectedId ? (
               <LeadPanel m={shown} commands={commands} collapsed={leadPanelClosed} onToggle={() => setLeadPanelClosed(!leadPanelClosed)} />
             ) : null}
