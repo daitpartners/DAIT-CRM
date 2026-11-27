@@ -1099,3 +1099,18 @@ git commit -m "test(parity): web-mail release 2 screenshots of mockup states 1, 
   - The "Show mail for" row and the folder-pane template list leave the screen: their links still work, and templates move to New mail ▾.
   - A "This week" date group is added between Yesterday and Last week.
   - Preview covers PDF and pictures only; other files are downloads.
+
+## Controller rulings (27 Nov 2026, after drafting)
+- All drafting calls in the planner's notes are accepted: overflow menu keeps Mark as read + Open lead (no Pin/.eml/settings);
+  no React button; "View" tab holds view toggles; Link to lead disabled in another user's mailbox (spec wins over mockup);
+  lead panel Value = newest sent quotation total or "—"; size = estimate; Filters "Owner" = lead owner; Scheduled lists the
+  CRM outbox until release 3; Follow-up date on lead + time on the assignee's task; Delete inside Deleted items = permanent
+  after confirmation; "Show mail for" row and folder-pane templates leave the screen (company/project links stay as a removable
+  chip); extra "This week" group; preview PDF/images only; two-way changes call Graph immediately.
+- **Auto-height HTML frame:** allowed on the Email screen only, as `sandbox="allow-same-origin"` WITHOUT `allow-scripts`, plus a
+  CSP in the frame document with `script-src 'none'` (and the existing sanitiser still strips scripts/handlers). No forms, no
+  top-navigation, no popups. Tests must assert the sandbox attribute has no `allow-scripts` and the CSP is present. Cost if wrong:
+  an email could read same-origin data only if script execution were possible, which this configuration prevents.
+- Release 1 parity screenshots live in `~/Documents/DAIT-CRM/parity-screenshots-web-mail-r1/` (done); release 2's go in
+  `~/Documents/DAIT-CRM/parity-screenshots-web-mail/release-2/`.
+- Flag due-date time zone: verify on live after deploy (runbook line).
