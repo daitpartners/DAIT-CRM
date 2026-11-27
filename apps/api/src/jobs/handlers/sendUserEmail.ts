@@ -5,6 +5,7 @@ import { isAuthFailure } from '../../graph/client.js';
 import type { SendUserEmailPayload } from '../types.js';
 import type { JobContext } from '../runner.js';
 import { onQuotationSendFailed, onQuotationSent } from '../../quotations/send.js';
+import { localNow } from '@dait-crm/shared';
 import { textToHtml } from '../../mail/html.js';
 
 /**
@@ -21,14 +22,24 @@ async function failMessage(id: number, lastError: string): Promise<void> {
 
 const INTERRUPTED = 'interrupted_may_have_sent';
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "26 Nov 2026, 14:05": 24-hour, in the sender's time zone (UTC for an unknown zone). */
+function sentAt(at: Date, timezone: string): string {
+  const { day, time } = localNow(timezone, at);
+  const [y, m, d] = day.split('-');
+  return `${Number(d)} ${MONTHS[Number(m) - 1]} ${y}, ${time}`;
+}
+
 /**
  * A forward of a message only the CRM has (no Graph id, so Graph forward cannot add it): the user's text, then the
- * original under a "Forwarded message" header (From, Date, Subject, To) and its stored, already sanitised HTML.
+ * original under a "Forwarded message" header (From, Date in the sender's time zone, Subject, To) and its stored,
+ * already sanitised HTML.
  */
-function withForwarded(html: string, text: string, original: EmailMessage): { html: string; text: string } {
+function withForwarded(html: string, text: string, original: EmailMessage, timezone: string): { html: string; text: string } {
   const from = original.fromName ? `${original.fromName} <${original.fromAddress}>` : original.fromAddress;
   const header = [
-    '---------- Forwarded message ---------', `From: ${from}`, `Date: ${original.occurredAt.toUTCString()}`,
+    '---------- Forwarded message ---------', `From: ${from}`, `Date: ${sentAt(original.occurredAt, timezone)}`,
     `Subject: ${original.subject}`, `To: ${(original.toAddresses as string[]).join(', ')}`,
   ].join('\n');
   return {
@@ -61,7 +72,7 @@ async function settleQuotation(msg: EmailMessage, quotation: NonNullable<SendUse
  */
 export async function sendUserEmailHandler(job: Job, ctx: JobContext): Promise<void> {
   const { emailMessageId, attachments, quotation, replyMode } = job.payload as unknown as SendUserEmailPayload;
-  const msg = await prisma.emailMessage.findUnique({ where: { id: emailMessageId }, include: { account: true } });
+  const msg = await prisma.emailMessage.findUnique({ where: { id: emailMessageId }, include: { account: true, user: { select: { timezone: true } } } });
   if (!msg) return;
   const lastAttempt = job.attempts + 1 >= job.maxAttempts;
   if (msg.status === 'sending') return failMessage(msg.id, INTERRUPTED);
@@ -86,7 +97,7 @@ export async function sendUserEmailHandler(job: Job, ctx: JobContext): Promise<v
     if (original?.graphId && original.userId === msg.userId) {
       await ctx.graph[replyMode ?? 'reply'](account, original.graphId, { to: msg.toAddresses as string[], ...(cc.length ? { cc } : {}), html });
     } else {
-      const body = replyMode === 'forward' && original ? withForwarded(html, msg.bodyText, original) : { html, text: msg.bodyText };
+      const body = replyMode === 'forward' && original ? withForwarded(html, msg.bodyText, original, msg.user.timezone) : { html, text: msg.bodyText };
       await ctx.graph.sendMail(account, {
         to: msg.toAddresses as string[],
         ...(cc.length ? { cc } : {}),

@@ -267,6 +267,7 @@ describe('Reply all and Forward (web-mail release 2)', () => {
 
   it('a forward of a CRM-only original (no Graph id) goes out with sendMail, carrying the original', async () => {
     const { rep, box } = await setup();
+    await prisma.user.update({ where: { id: rep.id }, data: { timezone: 'Asia/Kolkata' } });
     const crmOnly = await prisma.emailMessage.create({
       data: {
         userId: rep.id, accountId: box.id, folder: 'sent', status: 'sent', source: 'crm', fromAddress: 'maya@daitpartners.com', toAddresses: ['ana@acme.com'],
@@ -282,6 +283,9 @@ describe('Reply all and Forward (web-mail release 2)', () => {
     expect(sends[0]!.html).toContain('<div>See below</div>');
     expect(sends[0]!.html).toContain('Forwarded message');
     expect(sends[0]!.html).toContain('Subject: Price list');
+    // 10:00 UTC in the sender's time zone (India, +5:30), 24-hour.
+    expect(sends[0]!.html).toContain('Date: 20 Nov 2026, 15:30');
+    expect(sends[0]!.text).toContain('Date: 20 Nov 2026, 15:30');
     expect(sends[0]!.html).toContain('<div>Our prices &lt;2027&gt;</div>');
     expect(sends[0]!.text).toContain('See below');
     expect(sends[0]!.text).toContain('Our prices <2027>');
