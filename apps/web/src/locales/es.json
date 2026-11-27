@@ -2141,5 +2141,10 @@
   "Lead · {number}": "Lead · {number}",
   "Normal|priority": "Normal",
   "Up to 1000 characters": "Hasta 1000 caracteres",
-  "Email follow-up": "Seguimiento por correo"
+  "Email follow-up": "Seguimiento por correo",
+  "Email signature": "Firma de correo",
+  "Added to new emails and replies you write in the CRM.": "Se añade a los correos nuevos y a las respuestas que escribes en el CRM.",
+  "Add automatically": "Añadir automáticamente",
+  "Signature saved": "Firma guardada",
+  "The signature is too long (20 000 characters at most).": "La firma es demasiado larga (20 000 caracteres como máximo)."
 }

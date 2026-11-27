@@ -406,6 +406,8 @@ export function errorText(t: TFn, code: string, vars: Record<string, string | nu
       return t('This address opted out; ask an Administrator');
     case 'message_too_long':
       return t('This message is too long to send. Shorten it, or remove large pictures or formatting.');
+    case 'signature_too_long':
+      return t('The signature is too long (20 000 characters at most).');
     case 'try_again':
       return t('The server is busy. Try again in a moment.');
     case 'html_too_complex':

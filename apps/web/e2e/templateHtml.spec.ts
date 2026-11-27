@@ -26,7 +26,8 @@ const OFT_HTML =
 async function setLanguage(page: Page, lang: 'en' | 'es') {
   await page.goto('/settings');
   await page.getByLabel(lang === 'es' ? 'Language' : 'Idioma').selectOption(lang);
-  await page.getByRole('button', { name: lang === 'es' ? 'Save' : 'Guardar' }).click();
+  // The Preferences card's Save (the Email signature card has its own).
+  await page.getByRole('region', { name: lang === 'es' ? 'Preferences' : 'Preferencias' }).getByRole('button', { name: lang === 'es' ? 'Save' : 'Guardar' }).click();
   await expect(page.getByRole('navigation').getByRole('link', { name: lang === 'es' ? 'Configuración' : 'Settings', exact: true })).toBeVisible();
 }
 

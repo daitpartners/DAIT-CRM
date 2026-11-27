@@ -34,13 +34,14 @@ test('changing the language to Spanish translates the interface', async ({ page 
   await signInAs(page, MAYA);
   await page.goto('/settings');
   await page.getByLabel('Language').selectOption('es');
-  await page.getByRole('button', { name: 'Save' }).click();
+  // The Preferences card's Save (the Email signature card has its own).
+  await page.getByRole('region', { name: 'Preferences' }).getByRole('button', { name: 'Save' }).click();
   const nav = page.getByRole('navigation', { name: /navegación|Main navigation/i });
   await expect(nav.getByRole('link', { name: 'Configuración' })).toBeVisible();
 
   // Restore English so the preference does not leak into other specs.
   await page.getByLabel('Idioma').selectOption('en');
-  await page.getByRole('button', { name: 'Guardar' }).click();
+  await page.getByRole('region', { name: 'Preferencias' }).getByRole('button', { name: 'Guardar' }).click();
   await expect(page.getByRole('navigation').getByRole('link', { name: 'Settings', exact: true })).toBeVisible();
 });
 

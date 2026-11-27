@@ -9,6 +9,7 @@ import { FormField } from '../../components/FormField';
 import { useToast } from '../../components/Toast';
 import { LANGUAGE_NAMES, errorText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
+import { SignatureCard } from './SignatureCard';
 import { timezoneOptions } from './timezones';
 
 export function MySettings() {
@@ -48,39 +49,42 @@ export function MySettings() {
   }
 
   return (
-    <section className="card" aria-labelledby="prefs-title">
-      <div className="card-title-row">
-        <h2 id="prefs-title">{t('Preferences')}</h2>
-        <span className="muted card-sub">{t('Saved per user. Language, date format and time zone apply immediately across the CRM.')}</span>
-      </div>
-      <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div className="grid3">
-          <FormField id="pref-language" label={t('Language')}>
-            <select id="pref-language" className="in" value={language} onChange={(e) => setLanguage(e.target.value as Lang)}>
-              {(Object.keys(LANGUAGE_NAMES) as Lang[]).map((l) => (
-                <option key={l} value={l} lang={l}>
-                  {LANGUAGE_NAMES[l]}
-                </option>
-              ))}
-            </select>
-          </FormField>
-          <FormField id="pref-date" label={t('Date format')}>
-            <select id="pref-date" className="in" value={dateFormat} onChange={(e) => setDateFormat(e.target.value)}>
-              {DATE_FORMATS.map((f) => (
-                <option key={f} value={f}>
-                  {f}
-                </option>
-              ))}
-            </select>
-          </FormField>
-          <Combobox id="pref-timezone" label={t('Time zone')} options={timezoneOptions(timezone)} value={timezone} onChange={setTimezone} required />
+    <>
+      <section className="card" aria-labelledby="prefs-title">
+        <div className="card-title-row">
+          <h2 id="prefs-title">{t('Preferences')}</h2>
+          <span className="muted card-sub">{t('Saved per user. Language, date format and time zone apply immediately across the CRM.')}</span>
         </div>
-        <div>
-          <button type="submit" className="btn primary" disabled={save.isPending}>
-            {save.isPending ? t('Saving…') : t('Save')}
-          </button>
-        </div>
-      </form>
-    </section>
+        <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="grid3">
+            <FormField id="pref-language" label={t('Language')}>
+              <select id="pref-language" className="in" value={language} onChange={(e) => setLanguage(e.target.value as Lang)}>
+                {(Object.keys(LANGUAGE_NAMES) as Lang[]).map((l) => (
+                  <option key={l} value={l} lang={l}>
+                    {LANGUAGE_NAMES[l]}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+            <FormField id="pref-date" label={t('Date format')}>
+              <select id="pref-date" className="in" value={dateFormat} onChange={(e) => setDateFormat(e.target.value)}>
+                {DATE_FORMATS.map((f) => (
+                  <option key={f} value={f}>
+                    {f}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+            <Combobox id="pref-timezone" label={t('Time zone')} options={timezoneOptions(timezone)} value={timezone} onChange={setTimezone} required />
+          </div>
+          <div>
+            <button type="submit" className="btn primary" disabled={save.isPending}>
+              {save.isPending ? t('Saving…') : t('Save')}
+            </button>
+          </div>
+        </form>
+      </section>
+      <SignatureCard />
+    </>
   );
 }

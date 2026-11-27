@@ -13,7 +13,7 @@ beforeAll(async () => {
 afterAll(() => app.close());
 beforeEach(resetDb);
 
-const req = (method: 'GET' | 'POST' | 'PATCH', url: string, cookie?: string, payload?: unknown) =>
+const req = (method: 'GET' | 'POST' | 'PATCH' | 'PUT', url: string, cookie?: string, payload?: unknown) =>
   app.inject({ method, url, payload: payload as object, headers: cookie ? { cookie } : {} });
 
 describe('GET /api/users', () => {
@@ -172,6 +172,83 @@ describe('PATCH /api/me/preferences', () => {
   it('400 validation on bad body', async () => {
     const u = await makeUser();
     const res = await req('PATCH', '/api/me/preferences', await signIn(app, u), { language: 'xx' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('validation');
+  });
+});
+
+describe('/api/me/signature', () => {
+  it('401 when signed out', async () => {
+    expect((await req('GET', '/api/me/signature')).statusCode).toBe(401);
+    expect((await req('PUT', '/api/me/signature', undefined, { html: '<b>x</b>', auto: true })).statusCode).toBe(401);
+  });
+
+  it('none yet: no HTML, Add automatically on', async () => {
+    const u = await makeUser();
+    expect((await req('GET', '/api/me/signature', await signIn(app, u))).json()).toEqual({ html: null, auto: true });
+  });
+
+  it('saves a signature sanitised (no script, no pictures) with Add automatically; reads it back', async () => {
+    const u = await makeUser();
+    const repCookie = await signIn(app, u);
+    const res = await req('PUT', '/api/me/signature', repCookie, { html: '<b>Maya</b><script>x()</script><img src="https://x/y.png">', auto: false });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ html: '<b>Maya</b>', auto: false });
+    expect((await req('GET', '/api/me/signature', repCookie)).json()).toEqual({ html: '<b>Maya</b>', auto: false });
+  });
+
+  it('keeps formatting and http(s) links; drops pictures in CSS and javascript: links', async () => {
+    const u = await makeUser();
+    const cookie = await signIn(app, u);
+    const html =
+      '<p style="color: red; font-family: &quot;Segoe UI&quot;, Arial; background-image: url(&quot;https://x.example/y.png&quot;)">Maya <a href="https://dait.example">site</a> ' +
+      '<a href="javascript:alert(1)">bad</a></p><img src="data:image/png;base64,AAAA">' +
+      '<style>p { color: blue; background: url("https://x.example/z.png") }</style>';
+    const saved = (await req('PUT', '/api/me/signature', cookie, { html, auto: true })).json().html as string;
+    expect(saved).toContain('<a href="https://dait.example"');
+    expect(saved).toContain('color:red');
+    expect(saved).toContain('font-family:&quot;Segoe UI&quot;, Arial');
+    expect(saved).toContain('color: blue');
+    expect(saved).not.toMatch(/<img|url\(|javascript/i);
+  });
+
+  it('empty HTML or null removes the signature', async () => {
+    const u = await makeUser();
+    const cookie = await signIn(app, u);
+    await req('PUT', '/api/me/signature', cookie, { html: '<b>Maya</b>', auto: true });
+    expect((await req('PUT', '/api/me/signature', cookie, { html: '<script>x()</script>', auto: true })).json()).toEqual({ html: null, auto: true });
+    await req('PUT', '/api/me/signature', cookie, { html: '<b>Maya</b>', auto: true });
+    expect((await req('PUT', '/api/me/signature', cookie, { html: null, auto: true })).json()).toEqual({ html: null, auto: true });
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).signatureHtml).toBeNull();
+  });
+
+  it('a signature over 20 000 characters is 400 signature_too_long; audit carries no content', async () => {
+    const u = await makeUser();
+    const cookie = await signIn(app, u);
+    const long = await req('PUT', '/api/me/signature', cookie, { html: `<p>${'a'.repeat(20_001)}</p>`, auto: true });
+    expect(long.statusCode).toBe(400);
+    expect(long.json()).toEqual({ error: 'signature_too_long' });
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).signatureHtml).toBeNull();
+    expect(await prisma.auditLog.count({ where: { entityType: 'user', action: 'update' } })).toBe(0);
+
+    await req('PUT', '/api/me/signature', cookie, { html: '<b>Maya Secret</b>', auto: false });
+    const row = await prisma.auditLog.findFirstOrThrow({ where: { entityType: 'user', action: 'update' } });
+    expect(row).toMatchObject({ entityId: String(u.id), userId: u.id });
+    expect(row.after).toEqual({ signature: true, auto: false });
+    expect(JSON.stringify(row)).not.toContain('Maya');
+  });
+
+  it('only changes the caller: another user keeps theirs', async () => {
+    const a = await makeUser();
+    const b = await makeUser();
+    await req('PUT', '/api/me/signature', await signIn(app, b), { html: '<i>Bea</i>', auto: true });
+    await req('PUT', '/api/me/signature', await signIn(app, a), { html: '<b>Al</b>', auto: false });
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: b.id } })).signatureHtml).toBe('<i>Bea</i>');
+  });
+
+  it('400 validation on bad body', async () => {
+    const u = await makeUser();
+    const res = await req('PUT', '/api/me/signature', await signIn(app, u), { html: '<b>x</b>' });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe('validation');
   });
