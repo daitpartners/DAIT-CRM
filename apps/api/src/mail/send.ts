@@ -102,18 +102,21 @@ export async function queueDraftSend(graph: GraphClient, user: AuthUser, m: Emai
 
 /**
  * Takes a queued send back (Undo, a scheduled send's Cancel and Edit): its still-queued job is deleted and the row is
- * a draft again, in one transaction. No queued job (the worker claimed it, or it has left) is 409 already_sent, and
- * the row is left as the worker has it. Nothing else to undo: the lead effects only happen when the mail leaves.
+ * a draft again, in one transaction. No queued job (the worker claimed it, or it has left), or a row no longer queued,
+ * is 409 already_sent, and job and row are left as the worker has them. Nothing else to undo: the lead effects only happen when the mail leaves.
  */
 export async function unsend(graph: GraphClient, user: AuthUser, m: EmailMessage): Promise<DraftView> {
   if (m.folder !== 'drafts') throw new DraftError('already_sent', 409);
   await prisma.$transaction(async (tx) => {
     const { count } = await tx.job.deleteMany({ where: queuedJobOf(m.id) });
     if (count === 0) throw new DraftError('already_sent', 409);
-    await tx.emailMessage.updateMany({
+    const back = await tx.emailMessage.updateMany({
       where: { id: m.id, userId: user.id, status: 'queued' },
       data: { status: 'draft', scheduledAt: null, lastError: null },
     });
+    // The row is not waiting (left `sending` by an interrupted run whose job the sweep queued again): the job stays, so
+    // the worker still Fails and notifies it (Review Focus 2).
+    if (back.count === 0) throw new DraftError('already_sent', 409);
   });
   return openDraft(graph, user, await prisma.emailMessage.findUniqueOrThrow({ where: { id: m.id } }));
 }

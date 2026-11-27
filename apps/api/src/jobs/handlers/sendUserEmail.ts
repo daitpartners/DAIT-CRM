@@ -62,6 +62,7 @@ async function settleQuotation(msg: EmailMessage, quotation: NonNullable<SendUse
 }
 
 type Tx = Prisma.TransactionClient;
+const NO_SUBJECT = '(no subject)';
 type Queued = EmailMessage & { account: EmailAccount | null; user: { timezone: string } };
 
 /**
@@ -75,7 +76,8 @@ async function failDraft(msg: Queued, lastError: string): Promise<void> {
       where: { id: msg.id, status: { in: ['queued', 'sending'] } },
       data: { status: 'failed', lastError, scheduledAt: null },
     });
-    if (count > 0) await notifyUser(tx, msg.userId, `Your email "${msg.subject}" could not be sent`, null, '/email?folder=drafts');
+    // The web shows it in the reader's language (i18n/systemText.ts); an empty subject reads "(no subject)".
+    if (count > 0) await notifyUser(tx, msg.userId, `Your email "${msg.subject || NO_SUBJECT}" could not be sent`, null, '/email?folder=drafts');
   });
 }
 
@@ -92,8 +94,8 @@ async function markDraftSent(db: Tx | typeof prisma, msg: Queued): Promise<void>
  * What a sent draft files on its lead (plan decision 3), when the lead still exists and the sender can still see it:
  * the "Email sent" line and New / Not Contacted → Contacted (recordOnLead), then the follow-up asked for — the task
  * (assigned as asked when that user can still see the lead, else to the sender; the assignee notified when not the
- * sender) and, when asked and the lead is open, the lead's next follow-up on that day (the task stands in for the lead
- * follow-up task: syncFollowUpTask).
+ * sender) and, when asked, the lead's next follow-up on that day (the task stands in for the lead follow-up task:
+ * syncFollowUpTask). A lead closed or archived since Send gets no follow-up at all (plan decision 5).
  */
 async function fileOnLead(tx: Tx, msg: Queued, followUp: SendUserEmailPayload['followUp']): Promise<void> {
   if (msg.leadId === null) return;
@@ -102,8 +104,9 @@ async function fileOnLead(tx: Tx, msg: Queued, followUp: SendUserEmailPayload['f
   if (!lead || !(await canUserSeeLead(tx, msg.userId, lead.id))) return;
   await recordOnLead(tx, { id: msg.userId, timezone: msg.user.timezone }, lead, msg, msg.subject);
   if (!followUp || followUp.leadId !== lead.id) return;
-
   const current = await tx.lead.findUniqueOrThrow({ where: { id: lead.id } });
+  if (current.archivedAt || isClosedStatus(current.status)) return;
+
   const assignedToId = (await canUserSeeLead(tx, followUp.assignedToId, lead.id)) ? followUp.assignedToId : msg.userId;
   const task = await tx.task.create({
     data: {
@@ -114,7 +117,7 @@ async function fileOnLead(tx: Tx, msg: Queued, followUp: SendUserEmailPayload['f
   });
   if (assignedToId !== msg.userId) await notifyUser(tx, assignedToId, `Task assigned to you · ${task.title}`, null, '/tasks');
   await audit(tx, { entityType: 'task', entityId: task.id, action: 'create', userId: msg.userId, after: { origin: task.origin, leadId: lead.id, emailMessageId: msg.id } });
-  if (followUp.updateLead && !current.archivedAt && !isClosedStatus(current.status)) {
+  if (followUp.updateLead) {
     const updated = await tx.lead.update({ where: { id: lead.id }, data: { nextFollowUp: dateOnly(followUp.date) } });
     await syncFollowUpTask(tx, updated);
     await audit(tx, {
@@ -125,12 +128,29 @@ async function fileOnLead(tx: Tx, msg: Queued, followUp: SendUserEmailPayload['f
 }
 
 /**
+ * Where a draft stands after a send call failed without an answer (timeout, 5xx): `left` when Outlook no longer has it
+ * as a draft (404, or no longer a draft: it was sent), `draft` when it is still one (safe to send again), `unknown`
+ * when Outlook cannot be asked.
+ */
+async function afterSendError(ctx: JobContext, account: EmailAccount, graphId: string): Promise<'left' | 'draft' | 'unknown'> {
+  try {
+    await ctx.graph.getDraft(account, graphId);
+    return 'draft';
+  } catch (err) {
+    if (err instanceof GraphError && (err.status === 404 || (err.status === 409 && err.message === 'not_a_draft'))) return 'left';
+    return 'unknown';
+  }
+}
+
+/**
  * Sends a queued Outlook draft (web-mail release 3): the same claim as other sends (`queued` → `sending`; a row found
  * still `sending` was interrupted mid-send and is Failed, never resent), only from the sender's own connected mailbox,
  * then Graph send on the draft. Afterwards the row is Sent and the lead effects filed in one transaction; if that
  * transaction fails the mail has still left, so the row is marked Sent on its own (best effort) and the failure logged
- * with the message id only. A revoked mailbox or a draft gone from Outlook (404) fails it at once, never retried;
- * other errors put it back in the queue, and the last attempt fails it. A failure stays in Drafts and is notified.
+ * with the message id only. A revoked mailbox or a draft gone from Outlook (404) fails it at once, never retried. Any
+ * other error (a timeout, a 5xx) may come after Microsoft took the mail, so Outlook is asked first (afterSendError):
+ * no longer a draft → it left, and is filed as sent; still a draft → back in the queue (the last attempt fails it);
+ * unknown → Failed (interrupted_may_have_sent) rather than risk sending twice. A failure stays in Drafts and is notified.
  */
 async function sendDraftMessage(msg: Queued, ctx: JobContext, lastAttempt: boolean, followUp: SendUserEmailPayload['followUp']): Promise<void> {
   if (msg.status === 'sending') return failDraft(msg, INTERRUPTED);
@@ -158,9 +178,14 @@ async function sendDraftMessage(msg: Queued, ctx: JobContext, lastAttempt: boole
     }
     // Deleted (or sent) in Outlook before its time: Failed, never retried (Review Focus 3).
     if (err instanceof GraphError && err.status === 404) return failDraft(msg, 'draft_gone');
-    if (lastAttempt) await failDraft(msg, lastError);
-    else await prisma.emailMessage.updateMany({ where: { id: msg.id, status: 'sending' }, data: { status: 'queued', lastError } });
-    throw err;
+    const state = await afterSendError(ctx, account, graphId);
+    if (state === 'unknown') return failDraft(msg, INTERRUPTED);
+    if (state === 'draft') {
+      if (lastAttempt) await failDraft(msg, lastError);
+      else await prisma.emailMessage.updateMany({ where: { id: msg.id, status: 'sending' }, data: { status: 'queued', lastError } });
+      throw err;
+    }
+    // 'left': Microsoft took it after all; filed as sent below, once.
   }
 
   try {

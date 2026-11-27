@@ -26,6 +26,9 @@ const NOTIFICATION: Rule[] = [
   [/^Mailer finished · (.+)$/, (t, m) => t('Mailer finished · {name}', { name: m[1]! })],
   [/^Mailer queued · (.+)$/, (t, m) => t('Mailer queued · {name}', { name: m[1]! })],
   [/^Task assigned to you · (.+)$/, (t, m) => t('Task assigned to you · {title}', { title: m[1]! })],
+  // Web-mail release 3: a send that failed; the subject stays as the sender wrote it.
+  [/^Your email "\(no subject\)" could not be sent$/, (t) => t('Your email "(no subject)" could not be sent')],
+  [/^Your email "([\s\S]*)" could not be sent$/, (t, m) => t('Your email "{subject}" could not be sent', { subject: m[1]! })],
   // Import leads: one notification per assignee for a batch.
   [
     /^Import (\S+) · (\d+) (leads?|prospects?) assigned to you$/,

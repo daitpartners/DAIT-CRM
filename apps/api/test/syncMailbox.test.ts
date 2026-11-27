@@ -708,4 +708,32 @@ describe('the CRM’s own drafts and their sends (web-mail release 3)', () => {
     await syncMailboxHandler(job(account.id), { graph: scripted({ 'start:sentitems': final('sentitems', [copy]) }).graph });
     expect((await prisma.emailMessage.findMany({ where: { userId: user.id } })).map((r) => [r.id, r.graphId])).toEqual([[row.id, 'S2']]);
   });
+
+  test('a draft made in Outlook and sent from the CRM: left alone while queued, kept if Drafts reports it removed while sending, and claimed by its Sent Items copy (fix round 1)', async () => {
+    const { user, account } = await mailbox();
+    const draft = await prisma.emailMessage.create({
+      data: {
+        userId: user.id, accountId: account.id, folder: 'drafts', status: 'queued', source: 'sync', graphId: 'OD1', fromAddress: ADDRESS,
+        toAddresses: ['ana@acme.com'], subject: 'Proposal', bodyText: '', bodyHtml: '<p>Hi Ana</p>', leadId: acme.lead.id,
+      },
+    });
+    const queued = await prisma.emailMessage.findUniqueOrThrow({ where: { id: draft.id } });
+    const read = msg({ id: 'OD1', isDraft: true, from: { name: 'Maya', address: ADDRESS }, to: ['ana@acme.com'], subject: 'Proposal edited', flag: { status: 'flagged', due: null } });
+    await syncMailboxHandler(job(account.id), { graph: scripted({ 'start:drafts': final('drafts', [read]) }).graph });
+    expect(await prisma.emailMessage.findUniqueOrThrow({ where: { id: draft.id } })).toEqual(queued);
+
+    // While it is being sent, Drafts reports it gone: the row stays (without the draft id), never deleted.
+    await prisma.emailMessage.update({ where: { id: draft.id }, data: { status: 'sending' } });
+    await prisma.emailAccount.update({ where: { id: account.id }, data: { syncState: {} } });
+    await syncMailboxHandler(job(account.id), { graph: scripted({ 'start:drafts': final('drafts', [], ['OD1']) }).graph });
+    expect(await prisma.emailMessage.findUniqueOrThrow({ where: { id: draft.id } })).toMatchObject({ status: 'sending', graphId: null });
+
+    // Sent by the worker: the Sent Items copy claims the row (one row in Sent, not two).
+    const sentAt = new Date();
+    await prisma.emailMessage.update({ where: { id: draft.id }, data: { status: 'sent', folder: 'sent', occurredAt: sentAt } });
+    const copy = msg({ id: 'OS1', from: { name: 'Maya', address: ADDRESS }, to: ['ana@acme.com'], subject: 'Proposal', sentAt: sentAt.toISOString() });
+    await prisma.emailAccount.update({ where: { id: account.id }, data: { syncState: {} } });
+    await syncMailboxHandler(job(account.id), { graph: scripted({ 'start:sentitems': final('sentitems', [copy]) }).graph });
+    expect((await prisma.emailMessage.findMany({ where: { userId: user.id } })).map((r) => [r.id, r.folder, r.graphId])).toEqual([[draft.id, 'sent', 'OS1']]);
+  });
 });

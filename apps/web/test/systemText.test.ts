@@ -34,6 +34,14 @@ describe('stored system texts in the reader language (review #04)', () => {
     expect(notificationDetail(tEs, 'Project created · Website', 'Meyer Bauhaus · from LD-1010')).toBe('Meyer Bauhaus · de LD-1010');
   });
 
+  it('a failed send notification keeps the subject as written; an empty one reads (no subject) in each language (web-mail release 3)', () => {
+    expect(notificationText(tEs, 'Your email "Propuesta · Q4" could not be sent')).toBe('No se pudo enviar su correo "Propuesta · Q4"');
+    expect(notificationText(tFr, 'Your email "Proposal" could not be sent')).toBe('Votre e-mail « Proposal » n’a pas pu être envoyé');
+    expect(notificationText(tEs, 'Your email "(no subject)" could not be sent')).toBe('No se pudo enviar su correo "(sin asunto)"');
+    expect(notificationText(tFr, 'Your email "(no subject)" could not be sent')).toBe('Votre e-mail « (sans objet) » n’a pas pu être envoyé');
+    expect(notificationText(tEn, 'Your email "(no subject)" could not be sent')).toBe('Your email "(no subject)" could not be sent');
+  });
+
   it('what a user typed is never translated (review M-2)', () => {
     // An assigner's or transfer note in a lead notification's detail stays as typed.
     expect(notificationDetail(tEs, 'Lead LD-1013 assigned to you', 'Sunrise Pharma · Assigned to Carlos as agreed')).toBe('Sunrise Pharma · Assigned to Carlos as agreed');

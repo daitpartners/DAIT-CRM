@@ -25,6 +25,8 @@ const g = vi.hoisted(() => ({
   sendError: null as Error | null,
   /** When set, the next updateDraft waits for it (a save in flight). */
   gate: null as Promise<void> | null,
+  /** What getDraft answers: the draft as Outlook holds it, or a refusal. */
+  draftError: null as Error | null,
 }));
 
 const graphImpl: Partial<GraphClient> = {
@@ -33,6 +35,11 @@ const graphImpl: Partial<GraphClient> = {
     g.gate = null;
     if (gate) await gate;
     g.calls.push(['updateDraft', id, d]);
+  },
+  async getDraft(_account, id) {
+    g.calls.push(['getDraft', id]);
+    if (g.draftError) throw g.draftError;
+    return { id, conversationId: null, subject: 'Proposal', html: '<p>Hi Ana</p>', to: ['ana@acme.com'], cc: [], bcc: [], lastModified: '2026-11-27T10:00:00Z', attachments: [] };
   },
   async sendDraft(_account, id) {
     g.calls.push(['sendDraft', id]);
@@ -52,6 +59,7 @@ beforeEach(async () => {
   g.calls = [];
   g.sendError = null;
   g.gate = null;
+  g.draftError = null;
   await resetDb();
   await seedLookups();
 });
@@ -407,7 +415,8 @@ describe('Send with Undo (web-mail release 3)', () => {
     await call('POST', `/api/mail/drafts/${f.d.id}/send`, f.repCookie, fields);
     g.sendError = new GraphError('graph_request_failed 503', 503);
     await jobsDue();
-    // Back in the queue for a retry (Undo / Cancel still take it back).
+    // Outlook still has it as a draft, so it never left: back in the queue for a retry (Undo / Cancel still take it back).
+    expect(g.calls.filter((c) => c[0] === 'getDraft')).toEqual([['getDraft', 'D1']]);
     expect(await row(f.d.id)).toMatchObject({ status: 'queued', lastError: 'graph_request_failed 503' });
     expect((await sendJob())!).toMatchObject({ status: 'queued', attempts: 1 });
     await prisma.job.updateMany({ data: { attempts: 4 } });
@@ -509,5 +518,102 @@ describe('Send with Undo (web-mail release 3)', () => {
     const late = await call('PATCH', `/api/mail/drafts/${f.d.id}`, f.repCookie, { ...fields, bodyHtml: '<p>Too late</p>' });
     expect(late.json()).toEqual({ error: 'not_draft' });
     expect(updates()).toHaveLength(2);
+  });
+
+  it('an error after Microsoft may have taken the mail: Outlook is asked first; gone or no longer a draft is filed as sent once, unknown is Failed, never resent (fix round 1)', async () => {
+    const f = await setup();
+    // Timed out, but Outlook no longer has the draft: it left. Filed as sent with its lead effects, once.
+    await call('POST', `/api/mail/drafts/${f.d.id}/send`, f.repCookie, { ...fields, followUp: followUp(f) });
+    g.sendError = new Error('The operation was aborted due to timeout');
+    g.draftError = new GraphError('graph_request_failed 404', 404);
+    await jobsDue();
+    expect(sent()).toEqual(['D1']);
+    expect(await row(f.d.id)).toMatchObject({ status: 'sent', folder: 'sent', graphId: null });
+    expect((await sendJob())!).toMatchObject({ status: 'done', attempts: 0 });
+    expect(await prisma.task.count({ where: { origin: 'email_follow_up' } })).toBe(1);
+    expect(await prisma.leadActivity.count({ where: { leadId: f.lead.id, activityType: 'email' } })).toBe(1);
+    expect(await notes(f.rep.id)).toEqual([]);
+
+    // A 5xx, and Outlook has it as sent (getDraft: not a draft any more): sent too.
+    const d2 = await draftOf(f.rep.id, f.repBox.id);
+    await call('POST', `/api/mail/drafts/${d2.id}/send`, f.repCookie, fields);
+    g.sendError = new GraphError('graph_request_failed 502', 502);
+    g.draftError = new GraphError('not_a_draft', 409);
+    await jobsDue();
+    expect(await row(d2.id)).toMatchObject({ status: 'sent', folder: 'sent' });
+
+    // Outlook cannot be asked either: Failed (may have sent), notified, and the job is not retried.
+    const d3 = await draftOf(f.rep.id, f.repBox.id, { subject: '' });
+    await call('POST', `/api/mail/drafts/${d3.id}/send`, f.repCookie, { ...fields, subject: '' });
+    g.draftError = new GraphError('graph_request_failed 503', 503);
+    g.calls = [];
+    await jobsDue();
+    expect(sent()).toEqual([d3.graphId]);
+    expect(await row(d3.id)).toMatchObject({ status: 'failed', folder: 'drafts', lastError: 'interrupted_may_have_sent' });
+    expect((await prisma.job.findFirstOrThrow({ where: { payload: { path: ['emailMessageId'], equals: d3.id } } }))).toMatchObject({ status: 'done', attempts: 0 });
+    // An empty subject reads "(no subject)".
+    expect(await notes(f.rep.id)).toEqual([{ text: 'Your email "(no subject)" could not be sent', link: '/email?folder=drafts' }]);
+    await jobsDue();
+    expect(sent()).toEqual([d3.graphId]);
+  });
+
+  it('Undo after the sweep queued an interrupted send again is 409 already_sent; the worker still Fails and notifies it (fix round 1)', async () => {
+    const f = await setup();
+    await call('POST', `/api/mail/drafts/${f.d.id}/send`, f.repCookie, fields);
+    await prisma.job.updateMany({ where: { type: 'send_user_email' }, data: { status: 'running', lockedAt: new Date() } });
+    await prisma.emailMessage.update({ where: { id: f.d.id }, data: { status: 'sending' } });
+    expect(await sweepInterruptedSends({ startup: true })).toBe(1);
+    const undo = await call('POST', `/api/mail/${f.d.id}/unsend`, f.repCookie);
+    expect(undo.statusCode).toBe(409);
+    expect(undo.json()).toEqual({ error: 'already_sent' });
+    // The job was not deleted (the transaction rolled back).
+    expect((await sendJob())!.status).toBe('queued');
+    expect((await row(f.d.id)).status).toBe('sending');
+    await jobsDue();
+    expect(sent()).toEqual([]);
+    expect(await row(f.d.id)).toMatchObject({ status: 'failed', folder: 'drafts', lastError: 'interrupted_may_have_sent' });
+    expect(await notes(f.rep.id)).toEqual([{ text: 'Your email "Proposal" could not be sent', link: '/email?folder=drafts' }]);
+  });
+
+  it('a lead closed between Send and the mail leaving gets no follow-up task (plan decision 5; fix round 1)', async () => {
+    const f = await setup();
+    await call('POST', `/api/mail/drafts/${f.d.id}/send`, f.repCookie, { ...fields, followUp: followUp(f) });
+    await prisma.lead.update({ where: { id: f.lead.id }, data: { status: 'Lost' } });
+    await jobsDue();
+    expect(sent()).toEqual(['D1']);
+    expect(await prisma.task.count()).toBe(0);
+    const lead = await prisma.lead.findUniqueOrThrow({ where: { id: f.lead.id } });
+    expect([lead.status, lead.nextFollowUp]).toEqual(['Lost', null]);
+    // The mail still left on the lead: its Email sent line is there.
+    expect(await prisma.leadActivity.count({ where: { leadId: f.lead.id, title: 'Email sent · Proposal' } })).toBe(1);
+    // Archived since Send: no follow-up either.
+    await prisma.lead.update({ where: { id: f.lead.id }, data: { status: 'Contacted' } });
+    const d2 = await draftOf(f.rep.id, f.repBox.id, { leadId: f.lead.id });
+    await call('POST', `/api/mail/drafts/${d2.id}/send`, f.repCookie, { ...fields, followUp: followUp(f) });
+    expect(((await prisma.job.findFirstOrThrow({ where: { status: 'queued' } })).payload as { followUp?: unknown }).followUp).toBeTruthy();
+    await prisma.lead.update({ where: { id: f.lead.id }, data: { archivedAt: new Date() } });
+    await jobsDue();
+    expect(await row(d2.id)).toMatchObject({ status: 'sent' });
+    expect(await prisma.task.count()).toBe(0);
+  });
+
+  it('a draft made in Outlook, scheduled from the CRM: listed in Scheduled, Cancel and Send now work, and it is sent (fix round 1)', async () => {
+    const f = await setup();
+    const od = await draftOf(f.rep.id, f.repBox.id, { source: 'sync', subject: 'Proposal', toAddresses: ['ana@acme.com'], leadId: f.lead.id });
+    const at = new Date(Date.now() + 86_400_000);
+    at.setUTCMilliseconds(0);
+    expect((await call('POST', `/api/mail/drafts/${od.id}/send`, f.repCookie, { ...fields, at: at.toISOString() })).statusCode).toBe(202);
+    expect(await listed('scheduled', f.repCookie)).toEqual([expect.objectContaining({ id: od.id, scheduledAt: at.toISOString() })]);
+    expect(await listed('drafts', f.repCookie)).toEqual([expect.objectContaining({ id: f.d.id })]);
+    // Cancel: back in Drafts (opened fresh from Outlook, as any draft made there).
+    const cancel = await call('POST', `/api/mail/${od.id}/unsend`, f.repCookie);
+    expect(cancel.statusCode).toBe(200);
+    expect(cancel.json()).toMatchObject({ id: od.id, status: 'draft' });
+    expect(await listed('scheduled', f.repCookie)).toEqual([]);
+    await call('POST', `/api/mail/drafts/${od.id}/send`, f.repCookie, { ...fields, at: at.toISOString() });
+    expect((await call('POST', `/api/mail/${od.id}/send-now`, f.repCookie)).statusCode).toBe(204);
+    expect(await runSend()).toBe(true);
+    expect(sent()).toEqual([od.graphId]);
+    expect(await row(od.id)).toMatchObject({ status: 'sent', folder: 'sent', graphId: null, source: 'sync' });
   });
 });

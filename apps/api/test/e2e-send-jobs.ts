@@ -36,7 +36,17 @@ const graph: GraphClient = {
   forward: async (_account, graphId, msg) => respond('forward', graphId, msg),
   deltaPage: refuse, listAttachments: refuse, attachmentContent: refuse, markRead: refuse, moveTo: refuse, setFlag: refuse, deleteMessage: refuse,
   calendarDeltaPage: refuse, messageBody: refuse, searchPage: refuse, folderIds: refuse,
-  createDraft: refuse, createReplyDraft: refuse, getDraft: refuse, updateDraft: refuse, addAttachment: refuse, removeAttachment: refuse,
+  createDraft: refuse, createReplyDraft: refuse, updateDraft: refuse, addAttachment: refuse, removeAttachment: refuse,
+  // The worker asks Outlook about a draft only after a send call failed (never here, where every send succeeds): the
+  // CRM row that holds it, as Graph would give it.
+  getDraft: async (account, draftId) => {
+    const row = await prisma.emailMessage.findFirst({ where: { graphId: draftId, accountId: account.id } });
+    if (!row) throw new Error(`e2e-send-jobs: no CRM row for draft ${draftId}`);
+    return {
+      id: draftId, conversationId: row.threadId, subject: row.subject, html: row.bodyHtml ?? '', to: row.toAddresses as string[], cc: row.ccAddresses as string[],
+      bcc: row.bccAddresses as string[], lastModified: row.updatedAt.toISOString(), attachments: [],
+    };
+  },
   // A draft sent (web-mail release 3) is printed with the CRM row that holds it (found by its Graph id): what was sent
   // and its files (name, inline / content-id, size).
   sendDraft: async (account, draftId) => {

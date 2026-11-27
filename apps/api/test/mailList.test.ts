@@ -279,18 +279,22 @@ describe('GET /mail (web-mail release 2)', () => {
     await msg(f.rep.id, { ...crm, subject: 'Scheduled', status: 'queued', scheduledAt: at });
     await msg(f.rep.id, { ...crm, subject: 'Leaving', status: 'sending' });
     await msg(f.rep.id, { subject: 'Outlook draft', folder: 'drafts', status: 'draft', fromAddress: 'maya@daitpartners.com' });
+    // A draft made in Outlook and scheduled from the CRM is a sync row: Scheduled lists it all the same.
+    await msg(f.rep.id, { subject: 'Outlook draft scheduled', folder: 'drafts', status: 'queued', scheduledAt: at, fromAddress: 'maya@daitpartners.com' });
     await msg(f.carlos.id, { ...crm, subject: 'Carlos draft', status: 'draft' });
     const view = (v: string) => items(`/api/mail?view=${v}&conv=0`, f.repCookie);
     expect((await view('drafts')).map((i) => i.subject).sort()).toEqual(['Draft', 'Failed send', 'Outlook draft']);
     const scheduled = await view('scheduled');
-    expect(scheduled.map((i) => [i.subject, i.scheduledAt]).sort()).toEqual([['Leaving', null], ['Scheduled', at.toISOString()], ['Undo window', null]]);
+    expect(scheduled.map((i) => [i.subject, i.scheduledAt]).sort()).toEqual([
+      ['Leaving', null], ['Outlook draft scheduled', at.toISOString()], ['Scheduled', at.toISOString()], ['Undo window', null],
+    ]);
     // Team view never shows another user's unsent mail (drafts are not team-readable).
     const admin = await signIn(app, f.admin);
     expect(await subjects(`/api/mail?mailOf=${f.rep.id}&view=scheduled&conv=0`, admin)).toEqual([]);
     expect(await subjects(`/api/mail?mailOf=${f.rep.id}&view=drafts&conv=0`, admin)).toEqual([]);
     // The folder counts follow the views.
     const meta = (await call('/api/mail/meta', f.repCookie)).json();
-    expect(meta.counts).toMatchObject({ drafts: 3, scheduled: 3 });
+    expect(meta.counts).toMatchObject({ drafts: 3, scheduled: 4 });
   });
 
   it('items carry replied, flag, conversation count and lead status; restricted leads give no status', async () => {

@@ -1606,6 +1606,8 @@
   "Mailer finished · {name}": "Mailer terminado · {name}",
   "Mailer queued · {name}": "Mailer en cola · {name}",
   "Task assigned to you · {title}": "Tarea asignada a usted · {title}",
+  "Your email \"{subject}\" could not be sent": "No se pudo enviar su correo \"{subject}\"",
+  "Your email \"(no subject)\" could not be sent": "No se pudo enviar su correo \"(sin asunto)\"",
   "Follow up · {company}": "Seguimiento · {company}",
   "Review new lead · {company}": "Revisar nuevo lead · {company}",
   "Reply to email": "Responder al correo",

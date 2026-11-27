@@ -30,6 +30,9 @@ const MORE_AFTER_MS = 60_000;
 
 type SyncState = Partial<Record<MailFolder, { link: string }>>;
 
+/** A row the CRM is sending (web-mail release 3): only the CRM's send queue puts a row in these statuses. */
+const isBeingSent = (row: { status: string }) => row.status === 'queued' || row.status === 'sending';
+
 /** Subject without reply / forward prefixes ("Re:", "RE:", "Fw:", "Fwd:", "RV:"), for matching a sent copy. */
 export function baseSubject(subject: string): string {
   let s = subject.trim();
@@ -43,12 +46,16 @@ export function baseSubject(subject: string): string {
 const isOwn = (account: EmailAccount, address: string | undefined) =>
   !!address && [account.address, account.sendAs].some((a) => a?.toLowerCase() === address);
 
-/** Claims the CRM's own row for a Sent Items copy of a message it sent; true when one was claimed. */
+/**
+ * Claims the CRM's own row for a Sent Items copy of a message it sent; true when one was claimed. Any source: a draft
+ * made in Outlook and sent from the CRM (web-mail release 3) is a `sync` row. Only the CRM leaves a Sent row without a
+ * Graph id (its send worker; a synced row removed in Outlook is deleted, never kept without one).
+ */
 async function claimCrmCopy(userId: number, m: GraphMessage): Promise<boolean> {
   const at = Date.parse(m.sentAt ?? m.receivedAt);
   const candidates = await prisma.emailMessage.findMany({
     where: {
-      userId, source: 'crm', graphId: null, status: 'sent',
+      userId, graphId: null, status: 'sent',
       occurredAt: { gte: new Date(at - CLAIM_WINDOW_MS), lte: new Date(at + CLAIM_WINDOW_MS) },
     },
     orderBy: { occurredAt: 'asc' },
@@ -138,7 +145,7 @@ export type StoreResult = 'stored' | 'updated' | 'claimed' | 'skipped';
  * participants are now; a Sent Items copy of a CRM-sent message claims the CRM row; any other message is stored only
  * when it is lead mail (a participant is a lead/contact address or at a lead company's domain) or joins a
  * conversation where the user already keeps lead-linked mail. A skipped message writes and fetches nothing.
- * Web-mail release 3: the CRM's own draft while queued or sending is left untouched (it leaves Drafts when it is sent).
+ * Web-mail release 3: a draft the CRM is sending (queued or sending, whatever its source) is left untouched.
  * Web-mail release 2: a new row keeps Outlook's flag (the due date as the owner's own day), its non-inline attachment
  * names and its size (body plus attachments); an existing row takes the flag along with the folder and read state, so
  * a flag set or cleared in Outlook shows on the next sync.
@@ -150,8 +157,9 @@ export async function storeMessage(
   const outbound = m.isDraft || folder === 'sent' || folder === 'drafts' || isOwn(account, m.from?.address);
   const occurredAt = new Date(outbound ? (m.sentAt ?? m.receivedAt) : m.receivedAt);
   if (existing) {
-    // Web-mail release 3: the CRM's own draft while it is being sent (queued or sending) stays exactly as the CRM has it.
-    if (existing.source === 'crm' && (existing.status === 'queued' || existing.status === 'sending')) return 'skipped';
+    // Web-mail release 3: a draft the CRM is sending (queued or sending; made in the CRM or in Outlook) stays exactly as
+    // the CRM has it.
+    if (isBeingSent(existing)) return 'skipped';
     // Links the user (or matching) set are kept; only Outlook's state follows. A draft sent from Outlook becomes Sent.
     const sentDraft = existing.status === 'draft' && !m.isDraft ? { status: outbound ? 'sent' : 'received', occurredAt } : {};
     // A row stored before bodies came as HTML takes the HTML (and the cleaner text) now that it is here anyway.
@@ -211,7 +219,8 @@ async function applyRemovals(userId: number, removed: { graphId: string; folder:
   for (const r of removed) {
     const row = await prisma.emailMessage.findUnique({ where: { userId_graphId: { userId, graphId: r.graphId } } });
     if (!row || row.folder !== r.folder) continue;
-    if (row.source === 'crm') await prisma.emailMessage.update({ where: { id: row.id }, data: { graphId: null } });
+    // A CRM row, or a draft the CRM is sending (made in Outlook): kept, without its Graph id (a queued send then fails draft_gone).
+    if (row.source === 'crm' || isBeingSent(row)) await prisma.emailMessage.update({ where: { id: row.id }, data: { graphId: null } });
     else await prisma.emailMessage.delete({ where: { id: row.id } });
   }
 }
