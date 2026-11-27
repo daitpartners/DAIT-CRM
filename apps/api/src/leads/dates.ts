@@ -1,3 +1,5 @@
+import { instantIn } from '@dait-crm/shared';
+
 /** Today's calendar date (YYYY-MM-DD) in `timezone`; falls back to UTC for an unknown zone. */
 export function todayIn(timezone: string, now: Date = new Date()): string {
   const fmt = (timeZone: string) => new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
@@ -10,26 +12,10 @@ export function todayIn(timezone: string, now: Date = new Date()): string {
 
 /**
  * The instant a calendar day (YYYY-MM-DD) starts in `timezone` (UTC for an unknown zone).
- * Two passes of "UTC midnight minus the zone's offset at that moment" settle DST edges.
+ * Midnight through the shared `instantIn` (two passes of the zone's offset settle DST edges).
  */
 export function startOfDayIn(day: string, timezone: string): Date {
-  const utc = new Date(`${day}T00:00:00Z`).getTime();
-  const offsetAt = (ms: number) => {
-    try {
-      const parts = Object.fromEntries(
-        new Intl.DateTimeFormat('en-US', {
-          timeZone: timezone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
-        }).formatToParts(new Date(ms)).map((p) => [p.type, p.value]),
-      );
-      const wall = Date.UTC(+parts.year!, +parts.month! - 1, +parts.day!, +parts.hour!, +parts.minute!, +parts.second!);
-      return wall - ms;
-    } catch {
-      return 0;
-    }
-  };
-  let guess = utc - offsetAt(utc);
-  guess = utc - offsetAt(guess);
-  return new Date(guess);
+  return instantIn(day, '00:00', timezone);
 }
 
 /** A `@db.Date` column value as YYYY-MM-DD (Prisma returns it as UTC midnight). */
