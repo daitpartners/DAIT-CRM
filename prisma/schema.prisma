@@ -19,20 +19,24 @@ enum Role {
 }
 
 model User {
-  id           Int       @id @default(autoincrement())
-  email        String    @unique
-  name         String
-  role         Role
-  language     String    @default("en")
-  timezone     String    @default("Europe/London")
-  dateFormat   String    @default("DD MMM YYYY") @map("date_format")
-  isActive     Boolean   @default(true) @map("is_active")
-  microsoftOid String?   @unique @map("microsoft_oid")
-  lastLoginAt  DateTime? @map("last_login_at")
-  passwordHash String?   @map("password_hash")
-  isLocalAdmin Boolean   @default(false) @map("is_local_admin")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
+  id            Int       @id @default(autoincrement())
+  email         String    @unique
+  name          String
+  role          Role
+  language      String    @default("en")
+  timezone      String    @default("Europe/London")
+  dateFormat    String    @default("DD MMM YYYY") @map("date_format")
+  isActive      Boolean   @default(true) @map("is_active")
+  microsoftOid  String?   @unique @map("microsoft_oid")
+  lastLoginAt   DateTime? @map("last_login_at")
+  passwordHash  String?   @map("password_hash")
+  isLocalAdmin  Boolean   @default(false) @map("is_local_admin")
+  /// The user's email signature, sanitised HTML (web-mail release 3); null when none.
+  signatureHtml String?   @map("signature_html")
+  /// Add the signature to new messages, replies and forwards automatically (web-mail release 3).
+  signatureAuto Boolean   @default(true) @map("signature_auto")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
   sessions       Session[]
   emailAccounts  EmailAccount[]
@@ -162,6 +166,7 @@ model EmailMessage {
   /// 'sent' | 'inbox' | 'drafts' | 'archive' | 'deleted'
   folder          String
   /// 'queued' | 'sending' | 'sent' | 'failed' (sent from the CRM); synced mail is 'received' | 'sent' | 'draft'.
+  /// A CRM draft is 'draft'; a draft being sent is 'queued' / 'sending' while still in folder 'drafts' (web-mail release 3).
   status          String
   /// 'crm' written in the CRM | 'sync' read from the mailbox.
   source          String    @default("crm")
@@ -201,6 +206,12 @@ model EmailMessage {
   flagDue         DateTime? @map("flag_due") @db.Date
   /// Message size in bytes (Graph size; back-filled from the stored body length).
   sizeBytes       Int       @default(0) @map("size_bytes")
+  /// When a scheduled send goes out; set only for a scheduled send (web-mail release 3).
+  scheduledAt     DateTime? @map("scheduled_at")
+  /// The folded quote of a reply/forward draft, sanitised HTML (web-mail release 3).
+  quotedHtml      String?   @map("quoted_html")
+  /// DraftFile[]: the attachments and inline pictures uploaded to the Outlook draft (web-mail release 3).
+  draftFiles      Json      @default("[]") @map("draft_files")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
@@ -655,6 +666,10 @@ model Task {
   /// TASK_ORIGINS.
   origin          String
   closedReason    String?   @map("closed_reason")
+  /// 'normal' | 'high' (web-mail release 3).
+  priority        String    @default("normal") @db.VarChar(6)
+  /// Optional note, at most 1000 characters (web-mail release 3).
+  note            String?
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 

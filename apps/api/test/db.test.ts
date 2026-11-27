@@ -53,3 +53,17 @@ test('email_messages has flag_status (default notFlagged), flag_due and size_byt
   });
   expect(m).toMatchObject({ flagStatus: 'notFlagged', flagDue: null, sizeBytes: 0 });
 });
+
+test('web-mail release 3 columns: user signature, task priority and note, message schedule/quote/files', async () => {
+  const user = await makeUser();
+  const u = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+  expect(u).toMatchObject({ signatureHtml: null, signatureAuto: true });
+  const t = await prisma.task.create({
+    data: { title: 'x', dueDate: new Date('2026-12-01'), assignedToId: user.id, origin: 'manual' },
+  });
+  expect(t).toMatchObject({ priority: 'normal', note: null });
+  const m = await prisma.emailMessage.create({
+    data: { userId: user.id, folder: 'drafts', status: 'draft', fromAddress: 'a@b.co', subject: 's' },
+  });
+  expect(m).toMatchObject({ scheduledAt: null, quotedHtml: null, draftFiles: [] });
+});

@@ -252,6 +252,8 @@ An `email` activity shows its subject only to its sender; everyone else sees "Em
 | is_done, done_at | bool, timestamp | |
 | origin | text | follow_up / new_assignment / transfer / manual / quotation |
 | closed_reason | text | set when closing a lead closes the task |
+| priority | varchar(6) | `normal` (default) / `high` (web-mail release 3) |
+| note | text, nullable | optional note, at most 1000 characters (web-mail release 3) |
 | created_at, updated_at | timestamp | |
 
 Indexes: (`assigned_to_id`, `is_done`, `due_date`), (`lead_id`, `origin`, `is_done`), `quotation_id`. Calls and
@@ -310,7 +312,7 @@ A user's mail (`user_id` = the mailbox owner). Lead mail belongs to the mailbox 
 | account_id | FK email_accounts, nullable | set null |
 | lead_id, contact_id, company_id | FK, nullable | set null; auto-linked by sync matching, or by hand |
 | folder | text | sent / inbox / drafts / archive / deleted |
-| status | text | CRM-sent: queued / sending / sent / failed; synced: received / sent / draft |
+| status | text | CRM-sent: queued / sending / sent / failed; synced: received / sent / draft. A CRM draft is `draft`; a draft being sent is `queued` / `sending` while still in folder `drafts` (web-mail release 3) |
 | source | text | `crm` written in the CRM, `sync` read from the mailbox |
 | from_address | text | |
 | from_name | varchar(255) | |
@@ -331,6 +333,9 @@ A user's mail (`user_id` = the mailbox owner). Lead mail belongs to the mailbox 
 | flag_status | varchar(12) | Outlook flag: `notFlagged` (default) / `flagged` / `complete` (web-mail release 2) |
 | flag_due | date, nullable | the flag's due day (web-mail release 2) |
 | size_bytes | integer | message size in bytes, default 0; back-filled from the stored body length (web-mail release 2) |
+| scheduled_at | timestamp, nullable | when a scheduled send goes out; set only for a scheduled send (web-mail release 3) |
+| quoted_html | text, nullable | the folded quote of a reply/forward draft, sanitised (web-mail release 3) |
+| draft_files | jsonb array | default `[]`; the attachments and inline pictures uploaded to the Outlook draft (`DraftFile[]`) (web-mail release 3) |
 | created_at, updated_at | timestamp | |
 
 Indexes: unique (`user_id`, `graph_id`); (`user_id`, `thread_id`), (`user_id`, `lead_id`), (`user_id`, `folder`,
@@ -553,7 +558,9 @@ Composite PK (`project_id`, `contact_id`); both cascade delete; index `contact_i
 id PK; email (unique); name; role (enum `role`: ADMINISTRATOR / MANAGER / SALES_REPRESENTATIVE / DATA_RESEARCH_USER);
 language (default `en`; en / es / fr); timezone (default `Europe/London`); date_format (default `DD MMM YYYY`);
 is_active; microsoft_oid (unique, set at first Microsoft sign-in); last_login_at; password_hash (argon2id, local
-administrators only); is_local_admin; created_at, updated_at.
+administrators only); is_local_admin; signature_html (nullable; the email signature, sanitised HTML; web-mail release 3);
+signature_auto (default true; add the signature to new messages, replies and forwards; web-mail release 3); created_at,
+updated_at.
 
 ### sessions
 id (random text PK, the cookie value); user_id FK (cascade); expires_at (index); created_at; last_seen_at.
