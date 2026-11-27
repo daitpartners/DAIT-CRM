@@ -29,6 +29,16 @@ export type SendFlowOptions = {
   onUndone(d: DraftView): void;
 };
 
+/**
+ * Refusals after which the follow-up box cannot help (the draft is gone, sent, someone else's, the mailbox is gone or
+ * the session ended): the box closes and a toast says why. Any other refusal (a follow-up time, a field, a passing
+ * failure) keeps the box open with what was entered and the reason inside it, to send again.
+ */
+const ENDS_THE_BOX = new Set([
+  'draft_gone', 'already_sent', 'not_draft', 'mailbox_changed', 'view_only', 'not_found', 'forbidden', 'no_mailbox',
+  'mailbox_not_connected', 'mailbox_needs_reconnect', 'unauthenticated',
+]);
+
 /** The code of a failed request (a network failure reads as try_again). */
 const codeOf = (err: unknown) => (err instanceof ApiError ? err.code : 'try_again');
 
@@ -48,7 +58,7 @@ export function useSendFlow(opts: SendFlowOptions): { send(): void; schedule(at:
   const sendDraft = useSendDraft();
   const latest = useRef(opts);
   latest.current = opts;
-  const [box, setBox] = useState<{ at: Date | null; baseDay: string } | null>(null);
+  const [box, setBox] = useState<{ at: Date | null; baseDay: string; error: string | null } | null>(null);
   const [working, setWorking] = useState(false);
   const busy = working || sendDraft.isPending;
   /** Set from the first click to the end of that step: a second click before the screen catches up does nothing. */
@@ -61,6 +71,7 @@ export function useSendFlow(opts: SendFlowOptions): { send(): void; schedule(at:
     inFlight.current = true;
     const o = latest.current;
     setWorking(true);
+    setBox((b) => (b ? { ...b, error: null } : b));
     try {
       const id = await o.draftId();
       const r = await sendDraft.mutateAsync({ id, fields: o.fields(), at: at ? at.toISOString() : null, followUp });
@@ -73,8 +84,13 @@ export function useSendFlow(opts: SendFlowOptions): { send(): void; schedule(at:
         toast(t('Scheduled for {when}', { when: whenShort(local.day, local.time, me.timezone, lang) }));
       }
     } catch (err) {
-      setBox(null);
-      fail(codeOf(err));
+      const code = codeOf(err);
+      if (box && !ENDS_THE_BOX.has(code)) {
+        setBox((b) => (b ? { ...b, error: errorText(t, code, {}, { context: 'draft' }) } : b));
+      } else {
+        setBox(null);
+        fail(code);
+      }
     } finally {
       inFlight.current = false;
       setWorking(false);
@@ -95,7 +111,7 @@ export function useSendFlow(opts: SendFlowOptions): { send(): void; schedule(at:
         return;
       }
     }
-    if (o.lead?.open) setBox({ at, baseDay: localNow(me.timezone, at ?? new Date()).day });
+    if (o.lead?.open) setBox({ at, baseDay: localNow(me.timezone, at ?? new Date()).day, error: null });
     else await post(at, null);
   }
 
@@ -108,6 +124,7 @@ export function useSendFlow(opts: SendFlowOptions): { send(): void; schedule(at:
       baseDay: box.baseDay,
       sendAt: box.at ?? undefined,
       busy,
+      error: box.error,
       onSend: (followUp: SendFollowUp | null) => void post(box.at, followUp),
       onCancel: () => setBox(null),
     })

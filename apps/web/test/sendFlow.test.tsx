@@ -26,12 +26,20 @@ const DRAFT = { id: 7, subject: SUBJECT, leadId: 12 } as DraftView;
 type Call = { url: string; method: string; body: Record<string, unknown> | undefined };
 
 /** The API: send answers a queued send (Undo window for a send now), unsend the draft, or `unsendStatus` (409). */
-function stubApi(opts: { unsendStatus?: number; me?: Me; users?: UserSummary[] } = {}) {
+/**
+ * `sendAnswers`: answers for the first sends, in order (`{ status, error }` refuses, a promise holds the answer back);
+ * later sends are queued normally.
+ */
+function stubApi(opts: { unsendStatus?: number; me?: Me; users?: UserSummary[]; sendAnswers?: (({ status: number; error: string }) | Promise<void>)[] } = {}) {
+  const answers = [...(opts.sendAnswers ?? [])];
   const calls: Call[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
     calls.push({ url, method: init?.method ?? 'GET', body });
     if (url === '/api/mail/drafts/7/send') {
+      const answer = answers.shift();
+      if (answer instanceof Promise) await answer;
+      else if (answer) return Response.json({ error: answer.error }, { status: answer.status });
       const fu = body?.followUp as { date: string; time: string } | null;
       const result: SendResult = {
         id: 7,
@@ -345,6 +353,79 @@ describe('send flow (web-mail release 3)', () => {
     await u.type(within(box).getByLabelText('Time (24-hour)'), '16:00');
     expect(within(box).queryByText('Choose a follow-up time after the email is sent.')).toBeNull();
     expect(box.querySelector('.note.ok')).toHaveTextContent('Added to your Tasks · due Thu 26 Nov 2026, 16:00.');
+    expect(within(box).getByRole('button', { name: 'Send and add follow-up' })).toBeEnabled();
+  });
+
+  it('a refused send keeps the box open with what was entered and the reason; sending again works', async () => {
+    const u = userEvent.setup();
+    const api = stubApi({ sendAnswers: [{ status: 400, error: 'follow_up_time' }] });
+    mount();
+    await u.click(screen.getByRole('button', { name: 'Send' }));
+    const box = await screen.findByRole('dialog', { name: 'Set the next follow-up' });
+    await u.click(within(box).getByRole('radio', { name: /In 1 week/ }));
+    await u.selectOptions(within(box).getByLabelText('Assigned to'), 'Lakshita Singh');
+    await u.selectOptions(within(box).getByLabelText('Type'), 'Meeting');
+    await u.type(within(box).getByLabelText(/Note/), 'Bring the examples');
+    await u.click(within(box).getByRole('button', { name: 'Send and add follow-up' }));
+    expect(await within(box).findByRole('alert')).toHaveTextContent('Choose a follow-up time after the email is sent.');
+    expect(screen.getByRole('dialog', { name: 'Set the next follow-up' })).toBe(box);
+    expect(within(box).getByRole('radio', { name: /In 1 week/ })).toBeChecked();
+    expect(within(box).getByLabelText('Assigned to')).toHaveValue('3');
+    expect(within(box).getByLabelText('Type')).toHaveValue('meeting');
+    expect(within(box).getByLabelText(/Note/)).toHaveValue('Bring the examples');
+    expect(undoToast()).toBeNull();
+    await u.click(within(box).getByRole('button', { name: 'Send and add follow-up' }));
+    await waitFor(() => expect(undoToast()).not.toBeNull());
+    expect(api.sends()).toHaveLength(2);
+    expect(api.lastSend()).toMatchObject({ followUp: { date: '2026-12-03', assignedToId: 3, kind: 'meeting', note: 'Bring the examples' } });
+    expect(screen.queryByRole('dialog', { name: 'Set the next follow-up' })).toBeNull();
+  });
+
+  it('a passing failure keeps the box too; a draft gone closes it and says so', async () => {
+    const u = userEvent.setup();
+    stubApi({ sendAnswers: [{ status: 503, error: 'try_again' }, { status: 409, error: 'draft_gone' }] });
+    mount();
+    await u.click(screen.getByRole('button', { name: 'Send' }));
+    const box = await screen.findByRole('dialog', { name: 'Set the next follow-up' });
+    await u.click(within(box).getByRole('button', { name: 'Send and add follow-up' }));
+    expect(await within(box).findByRole('alert')).toHaveTextContent('The server is busy. Try again in a moment.');
+    await u.click(within(box).getByRole('button', { name: 'Send and add follow-up' }));
+    expect(await screen.findByText('This draft was removed in Outlook.')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Set the next follow-up' })).toBeNull();
+  });
+
+  it('while the send is being made, Cancel, Esc and the backdrop do not close the box', async () => {
+    const u = userEvent.setup();
+    let release!: () => void;
+    const held = new Promise<void>((r) => {
+      release = r;
+    });
+    stubApi({ sendAnswers: [held] });
+    mount();
+    await u.click(screen.getByRole('button', { name: 'Send' }));
+    const box = await screen.findByRole('dialog', { name: 'Set the next follow-up' });
+    await u.click(within(box).getByRole('button', { name: 'Send and add follow-up' }));
+    await waitFor(() => expect(within(box).getByRole('button', { name: 'Cancel' })).toBeDisabled());
+    await u.keyboard('{Escape}');
+    fireEvent.mouseDown(box.parentElement!);
+    expect(screen.getByRole('dialog', { name: 'Set the next follow-up' })).toBeInTheDocument();
+    release();
+    await waitFor(() => expect(undoToast()).not.toBeNull());
+    expect(screen.queryByRole('dialog', { name: 'Set the next follow-up' })).toBeNull();
+  });
+
+  it('an emptied task title says why Send and add follow-up is off', async () => {
+    const u = userEvent.setup();
+    stubApi();
+    mount();
+    await u.click(screen.getByRole('button', { name: 'Send' }));
+    const box = await screen.findByRole('dialog', { name: 'Set the next follow-up' });
+    await u.clear(within(box).getByLabelText('Task title'));
+    expect(within(box).getByText('Enter a title')).toBeInTheDocument();
+    expect(within(box).getByLabelText('Task title')).toHaveAttribute('aria-invalid', 'true');
+    expect(within(box).getByRole('button', { name: 'Send and add follow-up' })).toBeDisabled();
+    await u.type(within(box).getByLabelText('Task title'), 'Call back');
+    expect(within(box).queryByText('Enter a title')).toBeNull();
     expect(within(box).getByRole('button', { name: 'Send and add follow-up' })).toBeEnabled();
   });
 });

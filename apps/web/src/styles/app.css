@@ -1277,6 +1277,6 @@ select.in.pj-locked:disabled{opacity:1;color:var(--text);-webkit-text-fill-color
 .wm-send .utoast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--ink);color:#fff;border-radius:10px;box-shadow:0 12px 34px rgba(31,2,73,.35);padding:10px 10px 10px 16px;display:flex;align-items:center;gap:14px;font-size:13px;z-index:80;min-width:320px;max-width:calc(100vw - 32px);overflow:hidden}
 .wm-send .utoast .ico{width:16px;height:16px;color:var(--peach)}
 .wm-send .utoast .grow{flex:1}
-.wm-send .utoast button{height:30px;padding:0 14px;border-radius:7px;border:1px solid #5A2BB0;background:#3A1A78;color:#fff;font-weight:700;font-size:12.5px}
-.wm-send .utoast button:hover:not(:disabled){background:#5A2BB0}
+.wm-send .utoast button{height:30px;padding:0 14px;border-radius:7px;border:1px solid var(--purple-2);background:var(--nav-on);color:#fff;font-weight:700;font-size:12.5px}
+.wm-send .utoast button:hover:not(:disabled){background:var(--purple)}
 .wm-send .utoast .prog{position:absolute;left:0;bottom:0;height:3px;background:var(--peach);width:100%}

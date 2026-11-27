@@ -45,7 +45,7 @@ const KINDS: { kind: TaskKind; label: (t: TFn) => string }[] = [
  * and whether the lead's next follow-up moves too. A chosen time not after `sendAt` (default: the end of the Undo
  * window) is refused. `onSend(followUp)` sends with it, `onSend(null)` without.
  */
-export function FollowUpDialog({ lead, who, subject, baseDay, sendAt, busy = false, onSend, onCancel }: {
+export function FollowUpDialog({ lead, who, subject, baseDay, sendAt, busy = false, error = null, onSend, onCancel }: {
   lead: { number: string; company: string; status: string };
   who: string;
   subject: string;
@@ -53,7 +53,10 @@ export function FollowUpDialog({ lead, who, subject, baseDay, sendAt, busy = fal
   baseDay: string;
   /** When the mail leaves: a scheduled send's time; a send now leaves at the end of the Undo window. */
   sendAt?: Date;
+  /** While the send is being made: nothing closes the box (the send would go on after a Cancel). */
   busy?: boolean;
+  /** Why the last send was refused (already in the user's words): shown in the box, which keeps what was entered. */
+  error?: string | null;
   onSend(followUp: SendFollowUp | null): void;
   onCancel(): void;
 }) {
@@ -63,7 +66,10 @@ export function FollowUpDialog({ lead, who, subject, baseDay, sendAt, busy = fal
   const { data: users } = useUsers();
   const ref = useRef<HTMLDivElement>(null);
   const id = useId();
-  useDialogFocus(ref, onCancel, 'input[type="radio"]:checked');
+  const cancel = () => {
+    if (!busy) onCancel();
+  };
+  useDialogFocus(ref, cancel, 'input[type="radio"]:checked');
 
   const choices = sendFollowUpChoices(baseDay);
   const fallback = choices.find((c) => c.key === DEFAULT_SEND_FOLLOW_UP)!;
@@ -109,7 +115,7 @@ export function FollowUpDialog({ lead, who, subject, baseDay, sendAt, busy = fal
     <div
       className="modal-bg wm-send"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onCancel();
+        if (e.target === e.currentTarget) cancel();
       }}
     >
       <div ref={ref} className="modal fu" role="dialog" aria-modal="true" aria-labelledby={f('title')}>
@@ -160,7 +166,16 @@ export function FollowUpDialog({ lead, who, subject, baseDay, sendAt, busy = fal
         <div className="fu-hint">{t('Working days skip Saturday and Sunday. Times are 24-hour.')}</div>
         <div>
           <label className="lbl" htmlFor={f('task')}>{t('Task title')}</label>
-          <input id={f('task')} className="in" value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} />
+          <input
+            id={f('task')}
+            className={title.trim() ? 'in' : 'in err'}
+            value={title}
+            maxLength={200}
+            aria-invalid={!title.trim()}
+            aria-describedby={title.trim() ? undefined : f('task-err')}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          {title.trim() ? null : <div id={f('task-err')} className="err-msg">{t('Enter a title')}</div>}
         </div>
         <div className="grid3">
           <div>
@@ -199,6 +214,7 @@ export function FollowUpDialog({ lead, who, subject, baseDay, sendAt, busy = fal
           <input type="checkbox" checked={updateLead} onChange={(e) => setUpdateLead(e.target.checked)} />
           {t("Also update the lead's next follow-up")}
         </label>
+        {error ? <div className="note danger" role="alert">{error}</div> : null}
         {tooEarly ? (
           <div className="note danger" role="alert">{errorText(t, 'follow_up_time')}</div>
         ) : when ? (
@@ -208,7 +224,7 @@ export function FollowUpDialog({ lead, who, subject, baseDay, sendAt, busy = fal
         ) : null}
         <div className="actions">
           <button type="button" className="linkbtn" disabled={busy} onClick={() => onSend(null)}>{t('Send without follow-up')}</button>
-          <button type="button" className="btn" onClick={onCancel}>{t('Cancel')}</button>
+          <button type="button" className="btn" disabled={busy} onClick={cancel}>{t('Cancel')}</button>
           <button type="button" className="btn primary" disabled={!canSend} onClick={send}>
             <span className="ico">{Icons.send}</span>
             {t('Send and add follow-up')}
