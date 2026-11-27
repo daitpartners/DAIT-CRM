@@ -7,7 +7,7 @@ import type { SendFlowLead } from '../../../components/send/useSendFlow';
 import { useToast } from '../../../components/Toast';
 import { errorText } from '../../../i18n/labels';
 import { useT, type TFn } from '../../../i18n/useT';
-import { DraftComposer, type SentInfo } from './DraftComposer';
+import { DraftComposer, type ComposerGuard, type SentInfo } from './DraftComposer';
 
 export type ReplyKind = 'reply' | 'replyAll' | 'forward';
 
@@ -50,7 +50,7 @@ type Props = {
   /** The slot shows the sent note (true) or the editor (false). */
   onSent?(sent: boolean): void;
   /** The open composer's guarded close, for the screen to call before replacing it (see DraftComposer). */
-  guard?: MutableRefObject<(() => Promise<boolean>) | null>;
+  guard?: MutableRefObject<ComposerGuard | null>;
 };
 
 /**

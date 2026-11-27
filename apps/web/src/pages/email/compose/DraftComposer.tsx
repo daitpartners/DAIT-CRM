@@ -26,6 +26,13 @@ import { RecipientField } from './RecipientField';
 /** What a send left for the screen: the queued send, and who it went to (the first To recipient's name). */
 export type SentInfo = { result: SendResult; to: string };
 
+/**
+ * The open composer's guarded close, for the screen: calling it saves what the editor holds and answers true, or shows
+ * why the save failed and answers false (see `release`); `pending()` says whether leaving now could lose anything (a
+ * change not saved yet, a save under way, or a failed save shown).
+ */
+export type ComposerGuard = { (): Promise<boolean>; pending(): boolean };
+
 /** What the full page asks of its composer (the Lead and Project rows, the template bar). */
 export type ComposerControl = {
   /** Saves what the editor holds now (useAutoSave's flush). */
@@ -63,7 +70,7 @@ type Props = {
    * Continue editing). It saves what the editor holds and answers true, or shows why the save failed and answers false
    * (the screen then keeps the editor where it is).
    */
-  guard?: MutableRefObject<(() => Promise<boolean>) | null>;
+  guard?: MutableRefObject<ComposerGuard | null>;
   /** The page's rows before To (From). */
   before?: ReactNode;
   /** The lead chosen on the page (its Lead picker); the draft's own when not given. */
@@ -357,9 +364,11 @@ export function DraftComposer({
   }
   const releaseRef = useRef(release);
   releaseRef.current = release;
+  const unsaved = useRef<() => boolean>(() => false);
+  unsaved.current = () => !closed.current && (auto.pending() || auto.saving || (problem ?? auto.error) !== null);
   useEffect(() => {
     if (!guard) return;
-    const fn = () => releaseRef.current();
+    const fn: ComposerGuard = Object.assign(() => releaseRef.current(), { pending: () => unsaved.current() });
     guard.current = fn;
     return () => {
       if (guard.current === fn) guard.current = null;

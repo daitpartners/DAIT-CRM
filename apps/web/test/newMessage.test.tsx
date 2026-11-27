@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { Link, MemoryRouter, Outlet, Route, RouterProvider, Routes, createMemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import type { DraftView, SendResult } from '../src/api/drafts';
 import type { LeadSummary } from '../src/api/leads';
 import type { LeadPanel, MailMeta } from '../src/api/mail';
@@ -72,11 +72,12 @@ const made = (n: number, body: Record<string, unknown>): DraftView => draftView(
   leadId: (body.leadId as number | undefined) ?? null, projectId: (body.projectId as number | undefined) ?? null, lead: body.leadId ? PANEL : null,
 });
 
-function stub(opts: { drafts?: Record<number, DraftView>; saveErrors?: string[]; createError?: string } = {}) {
+function stub(opts: { drafts?: Record<number, DraftView>; saveErrors?: string[]; createError?: string; openError?: { status: number; code: string } } = {}) {
   const api = draftApi({ made, drafts: opts.drafts });
   const saveErrors = [...(opts.saveErrors ?? [])];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
+    if (opts.openError && /^\/api\/mail\/drafts\/\d+$/.test(url) && method === 'GET') return Response.json({ error: opts.openError.code }, { status: opts.openError.status });
     if (opts.createError && url === '/api/mail/drafts' && method === 'POST') return Response.json({ error: opts.createError }, { status: 409 });
     if (method === 'PATCH' && saveErrors.length && /^\/api\/mail\/drafts\/\d+$/.test(url)) {
       api.calls.push({ url, method, body: JSON.parse(String(init!.body)) });
@@ -156,6 +157,47 @@ function show(entries: string[]) {
       </I18nProvider>
     </QueryClientProvider>,
   );
+}
+
+/** The app's own kind of router (a data router, as createBrowserRouter), with a sidebar link outside the Email screen. */
+function showApp(entries: string[]) {
+  // The data router builds a Request with jsdom's AbortSignal, which Node's Request refuses: drop the signal in tests.
+  const NodeRequest = globalThis.Request;
+  vi.stubGlobal('Request', class extends NodeRequest {
+    constructor(input: RequestInfo | URL, init: RequestInit = {}) {
+      const { signal: _signal, ...rest } = init;
+      super(input, rest);
+    }
+  });
+  const router = createMemoryRouter([{
+    element: (
+      <>
+        <nav><Link to="/leads">Sidebar Leads</Link></nav>
+        <Outlet />
+        <Where />
+      </>
+    ),
+    children: [
+      { path: '/email', element: <EmailPage /> },
+      { path: '/email/new', element: <EmailPage /> },
+      { path: '/email/:id', element: <EmailPage /> },
+      { path: '/leads', element: <p>Leads page</p> },
+    ],
+  }], { initialEntries: entries, initialIndex: entries.length - 1 });
+  render(
+    <QueryClientProvider client={makeClient(me)}>
+      <I18nProvider>
+        <ToastProvider>
+          <ConfirmProvider>
+            <UndoSendProvider>
+              <RouterProvider router={router} />
+            </UndoSendProvider>
+          </ConfirmProvider>
+        </ToastProvider>
+      </I18nProvider>
+    </QueryClientProvider>,
+  );
+  return router;
 }
 
 const page = () => screen.findByRole('region', { name: 'New message' });
@@ -377,6 +419,76 @@ describe('Full-page New message (web-mail release 3, state 3)', () => {
     await user.click(within(f).getByRole('button', { name: 'Discard' }));
     await waitFor(() => expect(where()).toBe('/email?folder=drafts'));
     expect(api.of('/api/mail/drafts/50', 'DELETE')).toHaveLength(1);
+  });
+
+  it('Discard on a page opened directly (the tab\'s first entry) goes to the inbox, not out of the CRM', async () => {
+    const user = userEvent.setup();
+    const api = stub();
+    show(['/email/new']);
+    const f = await form();
+    await waitFor(() => expect(where()).toBe('/email/new?draft=50'));
+    await user.click(within(f).getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(where()).toBe('/email'));
+    expect(api.of('/api/mail/drafts/50', 'DELETE')).toHaveLength(1);
+  });
+
+  it("another user's draft id (403 view_only) says so, not that the draft is gone", async () => {
+    stub({ openError: { status: 403, code: 'view_only' } });
+    show(['/email/new?draft=77']);
+    expect(await screen.findByText('View only: only the mailbox owner can do this.')).toBeInTheDocument();
+    expect(screen.queryByText('This draft no longer exists. It may have been sent or deleted.')).toBeNull();
+    await waitFor(() => expect(where()).toBe('/email'));
+  });
+
+  it('the sidebar while a change is unsaved: the draft is saved first, then the page goes', async () => {
+    const user = userEvent.setup();
+    const api = stub();
+    showApp(['/email', '/email/new']);
+    const f = await form();
+    await waitFor(() => expect(where()).toBe('/email/new?draft=50'));
+    await user.type(within(f).getByRole('textbox', { name: 'Subject' }), 'Kept');
+    await user.click(screen.getByRole('link', { name: 'Sidebar Leads' }));
+    await waitFor(() => expect(where()).toBe('/leads'));
+    expect(api.of('/api/mail/drafts/50', 'PATCH')).toHaveLength(1);
+    expect(api.of('/api/mail/drafts/50', 'PATCH')[0]!.body).toMatchObject({ subject: 'Kept' });
+    expect(api.of('/api/mail/drafts/50', 'DELETE')).toHaveLength(0);
+  });
+
+  it('the sidebar with a failed save keeps the page and says why; Close without saving then goes', async () => {
+    const user = userEvent.setup();
+    stub({ saveErrors: ['mailbox_changed', 'mailbox_changed'] });
+    showApp(['/email', '/email/new']);
+    const f = await form();
+    await waitFor(() => expect(where()).toBe('/email/new?draft=50'));
+    await user.type(within(f).getByRole('textbox', { name: 'Subject' }), 'Not lost');
+    await user.click(screen.getByRole('link', { name: 'Sidebar Leads' }));
+    expect(await within(f).findByRole('alert')).toHaveTextContent('This draft is in a mailbox that is no longer connected. Open it in Outlook.');
+    expect(where()).toBe('/email/new?draft=50');
+    expect(within(f).getByRole('textbox', { name: 'Subject' })).toHaveValue('Not lost');
+    await user.click(within(f).getByRole('button', { name: 'Close without saving' }));
+    await waitFor(() => expect(where()).toBe('/leads'));
+  });
+
+  it('browser Back while a change is unsaved saves first; with nothing unsaved it goes at once', async () => {
+    const user = userEvent.setup();
+    const api = stub();
+    const router = showApp(['/email', '/email/new']);
+    const f = await form();
+    await waitFor(() => expect(where()).toBe('/email/new?draft=50'));
+    await user.type(within(f).getByRole('textbox', { name: 'Subject' }), 'Back');
+    await act(async () => {
+      await router.navigate(-1);
+    });
+    await waitFor(() => expect(where()).toBe('/email'));
+    expect(api.of('/api/mail/drafts/50', 'PATCH')[0]!.body).toMatchObject({ subject: 'Back' });
+    // A new message left untouched: nothing to save, it goes straight away and the empty draft is discarded.
+    await user.click(await screen.findByRole('button', { name: 'New mail' }));
+    await form();
+    await waitFor(() => expect(where()).toBe('/email/new?draft=51'));
+    await user.click(screen.getByRole('link', { name: 'Sidebar Leads' }));
+    await waitFor(() => expect(where()).toBe('/leads'));
+    expect(api.of('/api/mail/drafts/51', 'PATCH')).toHaveLength(0);
+    await waitFor(() => expect(api.of('/api/mail/drafts/51', 'DELETE')).toHaveLength(1));
   });
 
   it('?draft= opens an existing draft (Pop out, Continue editing) without making one', async () => {

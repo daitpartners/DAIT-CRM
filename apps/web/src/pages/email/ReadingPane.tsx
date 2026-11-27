@@ -8,6 +8,7 @@ import { useT } from '../../i18n/useT';
 import { InlineReply, type ReplyKind } from './compose/InlineReply';
 import { ConversationMessage } from './ConversationMessage';
 import type { CommandId, MailTarget, useMailCommands } from './useMailCommands';
+import type { ComposerGuard } from './compose/DraftComposer';
 
 type Commands = ReturnType<typeof useMailCommands>;
 type ThreadEntry = MailDetail['thread'][number];
@@ -26,7 +27,7 @@ type Props = {
   /** The slot now shows the sent note (true) or the editor again (false, after Undo). */
   onSent?: (sent: boolean) => void;
   /** The open composer's guarded close (see DraftComposer), set while it is open. */
-  guard?: MutableRefObject<(() => Promise<boolean>) | null>;
+  guard?: MutableRefObject<ComposerGuard | null>;
 };
 
 /**

@@ -12,6 +12,8 @@ import { MessageList } from './MessageList';
 import { ReadingPane, type Composing } from './ReadingPane';
 import { CommandBar } from './CommandBar';
 import { NewMessagePage, newMessageHref } from './compose/NewMessagePage';
+import type { ComposerGuard } from './compose/DraftComposer';
+import { LeaveGuard } from './compose/LeaveGuard';
 import { rowTarget, selectionTarget, useMailCommands, type MailTarget } from './useMailCommands';
 
 const num = (v: string | null) => (v && /^\d+$/.test(v) ? Number(v) : undefined);
@@ -82,7 +84,7 @@ export function EmailPage() {
   /** Each editor asked for gets its own number: a Reply after a send opens a fresh one. */
   const seq = useRef(0);
   /** The open composer's guarded close (DraftComposer): saves, or keeps the editor and says why. */
-  const guard = useRef<(() => Promise<boolean>) | null>(null);
+  const guard = useRef<ComposerGuard | null>(null);
   /** Runs `then` once the open editor (if any) has saved what it holds; a failed save keeps everything where it is. */
   const afterSave = (then: () => void) => {
     const release = guard.current;
@@ -315,6 +317,7 @@ export function EmailPage() {
       )}
 
       {commands.dialog}
+      <LeaveGuard guard={guard} />
     </div>
   );
 }

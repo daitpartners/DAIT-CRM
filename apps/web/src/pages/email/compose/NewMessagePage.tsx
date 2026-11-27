@@ -11,10 +11,12 @@ import { useToast } from '../../../components/Toast';
 import { errorText } from '../../../i18n/labels';
 import { useT } from '../../../i18n/useT';
 import { ComposeLeadSummary } from './ComposeLeadSummary';
-import { DraftComposer, type ComposerControl } from './DraftComposer';
+import { DraftComposer, type ComposerControl, type ComposerGuard } from './DraftComposer';
 import { draftKindOf } from './InlineReply';
 import { LeadPicker, type PickedLead } from './LeadPicker';
 
+/** Codes saying the draft is no longer there to open. */
+const GONE = new Set(['not_found', 'draft_gone', 'not_draft']);
 const num = (v: string | null) => (v && /^\d+$/.test(v) ? Number(v) : undefined);
 
 /** What the New message page opens with: a draft to go on with, or a new one's lead, client, project and template. */
@@ -31,7 +33,7 @@ export function newMessageHref(s: NewMessageStart = {}): string {
   return `/email/new${text ? `?${text}` : ''}`;
 }
 
-type Guard = MutableRefObject<(() => Promise<boolean>) | null>;
+type Guard = MutableRefObject<ComposerGuard | null>;
 
 /**
  * The full-page New message (web-mail release 3, mockup state 3) at `/email/new`: the crumb `Email / New message` and
@@ -61,7 +63,13 @@ export function NewMessagePage({ guard }: { guard: Guard }) {
   const mounted = useRef(true);
   const discardMutate = useRef(discard.mutate);
   discardMutate.current = discard.mutate;
-  const { data: draft, isError } = useDraft(draftId ?? null);
+  const { data: draft, error } = useDraft(draftId ?? null);
+  /**
+   * Whether the page was the first entry of this tab's history (a bookmark, a typed address, a new tab), read before
+   * its own replace to `?draft=` gives the entry a new key. The browser router's own index says it best; a memory
+   * router (tests) has only the key.
+   */
+  const firstEntry = useRef(location.key === 'default');
 
   useEffect(() => {
     mounted.current = true;
@@ -72,7 +80,9 @@ export function NewMessagePage({ guard }: { guard: Guard }) {
 
   /** Back where the user came from (the Email screen when the page was opened directly). */
   const leave = () => {
-    if (location.key !== 'default') navigate(-1);
+    const idx = (window.history.state as { idx?: unknown } | null)?.idx;
+    const canGoBack = typeof idx === 'number' ? idx > 0 : !firstEntry.current;
+    if (canGoBack) navigate(-1);
     else navigate('/email', { replace: true });
   };
 
@@ -100,11 +110,13 @@ export function NewMessagePage({ guard }: { guard: Guard }) {
     // Once per page.
   }, [draftId]);
 
+  // A draft that cannot be opened: gone (sent or deleted), or not the user's own (another user's draft id).
   useEffect(() => {
-    if (!isError) return;
-    toast(t('This draft no longer exists. It may have been sent or deleted.'), 'warn');
+    if (!error) return;
+    const code = error instanceof ApiError ? error.code : 'try_again';
+    toast(GONE.has(code) ? t('This draft no longer exists. It may have been sent or deleted.') : errorText(t, code, {}, { context: 'draft' }), 'warn');
     navigate('/email', { replace: true });
-  }, [isError]);
+  }, [error]);
 
   const created = draft !== undefined && draft.id === made;
   return (

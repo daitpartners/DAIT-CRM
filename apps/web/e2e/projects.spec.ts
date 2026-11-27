@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { expect, test } from '@playwright/test';
-import { ARJUN, signInAs } from './fixtures';
+import { ARJUN, NEHA, signInAs } from './fixtures';
 import { captureParity } from './parity/_shared';
 
 const DB = process.env.E2E_DATABASE_URL ?? 'postgresql://mac@localhost:5432/dait_crm_e2e';
@@ -156,5 +156,19 @@ test('Convert an accepted quotation: the project at net value, on the list, the 
   await tabRow.getByRole('link', { name: 'Email' }).click();
   await expect(page).toHaveURL(new RegExp(`/email/new\\?company=${lead.companyId}&lead=${lead.id}&project=${project.id}$`));
   await expect(page.getByRole('region', { name: 'New message' }).getByRole('alert')).toContainText('Connect your Microsoft 365 mailbox');
+
+  // With a mailbox (Neha, Manager): the same Email button makes the draft with the lead and the project, To the
+  // lead's contact, and the page shows them; Discard goes back to the company's Projects tab.
+  await signInAs(page, NEHA);
+  await page.goto(`/companies/${lead.companyId}#projects`);
+  await page.getByRole('row').filter({ hasText: `${project.number} · ${q.number}` }).getByRole('link', { name: 'Email' }).click();
+  const compose = page.getByRole('form', { name: 'New message' });
+  await expect(compose).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/email/new\\?draft=\\d+&company=${lead.companyId}$`));
+  await expect(compose.locator('.leadpick')).toContainText(`${lead.number} · ${company}`);
+  await expect(compose.getByLabel('Project')).toHaveValue(String(project.id));
+  await expect(page.getByRole('complementary', { name: 'Chosen lead' })).toContainText(lead.number);
   await captureParity(page, 'compose-project');
+  await compose.getByRole('button', { name: 'Discard' }).click();
+  await expect(page).toHaveURL(new RegExp(`/companies/${lead.companyId}`));
 });

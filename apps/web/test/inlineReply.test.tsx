@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { Link, MemoryRouter, Outlet, Route, RouterProvider, Routes, createMemoryRouter, useLocation } from 'react-router-dom';
 import type { DraftView, SendResult } from '../src/api/drafts';
 import type { MailDetail, MailItem, MailMeta } from '../src/api/mail';
 import type { Me } from '../src/api/queries';
@@ -129,6 +129,46 @@ function show(path = '/email/1', user: Me = me) {
       </I18nProvider>
     </QueryClientProvider>,
   );
+}
+
+/** The app's own kind of router (a data router, as createBrowserRouter), with a sidebar link outside the Email screen. */
+function showApp(path = '/email/1') {
+  // The data router builds a Request with jsdom's AbortSignal, which Node's Request refuses: drop the signal in tests.
+  const NodeRequest = globalThis.Request;
+  vi.stubGlobal('Request', class extends NodeRequest {
+    constructor(input: RequestInfo | URL, init: RequestInit = {}) {
+      const { signal: _signal, ...rest } = init;
+      super(input, rest);
+    }
+  });
+  const router = createMemoryRouter([{
+    element: (
+      <>
+        <nav><Link to="/leads">Sidebar Leads</Link></nav>
+        <Outlet />
+        <Where />
+      </>
+    ),
+    children: [
+      { path: '/email', element: <EmailPage /> },
+      { path: '/email/:id', element: <EmailPage /> },
+      { path: '/leads', element: <p>Leads page</p> },
+    ],
+  }], { initialEntries: [path] });
+  render(
+    <QueryClientProvider client={makeClient(me)}>
+      <I18nProvider>
+        <ToastProvider>
+          <ConfirmProvider>
+            <UndoSendProvider>
+              <RouterProvider router={router} />
+            </UndoSendProvider>
+          </ConfirmProvider>
+        </ToastProvider>
+      </I18nProvider>
+    </QueryClientProvider>,
+  );
+  return router;
 }
 
 const pane = () => screen.findByRole('region', { name: 'Reading pane' });
@@ -385,6 +425,31 @@ describe('Inline Reply, Reply all and Forward (web-mail release 3, state 2)', ()
     await user.click(within(await within(form).findByRole('alert')).getByRole('button', { name: 'Close without saving' }));
     await screen.findByRole('form', { name: 'Forward' });
     expect(api.of('/api/mail/drafts').map((c) => c.body)).toEqual([{ kind: 'reply', replyToId: 1 }, { kind: 'forward', replyToId: 1 }]);
+  });
+
+  it('leaving the Email screen by the sidebar with an unsaved reply saves it first, then goes', async () => {
+    const user = userEvent.setup();
+    const api = stub();
+    showApp();
+    const form = await openReply(user);
+    await typeMessage(form, '<p>Saved on the way out</p>');
+    await user.click(screen.getByRole('link', { name: 'Sidebar Leads' }));
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/leads'));
+    expect(api.of('/api/mail/drafts/50', 'PATCH')).toHaveLength(1);
+    expect(api.of('/api/mail/drafts/50', 'PATCH')[0]!.body!.bodyHtml).toContain('Saved on the way out');
+  });
+
+  it('leaving by the sidebar with a failed save keeps the reply and says why; Close without saving then goes', async () => {
+    const user = userEvent.setup();
+    stub({ saveErrors: ['mailbox_changed', 'mailbox_changed'] });
+    showApp();
+    const form = await openReply(user);
+    await typeMessage(form, '<p>Not lost</p>');
+    await user.click(screen.getByRole('link', { name: 'Sidebar Leads' }));
+    expect(await within(form).findByRole('alert')).toHaveTextContent('This draft is in a mailbox that is no longer connected. Open it in Outlook.');
+    expect(screen.getByTestId('where')).toHaveTextContent('/email/1');
+    await user.click(within(form).getByRole('button', { name: 'Close without saving' }));
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/leads'));
   });
 
   it('draftKindOf: forward prefixes in English, Spanish and French Outlook; reply all by recipients', () => {
