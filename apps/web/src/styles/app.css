@@ -1208,3 +1208,26 @@ select.in.pj-locked:disabled{opacity:1;color:var(--text);-webkit-text-fill-color
 .msg-link .err-msg{flex-basis:100%;margin-top:0}
 .in.msg-frame{display:block;height:200px;padding:0;resize:vertical;overflow:auto}.in.msg-frame:focus-within{outline:2px solid var(--purple);outline-offset:1px;border-color:var(--purple)}
 .mprev .msg-frame{height:190px;border-color:var(--line)}
+/* Web-mail release 3: the mail editor (MessageEditor toolbar="mail"), the mockup's .tbar / .tb / .rbody. */
+.wm .msg-editor.mail{display:flex;flex-direction:column;min-width:0}
+.wm .tbar{display:flex;align-items:center;gap:1px;padding:5px 8px;border-top:1px solid var(--line-2);border-bottom:1px solid var(--line-2);background:#FCFBFE;flex-wrap:wrap}
+.wm .tbar select{height:26px;border:1px solid var(--line);border-radius:6px;background:var(--surface);font-size:12px;padding:0 4px;margin-right:2px}
+.wm .tb{width:28px;height:28px;border:0;border-radius:6px;background:none;color:var(--body);display:inline-flex;align-items:center;justify-content:center;padding:0;font-size:13px;flex:0 0 auto}
+.wm .tb:hover:not(:disabled){background:var(--tint);color:var(--purple)}
+.wm .tb:disabled{opacity:.45;cursor:default}
+.wm .tb .ico{width:15px;height:15px}
+.wm .tb.wide{width:auto;padding:0 7px;gap:5px;font-size:12px;font-weight:600}
+.wm .tb-sep{width:1px;height:18px;background:var(--line);margin:0 4px;flex:0 0 auto}
+.wm .tb .clr{display:block;width:14px;height:3px;border-radius:1px;margin-top:1px}
+.wm .tb-a{display:flex;flex-direction:column;align-items:center;line-height:1;font-weight:700}
+.wm .tb-a .ico.mk{width:13px;height:13px}
+.wm .tb-i{font-family:Georgia,serif}
+.wm .tb-pop{position:relative;display:inline-flex}
+.wm .tb-pal{position:absolute;top:calc(100% + 4px);left:50%;transform:translateX(-50%);z-index:60;display:grid;grid-template-columns:repeat(4,22px);gap:6px;padding:8px;background:var(--surface);border:1px solid var(--field);border-radius:8px;box-shadow:0 10px 28px rgba(31,2,73,.16)}
+.wm .tb-pal.hl{grid-template-columns:repeat(5,22px)}
+.wm .tb-sw{width:22px;height:22px;border:1px solid var(--line);border-radius:5px;padding:0}
+.wm .tb-sw:hover,.wm .tb-sw:focus-visible{outline:2px solid var(--purple);outline-offset:1px}
+.wm .tb-sw.none{background:linear-gradient(135deg,transparent 44%,#C62828 44%,#C62828 56%,transparent 56%),var(--surface)}
+.wm .msg-editor.mail .msg-link{padding:6px 12px 0;margin-bottom:0}
+.wm iframe.rbody{display:block;width:100%;height:240px;min-height:120px;border:0;padding:0;background:#fff;resize:vertical}
+.wm iframe.rbody.err{box-shadow:inset 0 0 0 1px var(--bad-fg)}

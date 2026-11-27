@@ -118,3 +118,79 @@ export function editorText(root: Node): string {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
+
+/** Font sizes the mail toolbar offers, in points. */
+export type MailFontSize = 11 | 12 | 14;
+
+/**
+ * The mail toolbar's Size: the browser's `fontSize` command only knows the HTML sizes 1–7, so the selection is set to
+ * 7 and every element that produced (`<font size="7">`, or a span styled `xxx-large` where the browser writes CSS)
+ * becomes the chosen size in points, as Outlook writes it.
+ */
+export function applyFontSize(doc: Document, pt: MailFontSize): void {
+  doc.execCommand?.('styleWithCSS', false, 'false');
+  doc.execCommand?.('fontSize', false, '7');
+  const sized: Element[] = [];
+  for (const font of Array.from(doc.body.querySelectorAll('font[size="7"]'))) {
+    const span = doc.createElement('span');
+    span.setAttribute('style', `font-size:${pt}pt`);
+    while (font.firstChild) span.appendChild(font.firstChild);
+    font.replaceWith(span);
+    sized.push(span);
+  }
+  for (const span of Array.from(doc.body.querySelectorAll<HTMLElement>('span[style]'))) {
+    if (/xxx-large/.test(span.style.fontSize)) {
+      span.style.fontSize = `${pt}pt`;
+      sized.push(span);
+    }
+  }
+  // The replaced elements took the selection with them: the resized text is selected again, for the next command.
+  const sel = doc.getSelection?.();
+  if (!sel || sized.length === 0) return;
+  sized.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+  const range = doc.createRange();
+  range.setStartBefore(sized[0]);
+  range.setEndAfter(sized[sized.length - 1]);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+/** HTML parsed inert (a template element runs nothing and loads no pictures), changed by `edit`, and written back. */
+function rewrite(html: string, edit: (root: DocumentFragment) => void): string {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  edit(tpl.content);
+  return tpl.innerHTML;
+}
+
+/**
+ * The editor's HTML as it is sent: a picture inserted in the editor shows from its data (`<img data-cid="x"
+ * src="data:…">`) and is sent as the draft's inline picture it was uploaded as (`<img src="cid:x">`).
+ */
+export function toSendHtml(html: string): string {
+  if (!html.includes('data-cid')) return html;
+  return rewrite(html, (root) => {
+    for (const img of Array.from(root.querySelectorAll('img[data-cid]'))) {
+      if (!/^data:/i.test(img.getAttribute('src') ?? '')) continue;
+      const cid = img.getAttribute('data-cid') ?? '';
+      img.removeAttribute('data-cid');
+      img.setAttribute('src', `cid:${cid}`);
+    }
+  });
+}
+
+/** A draft's HTML opened in the editor: each `cid:` picture of one of the draft's files shows from that file's data. */
+export function toEditorHtml(html: string, files: { contentId: string | null; dataUrl: string | null }[]): string {
+  const data = new Map<string, string>();
+  for (const f of files) if (f.contentId && f.dataUrl && /^data:image\//i.test(f.dataUrl)) data.set(f.contentId, f.dataUrl);
+  if (data.size === 0 || !/cid:/i.test(html)) return html;
+  return rewrite(html, (root) => {
+    for (const img of Array.from(root.querySelectorAll('img[src]'))) {
+      const m = /^cid:(.+)$/i.exec(img.getAttribute('src') ?? '');
+      const url = m ? data.get(m[1]) : undefined;
+      if (!m || !url) continue;
+      img.setAttribute('src', url);
+      img.setAttribute('data-cid', m[1]);
+    }
+  });
+}

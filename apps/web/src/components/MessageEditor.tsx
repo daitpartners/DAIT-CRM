@@ -1,11 +1,27 @@
 import { useEffect, useRef, useState, type ReactNode, type TextareaHTMLAttributes } from 'react';
 import { useT } from '../i18n/useT';
-import { cleanPastedHtml, editorText, safeLinkUrl, textToEditorHtml } from '../lib/richText';
+import { applyFontSize, cleanPastedHtml, editorText, safeLinkUrl, textToEditorHtml, type MailFontSize } from '../lib/richText';
+import { Icons } from './Icons';
 
 /** A message body: plain text (`html` null, sent as today) or formatted (its HTML, and the text derived from it). */
 export type MessageValue = { text: string; html: string | null };
 
-type Command = 'bold' | 'italic' | 'insertUnorderedList' | 'insertOrderedList';
+type Command = 'bold' | 'italic' | 'insertUnorderedList' | 'insertOrderedList' | 'underline' | 'indent' | 'outdent';
+type StyleCommand = Command | 'fontName' | 'foreColor' | 'hiliteColor';
+/** Mail toolbar commands the browser writes as CSS (a span's style), as Outlook does; the rest keep their tags. */
+const CSS_COMMANDS = new Set<StyleCommand>(['fontName', 'foreColor', 'hiliteColor', 'underline', 'indent', 'outdent']);
+
+/** The mail toolbar's fonts: the name shown, and the family written (with fallbacks for a reader without the font). */
+const MAIL_FONTS: [string, string][] = [
+  ['Aptos', 'Aptos, Calibri, sans-serif'],
+  ['Arial', 'Arial, Helvetica, sans-serif'],
+  ['Calibri', 'Calibri, Carlito, sans-serif'],
+  ['Georgia', 'Georgia, serif'],
+  ['Montserrat', 'Montserrat, Arial, sans-serif'],
+];
+const MAIL_SIZES: MailFontSize[] = [11, 12, 14];
+/** A picture the composer hands back: a data:image address of a picture type the server takes. */
+const PICTURE_DATA = /^data:image\/(png|jpeg|gif);base64,[A-Za-z0-9+/=]+$/i;
 
 /** The browser's editing commands on the frame's document (absent where there is no editing, e.g. jsdom). */
 const exec = (d: Document, cmd: string, arg?: string) => d.execCommand?.(cmd, false, arg);
@@ -26,6 +42,17 @@ const FRAME_STYLE =
   'html{color-scheme:light}body{margin:0;padding:10px 12px;font:13.5px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;'
   + 'color:#1F1533;background:#fff;overflow-wrap:anywhere;min-height:calc(100% - 20px);outline:none}p{margin:0 0 .6em}'
   + 'img{max-width:100%;height:auto}a{color:#6811CF}ul,ol{margin:0 0 .6em;padding-left:1.6em}';
+/**
+ * The mail editor's look: the message as web mail writes it (the mockup's .rbody), not the CRM's field text; the
+ * signature block as the mockup's .sig (these rules live in the frame only: what is sent carries the signature's own
+ * formatting).
+ */
+const MAIL_FRAME_STYLE =
+  'html{color-scheme:light}body{margin:0;padding:12px 14px 6px;font:14px/1.55 Aptos, Calibri, "Segoe UI", Arial, sans-serif;'
+  + 'color:#1F1533;background:#fff;overflow-wrap:anywhere;min-height:calc(100% - 18px);outline:none}p{margin:0 0 10px}'
+  + 'img{max-width:100%;height:auto}a{color:#6811CF}ul,ol{margin:0 0 10px;padding-left:1.6em}'
+  + '.dait-sig{margin-top:10px;padding-top:8px;border-top:1px solid #EEE;font-size:12.5px;color:#4A3F66;line-height:1.45}'
+  + '.dait-sig b{color:#1F0249}';
 
 type Props = {
   id: string;
@@ -38,6 +65,19 @@ type Props = {
   invalid?: boolean;
   /** aria-invalid / aria-describedby from the form's error marking. */
   aria?: Pick<TextareaHTMLAttributes<HTMLTextAreaElement>, 'aria-invalid' | 'aria-describedby'>;
+  /**
+   * `basic` (templates, the Mailer, the signature card, the lead page): bold, italic, lists and link. `mail` (web mail's
+   * composer): always formatted, in the mail font, with the mockup's full toolbar.
+   */
+  toolbar?: 'basic' | 'mail';
+  /** Mail: uploads a chosen picture to the draft; its content id and data are inserted at the caret (null: refused). */
+  onPicture?: (file: File) => Promise<{ contentId: string; dataUrl: string } | null>;
+  /** Mail: files chosen with Attach file. */
+  onAttach?: (files: File[]) => void;
+  /** Mail: the Template button was pressed (the composer opens its templates menu at it). */
+  onTemplate?: (anchor: HTMLElement) => void;
+  /** Mail: the user's signature HTML (server-sanitised); the Signature button is off without one. */
+  signatureHtml?: string | null;
 };
 
 /**
@@ -48,8 +88,10 @@ type Props = {
  * sanitised, pastes are rebuilt from formatting tags only, links are http, https or mailto, and the server sanitises
  * the HTML again when the message is sent.
  */
-export function MessageEditor({ id, label, value, onChange, rows = 7, disabled, invalid, aria }: Props) {
+export function MessageEditor(props: Props) {
+  const { id, label, value, onChange, rows = 7, disabled, invalid, aria, toolbar = 'basic', onPicture, onAttach, onTemplate, signatureHtml } = props;
   const t = useT();
+  const mail = toolbar === 'mail';
   const frame = useRef<HTMLIFrameElement>(null);
   /** The HTML the frame holds now (written to it, or read from it): an outside change (a template) differs from it. */
   const shown = useRef<string | null>(null);
@@ -60,7 +102,20 @@ export function MessageEditor({ id, label, value, onChange, rows = 7, disabled, 
   const [linkOpen, setLinkOpen] = useState(false);
   const [link, setLink] = useState('');
   const [linkError, setLinkError] = useState(false);
-  const formatted = value.html !== null;
+  /** Mail: the open colour palette, and the last colours chosen (shown under the buttons, as the mockup). */
+  const [palette, setPalette] = useState<'colour' | 'highlight' | null>(null);
+  const [colour, setColour] = useState('#C62828');
+  const [mark, setMark] = useState('#FFE14D');
+  const [font, setFont] = useState(MAIL_FONTS[0][0]);
+  const [size, setSize] = useState<MailFontSize>(11);
+  /** Mail: the frame's last selection, put back after a toolbar select, palette or file dialog took the focus. */
+  const saved = useRef<Range | null>(null);
+  const paletteBox = useRef<HTMLSpanElement | null>(null);
+  const pictureInput = useRef<HTMLInputElement>(null);
+  const attachInput = useRef<HTMLInputElement>(null);
+  /** The HTML the editor shows: a mail editor shows a plain value as paragraphs (it is never the textarea). */
+  const editorHtml = value.html ?? (mail ? textToEditorHtml(value.text) : null);
+  const formatted = editorHtml !== null;
 
   const doc = () => frame.current?.contentDocument ?? null;
 
@@ -76,7 +131,7 @@ export function MessageEditor({ id, label, value, onChange, rows = 7, disabled, 
   function setUp(d: Document) {
     if (!d.body) return;
     if (d.body.dataset.editor !== 'on') {
-      d.head.innerHTML = `<meta http-equiv="Content-Security-Policy" content="${CSP}"><meta name="referrer" content="no-referrer"><style>${FRAME_STYLE}</style>`;
+      d.head.innerHTML = `<meta http-equiv="Content-Security-Policy" content="${CSP}"><meta name="referrer" content="no-referrer"><style>${mail ? MAIL_FRAME_STYLE : FRAME_STYLE}</style>`;
       d.body.dataset.editor = 'on';
       d.body.setAttribute('role', 'textbox');
       d.body.setAttribute('aria-multiline', 'true');
@@ -97,6 +152,14 @@ export function MessageEditor({ id, label, value, onChange, rows = 7, disabled, 
         if (text) exec(d, 'insertText', text);
         emit();
       });
+      if (mail) {
+        d.addEventListener('selectionchange', () => {
+          const sel = selection(d);
+          if (sel && sel.rangeCount > 0 && d.body.contains(sel.anchorNode)) saved.current = sel.getRangeAt(0).cloneRange();
+        });
+        // A click in the message closes an open palette (the page's own clicks never see the frame's).
+        d.addEventListener('mousedown', () => setPalette(null));
+      }
       shown.current = null;
     }
     d.body.setAttribute('contenteditable', disabled ? 'false' : 'true');
@@ -105,11 +168,11 @@ export function MessageEditor({ id, label, value, onChange, rows = 7, disabled, 
   /** Puts the value's HTML in the frame when it changed from outside (a template, the reset after sending). */
   function sync() {
     const d = doc();
-    if (!d || value.html === null) return;
+    if (!d || editorHtml === null) return;
     setUp(d);
-    if (value.html !== shown.current) {
-      d.body.innerHTML = value.html;
-      shown.current = value.html;
+    if (editorHtml !== shown.current) {
+      d.body.innerHTML = editorHtml;
+      shown.current = editorHtml;
     }
     if (pending.current) {
       const cmd = pending.current;
@@ -120,9 +183,26 @@ export function MessageEditor({ id, label, value, onChange, rows = 7, disabled, 
   }
 
   useEffect(() => {
-    if (value.html === null) shown.current = null;
+    if (editorHtml === null) shown.current = null;
     else sync();
   });
+
+  // An open palette closes on a click elsewhere on the page or on Escape.
+  useEffect(() => {
+    if (!palette) return;
+    const away = (e: MouseEvent) => {
+      if (!paletteBox.current?.contains(e.target as Node)) setPalette(null);
+    };
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPalette(null);
+    };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('mousedown', away);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [palette]);
 
   /** The caret at the end of the message. */
   function focusEnd(d: Document) {
@@ -136,11 +216,68 @@ export function MessageEditor({ id, label, value, onChange, rows = 7, disabled, 
     sel.addRange(range);
   }
 
-  function run(cmd: Command) {
+  /** The frame focused; in a mail editor its last selection is put back when the focus had left it. */
+  function focusFrame(d: Document) {
+    frame.current?.focus();
+    if (!mail || !saved.current) return;
+    const sel = selection(d);
+    if (sel && (sel.rangeCount === 0 || !d.body.contains(sel.anchorNode))) {
+      sel.removeAllRanges();
+      sel.addRange(saved.current);
+    }
+  }
+
+  function run(cmd: StyleCommand, arg?: string) {
     const d = doc();
     if (!d) return;
-    frame.current?.focus();
-    exec(d, cmd);
+    if (mail) {
+      focusFrame(d);
+      exec(d, 'styleWithCSS', CSS_COMMANDS.has(cmd) ? 'true' : 'false');
+    } else frame.current?.focus();
+    exec(d, cmd, arg);
+    emit();
+  }
+
+  /** Mail: a node put at the caret (the end of the message when there is none), as the browser's own insert. */
+  function insertAtCaret(d: Document, node: Element) {
+    focusFrame(d);
+    if (exec(d, 'insertHTML', node.outerHTML)) return;
+    const sel = selection(d);
+    if (sel && sel.rangeCount > 0 && d.body.contains(sel.anchorNode)) {
+      const range = sel.getRangeAt(0);
+      range.deleteContents();
+      range.insertNode(node);
+    } else d.body.appendChild(node);
+  }
+
+  async function addPicture(file: File) {
+    const got = await onPicture?.(file);
+    const d = doc();
+    if (!got || !d?.body || !PICTURE_DATA.test(got.dataUrl)) return;
+    const img = d.createElement('img');
+    img.setAttribute('src', got.dataUrl);
+    img.setAttribute('data-cid', got.contentId);
+    insertAtCaret(d, img);
+    emit();
+  }
+
+  /** Mail: the signature block at the end of the message, or the one already there put back as the signature. */
+  function addSignature() {
+    const d = doc();
+    if (!signatureHtml || !d?.body) return;
+    const blocks = d.body.querySelectorAll('.dait-sig');
+    const last = blocks[blocks.length - 1];
+    if (last) last.innerHTML = signatureHtml;
+    else d.body.insertAdjacentHTML('beforeend', `<p><br></p><div class="dait-sig">${signatureHtml}</div>`);
+    emit();
+  }
+
+  function chooseSize(pt: MailFontSize) {
+    setSize(pt);
+    const d = doc();
+    if (!d?.body) return;
+    focusFrame(d);
+    applyFontSize(d, pt);
     emit();
   }
 
@@ -160,7 +297,7 @@ export function MessageEditor({ id, label, value, onChange, rows = 7, disabled, 
     if (!url) return setLinkError(true);
     const d = doc();
     if (!d) return;
-    frame.current?.focus();
+    focusFrame(d);
     const sel = selection(d);
     if (!sel || sel.rangeCount === 0 || !d.body.contains(sel.anchorNode)) focusEnd(d);
     if (selection(d)?.isCollapsed ?? true) {
@@ -198,33 +335,200 @@ export function MessageEditor({ id, label, value, onChange, rows = 7, disabled, 
     </button>
   );
 
-  return (
-    <div className="msg-editor">
-      <div className="msg-tools" role="toolbar" aria-label={t('Formatting')} aria-controls={id}>
-        {tool('bold', t('Bold'), <b>B</b>)}
-        {tool('italic', t('Italic'), <i>I</i>)}
-        {tool('insertUnorderedList', t('Bulleted list'), '•')}
-        {tool('insertOrderedList', t('Numbered list'), '1.')}
-        <button type="button" className="btn xs" title={t('Link|format')} disabled={disabled} onMouseDown={(e) => e.preventDefault()} onClick={openLink}>
-          {t('Link|format')}
-        </button>
-        {formatted ? (
-          <>
-            <span className="grow" />
+  /** A mail toolbar button: keeps the selection in the message while it is pressed. */
+  const tb = (name: string, glyph: ReactNode, onClick: (el: HTMLButtonElement) => void, opts: { off?: boolean; wide?: boolean; title?: string; expanded?: boolean } = {}) => (
+    <button
+      type="button"
+      className={opts.wide ? 'tb wide' : 'tb'}
+      aria-label={name}
+      title={opts.title ?? name}
+      disabled={disabled || opts.off}
+      aria-expanded={opts.expanded}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={(e) => onClick(e.currentTarget)}
+    >
+      {glyph}
+    </button>
+  );
+  const ico = (name: string) => (
+    <span className="ico" aria-hidden="true">
+      {Icons[name]}
+    </span>
+  );
+  /** A colour button and, while open, its palette of swatches. */
+  const swatches = (
+    kind: 'colour' | 'highlight',
+    name: string,
+    glyph: ReactNode,
+    choices: { hex: string; name: string; title?: string; value?: string }[],
+    choose: (c: { hex: string; value?: string }) => void,
+  ) => (
+    <span className="tb-pop" ref={palette === kind ? paletteBox : undefined}>
+      {tb(name, glyph, () => setPalette(palette === kind ? null : kind), { expanded: palette === kind })}
+      {palette === kind ? (
+        <span className={kind === 'highlight' ? 'tb-pal hl' : 'tb-pal'} role="group" aria-label={name}>
+          {choices.map((c) => (
             <button
+              key={c.hex}
               type="button"
-              className="btn xs"
-              disabled={disabled}
+              className={c.value === 'transparent' ? 'tb-sw none' : 'tb-sw'}
+              title={c.title ?? c.hex}
+              aria-label={c.name}
+              style={c.value === 'transparent' ? undefined : { background: c.hex }}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
-                setLinkOpen(false);
-                change.current({ text: value.text, html: null });
+                setPalette(null);
+                choose(c);
               }}
-            >
-              {t('Remove formatting')}
-            </button>
-          </>
-        ) : null}
-      </div>
+            />
+          ))}
+        </span>
+      ) : null}
+    </span>
+  );
+
+  const mailTools = (
+    <div className="tbar" role="toolbar" aria-label={t('Formatting')} aria-controls={id}>
+      <select
+        aria-label={t('Font')}
+        value={font}
+        disabled={disabled}
+        onChange={(e) => {
+          setFont(e.target.value);
+          const family = MAIL_FONTS.find(([n]) => n === e.target.value)?.[1];
+          if (family) run('fontName', family);
+        }}
+      >
+        {MAIL_FONTS.map(([n]) => (
+          <option key={n}>{n}</option>
+        ))}
+      </select>
+      <select aria-label={t('Size')} value={size} disabled={disabled} onChange={(e) => chooseSize(Number(e.target.value) as MailFontSize)}>
+        {MAIL_SIZES.map((n) => (
+          <option key={n} value={n}>
+            {n}
+          </option>
+        ))}
+      </select>
+      <span className="tb-sep" />
+      {tb(t('Bold'), <b>B</b>, () => run('bold'))}
+      {tb(t('Italic'), <i className="tb-i">I</i>, () => run('italic'))}
+      {tb(t('Underline'), <u>U</u>, () => run('underline'))}
+      {swatches(
+        'colour',
+        t('Font colour'),
+        <span className="tb-a">
+          A<span className="clr" style={{ background: colour }} />
+        </span>,
+        [
+          { hex: '#1F1533', name: t('Black') },
+          { hex: '#C62828', name: t('Red') },
+          { hex: '#E65100', name: t('Orange') },
+          { hex: '#2E7D32', name: t('Green') },
+          { hex: '#1565C0', name: t('Blue') },
+          { hex: '#6811CF', name: t('Purple') },
+          { hex: '#6B7280', name: t('Grey') },
+          { hex: '#FFFFFF', name: t('White') },
+        ],
+        (c) => {
+          setColour(c.hex);
+          run('foreColor', c.hex);
+        },
+      )}
+      {swatches(
+        'highlight',
+        t('Highlight'),
+        <span className="tb-a">
+          <span className="ico mk" aria-hidden="true">
+            {Icons.marker}
+          </span>
+          <span className="clr" style={{ background: mark }} />
+        </span>,
+        [
+          { hex: '#FFE14D', name: t('Yellow') },
+          { hex: '#B9F6CA', name: t('Green') },
+          { hex: '#B3E5FC', name: t('Blue') },
+          { hex: '#F8BBD0', name: t('Pink') },
+          { hex: 'none', name: t('No highlight'), title: t('No highlight'), value: 'transparent' },
+        ],
+        (c) => {
+          const v = c.value ?? c.hex;
+          setMark(v);
+          run('hiliteColor', v);
+        },
+      )}
+      <span className="tb-sep" />
+      {tb(t('Bullets'), ico('bullets'), () => run('insertUnorderedList'))}
+      {tb(t('Numbering'), ico('numbers'), () => run('insertOrderedList'))}
+      {tb(t('Decrease indent'), ico('outdent'), () => run('outdent'))}
+      {tb(t('Increase indent'), ico('indent'), () => run('indent'))}
+      <span className="tb-sep" />
+      {tb(t('Insert link'), ico('link'), openLink)}
+      {tb(t('Insert picture'), ico('image'), () => pictureInput.current?.click(), { off: !onPicture })}
+      {tb(t('Attach file'), ico('clip'), () => attachInput.current?.click(), { off: !onAttach })}
+      <span className="tb-sep" />
+      {tb(t('Template'), <>{ico('template')}{t('Template')}</>, (el) => onTemplate?.(el), { off: !onTemplate, wide: true, title: t('Insert template') })}
+      {tb(t('Signature'), <>{ico('pen')}{t('Signature')}</>, addSignature, { off: !signatureHtml, wide: true })}
+    </div>
+  );
+
+  return (
+    <div className={mail ? 'msg-editor mail' : 'msg-editor'}>
+      {mail ? (
+        <>
+          {mailTools}
+          <input
+            ref={pictureInput}
+            type="file"
+            accept="image/png,image/jpeg,image/gif"
+            hidden
+            tabIndex={-1}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (file) void addPicture(file);
+            }}
+          />
+          <input
+            ref={attachInput}
+            type="file"
+            multiple
+            hidden
+            tabIndex={-1}
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? []);
+              e.target.value = '';
+              if (files.length) onAttach?.(files);
+            }}
+          />
+        </>
+      ) : (
+        <div className="msg-tools" role="toolbar" aria-label={t('Formatting')} aria-controls={id}>
+          {tool('bold', t('Bold'), <b>B</b>)}
+          {tool('italic', t('Italic'), <i>I</i>)}
+          {tool('insertUnorderedList', t('Bulleted list'), '•')}
+          {tool('insertOrderedList', t('Numbered list'), '1.')}
+          <button type="button" className="btn xs" title={t('Link|format')} disabled={disabled} onMouseDown={(e) => e.preventDefault()} onClick={openLink}>
+            {t('Link|format')}
+          </button>
+          {formatted ? (
+            <>
+              <span className="grow" />
+              <button
+                type="button"
+                className="btn xs"
+                disabled={disabled}
+                onClick={() => {
+                  setLinkOpen(false);
+                  change.current({ text: value.text, html: null });
+                }}
+              >
+                {t('Remove formatting')}
+              </button>
+            </>
+          ) : null}
+        </div>
+      )}
       {linkOpen ? (
         <div className="msg-link">
           <input
@@ -263,7 +567,7 @@ export function MessageEditor({ id, label, value, onChange, rows = 7, disabled, 
           ref={frame}
           id={id}
           title={label}
-          className={invalid ? 'in msg-frame err' : 'in msg-frame'}
+          className={mail ? (invalid ? 'rbody err' : 'rbody') : invalid ? 'in msg-frame err' : 'in msg-frame'}
           // Same-origin so the CRM can edit it; no allow-scripts, so nothing in a message can run. Where supported,
           // `credentialless` also keeps the CRM's cookies off anything the frame loads (security review I1; the server
           // already removes pictures that point at the CRM).
