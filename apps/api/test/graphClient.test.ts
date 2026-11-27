@@ -26,7 +26,7 @@ vi.mock('@azure/msal-node', () => ({
 
 import { prisma } from '../src/db';
 import { decrypt, encrypt } from '../src/crypto/tokens';
-import { calendarDeltaStartUrl, createGraphClient, deltaStartUrl, GRAPH_CALENDAR_SCOPES, GRAPH_MAIL_SCOPES, GRAPH_SEND_SCOPES, GraphError, isAuthFailure, searchStartUrl } from '../src/graph/client';
+import { calendarDeltaStartUrl, createGraphClient, deltaStartUrl, GRAPH_CALENDAR_SCOPES, GRAPH_MAIL_SCOPES, GRAPH_SEND_SCOPES, GraphError, isAuthFailure, searchStartUrl, SEND_TIMEOUT_MS } from '../src/graph/client';
 import { resetDb } from './helpers';
 
 const env = { MS_TENANT_ID: 't', MS_CLIENT_ID: 'c', MS_CLIENT_SECRET: 's' };
@@ -612,6 +612,160 @@ describe('graph client — flags, moves, delete, attachments, reply all, forward
     for (let i = 0; i < 3; i++) {
       expect(call(fetchMock, i)[1].method).toBe('POST');
       expect(headers(call(fetchMock, i)[1]).Prefer).toContain('IdType="ImmutableId"');
+    }
+  });
+});
+
+describe('graph client — drafts, draft attachments, sending a draft (web-mail release 3)', () => {
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  const call = (m: ReturnType<typeof vi.fn>, i = 0) => m.mock.calls[i] as unknown as [string, RequestInit];
+  const headers = (init: RequestInit) => init.headers as Record<string, string>;
+  const sentBody = (m: ReturnType<typeof vi.fn>, i = 0) => JSON.parse(call(m, i)[1].body as string) as unknown;
+  const draftAnswer = (extra: Record<string, unknown> = {}) => ({
+    id: 'AAMkD=', conversationId: 'CONV1', subject: 'Proposal', isDraft: true, lastModifiedDateTime: '2026-11-27T10:00:00Z',
+    body: { contentType: 'html', content: '<p>Hi</p>' },
+    toRecipients: [{ emailAddress: { address: 'Ana@Acme.com', name: 'Ana' } }], ccRecipients: [],
+    bccRecipients: [{ emailAddress: { address: 'b@acme.com' } }],
+    ...extra,
+  });
+  const fields = { subject: 'Proposal', html: '<p>Hi</p>', to: ['ana@acme.com'], cc: [], bcc: ['b@acme.com'] };
+
+  test('createDraft posts subject, HTML body and To/Cc/Bcc with immutable ids, and maps the answer', async () => {
+    const fetchMock = vi.fn(async () => json(draftAnswer(), 201));
+    vi.stubGlobal('fetch', fetchMock);
+    const draft = await createGraphClient(env).createDraft(await account(), fields);
+    const [url, init] = call(fetchMock);
+    expect(url).toBe('https://graph.microsoft.com/v1.0/me/messages');
+    expect(init.method).toBe('POST');
+    expect(headers(init).Prefer).toContain('IdType="ImmutableId"');
+    expect(headers(init).Prefer).toContain('outlook.body-content-type="html"');
+    expect(msalState.scopes[0]).toEqual(GRAPH_MAIL_SCOPES);
+    expect(sentBody(fetchMock)).toEqual({
+      subject: 'Proposal', body: { contentType: 'HTML', content: '<p>Hi</p>' },
+      toRecipients: [{ emailAddress: { address: 'ana@acme.com' } }], ccRecipients: [], bccRecipients: [{ emailAddress: { address: 'b@acme.com' } }],
+    });
+    expect(draft).toEqual({
+      id: 'AAMkD=', conversationId: 'CONV1', subject: 'Proposal', html: '<p>Hi</p>', to: ['ana@acme.com'], cc: [], bcc: ['b@acme.com'],
+      lastModified: '2026-11-27T10:00:00Z', attachments: [],
+    });
+  });
+
+  test('createDraft sends from only when a send-as address is given', async () => {
+    const fetchMock = vi.fn(async () => json(draftAnswer(), 201));
+    vi.stubGlobal('fetch', fetchMock);
+    const g = createGraphClient(env);
+    const acc = await account();
+    await g.createDraft(acc, { ...fields, from: 'sales@daitpartners.com' });
+    await g.createDraft(acc, { ...fields, from: null });
+    expect((sentBody(fetchMock, 0) as Record<string, unknown>).from).toEqual({ emailAddress: { address: 'sales@daitpartners.com' } });
+    expect(sentBody(fetchMock, 1)).not.toHaveProperty('from');
+  });
+
+  test('createReplyDraft calls createReply / createReplyAll / createForward on the original', async () => {
+    const fetchMock = vi.fn(async () => json(draftAnswer({ id: 'R1', subject: 'RE: Proposal', body: { contentType: 'html', content: '<div id="divRplyFwdMsg">quote</div>' } }), 201));
+    vi.stubGlobal('fetch', fetchMock);
+    const g = createGraphClient(env);
+    const acc = await account();
+    const reply = await g.createReplyDraft(acc, 'id/1', 'reply');
+    await g.createReplyDraft(acc, 'id/1', 'replyAll');
+    await g.createReplyDraft(acc, 'id/1', 'forward');
+    expect([0, 1, 2].map((i) => call(fetchMock, i)[0])).toEqual([
+      'https://graph.microsoft.com/v1.0/me/messages/id%2F1/createReply',
+      'https://graph.microsoft.com/v1.0/me/messages/id%2F1/createReplyAll',
+      'https://graph.microsoft.com/v1.0/me/messages/id%2F1/createForward',
+    ]);
+    for (let i = 0; i < 3; i++) {
+      expect(call(fetchMock, i)[1].method).toBe('POST');
+      expect(sentBody(fetchMock, i)).toEqual({});
+      expect(headers(call(fetchMock, i)[1]).Prefer).toContain('IdType="ImmutableId"');
+      expect(headers(call(fetchMock, i)[1]).Prefer).toContain('outlook.body-content-type="html"');
+    }
+    expect(reply).toMatchObject({ id: 'R1', conversationId: 'CONV1', subject: 'RE: Proposal', html: '<div id="divRplyFwdMsg">quote</div>' });
+  });
+
+  test('getDraft reads the draft with its attachments', async () => {
+    const fetchMock = vi.fn(async () => json(draftAnswer({
+      attachments: [{ '@odata.type': '#microsoft.graph.fileAttachment', id: 'A+1=', name: 'logo.png', contentType: 'image/png', size: 1200, isInline: true }],
+    })));
+    vi.stubGlobal('fetch', fetchMock);
+    const draft = await createGraphClient(env).getDraft(await account(), 'AAMkD=');
+    const [url, init] = call(fetchMock);
+    expect(url).toBe('https://graph.microsoft.com/v1.0/me/messages/AAMkD%3D?$select=subject,body,toRecipients,ccRecipients,bccRecipients,conversationId,lastModifiedDateTime,isDraft&$expand=attachments($select=id,name,contentType,size,isInline)');
+    expect(init.method).toBe('GET');
+    expect(headers(init).Prefer).toContain('IdType="ImmutableId"');
+    expect(headers(init).Prefer).toContain('outlook.body-content-type="html"');
+    expect(draft.attachments).toEqual([{ id: 'A+1=', name: 'logo.png', contentType: 'image/png', size: 1200, isInline: true, kind: 'file' }]);
+    expect(draft.to).toEqual(['ana@acme.com']);
+  });
+
+  test('getDraft refuses a message that is no longer a draft with 409 not_a_draft', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json(draftAnswer({ isDraft: false }))));
+    const err = await createGraphClient(env).getDraft(await account(), 'AAMkD=').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GraphError);
+    expect((err as GraphError).status).toBe(409);
+    expect((err as GraphError).message).toBe('not_a_draft');
+  });
+
+  test('getDraft: a draft gone from the mailbox is a GraphError with status 404', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ error: { code: 'ErrorItemNotFound' } }, 404)));
+    const err = await createGraphClient(env).getDraft(await account(), 'AAMkD=').catch((e: unknown) => e);
+    expect((err as GraphError).status).toBe(404);
+  });
+
+  test('updateDraft PATCHes the fields; addAttachment posts a fileAttachment (inline with contentId); removeAttachment DELETEs it', async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      if (init.method === 'PATCH') return json(draftAnswer());
+      if (init.method === 'DELETE') return new Response(null, { status: 204 });
+      return json({ id: 'ATT=1' }, 201);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const g = createGraphClient(env);
+    const acc = await account();
+    await expect(g.updateDraft(acc, 'd/1', { ...fields, cc: ['c@acme.com'], from: 'sales@daitpartners.com' })).resolves.toBeUndefined();
+    expect(call(fetchMock, 0)[0]).toBe('https://graph.microsoft.com/v1.0/me/messages/d%2F1');
+    expect(call(fetchMock, 0)[1].method).toBe('PATCH');
+    expect(sentBody(fetchMock, 0)).toEqual({
+      subject: 'Proposal', body: { contentType: 'HTML', content: '<p>Hi</p>' },
+      toRecipients: [{ emailAddress: { address: 'ana@acme.com' } }], ccRecipients: [{ emailAddress: { address: 'c@acme.com' } }],
+      bccRecipients: [{ emailAddress: { address: 'b@acme.com' } }], from: { emailAddress: { address: 'sales@daitpartners.com' } },
+    });
+
+    expect(await g.addAttachment(acc, 'd/1', { name: 'RFP.pdf', contentType: 'application/pdf', contentBase64: 'JVBERg==' })).toEqual({ id: 'ATT=1' });
+    expect(call(fetchMock, 1)[0]).toBe('https://graph.microsoft.com/v1.0/me/messages/d%2F1/attachments');
+    expect(call(fetchMock, 1)[1].method).toBe('POST');
+    expect(sentBody(fetchMock, 1)).toEqual({ '@odata.type': '#microsoft.graph.fileAttachment', name: 'RFP.pdf', contentType: 'application/pdf', contentBytes: 'JVBERg==' });
+    await g.addAttachment(acc, 'd/1', { name: 'logo.png', contentType: 'image/png', contentBase64: 'iVBO', isInline: true, contentId: 'img-1@dait' });
+    expect(sentBody(fetchMock, 2)).toEqual({
+      '@odata.type': '#microsoft.graph.fileAttachment', name: 'logo.png', contentType: 'image/png', contentBytes: 'iVBO', isInline: true, contentId: 'img-1@dait',
+    });
+
+    await expect(g.removeAttachment(acc, 'd/1', 'AAMk+a/b==')).resolves.toBeUndefined();
+    expect(call(fetchMock, 3)[0]).toBe('https://graph.microsoft.com/v1.0/me/messages/d%2F1/attachments/AAMk%2Ba%2Fb%3D%3D');
+    expect(call(fetchMock, 3)[1].method).toBe('DELETE');
+    for (let i = 0; i < 4; i++) expect(headers(call(fetchMock, i)[1]).Prefer).toContain('IdType="ImmutableId"');
+    expect(msalState.scopes.every((s) => s === GRAPH_MAIL_SCOPES)).toBe(true);
+  });
+
+  test('addAttachment: an answer without an id is a GraphError', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({}, 201)));
+    const err = await createGraphClient(env).addAttachment(await account(), 'd/1', { name: 'a.pdf', contentType: 'application/pdf', contentBase64: 'JVBERg==' }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GraphError);
+  });
+
+  test('sendDraft posts /send with the send timeout', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 202 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    try {
+      await expect(createGraphClient(env).sendDraft(await account(), 'd/1')).resolves.toBeUndefined();
+      expect(call(fetchMock)[0]).toBe('https://graph.microsoft.com/v1.0/me/messages/d%2F1/send');
+      expect(call(fetchMock)[1].method).toBe('POST');
+      expect(call(fetchMock)[1].body).toBeUndefined();
+      expect(headers(call(fetchMock)[1]).Prefer).toContain('IdType="ImmutableId"');
+      expect(timeout).toHaveBeenCalledWith(SEND_TIMEOUT_MS);
+      expect(msalState.scopes[0]).toEqual(GRAPH_MAIL_SCOPES);
+    } finally {
+      timeout.mockRestore();
     }
   });
 });

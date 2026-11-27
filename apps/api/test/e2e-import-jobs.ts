@@ -46,6 +46,7 @@ const graph: GraphClient = {
   sendMail: refuse, deltaPage: refuse, listAttachments: refuse, attachmentContent: refuse, markRead: refuse, moveTo: refuse, setFlag: refuse, deleteMessage: refuse,
   reply: refuse, replyAll: refuse, forward: refuse, calendarDeltaPage: refuse,
   messageBody: refuse, searchPage: refuse, folderIds: refuse,
+  createDraft: refuse, createReplyDraft: refuse, getDraft: refuse, updateDraft: refuse, addAttachment: refuse, removeAttachment: refuse, sendDraft: refuse,
 };
 
 const handlers = { import_read_file: importReadFileHandler, import_research: importResearchHandler, import_commit: importCommitHandler } as const;

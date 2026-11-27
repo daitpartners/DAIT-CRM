@@ -106,4 +106,55 @@ describe('e2e fake Graph (web-mail release 2)', () => {
       await expect(refused()).rejects.toThrow('not used in e2e');
     }
   });
+  test('the e2e fake keeps drafts: create, update, attach, get, delete', async () => {
+    await resetDb();
+    const account = await prisma.emailAccount.create({
+      data: { address: 'neha@daitpartners.com', provider: 'microsoft', kind: 'personal', refreshTokenEnc: encrypt('rt'), status: 'connected' },
+    });
+    const g = createE2eGraph();
+
+    const created = await g.createDraft(account, { subject: 'Hello', html: '<p>Hi</p>', to: ['Ana@Acme.com'], cc: [], bcc: ['b@acme.com'] });
+    expect(created).toMatchObject({ subject: 'Hello', html: '<p>Hi</p>', to: ['ana@acme.com'], cc: [], bcc: ['b@acme.com'], conversationId: null, attachments: [] });
+    expect(created.id).toMatch(/^e2e-draft-\d+$/);
+
+    await g.updateDraft(account, created.id, { subject: 'Hello again', html: '<p>Hi there</p>', to: ['ana@acme.com'], cc: ['c@acme.com'], bcc: [] });
+    const att = await g.addAttachment(account, created.id, { name: 'notes.pdf', contentType: 'application/pdf', contentBase64: Buffer.from('%PDF-1.4').toString('base64') });
+    const pic = await g.addAttachment(account, created.id, { name: 'logo.png', contentType: 'image/png', contentBase64: 'iVBO', isInline: true, contentId: 'img-1@dait' });
+    expect(att.id).toMatch(/^e2e-att-\d+$/);
+    expect(pic.id).not.toBe(att.id);
+
+    const read = await g.getDraft(account, created.id);
+    expect(read).toMatchObject({ id: created.id, subject: 'Hello again', html: '<p>Hi there</p>', cc: ['c@acme.com'], bcc: [] });
+    expect(read.attachments).toEqual([
+      { id: att.id, name: 'notes.pdf', contentType: 'application/pdf', size: 8, isInline: false, kind: 'file' },
+      { id: pic.id, name: 'logo.png', contentType: 'image/png', size: 3, isInline: true, kind: 'file' },
+    ]);
+    // A copy: changing what was returned does not change the stored draft.
+    read.attachments.pop();
+    expect((await g.getDraft(account, created.id)).attachments).toHaveLength(2);
+
+    await g.removeAttachment(account, created.id, pic.id);
+    expect((await g.getDraft(account, created.id)).attachments.map((a) => a.id)).toEqual([att.id]);
+
+    // A reply to the seeded Orbit message: its conversation, the sender as recipient and Outlook's quote.
+    const reply = await g.createReplyDraft(account, 'e2e-2', 'reply');
+    expect(reply).toMatchObject({ conversationId: 'e2e-conv-1', subject: 'RE: Re: Orbit proposal', to: ['finance@orbit.example'], cc: [], bcc: [] });
+    expect(reply.html).toContain('<div id="divRplyFwdMsg"><b>From:</b> Lena Vogel &lt;finance@orbit.example&gt;');
+    expect(reply.html).toContain('Thanks Neha, can we talk on Thursday?');
+    const forward = await g.createReplyDraft(account, 'e2e-2', 'forward');
+    expect(forward).toMatchObject({ conversationId: 'e2e-conv-1', subject: 'FW: Re: Orbit proposal', to: [] });
+    expect(forward.id).not.toBe(reply.id);
+    const missingOriginal = await g.createReplyDraft(account, 'nope', 'reply').catch((e: unknown) => e);
+    expect((missingOriginal as GraphError).status).toBe(404);
+
+    await g.deleteMessage(account, created.id);
+    const gone = await g.getDraft(account, created.id).catch((e: unknown) => e);
+    expect(gone).toBeInstanceOf(GraphError);
+    expect((gone as GraphError).status).toBe(404);
+    expect(((await g.updateDraft(account, created.id, { subject: 'x', html: '', to: [], cc: [], bcc: [] }).catch((e: unknown) => e)) as GraphError).status).toBe(404);
+    expect(((await g.addAttachment(account, created.id, { name: 'a.pdf', contentType: 'application/pdf', contentBase64: '' }).catch((e: unknown) => e)) as GraphError).status).toBe(404);
+
+    // The e2e server runs no worker: sending a draft is never done there.
+    await expect(g.sendDraft(account, reply.id)).rejects.toThrow('not used in e2e');
+  });
 });

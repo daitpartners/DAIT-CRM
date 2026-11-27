@@ -1,9 +1,11 @@
-import { GraphError, type GraphAttachment, type GraphClient } from './client.js';
+import { GraphError, type DraftFields, type GraphAttachment, type GraphClient, type GraphDraft } from './client.js';
 
 /**
  * The Graph client the e2e server uses (web-mail release 2): only with E2E_FAKE_GRAPH=1 and NODE_ENV=test (app.ts),
  * so it never stands in for Microsoft in production. Mailbox changes (read, move, flag, delete, reply, reply all,
  * forward) succeed without doing anything; attachments come from the fixtures below; every other call is refused.
+ * Web-mail release 3: drafts are kept in memory (created, read, updated, given attachments, deleted); sending one is
+ * refused (the e2e server runs no worker: `test/e2e-send-jobs.ts` sends).
  */
 
 /** The smallest valid one-page PDF. */
@@ -36,6 +38,48 @@ function fixtures(graphId: string): { meta: GraphAttachment; bytes: Buffer }[] {
   return [];
 }
 
+/** The seeded messages (test/e2e-seed.ts) a reply or forward draft can be made from. */
+const ORIGINALS: Record<string, { conversationId: string; subject: string; fromName: string; from: string; to: string[]; text: string }> = {
+  'e2e-1': {
+    conversationId: 'e2e-conv-1', subject: 'Orbit proposal', fromName: 'Neha Kapoor', from: 'neha@daitpartners.com', to: ['finance@orbit.example'],
+    text: 'Hi, Please find our proposal.',
+  },
+  'e2e-2': {
+    conversationId: 'e2e-conv-1', subject: 'Re: Orbit proposal', fromName: 'Lena Vogel', from: 'finance@orbit.example', to: ['neha@daitpartners.com'],
+    text: 'Thanks Neha, can we talk on Thursday?',
+  },
+  'e2e-3': {
+    conversationId: 'e2e-conv-2', subject: 'Website enquiry', fromName: 'Sara Lind', from: 'sara@blue-river.example', to: ['neha@daitpartners.com'],
+    text: 'We need a new website. Can you help?',
+  },
+};
+
+/** Drafts made through the fake, by id (`e2e-draft-<n>`); attachment ids are `e2e-att-<n>`. */
+const drafts = new Map<string, GraphDraft>();
+let draftCount = 0;
+let attachmentCount = 0;
+
+const notFound = () => new GraphError('graph_request_failed status=404 code=ErrorItemNotFound', 404);
+const lower = (list: string[]) => list.map((a) => a.trim().toLowerCase());
+const copy = (d: GraphDraft): GraphDraft => structuredClone(d);
+
+function storedDraft(id: string): GraphDraft {
+  const d = drafts.get(id);
+  if (!d) throw notFound();
+  return d;
+}
+
+function newDraft(fields: Omit<GraphDraft, 'id' | 'lastModified' | 'attachments'>): GraphDraft {
+  draftCount += 1;
+  const d: GraphDraft = { id: `e2e-draft-${draftCount}`, ...fields, lastModified: new Date().toISOString(), attachments: [] };
+  drafts.set(d.id, d);
+  return copy(d);
+}
+
+const writeFields = (d: DraftFields) => ({ subject: d.subject, html: d.html, to: lower(d.to), cc: lower(d.cc), bcc: lower(d.bcc) });
+
+const escape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 const fakes = new WeakSet<GraphClient>();
 
 export function createE2eGraph(): GraphClient {
@@ -43,7 +87,45 @@ export function createE2eGraph(): GraphClient {
   const accept = async () => undefined;
   const graph: GraphClient = {
     sendMail: refuse, deltaPage: refuse, messageBody: refuse, searchPage: refuse, folderIds: refuse, calendarDeltaPage: refuse,
-    markRead: accept, moveTo: accept, setFlag: accept, deleteMessage: accept, reply: accept, replyAll: accept, forward: accept,
+    markRead: accept, moveTo: accept, setFlag: accept, reply: accept, replyAll: accept, forward: accept,
+    sendDraft: refuse,
+    async deleteMessage(_account, graphId) {
+      drafts.delete(graphId);
+    },
+    async createDraft(_account, d) {
+      return newDraft({ conversationId: null, ...writeFields(d) });
+    },
+    async createReplyDraft(account, graphId, kind) {
+      const o = ORIGINALS[graphId];
+      if (!o) throw notFound();
+      const own = account.address.toLowerCase();
+      const to = kind === 'forward' ? [] : kind === 'reply' ? [o.from] : [o.from, ...o.to.filter((a) => a !== own && a !== o.from)];
+      // Outlook's quote header, as web mail folds it.
+      const html = '<p></p><hr><div id="divRplyFwdMsg"><b>From:</b> '
+        + `${escape(o.fromName)} &lt;${escape(o.from)}&gt;<br><b>Subject:</b> ${escape(o.subject)}</div><div>${escape(o.text)}</div>`;
+      return newDraft({ conversationId: o.conversationId, subject: `${kind === 'forward' ? 'FW' : 'RE'}: ${o.subject}`, html, to, cc: [], bcc: [] });
+    },
+    async getDraft(_account, draftId) {
+      return copy(storedDraft(draftId));
+    },
+    async updateDraft(_account, draftId, d) {
+      Object.assign(storedDraft(draftId), writeFields(d), { lastModified: new Date().toISOString() });
+    },
+    async addAttachment(_account, draftId, a) {
+      const d = storedDraft(draftId);
+      attachmentCount += 1;
+      const id = `e2e-att-${attachmentCount}`;
+      d.attachments.push({
+        id, name: a.name, contentType: a.contentType, size: Buffer.from(a.contentBase64, 'base64').length, isInline: a.isInline === true, kind: 'file',
+      });
+      return { id };
+    },
+    async removeAttachment(_account, draftId, attachmentId) {
+      const d = storedDraft(draftId);
+      const at = d.attachments.findIndex((a) => a.id === attachmentId);
+      if (at < 0) throw notFound();
+      d.attachments.splice(at, 1);
+    },
     async listAttachments(_account, graphId) {
       return fixtures(graphId).map((f) => f.meta);
     },

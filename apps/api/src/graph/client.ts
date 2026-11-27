@@ -87,6 +87,32 @@ export interface GraphResponseMessage {
   html: string;
 }
 
+/**
+ * A draft's fields as the CRM writes them (web-mail release 3); `from` is a send-as address, left out when unset so
+ * Outlook sends from the mailbox itself.
+ */
+export interface DraftFields {
+  subject: string;
+  html: string;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  from?: string | null;
+}
+
+/** An Outlook draft as Graph returns it (web-mail release 3): addresses lower-cased, `html` the body as HTML. */
+export interface GraphDraft {
+  id: string;
+  conversationId: string | null;
+  subject: string;
+  html: string;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  lastModified: string;
+  attachments: GraphAttachment[];
+}
+
 /** One page of a delta query: changed messages, removed ids, and the link to continue from. */
 export interface DeltaPage {
   messages: GraphMessage[];
@@ -154,6 +180,18 @@ export interface GraphClient {
   folderIds(account: EmailAccount): Promise<Partial<Record<MailFolder, string>>>;
   /** Release 3C (the account's own calendar, read only): */
   calendarDeltaPage(account: EmailAccount, url: string): Promise<CalendarDeltaPage>;
+  /** Web-mail release 3 (drafts in the account's own mailbox): a new draft in Drafts. */
+  createDraft(account: EmailAccount, d: DraftFields): Promise<GraphDraft>;
+  /** A reply, reply all or forward draft of a message, with Outlook's recipients, subject and quoted original. */
+  createReplyDraft(account: EmailAccount, graphId: string, kind: 'reply' | 'replyAll' | 'forward'): Promise<GraphDraft>;
+  /** A draft with its attachments; a message that is no longer a draft (sent in Outlook) is `GraphError('not_a_draft', 409)`. */
+  getDraft(account: EmailAccount, draftId: string): Promise<GraphDraft>;
+  updateDraft(account: EmailAccount, draftId: string, d: DraftFields): Promise<void>;
+  /** A file (or inline picture) uploaded to a draft. */
+  addAttachment(account: EmailAccount, draftId: string, a: MailAttachment): Promise<{ id: string }>;
+  removeAttachment(account: EmailAccount, draftId: string, attachmentId: string): Promise<void>;
+  /** Sends a draft (Outlook moves it to Sent Items). */
+  sendDraft(account: EmailAccount, draftId: string): Promise<void>;
 }
 
 export const GRAPH_SEND_SCOPES = [
@@ -298,6 +336,41 @@ function flagBody(flag: GraphFlag): { flag: Record<string, unknown> } {
   if (!start || !due) return { flag: { flagStatus: 'flagged' } };
   return { flag: { flagStatus: 'flagged', startDateTime: midnight(start, flag.timeZone), dueDateTime: midnight(due, flag.timeZone) } };
 }
+
+/** Graph's fileAttachment for a file sent or uploaded; inline (shown as `cid:`) only with a content id. */
+const fileAttachment = (a: MailAttachment) => ({
+  '@odata.type': '#microsoft.graph.fileAttachment', name: a.name, contentType: a.contentType, contentBytes: a.contentBase64,
+  ...(a.isInline && a.contentId ? { isInline: true, contentId: a.contentId } : {}),
+});
+
+/** The message fields a draft is created or updated with (`from` only for a send-as address). */
+const draftBody = (d: DraftFields) => ({
+  subject: d.subject,
+  body: { contentType: 'HTML', content: d.html },
+  toRecipients: recipients(d.to),
+  ccRecipients: recipients(d.cc),
+  bccRecipients: recipients(d.bcc),
+  ...(d.from ? { from: { emailAddress: { address: d.from } } } : {}),
+});
+
+/** A Graph message as a GraphDraft (attachments only when expanded). */
+function toDraft(v: Record<string, unknown>): GraphDraft {
+  const attachments = Array.isArray(v.attachments) ? (v.attachments as Record<string, unknown>[]) : [];
+  return {
+    id: String(v.id),
+    conversationId: str(v.conversationId),
+    subject: str(v.subject) ?? '',
+    html: bodyOf(v.body).content,
+    to: addressList(v.toRecipients),
+    cc: addressList(v.ccRecipients),
+    bcc: addressList(v.bccRecipients),
+    lastModified: str(v.lastModifiedDateTime) ?? new Date().toISOString(),
+    attachments: attachments.map(toAttachment).filter((a): a is GraphAttachment => a !== null),
+  };
+}
+
+const DRAFT_SELECT = 'subject,body,toRecipients,ccRecipients,bccRecipients,conversationId,lastModifiedDateTime,isDraft';
+const REPLY_ACTIONS = { reply: 'createReply', replyAll: 'createReplyAll', forward: 'createForward' } as const;
 
 const tooLarge = () => new GraphError('attachment_too_large', 413);
 
@@ -498,12 +571,7 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
             ccRecipients: recipients(msg.cc),
             ...(msg.bcc?.length ? { bccRecipients: recipients(msg.bcc) } : {}),
             ...(msg.attachments?.length
-              ? {
-                attachments: msg.attachments.map((a) => ({
-                  '@odata.type': '#microsoft.graph.fileAttachment', name: a.name, contentType: a.contentType, contentBytes: a.contentBase64,
-                  ...(a.isInline && a.contentId ? { isInline: true, contentId: a.contentId } : {}),
-                })),
-              }
+              ? { attachments: msg.attachments.map(fileAttachment) }
               : {}),
           },
           saveToSentItems: true,
@@ -632,6 +700,43 @@ export function createGraphClient(env: MsEnv = process.env, db: PrismaClient = p
         }
       }
       return { events, removed, nextLink: page['@odata.nextLink'], deltaLink: page['@odata.deltaLink'], ...(skipped ? { skipped } : {}) };
+    },
+
+    async createDraft(account, d) {
+      const res = await mailCall(account, `${GRAPH}/me/messages`, 'POST', draftBody(d), `${IMMUTABLE}, ${HTML_BODY}`);
+      return toDraft((await res.json()) as Record<string, unknown>);
+    },
+
+    async createReplyDraft(account, graphId, kind) {
+      const res = await mailCall(account, `${messageUrl(graphId)}/${REPLY_ACTIONS[kind]}`, 'POST', {}, `${IMMUTABLE}, ${HTML_BODY}`);
+      return toDraft((await res.json()) as Record<string, unknown>);
+    },
+
+    async getDraft(account, draftId) {
+      const url = `${messageUrl(draftId)}?$select=${DRAFT_SELECT}&$expand=attachments($select=id,name,contentType,size,isInline)`;
+      const res = await mailCall(account, url, 'GET', undefined, `${IMMUTABLE}, ${HTML_BODY}`);
+      const v = (await res.json()) as Record<string, unknown>;
+      if (v.isDraft === false) throw new GraphError('not_a_draft', 409);
+      return toDraft(v);
+    },
+
+    async updateDraft(account, draftId, d) {
+      await mailCall(account, messageUrl(draftId), 'PATCH', draftBody(d));
+    },
+
+    async addAttachment(account, draftId, a) {
+      const res = await mailCall(account, `${messageUrl(draftId)}/attachments`, 'POST', fileAttachment(a));
+      const id = str(((await res.json()) as { id?: unknown }).id);
+      if (!id) throw new GraphError('graph_request_failed attachment_without_id', 502);
+      return { id };
+    },
+
+    async removeAttachment(account, draftId, attachmentId) {
+      await mailCall(account, `${messageUrl(draftId)}/attachments/${encodeURIComponent(attachmentId)}`, 'DELETE');
+    },
+
+    async sendDraft(account, draftId) {
+      await mailCall(account, `${messageUrl(draftId)}/send`, 'POST', undefined, IMMUTABLE, SEND_TIMEOUT_MS);
     },
   };
 }

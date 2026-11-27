@@ -37,6 +37,9 @@ export function fakeGraph(impl: Partial<GraphClient> = {}): GraphClient {
     markRead: unexpected('markRead'), moveTo: unexpected('moveTo'), setFlag: unexpected('setFlag'), deleteMessage: unexpected('deleteMessage'),
     reply: unexpected('reply'), replyAll: unexpected('replyAll'), forward: unexpected('forward'),
     searchPage: unexpected('searchPage'), folderIds: unexpected('folderIds'),
+    createDraft: unexpected('createDraft'), createReplyDraft: unexpected('createReplyDraft'), getDraft: unexpected('getDraft'),
+    updateDraft: unexpected('updateDraft'), addAttachment: unexpected('addAttachment'), removeAttachment: unexpected('removeAttachment'),
+    sendDraft: unexpected('sendDraft'),
     ...impl,
   };
 }

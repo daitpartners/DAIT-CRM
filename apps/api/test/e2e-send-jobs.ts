@@ -1,5 +1,6 @@
 // e2e only: runs the queued `send_user_email` jobs against a fake Microsoft Graph that accepts every message, so a
 // spec can see a send succeed (the e2e server runs no worker). Run with tsx (`npx tsx test/e2e-send-jobs.ts`).
+// Web-mail release 3: jobs waiting out the Undo window (or a scheduled time) are made due first, so they run now.
 import type { GraphClient, GraphResponseMessage } from '../src/graph/client';
 
 process.env.DATABASE_URL ??= 'postgresql://mac@localhost:5432/dait_crm_e2e';
@@ -35,9 +36,25 @@ const graph: GraphClient = {
   forward: async (_account, graphId, msg) => respond('forward', graphId, msg),
   deltaPage: refuse, listAttachments: refuse, attachmentContent: refuse, markRead: refuse, moveTo: refuse, setFlag: refuse, deleteMessage: refuse,
   calendarDeltaPage: refuse, messageBody: refuse, searchPage: refuse, folderIds: refuse,
+  createDraft: refuse, createReplyDraft: refuse, getDraft: refuse, updateDraft: refuse, addAttachment: refuse, removeAttachment: refuse,
+  // A draft sent (web-mail release 3) is printed with the CRM row that holds it (found by its Graph id): what was sent
+  // and its files (name, inline / content-id, size).
+  sendDraft: async (account, draftId) => {
+    const row = await prisma.emailMessage.findFirst({ where: { graphId: draftId, accountId: account.id } });
+    if (!row) throw new Error(`e2e-send-jobs: no CRM row for draft ${draftId}`);
+    const draftFiles = (Array.isArray(row.draftFiles) ? row.draftFiles : []).map((f) => {
+      const file = f as { name?: unknown; inline?: unknown; contentId?: unknown; size?: unknown };
+      return { name: file.name, inline: file.inline === true, contentId: file.contentId ?? null, size: file.size };
+    });
+    console.log(`e2e-sent: ${JSON.stringify({
+      kind: 'draft', graphId: draftId, to: row.toAddresses, cc: row.ccAddresses, bcc: row.bccAddresses, subject: row.subject, html: row.bodyHtml ?? '', draftFiles,
+    })}`);
+  },
 };
 
 try {
+  // The Undo window (and a scheduled time) holds a send job back: run every queued one now.
+  await prisma.job.updateMany({ where: { type: 'send_user_email', status: 'queued' }, data: { runAt: new Date() } });
   let n = 0;
   while (await runOnce({ types: ['send_user_email'], handlers: { send_user_email: sendUserEmailHandler }, graph, log: console.error })) n++;
   console.log(`e2e: ${n} send job(s) run`);
