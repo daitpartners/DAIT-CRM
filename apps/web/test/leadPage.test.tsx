@@ -216,7 +216,7 @@ function mailStub(opts: { templates?: unknown[]; projects?: { items: unknown[]; 
 }
 
 function renderEmailForm(lead: LeadFull) {
-  render(
+  return render(
     <Wrap qc={setup()}>
       <UndoSendProvider>
         <EmailForm lead={lead} />
@@ -530,5 +530,56 @@ describe('lead email form: the signature (Add automatically)', () => {
     await sendWith(u);
     await waitFor(() => expect(api.of('/api/mail/drafts/9/send')).toHaveLength(1));
     expect(api.of('/api/mail/drafts/9/send')[0]!.bodyHtml).not.toContain('Arjun Mehta</b>');
+  });
+});
+
+describe('lead email form: a refused send keeps its draft (review fix round 1)', () => {
+  const lead = { ...baseLead, contact: { ...makeLead().contact!, firstName: 'Tom', email: 'tom@meridian.in' } };
+  const WITH_PDF = {
+    id: 10, name: 'Holiday', language: 'en', subject: 'Season', body: 'Hi', bodyHtml: '<p>Hi {first_name}</p>', sourceType: 'manual', fileName: null, fileSize: null,
+    attachments: [{ id: 32, name: 'Brochure.pdf', contentType: 'application/pdf', size: 997_316, contentId: null, inline: false }],
+    createdBy: null, createdAt: '', updatedAt: '2026-11-24T10:00:00.000Z',
+  };
+  const deletes = (api: ReturnType<typeof mailStub>) => api.calls.filter((c) => c.method === 'DELETE').map((c) => c.url);
+
+  it('after a refused send, "— blank —" takes the template file off that same draft and the next Send uses it', async () => {
+    const u = userEvent.setup();
+    const api = mailStub({ templates: [WITH_PDF], sendError: ['try_again'] });
+    renderEmailForm(lead);
+    const pick = screen.getByRole('combobox', { name: 'Template' });
+    await waitFor(() => expect(within(pick).getByRole('option', { name: 'Holiday' })).toBeTruthy());
+    await u.selectOptions(pick, '10');
+    await sendWith(u);
+    const box = screen.getByRole('dialog', { name: 'Set the next follow-up' });
+    await waitFor(() => expect(api.postPaths()).toEqual(['/api/mail/drafts', '/api/mail/drafts/9/template', '/api/mail/drafts/9/send']));
+    await u.click(within(box).getByRole('button', { name: 'Cancel' }));
+    await u.selectOptions(pick, '');
+    await sendWith(u);
+    // The refused send and this one, both on draft 9.
+    await waitFor(() => expect(api.of('/api/mail/drafts/9/send')).toHaveLength(2));
+    expect(deletes(api)).toEqual(['/api/mail/drafts/9/files/att-pdf']);
+    expect(api.of('/api/mail/drafts')).toHaveLength(1);
+    expect(await screen.findByText(/^Sent$/)).toBeInTheDocument();
+  });
+
+  it('leaving the lead page after a refused send discards that draft; after a send, or a draft Undo gave back, nothing is discarded', async () => {
+    const u = userEvent.setup();
+    const api = mailStub({ sendError: ['try_again'] });
+    const view = renderEmailForm(lead);
+    await sendWith(u);
+    await waitFor(() => expect(api.postPaths()).toEqual(['/api/mail/drafts', '/api/mail/drafts/9/send']));
+    view.unmount();
+    await waitFor(() => expect(deletes(api)).toEqual(['/api/mail/drafts/9']));
+
+    // Sent, then Undo: the draft is back in Drafts on purpose and stays when the page is left.
+    const again = mailStub();
+    const second = renderEmailForm(lead);
+    await sendWith(u);
+    const toast = (await screen.findByText(/^Sent$/)).closest('.utoast') as HTMLElement;
+    await u.click(within(toast).getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'To' })).toHaveValue('tom@meridian.in'));
+    second.unmount();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(deletes(again)).toEqual([]);
   });
 });

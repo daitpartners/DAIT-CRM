@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 
 import { Link } from 'react-router-dom';
 import { isClosedStatus } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
-import { useApplyTemplateFiles, useCreateDraft, useDraftFile, type DraftFileView, type DraftView } from '../../api/drafts';
+import { useApplyTemplateFiles, useCreateDraft, useDiscardDraft, useDraftFile, type DraftFileView, type DraftView } from '../../api/drafts';
 import type { LeadFull } from '../../api/leads';
 import { useMailboxes } from '../../api/mailboxes';
 import { useSignature } from '../../api/signature';
@@ -50,9 +50,10 @@ const FIELD_ID: Record<EmailField, string> = { to: 'em-to', subject: EMAIL_SUBJE
 /**
  * The draft in the user's Outlook the next Send uses: made at the first Send (or given back by Undo). `synced`: its
  * files are the form's (a template picked since, or never applied, is copied on at Send); `fileIds`: the files on it,
- * all a template's (the lead page attaches nothing else).
+ * all a template's (the lead page attaches nothing else); `made`: made at a Send that was refused (nothing sent), so
+ * leaving the lead page discards it, as the composer discards a draft never used. A draft Undo gave back stays in Drafts.
  */
-type HeldDraft = { id: number; synced: boolean; fileIds: string[] };
+type HeldDraft = { id: number; synced: boolean; fileIds: string[]; made: boolean };
 
 /** The text a formatted message shows (what "Enter a message" checks). */
 function textOf(html: string): string {
@@ -222,7 +223,8 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
   async function draftForSend(): Promise<number> {
     if (!held.current) {
       const v = await createDraft.mutateAsync({ kind: 'new', leadId: lead.id, ...(projectId ? { projectId } : {}) });
-      held.current = { id: v.id, synced: false, fileIds: v.files.map((f) => f.id) };
+      held.current = { id: v.id, synced: false, fileIds: v.files.map((f) => f.id), made: true };
+      setHeldId(v.id);
     }
     const d = held.current;
     if (!d.synced) {
@@ -231,7 +233,7 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
       if (tpl && tpl.attachments.length) {
         d.fileIds = (await applyFiles.mutateAsync({ draftId: d.id, templateId: tpl.id, attachmentIds })).map((f) => f.id);
       } else {
-        for (const fileId of d.fileIds) await draftFile.remove(fileId);
+        for (const fileId of d.fileIds) await draftFile.remove(fileId, d.id);
         d.fileIds = [];
       }
       d.synced = true;
@@ -255,7 +257,7 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
 
   /** Undo gave the draft back: the form shows it again, and the next Send uses it. */
   function refill(d: DraftView) {
-    held.current = { id: d.id, synced: true, fileIds: d.files.map((f) => f.id) };
+    held.current = { id: d.id, synced: true, fileIds: d.files.map((f) => f.id), made: false };
     setHeldId(d.id);
     setKept(d.files.filter((f) => !f.inline));
     files.clear();
@@ -286,6 +288,26 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
     onUndone: refill,
   });
 
+  // Leaving the lead page with a draft made at a refused Send (nothing sent): it is discarded from the user's Outlook,
+  // best-effort. Not while a send is out (it may still go), and deferred a tick so the development double mount does
+  // not count as leaving.
+  const discardDraft = useDiscardDraft();
+  const leaving = useRef({ discard: discardDraft.mutate, busy: flow.busy });
+  leaving.current = { discard: discardDraft.mutate, busy: flow.busy };
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      setTimeout(() => {
+        const d = held.current;
+        if (mounted.current || !d?.made || leaving.current.busy) return;
+        held.current = null;
+        leaving.current.discard(d.id);
+      }, 0);
+    };
+  }, []);
+
   /** Send now or at `at`: the empty fields are marked instead. */
   function go(at: Date | null) {
     if (noMailbox || flow.busy) return;
@@ -298,7 +320,7 @@ export function EmailForm({ lead, disabled }: { lead: LeadFull; disabled?: boole
 
   async function removeKept(file: DraftFileView) {
     try {
-      await draftFile.remove(file.id);
+      await draftFile.remove(file.id, held.current?.id);
       if (held.current) held.current.fileIds = held.current.fileIds.filter((id) => id !== file.id);
       setKept((list) => list?.filter((f) => f.id !== file.id) ?? null);
     } catch (err) {

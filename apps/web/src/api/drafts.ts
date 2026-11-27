@@ -312,7 +312,8 @@ function fileBase64(file: File): Promise<string> {
 
 /**
  * Files on draft `id`, straight onto the Outlook draft: `add` uploads one (an attachment, or an inline picture when
- * `inline`) and answers it as listed; `remove` takes one off. The editor keeps its own list from the answers.
+ * `inline`) and answers it as listed; `remove` takes one off (from `draftId` when given: a screen that makes the draft
+ * just before, the lead page's Send). The editor keeps its own list from the answers.
  */
 export function useDraftFile(id: number | null) {
   const adding = useMutation({
@@ -320,12 +321,13 @@ export function useDraftFile(id: number | null) {
       api<DraftFileView>(`/api/mail/drafts/${draftPath(id)}/files`, { method: 'POST', body: { name: v.file.name, data: await fileBase64(v.file), inline: v.inline } }),
   });
   const removing = useMutation({
-    mutationFn: async (fileId: string) => api<void>(`/api/mail/drafts/${draftPath(id)}/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' }),
+    mutationFn: async (v: { fileId: string; draftId?: number }) =>
+      api<void>(`/api/mail/drafts/${draftPath(v.draftId ?? id)}/files/${encodeURIComponent(v.fileId)}`, { method: 'DELETE' }),
   });
   const { mutateAsync: addAsync } = adding;
   const { mutateAsync: removeAsync } = removing;
   const add = useCallback((file: File, inline: boolean) => addAsync({ file, inline }), [addAsync]);
-  const remove = useCallback((fileId: string) => removeAsync(fileId), [removeAsync]);
+  const remove = useCallback((fileId: string, draftId?: number) => removeAsync({ fileId, draftId }), [removeAsync]);
   return { add, remove, busy: adding.isPending || removing.isPending };
 }
 
