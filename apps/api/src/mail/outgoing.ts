@@ -1,5 +1,5 @@
 import type { EmailAccount, EmailMessage, Lead, Prisma } from '@prisma/client';
-import { isClosedStatus } from '@dait-crm/shared';
+import { isClosedStatus, type ReplyMode } from '@dait-crm/shared';
 import type { AuthUser } from '../plugins/auth.js';
 import type { MailAttachment } from '../graph/client.js';
 import type { SendUserEmailPayload } from '../jobs/types.js';
@@ -34,6 +34,8 @@ export interface Outgoing {
    */
   formatted?: Formatted | null;
   replyToId?: number;
+  /** Web-mail release 2: how it answers `replyToId` (default reply); the worker sends it the same way in Outlook. */
+  replyMode?: ReplyMode;
   threadId?: string | null;
   /** "Set follow-up in N days" (prototype): an open lead only. */
   followUpDays?: number | null;
@@ -81,6 +83,7 @@ export async function queueOutgoing(tx: Tx, user: AuthUser, account: EmailAccoun
   });
   const payload: SendUserEmailPayload = {
     emailMessageId: msg.id, ...(o.attachments?.length ? { attachments: o.attachments } : {}), ...(o.quotation ? { quotation: o.quotation } : {}),
+    ...(o.replyMode && o.replyMode !== 'reply' ? { replyMode: o.replyMode } : {}),
   };
   await enqueue(tx, 'send_user_email', payload, { maxAttempts: SEND_ATTEMPTS });
   if (lead && !o.quotation) await recordOnLead(tx, user, lead, msg, o.subject, o.followUpDays);

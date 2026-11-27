@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
 import { Prisma, type EmailMessage, type Lead } from '@prisma/client';
-import { LeadCreate, MailBulk, MailChange, MailCompose, MailLink, MailListQuery, MailRead, MailReply, can, checkDomain, domainOf, isFreeMail, pageArgs } from '@dait-crm/shared';
+import { LeadCreate, MailBulk, MailChange, MailCompose, MailLink, MailListQuery, MailRead, MailReply, can, replyRecipients, replySubject, checkDomain, domainOf, isFreeMail, pageArgs } from '@dait-crm/shared';
 import { audit } from '../audit.js';
 import { enqueue } from '../jobs/queue.js';
 import { BODY_MAX } from '../jobs/handlers/syncMailbox.js';
@@ -294,6 +294,8 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // Reply (prototype Reply): to the sender of a received message, or the recipients of your own; same conversation.
+  // Web-mail release 2: also Reply all (those and the original To, never your own addresses) and Forward (to the `to`
+  // given; it keeps the conversation and lead too). Recipients and subject: shared replyRecipients / replySubject.
   // Only from your own mailbox: another user's message is view only (403) or not yours to see (404).
   app.post<{ Params: { id: string } }>('/mail/:id/reply', send, async (request, reply) => {
     const body = parseBody(MailReply, request.body);
@@ -304,8 +306,9 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
       const account = await myMailbox(user.id);
       if (!account) return reply.code(409).send({ error: 'no_mailbox' });
       const message = await outgoingBody(body.body, body.bodyHtml);
-      const to = original.status === 'received' ? [original.fromAddress] : (original.toAddresses as string[]);
-      const subject = /^\s*re\s*:/i.test(original.subject) ? original.subject : `Re: ${original.subject}`.slice(0, 500);
+      const own = [account.address, ...(account.sendAs ? [account.sendAs] : [])];
+      const { to } = replyRecipients({ ...original, toAddresses: original.toAddresses as string[] }, body.mode, own, body.to);
+      const subject = replySubject(original.subject, body.mode);
       const created = await prisma.$transaction(async (tx) => {
         const lead = original.leadId && (await canSeeLead(tx, user, original.leadId))
           ? await lockedLead(tx, user, original.leadId).catch((e) => {
@@ -316,7 +319,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
           : null;
         return queueOutgoing(tx, user, account, {
           lead, companyId: original.companyId, contactId: original.contactId, to, cc: body.cc, subject, ...message,
-          replyToId: original.id, threadId: original.threadId, projectId: original.projectId,
+          replyToId: original.id, replyMode: body.mode, threadId: original.threadId, projectId: original.projectId,
         });
       });
       return reply.code(201).send(emailView(created));

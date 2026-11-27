@@ -195,6 +195,112 @@ describe('compose and reply (2B-2)', () => {
   });
 });
 
+describe('Reply all and Forward (web-mail release 2)', () => {
+  const toAll = { toAddresses: ['maya@daitpartners.com', 'bo@acme.com'], ccAddresses: ['cy@acme.com'] };
+
+  it('Reply all goes to the sender and the other To addresses, never your own; Cc as given; subject Re:', async () => {
+    const { rep, box } = await setup();
+    await prisma.emailAccount.update({ where: { id: box.id }, data: { sendAs: 'sales@daitpartners.com' } });
+    const m = await synced(rep.id, box.id, { toAddresses: [...toAll.toAddresses, 'Sales@DaitPartners.com'], ccAddresses: toAll.ccAddresses });
+    const res = await call('POST', `/api/mail/${m.id}/reply`, await signIn(app, rep), { mode: 'replyAll', cc: ['cy@acme.com'], body: 'Thanks' });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({ toAddresses: ['ana@acme.com', 'bo@acme.com'], ccAddresses: ['cy@acme.com'], subject: 'Re: Proposal' });
+    expect((await prisma.job.findFirstOrThrow({ where: { type: 'send_user_email' } })).payload).toMatchObject({ replyMode: 'replyAll' });
+  });
+
+  it('a plain reply puts no reply mode on the job', async () => {
+    const { rep, box } = await setup();
+    const m = await synced(rep.id, box.id);
+    await call('POST', `/api/mail/${m.id}/reply`, await signIn(app, rep), { cc: [], body: 'Thanks' });
+    expect((await prisma.job.findFirstOrThrow({ where: { type: 'send_user_email' } })).payload).not.toHaveProperty('replyMode');
+  });
+
+  it('Forward needs a To, keeps the conversation and lead, subject Fw: once', async () => {
+    const { rep, box, lead, company, contact } = await setup();
+    const m = await synced(rep.id, box.id, { leadId: lead.id, companyId: company.id, contactId: contact.id });
+    const cookie = await signIn(app, rep);
+    expect((await call('POST', `/api/mail/${m.id}/reply`, cookie, { mode: 'forward', body: 'x' })).statusCode).toBe(400);
+    const res = await call('POST', `/api/mail/${m.id}/reply`, cookie, { mode: 'forward', to: ['New@Acme.com'], cc: [], body: 'FYI' });
+    expect(res.statusCode).toBe(201);
+    const created = await prisma.emailMessage.findUniqueOrThrow({ where: { id: res.json().id } });
+    expect(created).toMatchObject({ toAddresses: ['new@acme.com'], subject: 'Fw: Proposal', replyToId: m.id, leadId: lead.id, threadId: 'conv-1' });
+    expect((await prisma.job.findFirstOrThrow({ where: { type: 'send_user_email' } })).payload).toMatchObject({ replyMode: 'forward' });
+    const fw = await synced(rep.id, box.id, { subject: 'FW: Proposal' });
+    const again = await call('POST', `/api/mail/${fw.id}/reply`, cookie, { mode: 'forward', to: ['new@acme.com'], body: 'FYI' });
+    expect(again.json().subject).toBe('FW: Proposal');
+  });
+
+  it("Reply all / Forward on another user's message are 403 view_only", async () => {
+    const { rep, admin, box, lead } = await setup();
+    const m = await synced(rep.id, box.id, { leadId: lead.id });
+    const cookie = await signIn(app, admin);
+    for (const body of [{ mode: 'replyAll', body: 'x' }, { mode: 'forward', to: ['new@acme.com'], body: 'x' }]) {
+      const res = await call('POST', `/api/mail/${m.id}/reply`, cookie, body);
+      expect(res.statusCode).toBe(403);
+      expect(res.json()).toEqual({ error: 'view_only' });
+    }
+    expect(await prisma.emailMessage.count()).toBe(1);
+    expect(await prisma.job.count({ where: { type: 'send_user_email' } })).toBe(0);
+  });
+
+  it('a queued Reply all / Forward is sent with Graph replyAll / forward on the original', async () => {
+    const { rep, box } = await setup();
+    const original = await synced(rep.id, box.id, { graphId: 'orig-1', ...toAll });
+    const cookie = await signIn(app, rep);
+    const calls: [string, string, unknown][] = [];
+    const sends: string[] = [];
+    const graph = fakeGraph({
+      async replyAll(_a, graphId, msg) { calls.push(['replyAll', graphId, msg]); },
+      async forward(_a, graphId, msg) { calls.push(['forward', graphId, msg]); },
+      async sendMail(_a, msg) { sends.push(msg.subject); },
+    });
+    await call('POST', `/api/mail/${original.id}/reply`, cookie, { mode: 'replyAll', cc: ['cy@acme.com'], body: 'Thanks' });
+    await runJobs(graph);
+    expect(calls).toEqual([['replyAll', original.graphId, { to: ['ana@acme.com', 'bo@acme.com'], cc: ['cy@acme.com'], html: expect.any(String) }]]);
+    calls.length = 0;
+    await call('POST', `/api/mail/${original.id}/reply`, cookie, { mode: 'forward', to: ['new@acme.com'], body: 'FYI' });
+    await runJobs(graph);
+    expect(calls).toEqual([['forward', original.graphId, { to: ['new@acme.com'], html: '<div>FYI</div>' }]]);
+    expect(sends).toEqual([]);
+    expect(await prisma.emailMessage.count({ where: { status: 'sent' } })).toBe(2);
+  });
+
+  it('a forward of a CRM-only original (no Graph id) goes out with sendMail, carrying the original', async () => {
+    const { rep, box } = await setup();
+    const crmOnly = await prisma.emailMessage.create({
+      data: {
+        userId: rep.id, accountId: box.id, folder: 'sent', status: 'sent', source: 'crm', fromAddress: 'maya@daitpartners.com', toAddresses: ['ana@acme.com'],
+        subject: 'Price list', bodyText: 'Our prices <2027>', bodyHtml: '<div>Our prices &lt;2027&gt;</div>', occurredAt: new Date('2026-11-20T10:00:00Z'),
+      },
+    });
+    const sends: { to: string[]; subject: string; html: string; text?: string }[] = [];
+    const graph = fakeGraph({ async sendMail(_a, msg) { sends.push(msg); } });
+    await call('POST', `/api/mail/${crmOnly.id}/reply`, await signIn(app, rep), { mode: 'forward', to: ['new@acme.com'], body: 'See below' });
+    await runJobs(graph);
+    expect(sends).toHaveLength(1);
+    expect(sends[0]).toMatchObject({ to: ['new@acme.com'], subject: 'Fw: Price list' });
+    expect(sends[0]!.html).toContain('<div>See below</div>');
+    expect(sends[0]!.html).toContain('Forwarded message');
+    expect(sends[0]!.html).toContain('Subject: Price list');
+    expect(sends[0]!.html).toContain('<div>Our prices &lt;2027&gt;</div>');
+    expect(sends[0]!.text).toContain('See below');
+    expect(sends[0]!.text).toContain('Our prices <2027>');
+    // What the CRM stores (and shows as sent) is the user's own text; the original is added only on the way out.
+    expect((await prisma.emailMessage.findFirstOrThrow({ where: { replyToId: crmOnly.id } })).bodyHtml).toBe('<div>See below</div>');
+  });
+
+  it('a Reply all of a CRM-only original goes out with sendMail', async () => {
+    const { rep, box } = await setup();
+    const crmOnly = await prisma.emailMessage.create({
+      data: { userId: rep.id, accountId: box.id, folder: 'sent', status: 'sent', fromAddress: 'maya@daitpartners.com', toAddresses: ['ana@acme.com', 'bo@acme.com'], subject: 'First' },
+    });
+    const sends: { to: string[]; subject: string; html: string }[] = [];
+    await call('POST', `/api/mail/${crmOnly.id}/reply`, await signIn(app, rep), { mode: 'replyAll', cc: [], body: 'Again' });
+    await runJobs(fakeGraph({ async sendMail(_a, msg) { sends.push(msg); } }));
+    expect(sends).toEqual([expect.objectContaining({ to: ['ana@acme.com', 'bo@acme.com'], subject: 'Re: First', html: '<div>Again</div>' })]);
+  });
+});
+
 describe('formatted compose and reply (24 Nov 2026)', () => {
   it('compose and reply send formatted HTML (sanitised again on the server) with its plain text', async () => {
     const { rep, box } = await setup();

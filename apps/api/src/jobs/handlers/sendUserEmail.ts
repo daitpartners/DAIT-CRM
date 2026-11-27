@@ -22,6 +22,22 @@ async function failMessage(id: number, lastError: string): Promise<void> {
 const INTERRUPTED = 'interrupted_may_have_sent';
 
 /**
+ * A forward of a message only the CRM has (no Graph id, so Graph forward cannot add it): the user's text, then the
+ * original under a "Forwarded message" header (From, Date, Subject, To) and its stored, already sanitised HTML.
+ */
+function withForwarded(html: string, text: string, original: EmailMessage): { html: string; text: string } {
+  const from = original.fromName ? `${original.fromName} <${original.fromAddress}>` : original.fromAddress;
+  const header = [
+    '---------- Forwarded message ---------', `From: ${from}`, `Date: ${original.occurredAt.toUTCString()}`,
+    `Subject: ${original.subject}`, `To: ${(original.toAddresses as string[]).join(', ')}`,
+  ].join('\n');
+  return {
+    html: `${html}<br>${textToHtml(header)}<br>${original.bodyHtml || textToHtml(original.bodyText)}`,
+    text: `${text}\n\n${header}\n\n${original.bodyText}`,
+  };
+}
+
+/**
  * Release 3A: the send effects of the quotation this message sent, in their own transaction after the message is
  * marked sent (the email has left whatever happens here). A failure is retried with the job — a later run finds the
  * message sent and the quotation still "Sending…" and applies them then, once (onQuotationSent re-checks under its
@@ -37,13 +53,14 @@ async function settleQuotation(msg: EmailMessage, quotation: NonNullable<SendUse
 }
 
 /**
- * Sends a message a user wrote in the CRM through their own mailbox (Graph sendMail, so it is also in Outlook's Sent
- * Items). The message is claimed first (`queued` → `sending`), so it is never handed to Microsoft twice: a message
- * found still `sending` was interrupted mid-send and is failed rather than resent. A revoked mailbox fails it at once;
+ * Sends a message a user wrote in the CRM through their own mailbox (Graph sendMail, or reply / replyAll / forward on
+ * the original in that mailbox, so it is also in Outlook's Sent Items). The message is claimed first (`queued` →
+ * `sending`), so it is never handed to Microsoft twice: a message found still `sending` was interrupted mid-send and is
+ * failed rather than resent. A revoked mailbox fails it at once;
  * other errors put it back in the queue, and the last attempt fails it.
  */
 export async function sendUserEmailHandler(job: Job, ctx: JobContext): Promise<void> {
-  const { emailMessageId, attachments, quotation } = job.payload as unknown as SendUserEmailPayload;
+  const { emailMessageId, attachments, quotation, replyMode } = job.payload as unknown as SendUserEmailPayload;
   const msg = await prisma.emailMessage.findUnique({ where: { id: emailMessageId }, include: { account: true } });
   if (!msg) return;
   const lastAttempt = job.attempts + 1 >= job.maxAttempts;
@@ -59,21 +76,22 @@ export async function sendUserEmailHandler(job: Job, ctx: JobContext): Promise<v
   const claimed = await prisma.emailMessage.updateMany({ where: { id: msg.id, status: 'queued' }, data: { status: 'sending' } });
   if (claimed.count === 0) return; // another run took it
 
-  // A reply goes through Graph reply on the original, so it stays in the conversation in Outlook too.
+  // A reply, reply all or forward goes through Graph on the original (reply / replyAll / forward), so it stays in the
+  // conversation in Outlook too and a forward carries the original's attachments.
   const original = msg.replyToId ? await prisma.emailMessage.findUnique({ where: { id: msg.replyToId } }) : null;
   // The HTML stored when it was queued: a formatted message's sanitised HTML, or its plain text as simple HTML.
   const html = msg.bodyHtml || textToHtml(msg.bodyText);
   try {
     const cc = msg.ccAddresses as string[];
     if (original?.graphId && original.userId === msg.userId) {
-      await ctx.graph.reply(account, original.graphId, { to: msg.toAddresses as string[], ...(cc.length ? { cc } : {}), html });
+      await ctx.graph[replyMode ?? 'reply'](account, original.graphId, { to: msg.toAddresses as string[], ...(cc.length ? { cc } : {}), html });
     } else {
+      const body = replyMode === 'forward' && original ? withForwarded(html, msg.bodyText, original) : { html, text: msg.bodyText };
       await ctx.graph.sendMail(account, {
         to: msg.toAddresses as string[],
         ...(cc.length ? { cc } : {}),
         subject: msg.subject,
-        html,
-        text: msg.bodyText,
+        ...body,
         ...(attachments?.length ? { attachments } : {}),
       });
     }

@@ -29,6 +29,8 @@ export interface SendUserEmailPayload {
   attachments?: MailAttachment[];
   /** Release 3A: the quotation it sends and the snapshot printed on the PDF (frozen as the revision when it is sent). */
   quotation?: { id: number; snapshot: QuotationSnapshot };
+  /** Web-mail release 2: how it answers its original (`replyToId`); absent = a reply. */
+  replyMode?: 'replyAll' | 'forward';
 }
 
 /** `sync_mailbox` (release 2B-2): read new mail from a personal mailbox. */

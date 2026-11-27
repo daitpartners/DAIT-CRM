@@ -17,6 +17,7 @@ export * from './schemas/lead.js';
 export * from './schemas/task.js';
 export * from './schemas/email.js';
 export * from './mailDates.js';
+export * from './mailReply.js';
 export * from './outreach.js';
 export * from './timezones.js';
 export * from './mergeFields.js';
