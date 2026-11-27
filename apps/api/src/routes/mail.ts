@@ -466,6 +466,9 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
           leadRestricted: hidden, project: m.projectId ? projects.get(m.projectId) ?? null : null,
         }, user.id, { replied: shown.replied.has(m.id), conversationCount: shown.counts.get(countKey(m)) ?? 1 }),
         restrictedLead: restricted ? { number: restricted.number, companyName: restricted.company?.name ?? restricted.companyName } : null,
+        // Web-mail release 3: what a draft answers (opening it: inline reply or the New message page), and why your own
+        // send failed (a Failed draft's "Not sent: …").
+        replyToId: m.replyToId, lastError: m.status === 'failed' && !viewOnly ? m.lastError : null,
         ccAddresses: m.ccAddresses as string[], bodyText: m.bodyText, bodyHtml: m.bodyHtml || null, attachmentNames: m.attachmentNames as string[], loggedAt: m.loggedAt,
         lead: lead ? { id: lead.id, number: lead.number, status: lead.status, priority: lead.priority, nextFollowUp: ymd(lead.nextFollowUp), companyId: lead.companyId } : null,
         contact: contact ? { id: contact.id, name: `${contact.firstName} ${contact.lastName}`.trim() } : null,

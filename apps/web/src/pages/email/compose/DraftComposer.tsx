@@ -453,6 +453,12 @@ export function DraftComposer({
 
   return (
     <form className={variant === 'inline' ? 'reply' : 'reply page'} aria-label={label} onSubmit={(e) => e.preventDefault()}>
+      {/* A Failed send opened from Drafts (plan decision 18): why it did not leave, above the editor. */}
+      {draft.status === 'failed' && draft.lastError ? (
+        <div className="note warn rnote failed" role="alert">
+          {t('Not sent: {reason}', { reason: errorText(t, draft.lastError, {}, { context: 'draft' }) })}
+        </div>
+      ) : null}
       <div className="rtop">
         <SendButton
           onSend={flow.send}

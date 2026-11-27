@@ -250,7 +250,7 @@ export function FlagMenu({ at, target, commands, onClose }: { at: { x: number; y
 /**
  * A message's menu (mockup state 4: right-click on a row; later the reading pane's More actions): Reply, Reply all,
  * Forward | Delete, Archive, Move to ›, Flag ›, Mark as unread | Link to lead, Log as activity, Create task, Open lead,
- * each enabled and titled by the commands' rules for `target`.
+ * each enabled and titled by the commands' rules for `target`. A scheduled send starts with Edit, Send now, Cancel.
  */
 export function RowMenu({ at, target, commands, onClose }: { at: { x: number; y: number }; target: MailTarget; commands: Commands; onClose: () => void }) {
   const t = useT();
@@ -263,7 +263,16 @@ export function RowMenu({ at, target, commands, onClose }: { at: { x: number; y:
       ...(more.submenu && !s.enabled ? { submenu: undefined } : {}),
     };
   };
+  // A scheduled send's own three first (disabled with the view-only title in another user's mailbox).
+  const m = target.item;
+  const scheduled: MenuEntry[] = m && m.status === 'queued' && m.scheduledAt !== null ? [
+    item('editScheduled', t('Edit'), Icons.pen),
+    item('sendNow', t('Send now'), Icons.send),
+    item('cancelScheduled', t('Cancel'), Icons.x),
+    { kind: 'sep', key: 's0' },
+  ] : [];
   const items: MenuEntry[] = [
+    ...scheduled,
     item('reply', t('Reply'), Icons.reply),
     item('replyAll', t('Reply all'), Icons.replyall),
     item('forward', t('Forward'), Icons.forward),

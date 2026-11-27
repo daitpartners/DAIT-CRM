@@ -1,13 +1,17 @@
-import { useState, type MutableRefObject, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { isClosedStatus } from '@dait-crm/shared';
 import { useMailMessage, type MailDetail } from '../../api/mail';
+import { useCurrentUser } from '../../api/useCurrentUser';
 import { Icons } from '../../components/Icons';
 import { useFormatDate } from '../../hooks/useFormatDate';
-import { firstName, initials, leadStatusText } from '../../i18n/labels';
+import { errorText, firstName, initials, leadStatusText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
 import { InlineReply, type ReplyKind } from './compose/InlineReply';
+import { newMessageHref } from './compose/NewMessagePage';
 import { ConversationMessage } from './ConversationMessage';
-import type { CommandId, MailTarget, useMailCommands } from './useMailCommands';
+import { instantLabel } from './sendDates';
+import { isScheduled, type CommandId, type MailTarget, type useMailCommands } from './useMailCommands';
 import type { ComposerGuard } from './compose/DraftComposer';
 
 type Commands = ReturnType<typeof useMailCommands>;
@@ -50,10 +54,16 @@ const selfEntry = (m: MailDetail): ThreadEntry => ({
  * Then release 1's view-only banner, and the conversation newest on top: the opened message expanded, the others
  * collapsed rows (avatar, sender, preview, date) that expand on a click, each read when expanded, and fold back on a
  * click on their sender. Under the opened message: Reply, Reply all, Forward, or in another user's mailbox the
- * view-only pill with Log as activity and Create task. A draft shows "Drafts are edited in Outlook." instead.
+ * view-only pill with Log as activity and Create task.
+ * Web-mail release 3: your own draft (Drafts folder), when opened, is edited in the CRM: a reply draft in the inline
+ * editor here (its own message gives way to the editor), any other draft on the New message page; shown on arrival
+ * (`peek`) it offers Continue editing instead, with `Not sent: {reason}` for a Failed send. A scheduled send shows
+ * `Scheduled for {when}` with Edit, Send now and Cancel (view only in another user's mailbox).
  */
 export function ReadingPane({ id, peek = false, teamView = false, commands, composing = null, onCompose, onSent, guard }: Props) {
   const t = useT();
+  const me = useCurrentUser();
+  const navigate = useNavigate();
   const { dateTime } = useFormatDate();
   const { data: m, isError } = useMailMessage(id, peek);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
@@ -61,6 +71,22 @@ export function ReadingPane({ id, peek = false, teamView = false, commands, comp
   const [editing, setEditing] = useState<number | null>(null);
   const sentNote = composing?.sent === true;
   const label = t('Reading pane');
+  /** Your own draft (Drafts folder, not being sent): opened, it is edited in the CRM. */
+  const ownDraft = !!m && !m.viewOnly && m.folder === 'drafts' && (m.status === 'draft' || m.status === 'failed');
+  /** A reply draft in the inline editor here; any other draft (a new message, one made in Outlook) on the full page. */
+  const openDraft = (replace: boolean) => {
+    if (!m) return;
+    if (m.replyToId !== null) onCompose?.({ originalId: m.replyToId, kind: 'reply', draftId: m.id, seq: 0 });
+    else navigate(newMessageHref({ draft: m.id }), { replace });
+  };
+  // Opened (a click on its row or a link, not shown on arrival): your draft opens in its editor at once. Decided once,
+  // by the message as it first loads opened, so a draft that a Cancel or a Discard leaves here does not open again.
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (!m || peek || autoOpened.current) return;
+    autoOpened.current = true;
+    if (ownDraft && !composing) openDraft(true);
+  }, [m, peek]);
 
   if (isError) return <section className="rpane empty" aria-label={label}>{t('This message is not available.')}</section>;
   if (!m) return <section className="rpane empty" aria-label={label}>{t('Loading…')}</section>;
@@ -88,10 +114,15 @@ export function ReadingPane({ id, peek = false, teamView = false, commands, comp
       </button>
     );
   };
+  /** The inline editor stands for this draft itself: its own message is not shown beside it. */
+  const editingSelf = !!composing && !sentNote && (composing.draftId === m.id || editing === m.id);
   const footer = composing && !sentNote ? null : (
     <div className="msg-foot">
-      {m.status === 'draft' ? (
-        <span className="msg-note">{t('Drafts are edited in Outlook.')}</span>
+      {ownDraft ? (
+        <button type="button" className="btn primary" onClick={() => openDraft(false)}>
+          <span className="ico" aria-hidden="true">{Icons.pen}</span>
+          {t('Continue editing')}
+        </button>
       ) : viewOnly ? (
         <>
           <span className="vo-pill">
@@ -101,7 +132,7 @@ export function ReadingPane({ id, peek = false, teamView = false, commands, comp
           {button('log', Icons.activity, t('Log as activity'))}
           {button('task', Icons.task, t('Create task'))}
         </>
-      ) : (
+      ) : m.status === 'draft' ? null : (
         <>
           {button('reply', Icons.reply, t('Reply'))}
           {button('replyAll', Icons.replyall, t('Reply all'))}
@@ -145,6 +176,18 @@ export function ReadingPane({ id, peek = false, teamView = false, commands, comp
             </span>
           </div>
         ) : null}
+        {isScheduled(m) ? (
+          <div className="note sched-bar" role="status" aria-label={t('Scheduled send')}>
+            <span className="ico" aria-hidden="true">{Icons.clock}</span>
+            <span className="sched-when">{t('Scheduled for {when}', { when: instantLabel(m.scheduledAt!, me.timezone, me.language) })}</span>
+            {button('editScheduled', Icons.pen, t('Edit'))}
+            {button('sendNow', Icons.send, t('Send now'))}
+            {button('cancelScheduled', Icons.x, t('Cancel'))}
+          </div>
+        ) : null}
+        {ownDraft && m.lastError && !composing ? (
+          <div className="note warn" role="alert">{t('Not sent: {reason}', { reason: errorText(t, m.lastError, {}, { context: 'draft' }) })}</div>
+        ) : null}
         {composing && !viewOnly ? (
           <InlineReply
             key={composing.seq}
@@ -162,14 +205,15 @@ export function ReadingPane({ id, peek = false, teamView = false, commands, comp
           />
         ) : null}
         {thread.map((e) => {
-          if (e.id === m.id) return <ConversationMessage key={e.id} m={m} viewOnly={viewOnly} commands={commands} footer={footer} />;
+          if (e.id === m.id) return editingSelf ? null : <ConversationMessage key={e.id} m={m} viewOnly={viewOnly} commands={commands} footer={footer} />;
           if (e.kind === 'draft' && e.id !== m.id) {
             if (e.id === editing || viewOnly) return null;
             return (
               <div key={e.id} className="msg col draft-row">
                 <span className="av" aria-hidden="true"><span className="ico">{Icons.draft}</span></span>
                 <span className="cprev">{t('Draft · {preview}', { preview: e.preview || t('(no text)') })}</span>
-                <button type="button" className="btn sm" onClick={() => onCompose?.({ originalId: m.id, kind: 'reply', draftId: e.id, seq: 0 })}>
+                {/* A draft answers a message, never another draft: in a draft's own pane, the message that one answers. */}
+                <button type="button" className="btn sm" onClick={() => onCompose?.({ originalId: ownDraft && m.replyToId !== null ? m.replyToId : m.id, kind: 'reply', draftId: e.id, seq: 0 })}>
                   {t('Continue editing')}
                 </button>
               </div>

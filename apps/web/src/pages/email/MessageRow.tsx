@@ -6,6 +6,7 @@ import { Icons } from '../../components/Icons';
 import { firstName, initials, leadStatusText } from '../../i18n/labels';
 import { useT } from '../../i18n/useT';
 import { rowTime } from './listDates';
+import { instantShort } from './sendDates';
 import { rowTarget, type CommandId, type useMailCommands } from './useMailCommands';
 
 type Props = {
@@ -29,7 +30,7 @@ type Props = {
  * A message list row (web-mail release 2, mockup `.row`), the stretched-link pattern: the row is a `div.mrow` whose
  * link, named by sender and subject, covers it, with the avatar's Select message checkbox (on hover, or once any row is
  * checked) and the hover actions above it. Sender (bold when unread), replied / attachment / flag icons, subject, the
- * conversation count, the 24-hour time, preview, the lead chip with its stage, the mailbox in team view.
+ * conversation count, the 24-hour time (a scheduled send: `Scheduled · Mon 30 Nov, 08:00`), preview, the lead chip with its stage, the mailbox in team view.
  */
 export function MessageRow({ m, on, to, team, checked, selecting, menuOpen, onCheck, onMenu, commands }: Props) {
   const t = useT();
@@ -75,7 +76,12 @@ export function MessageRow({ m, on, to, team, checked, selecting, menuOpen, onCh
           {m.conversationCount > 1 ? (
             <span className="rcount" title={t('{n} messages in this conversation', { n: m.conversationCount })}>{m.conversationCount}</span>
           ) : null}
-          <span className="rtime">{rowTime(m.occurredAt, me.timezone, me.language)}</span>
+          {/* A scheduled send shows when it leaves in place of the time (Scheduled folder). */}
+          {m.status === 'queued' && m.scheduledAt ? (
+            <span className="rtime sched">{t('Scheduled · {when}', { when: instantShort(m.scheduledAt, me.timezone, me.language) })}</span>
+          ) : (
+            <span className="rtime">{rowTime(m.occurredAt, me.timezone, me.language)}</span>
+          )}
         </span>
         <span className="rprev">{m.preview}</span>
         <span className="rl4">
@@ -89,7 +95,7 @@ export function MessageRow({ m, on, to, team, checked, selecting, menuOpen, onCh
           ) : null}
           {m.projectNumber ? <span className="badge b-ok">{m.projectNumber}</span> : null}
           {m.status === 'failed' ? <span className="badge b-bad">{t('Failed')}</span> : null}
-          {m.status === 'queued' || m.status === 'sending' ? <span className="badge b-grey">{t('Sending')}</span> : null}
+          {(m.status === 'queued' && !m.scheduledAt) || m.status === 'sending' ? <span className="badge b-grey">{t('Sending')}</span> : null}
           {team ? <span className="mbx">{mailbox}</span> : null}
         </span>
       </Link>

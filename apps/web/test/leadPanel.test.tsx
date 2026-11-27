@@ -57,7 +57,7 @@ const PANEL: LeadPanel = {
   linkReason: { kind: 'domain', value: 'acme-logistics.com' },
 };
 const detail = (m: MailItem, over: Partial<MailDetail> = {}): MailDetail => ({
-  ...m, ccAddresses: [], bodyText: m.preview, bodyHtml: null, attachmentNames: [], loggedAt: null,
+  ...m, replyToId: null, lastError: null, ccAddresses: [], bodyText: m.preview, bodyHtml: null, attachmentNames: [], loggedAt: null,
   lead: m.leadId ? { id: m.leadId, number: m.leadNumber ?? '', status: m.leadStatus ?? 'New', priority: 'High', nextFollowUp: '2026-11-22', companyId: 4 } : null,
   contact: null, company: m.leadId ? { id: 4, name: 'Acme Logistics' } : null, restrictedLead: null, leadPanel: m.leadId ? PANEL : null, thread: [], ...over,
 });

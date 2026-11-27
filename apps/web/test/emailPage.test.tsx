@@ -31,7 +31,7 @@ type ThreadEntry = MailDetail['thread'][number];
 /** A thread entry with release 1's fields; the reading pane's (web-mail release 2) default to an empty message. */
 type ThreadIn = Omit<ThreadEntry, 'fromName' | 'fromAddress' | 'toAddresses' | 'ccAddresses' | 'preview' | 'hasAttachments' | 'folder' | 'isRead'> & Partial<ThreadEntry>;
 const detail = (m: MailItem, over: Omit<Partial<MailDetail>, 'thread'> & { thread?: ThreadIn[] } = {}): MailDetail => ({
-  ...m, ccAddresses: [], bodyText: 'Looks good', bodyHtml: null, attachmentNames: [], loggedAt: null, lead: null, contact: null, company: null, restrictedLead: null,
+  ...m, replyToId: null, lastError: null, ccAddresses: [], bodyText: 'Looks good', bodyHtml: null, attachmentNames: [], loggedAt: null, lead: null, contact: null, company: null, restrictedLead: null,
   leadPanel: null, ...over,
   thread: (over.thread ?? []).map((t) => ({
     fromName: null, fromAddress: '', toAddresses: [], ccAddresses: [], preview: '', hasAttachments: false, folder: 'inbox', isRead: true, ...t,

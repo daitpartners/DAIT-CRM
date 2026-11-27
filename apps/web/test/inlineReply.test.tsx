@@ -36,7 +36,7 @@ const entry = (m: MailItem, over: Partial<ThreadEntry> = {}): ThreadEntry => ({
   folder: m.folder, isRead: true, ...over,
 });
 const detail = (m: MailItem, over: Partial<MailDetail> = {}): MailDetail => ({
-  ...m, ccAddresses: ['robert@acme.com'], bodyText: 'Please find attached our RFP.', bodyHtml: null, attachmentNames: [], loggedAt: null,
+  ...m, replyToId: null, lastError: null, ccAddresses: ['robert@acme.com'], bodyText: 'Please find attached our RFP.', bodyHtml: null, attachmentNames: [], loggedAt: null,
   lead: { id: 5, number: 'LD-1178', status: 'Contacted', priority: 'High', nextFollowUp: null, companyId: 4 },
   contact: null, company: { id: 4, name: 'Acme Logistics' }, restrictedLead: null, leadPanel: null, thread: [], ...over,
 });

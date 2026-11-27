@@ -149,7 +149,7 @@ describe('useMailChange (web-mail release 2)', () => {
   it('marking read patches the open message and its conversation entry', async () => {
     const m = item({ id: 4, subject: 'Open one', isRead: true });
     const d = {
-      ...m, ccAddresses: [], bodyText: '', bodyHtml: null, attachmentNames: [], loggedAt: null, lead: null, contact: null, company: null, restrictedLead: null, leadPanel: null,
+      ...m, replyToId: null, lastError: null, ccAddresses: [], bodyText: '', bodyHtml: null, attachmentNames: [], loggedAt: null, lead: null, contact: null, company: null, restrictedLead: null, leadPanel: null,
       thread: [{
         id: 4, occurredAt: m.occurredAt, direction: 'in', who: 'Ana Ruiz', subject: 'Open one', kind: 'received', by: null, unmatched: true, fromName: 'Ana Ruiz',
         fromAddress: 'ana@acme.com', toAddresses: [], ccAddresses: [], preview: '', hasAttachments: false, folder: 'inbox', isRead: true,

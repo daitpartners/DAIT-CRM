@@ -27,7 +27,7 @@ const item = (over: Partial<MailItem> = {}): MailItem => ({
   flagStatus: 'notFlagged', flagDue: null, replied: false, conversationCount: 1, leadStatus: null, scheduledAt: null, ...over,
 });
 const detail = (m: MailItem): MailDetail => ({
-  ...m, ccAddresses: [], bodyText: 'Looks good', bodyHtml: null, attachmentNames: [], loggedAt: null, lead: null, contact: null, company: null,
+  ...m, replyToId: null, lastError: null, ccAddresses: [], bodyText: 'Looks good', bodyHtml: null, attachmentNames: [], loggedAt: null, lead: null, contact: null, company: null,
   restrictedLead: null, leadPanel: null, thread: [],
 });
 const META: MailMeta = {

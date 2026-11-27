@@ -42,6 +42,8 @@ export type DraftView = {
   savedAt: string;
   status: string;
   scheduledAt: string | null;
+  /** Why the last send failed (a Failed draft: "Not sent: …" above the editor); null otherwise. */
+  lastError: string | null;
 };
 
 /** The draft as the editor holds it: what auto-save and Send send. */

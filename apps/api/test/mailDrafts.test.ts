@@ -270,6 +270,17 @@ describe('drafts API (web-mail release 3)', () => {
     expect(g.calls).toEqual([]);
   });
 
+  it('a Failed draft opens with why it was not sent; the message itself carries its replyToId and lastError (Drafts folder, Task 14)', async () => {
+    const f = await setup();
+    const original = await msg(f.rep.id, f.repBox.id);
+    const d = await crmDraft(f, { status: 'failed', lastError: 'draft_gone', replyToId: original.id });
+    const ok = await crmDraft(f, { lastError: 'stale', graphId: 'D10' });
+    expect((await call('GET', `/api/mail/drafts/${d.id}`, f.repCookie)).json()).toMatchObject({ id: d.id, status: 'failed', lastError: 'draft_gone', replyToId: original.id });
+    expect((await call('GET', `/api/mail/drafts/${ok.id}`, f.repCookie)).json()).toMatchObject({ lastError: null });
+    expect((await call('GET', `/api/mail/${d.id}`, f.repCookie)).json()).toMatchObject({ replyToId: original.id, lastError: 'draft_gone' });
+    expect((await call('GET', `/api/mail/${ok.id}`, f.repCookie)).json()).toMatchObject({ replyToId: null, lastError: null });
+  });
+
   it('save: the user part is sanitised (no script), Outlook gets user part + quote, the row keeps To/Cc/Bcc/subject', async () => {
     const f = await setup();
     const quote = '<div id="divRplyFwdMsg">Quoted</div>';

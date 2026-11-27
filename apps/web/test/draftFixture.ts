@@ -9,7 +9,7 @@ export function draftView(over: Partial<DraftView> = {}): DraftView {
     bodyHtml: '<p><br></p><div class="dait-sig"><b>Arjun Mehta</b></div>',
     quotedHtml: '<p><b>From:</b> Maria Gómez</p><p>Dear Arjun, thank you…</p>',
     files: [], leadId: 5, projectId: null, lead: null, recipientZone: null,
-    savedAt: '2026-11-22T14:32:00.000Z', status: 'draft', scheduledAt: null,
+    savedAt: '2026-11-22T14:32:00.000Z', status: 'draft', scheduledAt: null, lastError: null,
     ...over,
   };
 }

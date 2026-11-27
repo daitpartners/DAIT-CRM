@@ -14,6 +14,7 @@ import { CommandBar } from './CommandBar';
 import { NewMessagePage, newMessageHref } from './compose/NewMessagePage';
 import type { ComposerGuard } from './compose/DraftComposer';
 import { LeaveGuard } from './compose/LeaveGuard';
+import { draftKindOf } from './compose/InlineReply';
 import { rowTarget, selectionTarget, useMailCommands, type MailTarget } from './useMailCommands';
 
 const num = (v: string | null) => (v && /^\d+$/.test(v) ? Number(v) : undefined);
@@ -142,6 +143,18 @@ export function EmailPage() {
       });
     },
     newStart: () => ({ company: filter.company, lead: filter.lead, project: filter.project }),
+    // A scheduled send's Edit (plan decision 17): back in Drafts, it opens in its editor — a reply in the inline editor
+    // of its conversation (the draft opened in the Drafts folder), any other draft on the New message page.
+    onEditDraft: (draft) => afterSave(() => {
+      if (draft.replyToId === null) {
+        navigate(newMessageHref({ draft: draft.id }));
+        return;
+      }
+      openEditor(draft.id, { originalId: draft.replyToId, kind: draftKindOf(draft), draftId: draft.id });
+      const q = new URLSearchParams(params);
+      q.set('folder', 'drafts');
+      navigate(`/email/${draft.id}?${q.toString()}`);
+    }),
     onGone: (ids) => {
       const open = num(id ?? null);
       if (open !== undefined && ids.includes(open)) navigate(href({}, false));

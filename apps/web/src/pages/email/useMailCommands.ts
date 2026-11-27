@@ -2,11 +2,12 @@ import { createElement, useState, type ReactElement } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BULK_MAX, type FlagPreset } from '@dait-crm/shared';
 import { ApiError } from '../../api/client';
+import { useSendNow, useUnsend, type DraftView } from '../../api/drafts';
 import { useBulkMailChange, useMailAction, useMailChange, useMailFollowUp, useUnlinkMail, type MailChange, type MailDetail, type MailItem } from '../../api/mail';
 import { useCurrentUser } from '../../api/useCurrentUser';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { useToast } from '../../components/Toast';
-import { firstName, mailErrorText } from '../../i18n/labels';
+import { errorText, firstName, mailErrorText } from '../../i18n/labels';
 import { useT, type TFn } from '../../i18n/useT';
 import { newMessageHref, type NewMessageStart } from './compose/NewMessagePage';
 import type { ReplyKind } from './compose/InlineReply';
@@ -15,7 +16,9 @@ import { followUpWhen, LinkMenu } from './menus';
 
 export type CommandId =
   | 'new' | 'delete' | 'archive' | 'move' | 'reply' | 'replyAll' | 'forward' | 'flag' | 'toggleRead'
-  | 'followUp' | 'link' | 'log' | 'task' | 'meeting' | 'openLead';
+  | 'followUp' | 'link' | 'log' | 'task' | 'meeting' | 'openLead'
+  // Web-mail release 3: a scheduled send's Edit, Send now and Cancel.
+  | 'editScheduled' | 'sendNow' | 'cancelScheduled';
 
 /**
  * What a command acts on: one message (`item`), or a multi-selection (`item` null, `rows` the selected rows). `ids` are
@@ -38,6 +41,10 @@ export function selectionTarget(rows: MailItem[]): MailTarget {
 
 /** Commands that change the mailbox (Outlook first): never in another user's mailbox, never while a message is sending. */
 const MAILBOX: readonly CommandId[] = ['delete', 'archive', 'move', 'reply', 'replyAll', 'forward', 'flag', 'toggleRead'];
+/** A scheduled send's own commands (one message, your own mailbox). */
+const SCHEDULED: readonly CommandId[] = ['editScheduled', 'sendNow', 'cancelScheduled'];
+/** Waiting for its scheduled time (Scheduled folder): Edit, Send now and Cancel apply. */
+export const isScheduled = (m: Pick<MailItem, 'status' | 'scheduledAt'>) => m.status === 'queued' && m.scheduledAt !== null;
 /** What a multi-selection can do. */
 const MULTI: readonly CommandId[] = ['delete', 'archive', 'move', 'flag', 'toggleRead'];
 
@@ -46,9 +53,10 @@ type Rules = { connected: boolean; canFollowUp: boolean };
 /**
  * Whether command `id` can run on `target`, and why not (the button's title): the one place for the Email screen's
  * rules (F10). No target → only New mail. Another user's message (team view) → mailbox commands and Link to lead
- * disabled, "View only — {first}'s mailbox". A draft → only Delete. Queued or sending → mailbox commands disabled,
+ * disabled, "View only — {first}'s mailbox". A draft (a Failed send in Drafts too) → only Delete. Queued or sending → mailbox commands disabled,
  * "Still sending". CRM commands need a lead the user can open (Follow-up also `manage_leads`). A multi-selection →
  * Delete, Archive, Move, Flag and Mark as read only. Mark as read / unread is labelled for what it will do.
+ * A scheduled send (one message, waiting for its time) → Edit, Send now and Cancel, view only in another user's mailbox.
  */
 export function commandState(id: CommandId, target: MailTarget | null, rules: Rules, t: TFn): CommandState {
   if (id === 'new') return { enabled: true };
@@ -60,8 +68,14 @@ export function commandState(id: CommandId, target: MailTarget | null, rules: Ru
   const off = (title?: string): CommandState => ({ enabled: false, title, label });
   const on: CommandState = { enabled: true, label };
   const theirs = rows.find((r) => r.viewOnly);
+  if (SCHEDULED.includes(id)) {
+    if (!m || !isScheduled(m)) return off();
+    if (theirs) return off(t("View only — {name}'s mailbox", { name: firstName(theirs.owner.name) }));
+    return rules.connected ? on : off(t('Mailbox not connected'));
+  }
   if (theirs && (MAILBOX.includes(id) || id === 'link')) return off(t("View only — {name}'s mailbox", { name: firstName(theirs.owner.name) }));
-  if (rows.some((r) => r.status === 'draft')) return id === 'delete' ? on : off();
+  // A Failed send is back in Drafts (plan decision 18): a draft like any other.
+  if (rows.some((r) => r.status === 'draft' || (r.status === 'failed' && r.folder === 'drafts'))) return id === 'delete' ? on : off();
   if (MAILBOX.includes(id)) {
     if (rows.some((r) => r.status === 'queued' || r.status === 'sending')) return off(t('Still sending'));
     return rules.connected ? on : off(t('Mailbox not connected'));
@@ -83,6 +97,8 @@ export type MailCommandsContext = {
   newStart?: () => Omit<NewMessageStart, 'draft' | 'template'>;
   /** Messages moved or deleted: the screen lets go of the open one if it is among them. */
   onGone?: (ids: number[]) => void;
+  /** A scheduled send's Edit: it is a draft again (`draft`), to open in its editor. */
+  onEditDraft?: (draft: DraftView) => void;
 };
 
 /** The flag a Flag command sets: a due-day preset, Mark complete or Clear flag. */
@@ -113,12 +129,16 @@ export function useMailCommands(ctx: MailCommandsContext): {
   const action = useMailAction();
   const followUp = useMailFollowUp();
   const unlink = useUnlinkMail();
+  const unsend = useUnsend();
+  const sendNow = useSendNow();
   /** Link to lead ▾ open for a message (where it opened), or its Link email to a lead window (Create lead…). */
   const [linkMenu, setLinkMenu] = useState<{ item: MailItem | MailDetail; at: { x: number; y: number } } | null>(null);
   const [linking, setLinking] = useState<number | null>(null);
   const rules: Rules = { connected: ctx.connected, canFollowUp: me.can('manage_leads') };
   const state = (id: CommandId, target: MailTarget | null) => commandState(id, target, rules, t);
   const failed = (err: unknown) => toast(mailErrorText(t, err instanceof ApiError ? err.code : ''), 'warn');
+  /** A scheduled send's command refused (already_sent: "Too late: the email was sent."). */
+  const sendFailed = (err: unknown) => toast(errorText(t, err instanceof ApiError ? err.code : 'try_again', {}, { context: 'draft' }), 'warn');
 
   /** One message through /change, more through /bulk (BULK_MAX at a time). */
   const change = (ids: number[], c: MailChange) => {
@@ -205,6 +225,22 @@ export function useMailCommands(ctx: MailCommandsContext): {
         return;
       case 'openLead':
         navigate(`/leads/${m.leadId}`);
+        return;
+      // Plan decision 17: Cancel moves the mail back to Drafts; Edit = Cancel, then its editor opens.
+      case 'cancelScheduled':
+        unsend.mutate(m.id, {
+          onSuccess: () => {
+            toast(t('Moved to Drafts'));
+            ctx.onGone?.([m.id]);
+          },
+          onError: sendFailed,
+        });
+        return;
+      case 'editScheduled':
+        unsend.mutate(m.id, { onSuccess: (draft) => ctx.onEditDraft?.(draft), onError: sendFailed });
+        return;
+      case 'sendNow':
+        sendNow.mutate({ id: m.id, leadId: m.leadId }, { onSuccess: () => toast(t('Sending…')), onError: sendFailed });
         return;
     }
   };

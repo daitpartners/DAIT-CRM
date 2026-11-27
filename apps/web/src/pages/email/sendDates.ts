@@ -40,3 +40,15 @@ export function whenShort(day: string, time: string, timezone: string, lang: str
 export function savedLabel(iso: string, timezone: string): string {
   return localNow(timezone, new Date(iso)).time;
 }
+
+/** The instant `iso` (a scheduled send's time) as whenShort / whenLabel show it, in `timezone`: `Mon 30 Nov, 08:00`. */
+export function instantShort(iso: string, timezone: string, lang: string, now: Date = new Date()): string {
+  const local = localNow(timezone, new Date(iso));
+  return whenShort(local.day, local.time, timezone, lang, now);
+}
+
+/** The instant `iso` as the long label, in `timezone`: `Mon 30 Nov 2026, 08:00`. */
+export function instantLabel(iso: string, timezone: string, lang: string): string {
+  const local = localNow(timezone, new Date(iso));
+  return whenLabel(local.day, local.time, timezone, lang);
+}

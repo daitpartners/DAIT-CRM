@@ -34,7 +34,7 @@ const entry = (m: MailItem, over: Partial<ThreadEntry> = {}): ThreadEntry => ({
   hasAttachments: m.hasAttachments, folder: m.folder, isRead: m.isRead, ...over,
 });
 const detail = (m: MailItem, over: Partial<MailDetail> = {}): MailDetail => ({
-  ...m, ccAddresses: [], bodyText: m.preview, bodyHtml: null, attachmentNames: [], loggedAt: null, lead: null, contact: null, company: null,
+  ...m, replyToId: null, lastError: null, ccAddresses: [], bodyText: m.preview, bodyHtml: null, attachmentNames: [], loggedAt: null, lead: null, contact: null, company: null,
   restrictedLead: null, leadPanel: null, thread: [], ...over,
 });
 const META: MailMeta = {
@@ -297,15 +297,15 @@ describe('Reading pane (web-mail release 2, mockup states 1 and 5)', () => {
     await waitFor(() => expect(posts).toContainEqual({ url: '/api/mail/2/change', body: { type: 'move', folder: 'archive' } }));
   });
 
-  it('a draft: no reply footer, "Drafts are edited in Outlook."', async () => {
+  it('a draft shown on arrival: no reply footer, Continue editing instead (release 3 edits drafts in the CRM)', async () => {
     const draft = item({ folder: 'drafts', status: 'draft' });
     stub([draft], { 1: detail(draft) });
-    show('/email/1?folder=drafts');
-    const p = await pane();
-    const article = await within(p).findByRole('article');
-    expect(await within(article).findByText('Drafts are edited in Outlook.')).toBeInTheDocument();
-    expect(article.querySelector('.msg-foot button')).toBeNull();
+    show('/email?folder=drafts');
+    const article = await screen.findByRole('article');
+    const foot = article.querySelector('.msg-foot') as HTMLElement;
+    expect(within(foot).getAllByRole('button').map((b) => b.textContent)).toEqual(['Continue editing']);
     expect(within(article).getByRole('button', { name: 'Reply' })).toBeDisabled();
+    expect(screen.queryByText('Drafts are edited in Outlook.')).toBeNull();
   });
 
   it('view only: banner, footer pill, Log as activity and Create task; no Reply buttons', async () => {

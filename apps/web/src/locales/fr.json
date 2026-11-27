@@ -1041,7 +1041,6 @@
   "Client: all": "Client : tous",
   "Creating a lead runs the same duplicate check as the lead form: the sender's email domain is matched against existing companies first.": "La création d'un lead applique le même contrôle des doublons que le formulaire : le domaine de l'expéditeur est d'abord comparé aux entreprises existantes.",
   "Discard": "Abandonner",
-  "Drafts are edited in Outlook.": "Les brouillons se modifient dans Outlook.",
   "Drafts": "Brouillons",
   "every thread links to a Lead, Contact and Company": "chaque conversation est liée à un lead, un contact et une entreprise",
   "Existing lead": "Lead existant",
@@ -2235,5 +2234,9 @@
   "fields filled from {lead}": "champs remplis depuis {lead}",
   "Change": "Modifier",
   "Add people": "Ajouter des personnes",
-  "Leave without saving": "Quitter sans enregistrer"
+  "Leave without saving": "Quitter sans enregistrer",
+  "Scheduled · {when}": "Programmé · {when}",
+  "Scheduled send": "Envoi programmé",
+  "Moved to Drafts": "Déplacé dans Brouillons",
+  "Not sent: {reason}": "Non envoyé : {reason}"
 }

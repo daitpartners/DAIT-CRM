@@ -70,6 +70,8 @@ export interface DraftView {
   savedAt: string;
   status: string;
   scheduledAt: string | null;
+  /** Why the last send failed (a Failed draft, plan decision 18); null otherwise. */
+  lastError: string | null;
 }
 
 /** The caller's connected personal mailbox, else DraftError no_mailbox (409). */
@@ -296,7 +298,7 @@ export async function draftView(user: AuthUser, m: EmailMessage, graph?: GraphCl
     id: m.id, replyToId: m.replyToId, from: m.fromAddress, to: chips(to), cc: chips(cc), bcc: chips(bcc), subject: m.subject,
     bodyHtml: m.bodyHtml ?? '', quotedHtml: m.quotedHtml, files,
     leadId: m.leadId, projectId: m.projectId, lead, recipientZone, savedAt: m.updatedAt.toISOString(), status: m.status,
-    scheduledAt: m.scheduledAt?.toISOString() ?? null,
+    scheduledAt: m.scheduledAt?.toISOString() ?? null, lastError: m.status === 'failed' ? m.lastError : null,
   };
 }
 

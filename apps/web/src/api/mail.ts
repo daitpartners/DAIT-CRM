@@ -94,6 +94,10 @@ export type ChangedMessage = { id: number; folder: string; isRead: boolean; flag
 export type MailAttachment = { id: string; name: string; contentType: string; size: number; preview: boolean; kind: 'file' | 'item' | 'reference' };
 
 export type MailDetail = MailItem & {
+  /** Web-mail release 3: the message a draft answers (null for a new message, or a draft made in Outlook). */
+  replyToId: number | null;
+  /** Why your own send failed (a Failed draft's "Not sent: …"); null otherwise, and in another user's mailbox. */
+  lastError: string | null;
   ccAddresses: string[];
   bodyText: string;
   /** Sanitised HTML (shown in the reader's sandboxed frame); null for plain text. */
