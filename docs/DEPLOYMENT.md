@@ -351,9 +351,9 @@ Only after the owner says "deploy". Follow "Deploying a release to live" with th
 
 ## Web mail release 2: deploy runbook
 
-Only after the owner says "deploy". Web mail release 2 (branch `web-mail-r2`) contains release 1: if release 1 is not
-live yet, its runbook above comes first. Follow "Deploying a release to live" (backup first, named
-`dait_crm-pre-web-mail-r2.dump`). Before installing (release 1 live), `migrate status` (as in release 1's step 2) must list only
+Only after the owner says "deploy". Web mail release 2 (branch `web-mail-r2`) builds on release 1 (live since 27 Nov
+2026 as `2f981c2`). Follow "Deploying a release to live" (backup first, named
+`dait_crm-pre-web-mail-r2.dump`). Before installing, `migrate status` (as in release 1's step 2) must list only
 `20261213100000_web_mail_screen` (number 27) as not yet applied: it adds `flag_status`, `flag_due` and `size_bytes` to
 `email_messages` and fills `size_bytes` from the stored bodies (one UPDATE over the mail table).
 Anything else means stop and ask. There is one one-time step (1) and one read-only check (2):
@@ -409,7 +409,8 @@ All of these have already been run on live; they are kept for reference and for 
 - **Outreach language:** the live allocation rules were set in Settings → Lead allocation rules ("Spanish market
   (Español)", any country + es → Carlos and Sebastian, priority 1; "English market (US and Canada)", US/CA + en →
   Deepak and Lakshita, priority 2).
-- **Web mail release 1 — clean-up** (not yet run on live; run after the release is live, so sync no longer stores
+- **Web mail release 1 — clean-up** (dry run done on live 27 Nov 2026: 684 checked, 320 kept, 364 to remove; the
+  `--apply` run waits for the owner's OK. Run after the release is live, so sync no longer stores
   non-lead mail): remove the stored mail that is not lead mail, for every user. First
   `cd ~/live/current/apps/api && node --env-file=$HOME/live/shared/.env dist/cli/mail-cleanup.js` (no flag, or
   `--dry-run`: a dry run, nothing changes) and check the per-user counts (`checked, kept, removed`) look sane; it prints
@@ -422,7 +423,8 @@ All of these have already been run on live; they are kept for reference and for 
   no address, the real run refuses: the mail of those leads cannot be recognised; check with the owner, then add
   `--accept-unrecorded-deletes` to go ahead. Safe to run again (removes 0). The mail stays in Outlook; rows removed by
   mistake can be restored by id from the fresh dump.
-- **Web mail release 1 — backfill** (nothing to start by hand): it starts by itself within a minute of the worker
+- **Web mail release 1 — backfill** (finished on live 27 Nov 2026: 561 searches, 220 emails stored, no failures; nothing
+  to start by hand): it starts by itself within a minute of the worker
   starting: one 12-month search per lead/contact address per connected mailbox (Sync mail on, active user), one short
   job every 10 s, so several hours. Watch it with
   `cd ~/live/current/apps/api && node --env-file=$HOME/live/shared/.env dist/cli/mail-backfill.js --status` (counts by

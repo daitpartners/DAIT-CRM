@@ -3,14 +3,12 @@
 Kept here at the owner's request; picked up when the owner says so. Items that were fixed are no longer listed (they are
 in the git history).
 
-## Where things stand (26 Nov 2026)
+## Where things stand (27 Nov 2026)
 
-- **Live** at crm.daitpartners.com: release `7d1d8c2` (live since 26 Nov 2026).
-- **Ready, waiting for "deploy":** branch `web-mail` — web-mail release 1 (lead mail only, team view for
-  Administrators and Managers). See "Ready, waiting for deploy: web-mail release 1" below.
+- **Live** at crm.daitpartners.com: release `2f981c2`, web-mail release 1 (live since 27 Nov 2026). Its backfill has
+  finished; **its clean-up is waiting for your OK** (see "Live: web-mail release 1" below).
 - **Ready, waiting for "deploy":** branch `web-mail-r2` — web-mail release 2 (the Microsoft 365-style Email screen;
-  Delete, Archive, Move, Flag and Read change Outlook too). It contains release 1. See "Ready, waiting for deploy:
-  web-mail release 2" below.
+  Delete, Archive, Move, Flag and Read change Outlook too). See "Ready, waiting for deploy: web-mail release 2" below.
 - **There is no test copy on the server.** Each release was checked on the developer's machine (automatic tests and
   side-by-side screenshots against the prototype) and then put live by hand, only after you said "deploy". How that is
   done, and how to undo it, is in `docs/DEPLOYMENT.md`.
@@ -40,11 +38,12 @@ in the git history).
 | Claude Code engine | Claude through the server's Claude Code, monthly run cap | `08ee5da` |
 | Minor fixes | 26 review follow-ups (time zones, mail linking, Mailer wizard, quotations, keyboard) + handover docs | `79b9415` |
 | Leads delete, import follow-ups | Delete leads with their company (Administrators), Download all leads, update rows through Import leads, Do not email list | `7d1d8c2` (live 26 Nov) |
+| Web-mail release 1 | Lead mail only, 12-month backfill, team view (view only) for Administrators and Managers | `2f981c2` (live 27 Nov; clean-up waiting for your OK) |
 
 ## Ready, waiting for deploy: web-mail release 2 (branch `web-mail-r2`)
 
 Design: `docs/superpowers/specs/2026-11-26-web-mail-email-design.md` (mockup 2026-11-26-outlook-mail). Reviewed and
-tested; not live. The branch contains web-mail release 1, so release 1's deploy steps come first if it is not live yet.
+tested; not live. It builds on web-mail release 1 (live).
 
 **What changes for users:**
 - **A new Email screen in the style of Microsoft 365 web mail:** a top bar with "Search lead mail" and a Filters panel
@@ -102,9 +101,14 @@ one-time step: after the release 1 backfill has finished, clear the stored sync 
 more and flags already set in Outlook reach the CRM (that re-read takes a while; nothing is lost). Then one read-only
 check on live of how Outlook writes a flag's due date (it decides whether users west of UTC see the right day).
 
-## Ready, waiting for deploy: web-mail release 1 (branch `web-mail`)
+## Live: web-mail release 1 (`2f981c2`, since 27 Nov 2026)
 
-Design: `docs/superpowers/specs/2026-11-26-web-mail-email-design.md`. Reviewed and tested; not live.
+**Status on live:** migration 26 applied. The backfill has finished: 561 searches done, 220 emails stored, no
+failures. **The clean-up is waiting for your OK:** the dry run checked 684 stored messages, keeps 320 and would remove
+364 (the non-lead mail; it stays in Outlook). Say OK and the real run follows, with a fresh copy of the mail table
+taken just before it (step 4 of the runbook).
+
+Design: `docs/superpowers/specs/2026-11-26-web-mail-email-design.md`.
 
 **What changes:**
 - **The CRM stores lead mail only.** Mail sync keeps a message only when it is with a lead or contact address (or that
@@ -124,7 +128,8 @@ Design: `docs/superpowers/specs/2026-11-26-web-mail-email-design.md`. Reviewed a
   company name only.
 - Mail is linked to the open lead first, then the most recently active one, whoever owns it.
 
-**The deploy needs two one-time steps** (runbook: `docs/DEPLOYMENT.md`, "Web mail release 1: deploy runbook"):
+**The deploy's two one-time steps** (runbook: `docs/DEPLOYMENT.md`, "Web mail release 1: deploy runbook"; step 2 is
+done, step 1's real run waits for your OK):
 1. **Clean-up:** a dry run first; you see the counts per user (how many messages kept and removed, no subjects or
    addresses) and say OK; then a fresh copy of the mail table is taken and the real run follows. If it finds leads
    deleted before this release whose addresses cannot be found, it stops and we ask you before going ahead.
