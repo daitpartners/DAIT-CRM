@@ -9,7 +9,7 @@ import type { GraphBody } from '../mail/html.js';
 import { processEmailBody, storedColumns } from '../mail/bodies.js';
 import type { MailActionPayload } from '../jobs/types.js';
 import { dateOnly, todayIn, ymd } from '../leads/dates.js';
-import { auditCreatedLead, createLeadWithCompany, RuleError } from '../leads/service.js';
+import { auditCreatedLead, createLeadWithCompany } from '../leads/service.js';
 import { autoResearchForLead } from '../research/service.js';
 import { findCompanyMatches } from '../companies/match.js';
 import { isUniqueViolation } from '../prismaErrors.js';
@@ -24,6 +24,7 @@ import { LIST_CANDIDATES_MAX, conversationKey, countKey, decorate, listWhere, or
 import { leadPanel } from '../mail/leadPanel.js';
 import { setLeadFollowUp, suggestLeads } from '../mail/crm.js';
 import { participantsOf } from '../mail/leadMail.js';
+import { alreadyLogged, lockLeadTimeline, logLeadMail, teamSenders } from '../mail/leadTimeline.js';
 import { perUser } from '../mail/formatted.js';
 import { projectWhere } from '../projects/visibility.js';
 import { domainTaken, guard } from './leads.js';
@@ -109,19 +110,27 @@ function threadHistory(ownerName: string, open: EmailMessage, others: EmailMessa
  * matched to another company. As /link: the lead's contact, else the row's own contact only when it belongs
  * to the lead's company. Linking clears a deleted-lead mark (`lead_deleted_at`), as /link and /create-lead do.
  */
-async function linkConversation(db: Tx | typeof prisma, m: EmailMessage, lead: Pick<Lead, 'id' | 'companyId' | 'contactId'>) {
-  if (!m.threadId) return;
+async function linkConversation(db: Tx | typeof prisma, m: EmailMessage, lead: Pick<Lead, 'id' | 'companyId' | 'contactId'>): Promise<number[]> {
+  if (!m.threadId) return [];
   const rows = await db.emailMessage.findMany({
     where: {
       userId: m.userId, threadId: m.threadId, leadId: null, id: { not: m.id }, folder: { not: 'drafts' },
       OR: [{ companyId: null }, ...(lead.companyId !== null ? [{ companyId: lead.companyId }] : [])],
     },
     select: { id: true, contact: { select: { id: true, companyId: true } } },
+    orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
   });
   for (const r of rows) {
     const keep = r.contact && lead.companyId !== null && r.contact.companyId === lead.companyId ? r.contact.id : null;
     await db.emailMessage.update({ where: { id: r.id }, data: { leadId: lead.id, companyId: lead.companyId, contactId: lead.contactId ?? keep, leadDeletedAt: null } });
   }
+  return rows.map((r) => r.id);
+}
+
+/** Lead mail timeline: a message just linked to a lead, and the conversation linked with it, go on its timeline. */
+async function logLinked(tx: Tx, ids: number[]): Promise<void> {
+  const senders = await teamSenders(tx);
+  for (const id of ids) await logLeadMail(tx, id, { senders });
 }
 
 /** Queues the change in the user's mailbox (messages that came from it only); used when a message is opened. */
@@ -478,20 +487,25 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
     return guard(reply, async () => {
       const { m } = await messageFor(prisma, user, request.params.id, 'crm');
       if (!m.leadId || !(await canSeeLead(prisma, user, m.leadId))) return reply.code(409).send({ error: 'no_lead' });
-      const logged = m.loggedAt || (await prisma.leadActivity.count({ where: { relatedType: 'email_message', relatedId: m.id } })) > 0;
-      if (logged) return reply.code(409).send({ error: 'already_logged' });
-      await prisma.$transaction(async (tx) => {
+      const leadId = m.leadId;
+      if (m.loggedAt) return reply.code(409).send({ error: 'already_logged' });
+      // Lead mail timeline: the same check as the automatic lines, so a copy in another mailbox counts too.
+      const logged = await prisma.$transaction(async (tx) => {
+        await lockLeadTimeline(tx, leadId);
+        if (await alreadyLogged(tx, { ...m, leadId })) return true;
         const claimed = await tx.emailMessage.updateMany({ where: { id: m.id, loggedAt: null }, data: { loggedAt: new Date() } });
-        if (claimed.count === 0) throw new RuleError('already_logged');
+        if (claimed.count === 0) return true;
         await tx.leadActivity.create({
           data: {
-            leadId: m.leadId!, activityType: 'email', title: `${isInbound(m) ? 'Email received' : 'Email sent'} · ${m.subject}`,
+            leadId, activityType: 'email', title: `${isInbound(m) ? 'Email received' : 'Email sent'} · ${m.subject}`,
             relatedType: 'email_message', relatedId: m.id, byUserId: user.id, occurredAt: m.occurredAt,
           },
         });
-        await audit(tx, { entityType: 'lead', entityId: m.leadId!, action: 'update', userId: user.id, after: { emailMessageId: m.id } });
+        await audit(tx, { entityType: 'lead', entityId: leadId, action: 'update', userId: user.id, after: { emailMessageId: m.id } });
+        return false;
       });
-      return reply.code(201).send({ id: m.id, leadId: m.leadId });
+      if (logged) return reply.code(409).send({ error: 'already_logged' });
+      return reply.code(201).send({ id: m.id, leadId });
     });
   });
 
@@ -508,7 +522,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
           where: { id: m.id },
           data: { leadId: lead.id, companyId: lead.companyId, contactId: lead.contactId ?? (keepContact ? m.contactId : null), leadDeletedAt: null },
         });
-        await linkConversation(tx, m, lead);
+        await logLinked(tx, [m.id, ...(await linkConversation(tx, m, lead))]);
         return u;
       });
       return { id: updated.id, leadId: updated.leadId };
@@ -581,7 +595,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
           await auditCreatedLead(tx, user.id, created);
           const l = created.lead;
           await tx.emailMessage.update({ where: { id: m.id }, data: { leadId: l.id, companyId: l.companyId, contactId: l.contactId, leadDeletedAt: null } });
-          await linkConversation(tx, m, l);
+          await logLinked(tx, [m.id, ...(await linkConversation(tx, m, l))]);
           return l.id;
         });
         // Release 4: AI research for a never-researched company with a website.

@@ -7,6 +7,7 @@ import { mailUser, matchMail } from '../../mail/match.js';
 import { inLeadConversation, isLeadMail, loadLeadMailRules, participantsOf, type LeadMailRules } from '../../mail/leadMail.js';
 import { processEmailBody, storedColumns } from '../../mail/bodies.js';
 import { incomingSide, sideWhere } from '../../mail/direction.js';
+import { logLeadMail } from '../../mail/leadTimeline.js';
 import { dateOnly, startOfDayIn, todayIn } from '../../leads/dates.js';
 import type { AuthUser } from '../../plugins/auth.js';
 import type { SyncMailboxPayload } from '../types.js';
@@ -24,8 +25,8 @@ export const FOLDERS: { graph: MailFolder; folder: string }[] = [
 export const INITIAL_DAYS = 365;
 export const MAX_PAGES = 20;
 export const BODY_MAX = 50_000;
-/** A CRM-sent message and its Sent Items copy are this close in time. */
-const CLAIM_WINDOW_MS = 15 * 60_000;
+/** A CRM-sent message and its Sent Items copy are this close in time (also how `logLeadMail` matches a colleague's copy). */
+export const CLAIM_WINDOW_MS = 15 * 60_000;
 /** A run that stopped at the page cap continues this soon. */
 const MORE_AFTER_MS = 60_000;
 
@@ -81,6 +82,18 @@ async function inheritedProject(userId: number, threadId: string | null): Promis
     where: { userId, threadId, projectId: { not: null } }, select: { projectId: true }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
   });
   return tagged?.projectId ?? null;
+}
+
+/**
+ * Lead mail timeline: puts a stored lead email on its lead's timeline. A failure is logged with the id only and never
+ * fails the sync (the one-time fill, or Log as activity, can add the line later).
+ */
+async function logOnLead(emailMessageId: number): Promise<void> {
+  try {
+    await logLeadMail(prisma, emailMessageId);
+  } catch {
+    console.warn(`sync_mailbox: email_message ${emailMessageId}: timeline line not written`);
+  }
 }
 
 /** The message id and the reason only: the mail is private to its owner. */
@@ -163,7 +176,8 @@ export type StoreResult = 'stored' | 'updated' | 'claimed' | 'skipped';
  * a flag set or cleared in Outlook shows on the next sync.
  * Lead mail timeline: search (the lead-mail backfill) gives regular Graph ids and delta sync immutable ones, so a
  * message not found by Graph id is matched by its internet message id and direction (`sameEmail`); delta's id then
- * replaces the stored one, so a later delta removal finds the row.
+ * replaces the stored one, so a later delta removal finds the row. A lead email stored here (or a lead draft that
+ * Outlook sent) goes on the lead's timeline (`logLeadMail`); a claimed CRM row already has its line.
  */
 export async function storeMessage(
   account: EmailAccount, user: AuthUser, folder: string, m: GraphMessage, ctx: JobContext, rules: LeadMailRules,
@@ -185,16 +199,19 @@ export async function storeMessage(
     const bodies = existing.bodyHtml === null && m.body.contentType === 'html' ? await bodyColumns(user.id, m, existing.id) : {};
     const flag = flagColumns(m, user.timezone);
     const data = { folder, isRead: outbound ? true : m.isRead, ...flag, ...sentDraft, ...bodies };
+    let moved = false;
     if (idSource === 'delta' && existing.graphId !== m.id) {
       try {
         await prisma.emailMessage.update({ where: { id: existing.id }, data: { ...data, graphId: m.id } });
-        return 'updated';
+        moved = true;
       } catch (err) {
         // Another row took this id meanwhile (a concurrent run): this row keeps its id.
         if (!isUniqueViolation(err)) throw err;
       }
     }
-    await prisma.emailMessage.update({ where: { id: existing.id }, data });
+    if (!moved) await prisma.emailMessage.update({ where: { id: existing.id }, data });
+    // Lead mail timeline: a lead draft sent from Outlook is an email now, so it goes on the timeline.
+    if ('status' in sentDraft && existing.leadId !== null) await logOnLead(existing.id);
     return 'updated';
   }
   const participants = participantsOf({ from: m.from?.address ?? null, to: m.to, cc: m.cc, bcc: m.bcc });
@@ -233,8 +250,10 @@ export async function storeMessage(
       row = await store({ ...links, leadId: null, contactId: null, companyId: null });
     }
     if (result.fellBack) warnFallback(row.id, result.reason);
+    // Lead mail timeline: once the row is stored (a copy another mailbox already logged adds nothing).
+    if (row.leadId !== null) await logOnLead(row.id);
   } catch (err) {
-    if (!isUniqueViolation(err)) throw err; // a concurrent run stored it first: stored all the same
+    if (!isUniqueViolation(err)) throw err; // a concurrent run stored it first: stored all the same (and it logs it)
   }
   return 'stored';
 }

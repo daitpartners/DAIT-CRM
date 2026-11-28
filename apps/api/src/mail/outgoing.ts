@@ -14,8 +14,8 @@ type Tx = Prisma.TransactionClient;
 
 /** Retries for a user's email: about half an hour of backoff (2, 4, 8, 16 minutes) before it is marked failed. */
 const SEND_ATTEMPTS = 5;
-/** Statuses an email moves to Contacted. */
-const CONTACTED_ON_EMAIL = new Set(['New', 'Not Contacted']);
+/** Statuses an email moves to Contacted (a CRM send here, a team member's email in `logLeadMail`). */
+export const CONTACTED_ON_EMAIL = new Set(['New', 'Not Contacted']);
 
 export interface Outgoing {
   /** The lead it is sent on (already checked visible and locked by the caller), or null. */
