@@ -1,6 +1,7 @@
 import type { EmailMessage, Prisma, PrismaClient } from '@prisma/client';
 import { applyStatusChange } from '../leads/service.js';
 import { CLAIM_WINDOW_MS, baseSubject } from '../jobs/handlers/syncMailbox.js';
+import { isAutomaticMail } from './automatic.js';
 import { CONTACTED_ON_EMAIL } from './outgoing.js';
 
 /**
@@ -129,7 +130,8 @@ export interface LogOptions {
  * the sender is a team address, else `Email received · <subject>` with no author; dated at the email, related to the
  * row (for a sent line, the sender's own copy when stored), which gets `logged_at`. A sent line with a recipient outside
  * the team moves New / Not Contacted to Contacted, as `recordOnLead`. Drafts, unsent or failed rows, rows without a
- * lead, deleted-lead mail and a quotation's sending email (and its copies) are skipped. Given a transaction it runs in it; given the client it opens one.
+ * lead, deleted-lead mail, a quotation's sending email (and its copies) and a received bounce or automatic reply
+ * (`isAutomaticMail`; Log as activity can still log one by hand) are skipped. Given a transaction it runs in it; given the client it opens one.
  * Either way it holds the lead's advisory lock, so two copies logged at once give one line.
  */
 export async function logLeadMail(db: Db, emailMessageId: number, opts: LogOptions = {}): Promise<LogResult> {
@@ -149,10 +151,12 @@ async function logIn(tx: Tx, emailMessageId: number, opts: LogOptions): Promise<
   const lead = await tx.lead.findUnique({ where: { id: row.leadId } });
   if (!lead) return 'skipped';
   const senders = opts.senders ?? (await teamSenders(tx));
+  const by = senders.get(row.fromAddress.toLowerCase()) ?? null;
+  // Bounces and automatic replies stay off the timeline (owner, 28 Nov 2026); only received mail is ever automatic.
+  if (by === null && isAutomaticMail(row)) return 'skipped';
   if (await alreadyLogged(tx, { ...row, leadId: lead.id }, senders)) return 'already';
   if (await quotationEmail(tx, { ...row, leadId: lead.id }, senders)) return 'skipped';
 
-  const by = senders.get(row.fromAddress.toLowerCase()) ?? null;
   // A sent line made from a colleague's copy relates to the sender's own copy when it is stored, so the sender sees it.
   const own = by !== null && row.userId !== by && row.messageId !== null
     ? await tx.emailMessage.findFirst({

@@ -14,6 +14,10 @@ in the git history).
   timeline by itself, the email Lead box shows the person in the email). One-time steps done on live: 225 duplicate
   copies removed (117 lead links carried), 175 past-mail timeline lines added on 117 leads, 116 leads moved to
   Contacted. Backup before it: `dait_crm-pre-lead-mail-timeline.dump`.
+- **Ready, not yet live (branch `timeline-skip-auto`, owner OK 28 Nov):** bounces and automatic replies stay off the
+  lead timelines (still in the Email screen, never change a stage; Log as activity can still log one by hand). On
+  deploy, a one-time `timeline-automatic` clean-up removes the ones already there (about 15). Runbook:
+  `docs/DEPLOYMENT.md`, "Timeline without bounces: deploy runbook".
 - **Next (owner approved 28 Nov):** one lead per person — plan `docs/superpowers/plans/2026-11-28-lead-per-person.md`.
 - **There is no test copy on the server.** Each release was checked on the developer's machine (automatic tests and
   side-by-side screenshots against the prototype) and then put live by hand, only after you said "deploy". How that is

@@ -639,6 +639,31 @@ The data changes stay and `e83f6ea` runs fine with them: there is no
 schema change, the removed rows were duplicates and the new lines are ordinary timeline lines. To undo the data too,
 restore `dait_crm-pre-lead-mail-timeline.dump` (see "Restoring").
 
+## Timeline without bounces: deploy runbook
+
+Only after the owner says "deploy". This release (branch `timeline-skip-auto`) keeps bounces and automatic replies
+("Undeliverable: …", "No se puede entregar: …", "Automatic reply: …", mail from postmaster / mailer-daemon / no-reply)
+off the lead timelines; they stay in the Email screen and never change a lead's stage. Log as activity can still log
+one by hand. Follow "Deploying a release to live" (backup first, named `dait_crm-pre-timeline-automatic.dump`), with
+these additions.
+
+1. **Check there is no migration** (as in "Lead mail timeline: deploy runbook", step 1): `migrate status` must report
+   the schema up to date. Anything else means stop and ask.
+2. **Install and check** (steps 4–5 of "Deploying a release to live").
+3. **Take the bounces already on the timelines off** (as `daitcrm`; counts only). Dry run first:
+
+   ```
+   cd ~/live/current/apps/api
+   node --env-file=$HOME/live/shared/.env dist/cli/timeline-automatic.js
+   ```
+
+   Show the owner the line `timeline-automatic: dry run lines=…` (expected about 15). With the owner's OK, run it with
+   `--apply`, then the dry run again: it must show `lines=0`. It removes only the lines the timeline wrote by itself
+   (`Email received · …`, no author) for bounces and automatic replies; lines someone logged by hand stay.
+
+**Rollback:** switch back to the previous release as in "Rolling back". There is no schema change; the removed lines
+are not put back by a rollback (restore `dait_crm-pre-timeline-automatic.dump` for that, see "Restoring").
+
 ## One-time steps after a release
 
 All of these have already been run on live; they are kept for reference and for a rebuild.
@@ -696,6 +721,9 @@ All of these have already been run on live; they are kept for reference and for 
   --env-file=$HOME/live/shared/.env dist/cli/lead-mail-timeline.js` from the same folder (dry run), then with
   `--apply`. The dry run makes the same changes in a transaction it rolls back, so its counts are what `--apply` does.
   Safe to run again (`lines=0`). Details in that runbook, step 4.
+- **Timeline without bounces — take bounces off the timelines** (not yet run): `cd ~/live/current/apps/api && node
+  --env-file=$HOME/live/shared/.env dist/cli/timeline-automatic.js` (dry run), then with `--apply`; any other argument
+  is rejected with exit 1. Safe to run again (`lines=0`). Details in "Timeline without bounces: deploy runbook", step 3.
 
 ## Setting the server up from scratch (reference)
 
