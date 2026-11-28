@@ -137,6 +137,20 @@ async function attachmentColumns(account: EmailAccount, m: GraphMessage, ctx: Jo
   };
 }
 
+/**
+ * The user's stored copy of `m` under another Graph id: the same internet message id and the same direction (received
+ * or not). On the outbound side a Sent Items copy and a copy elsewhere stay apart too: an email to yourself is from an
+ * own address, so its Inbox copy is stored as sent as well. A message without an internet message id matches nothing.
+ */
+async function sameEmail(userId: number, folder: string, outbound: boolean, m: GraphMessage) {
+  const messageId = m.internetMessageId?.slice(0, 255);
+  if (!messageId) return null;
+  const side = !outbound
+    ? { status: 'received' }
+    : { status: { not: 'received' }, folder: folder === 'sent' ? 'sent' : { not: 'sent' } };
+  return prisma.emailMessage.findFirst({ where: { userId, messageId, ...side }, orderBy: { id: 'asc' } });
+}
+
 /** What `storeMessage` did with a message. */
 export type StoreResult = 'stored' | 'updated' | 'claimed' | 'skipped';
 
@@ -149,13 +163,20 @@ export type StoreResult = 'stored' | 'updated' | 'claimed' | 'skipped';
  * Web-mail release 2: a new row keeps Outlook's flag (the due date as the owner's own day), its non-inline attachment
  * names and its size (body plus attachments); an existing row takes the flag along with the folder and read state, so
  * a flag set or cleared in Outlook shows on the next sync.
+ * Lead mail timeline: search (the lead-mail backfill) gives regular Graph ids and delta sync immutable ones, so a
+ * message not found by Graph id is matched by its internet message id and direction (`sameEmail`); delta's id then
+ * replaces the stored one, so a later delta removal finds the row.
  */
 export async function storeMessage(
   account: EmailAccount, user: AuthUser, folder: string, m: GraphMessage, ctx: JobContext, rules: LeadMailRules,
+  idSource: 'delta' | 'search' = 'delta',
 ): Promise<StoreResult> {
-  const existing = await prisma.emailMessage.findUnique({ where: { userId_graphId: { userId: user.id, graphId: m.id } } });
   const outbound = m.isDraft || folder === 'sent' || folder === 'drafts' || isOwn(account, m.from?.address);
   const occurredAt = new Date(outbound ? (m.sentAt ?? m.receivedAt) : m.receivedAt);
+  const byGraphId = await prisma.emailMessage.findUnique({ where: { userId_graphId: { userId: user.id, graphId: m.id } } });
+  // A CRM row has no message id until it is claimed, so the claim comes before the match by message id.
+  if (!byGraphId && outbound && !m.isDraft && (await claimCrmCopy(user.id, m))) return 'claimed';
+  const existing = byGraphId ?? (await sameEmail(user.id, folder, outbound, m));
   if (existing) {
     // Web-mail release 3: a draft the CRM is sending (queued or sending; made in the CRM or in Outlook) stays exactly as
     // the CRM has it.
@@ -165,10 +186,19 @@ export async function storeMessage(
     // A row stored before bodies came as HTML takes the HTML (and the cleaner text) now that it is here anyway.
     const bodies = existing.bodyHtml === null && m.body.contentType === 'html' ? await bodyColumns(user.id, m, existing.id) : {};
     const flag = flagColumns(m, user.timezone);
-    await prisma.emailMessage.update({ where: { id: existing.id }, data: { folder, isRead: outbound ? true : m.isRead, ...flag, ...sentDraft, ...bodies } });
+    const data = { folder, isRead: outbound ? true : m.isRead, ...flag, ...sentDraft, ...bodies };
+    if (idSource === 'delta' && existing.graphId !== m.id) {
+      try {
+        await prisma.emailMessage.update({ where: { id: existing.id }, data: { ...data, graphId: m.id } });
+        return 'updated';
+      } catch (err) {
+        // Another row took this id meanwhile (a concurrent run): this row keeps its id.
+        if (!isUniqueViolation(err)) throw err;
+      }
+    }
+    await prisma.emailMessage.update({ where: { id: existing.id }, data });
     return 'updated';
   }
-  if (outbound && !m.isDraft && (await claimCrmCopy(user.id, m))) return 'claimed';
   const participants = participantsOf({ from: m.from?.address ?? null, to: m.to, cc: m.cc, bcc: m.bcc });
   if (!isLeadMail(rules, participants) && !(await inLeadConversation(prisma, user.id, m.conversationId))) return 'skipped';
 
@@ -250,7 +280,7 @@ async function readFolder(
       }
       throw err;
     }
-    for (const m of page.messages) await storeMessage(account, user, f.folder, m, ctx, rules);
+    for (const m of page.messages) await storeMessage(account, user, f.folder, m, ctx, rules, 'delta');
     for (const graphId of page.removed) removed.push({ graphId, folder: f.folder });
     if (!page.nextLink) return { link: page.deltaLink ?? url, removed, more: false };
     url = page.nextLink;

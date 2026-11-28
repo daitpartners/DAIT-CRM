@@ -3,7 +3,9 @@ import type { Job } from '@prisma/client';
 import { prisma } from '../src/db';
 import { encrypt } from '../src/crypto/tokens';
 import { GraphError, type DeltaPage, type GraphMessage } from '../src/graph/client';
-import { syncMailboxHandler } from '../src/jobs/handlers/syncMailbox';
+import { storeMessage, syncMailboxHandler } from '../src/jobs/handlers/syncMailbox';
+import { loadLeadMailRules } from '../src/mail/leadMail';
+import { mailUser } from '../src/mail/match';
 import { setBodyWorkerMemoryForTests } from '../src/mail/bodies';
 import { requestSync, scheduleMailSync } from '../src/mail/schedule';
 import { fakeGraph, resetDb } from './helpers';
@@ -735,5 +737,65 @@ describe('the CRM’s own drafts and their sends (web-mail release 3)', () => {
     await prisma.emailAccount.update({ where: { id: account.id }, data: { syncState: {} } });
     await syncMailboxHandler(job(account.id), { graph: scripted({ 'start:sentitems': final('sentitems', [copy]) }).graph });
     expect((await prisma.emailMessage.findMany({ where: { userId: user.id } })).map((r) => [r.id, r.folder, r.graphId])).toEqual([[draft.id, 'sent', 'OS1']]);
+  });
+});
+
+describe('one copy per email (lead mail timeline)', () => {
+  /** Stores `m` in `folder` as the backfill (search) or delta sync would. */
+  async function store(box: Awaited<ReturnType<typeof mailbox>>, folder: string, m: GraphMessage, idSource: 'delta' | 'search') {
+    const user = (await mailUser(prisma, box.user.id))!;
+    return storeMessage(box.account, user, folder, m, { graph: scripted({}).graph }, await loadLeadMailRules(prisma), idSource);
+  }
+  const rowsOf = (userId: number, messageId = '<m1@x>') => prisma.emailMessage.findMany({ where: { userId, messageId } });
+
+  test('stores a message seen by search and then by delta once, and takes the delta id', async () => {
+    const box = await mailbox();
+    await store(box, 'inbox', msg({ id: 'AAMk-search', internetMessageId: '<m1@x>' }), 'search');
+    await store(box, 'inbox', msg({ id: 'AAkALg-delta', internetMessageId: '<m1@x>' }), 'delta');
+    const rows = await rowsOf(box.user.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.graphId).toBe('AAkALg-delta');
+  });
+
+  test('a delta copy first and a search copy later stay one row with the delta id', async () => {
+    const box = await mailbox();
+    expect(await store(box, 'inbox', msg({ id: 'AAkALg-delta', internetMessageId: '<m1@x>' }), 'delta')).toBe('stored');
+    expect(await store(box, 'inbox', msg({ id: 'AAMk-search', internetMessageId: '<m1@x>' }), 'search')).toBe('updated');
+    const rows = await rowsOf(box.user.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.graphId).toBe('AAkALg-delta');
+  });
+
+  test('an email to yourself keeps its Sent and Inbox rows', async () => {
+    const box = await mailbox();
+    const own = { from: { name: 'Maya', address: ADDRESS }, to: [ADDRESS], cc: ['ana@acme.com'], internetMessageId: '<m1@x>' };
+    await store(box, 'sent', msg({ id: 'AAkALg-sent', ...own }), 'delta');
+    await store(box, 'inbox', msg({ id: 'AAkALg-inbox', ...own }), 'delta');
+    // Both copies are from an own address, so both are stored as `sent`; the Sent Items copy and the Inbox copy stay apart.
+    expect((await rowsOf(box.user.id)).map((r) => r.folder).sort()).toEqual(['inbox', 'sent']);
+  });
+
+  test('a removal by the delta id removes the row first stored by search', async () => {
+    const box = await mailbox();
+    await store(box, 'inbox', msg({ id: 'AAMk-search', internetMessageId: '<m1@x>' }), 'search');
+    await store(box, 'inbox', msg({ id: 'AAkALg-delta', internetMessageId: '<m1@x>' }), 'delta');
+    await syncMailboxHandler(job(box.account.id), { graph: scripted({ 'start:inbox': final('inbox', [], ['AAkALg-delta']) }).graph });
+    expect(await rowsOf(box.user.id)).toHaveLength(0);
+  });
+
+  test('two users with the same message keep a row each', async () => {
+    const maya = await mailbox();
+    const other = await mailbox();
+    await store(maya, 'inbox', msg({ id: 'AAkALg-maya', internetMessageId: '<m1@x>' }), 'delta');
+    await store(other, 'inbox', msg({ id: 'AAkALg-other', internetMessageId: '<m1@x>' }), 'delta');
+    expect(await rowsOf(maya.user.id)).toHaveLength(1);
+    expect(await rowsOf(other.user.id)).toHaveLength(1);
+  });
+
+  test('a message without an internet message id is matched by Graph id only', async () => {
+    const box = await mailbox();
+    await store(box, 'inbox', msg({ id: 'AAMk-one', internetMessageId: null }), 'search');
+    await store(box, 'inbox', msg({ id: 'AAkALg-two', internetMessageId: null }), 'delta');
+    expect(await prisma.emailMessage.findMany({ where: { userId: box.user.id, messageId: null } })).toHaveLength(2);
   });
 });

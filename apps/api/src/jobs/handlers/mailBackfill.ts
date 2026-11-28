@@ -62,7 +62,7 @@ export async function mailBackfillHandler(_job: Job, ctx: JobContext): Promise<v
         for (const item of page.items) {
           found += 1;
           const folder = await crmFolderOf(item.folderId);
-          if (folder && (await storeMessage(account, user, folder, item.message, ctx, rules)) === 'stored') stored += 1;
+          if (folder && (await storeMessage(account, user, folder, item.message, ctx, rules, 'search')) === 'stored') stored += 1;
         }
         if (!page.nextLink) {
           status = 'done';
