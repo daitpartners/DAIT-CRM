@@ -6,6 +6,7 @@ import { isForeignKeyViolation, isUniqueViolation } from '../../prismaErrors.js'
 import { mailUser, matchMail } from '../../mail/match.js';
 import { inLeadConversation, isLeadMail, loadLeadMailRules, participantsOf, type LeadMailRules } from '../../mail/leadMail.js';
 import { processEmailBody, storedColumns } from '../../mail/bodies.js';
+import { incomingSide, sideWhere } from '../../mail/direction.js';
 import { dateOnly, startOfDayIn, todayIn } from '../../leads/dates.js';
 import type { AuthUser } from '../../plugins/auth.js';
 import type { SyncMailboxPayload } from '../types.js';
@@ -138,17 +139,14 @@ async function attachmentColumns(account: EmailAccount, m: GraphMessage, ctx: Jo
 }
 
 /**
- * The user's stored copy of `m` under another Graph id: the same internet message id and the same direction (received
- * or not). On the outbound side a Sent Items copy and a copy elsewhere stay apart too: an email to yourself is from an
- * own address, so its Inbox copy is stored as sent as well. A message without an internet message id matches nothing.
+ * The user's stored copy of `m` under another Graph id: the same internet message id and the same side (`mail/direction.ts`:
+ * received, outbound in Sent Items, outbound elsewhere; an email to yourself keeps its Sent and Inbox rows). A message
+ * without an internet message id matches nothing.
  */
 async function sameEmail(userId: number, folder: string, outbound: boolean, m: GraphMessage) {
   const messageId = m.internetMessageId?.slice(0, 255);
   if (!messageId) return null;
-  const side = !outbound
-    ? { status: 'received' }
-    : { status: { not: 'received' }, folder: folder === 'sent' ? 'sent' : { not: 'sent' } };
-  return prisma.emailMessage.findFirst({ where: { userId, messageId, ...side }, orderBy: { id: 'asc' } });
+  return prisma.emailMessage.findFirst({ where: { userId, messageId, ...sideWhere(incomingSide(outbound, folder)) }, orderBy: { id: 'asc' } });
 }
 
 /** What `storeMessage` did with a message. */
