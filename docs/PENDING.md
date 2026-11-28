@@ -5,14 +5,16 @@ in the git history).
 
 ## Where things stand (28 Nov 2026)
 
-- **Live** at crm.daitpartners.com: release `e83f6ea`, web-mail release 3 (inline reply, full-page New message,
+- **Live** at crm.daitpartners.com: release `edd28f9` (lead mail timeline, below) on top of web-mail release 3 `e83f6ea` (inline reply, full-page New message,
   drafts in Outlook, signature, Schedule send, Undo send, follow-up box after Send, task priority and note), live since
   28 Nov 2026. Your live check of the new Outlook actions is still pending (see "Live: web-mail release 3" below).
   Web-mail release 2's Outlook actions were checked on your own mailbox, all worked; release 1's backfill and clean-up
   have finished.
-- **Ready, waiting for deploy:** branch `lead-mail-timeline` (on top of the live release 3) — one copy per email, and
-  every lead email on its lead's timeline by itself. See "Ready, waiting for deploy: lead mail timeline" below; it goes
-  live only when you say "deploy".
+- **Live since 28 Nov 2026 as `edd28f9`:** lead mail timeline (one copy per email, every lead email on its lead's
+  timeline by itself, the email Lead box shows the person in the email). One-time steps done on live: 225 duplicate
+  copies removed (117 lead links carried), 175 past-mail timeline lines added on 117 leads, 116 leads moved to
+  Contacted. Backup before it: `dait_crm-pre-lead-mail-timeline.dump`.
+- **Next (owner approved 28 Nov):** one lead per person — plan `docs/superpowers/plans/2026-11-28-lead-per-person.md`.
 - **There is no test copy on the server.** Each release was checked on the developer's machine (automatic tests and
   side-by-side screenshots against the prototype) and then put live by hand, only after you said "deploy". How that is
   done, and how to undo it, is in `docs/DEPLOYMENT.md`.
@@ -117,11 +119,10 @@ its 10 seconds) is taken out of the queue so release 2 does not send it the wron
 attachments, pictures or Bcc); it stays in the sender's Outlook Drafts, and those people are told to send it from
 Outlook.
 
-## Ready, waiting for deploy: lead mail timeline (branch `lead-mail-timeline`)
+## Live: lead mail timeline (`edd28f9`, since 28 Nov 2026)
 
-Design: `docs/superpowers/specs/2026-11-28-lead-mail-timeline-design.md`. Checked on the developer's machine with the
-automatic tests; not yet on live. Built on web-mail release 3 (live as `e83f6ea`); goes live only when you say
-"deploy".
+Design: `docs/superpowers/specs/2026-11-28-lead-mail-timeline-design.md`. Deployed 28 Nov 2026 on top of web-mail
+release 3; both one-time steps done (dry runs shown to the owner first; re-runs show 0).
 
 **What changes for users:**
 - **One copy per email.** An email found by the 12-month search and again by the regular sync is stored once (today
@@ -136,7 +137,7 @@ automatic tests; not yet on live. Built on web-mail release 3 (live as `e83f6ea`
 
 **The deploy** (runbook: `docs/DEPLOYMENT.md`, "Lead mail timeline: deploy runbook"): no database change. After the
 install, two one-time steps, each a dry run shown to you first, then the real run: `mail-dedupe` merges the duplicate
-rows (expected about 225), then `lead-mail-timeline` adds the missing timeline lines. Then a check that the KPMG lead
+rows (225 on live), then `lead-mail-timeline` adds the missing timeline lines. Then a check that the KPMG lead
 shows Carlos's "Email sent" line. Going back means switching to release 3 (`e83f6ea`); the merged rows and new lines
 stay, and release 3 runs fine with them.
 
