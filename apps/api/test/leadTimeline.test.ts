@@ -145,6 +145,28 @@ describe('logLeadMail', () => {
     expect(await logLeadMail(prisma, other.id)).toBe('logged');
   });
 
+  test('a quotation\'s sending email and a colleague\'s copy of it add no line and leave the stage', async () => {
+    const f = await setup();
+    const quote = await row(f.carlos.id, f.carlosBox.id, {
+      source: 'crm', folder: 'sent', status: 'sent', fromAddress: CARLOS, toAddresses: [ELAINE], ccAddresses: [DEEPAK],
+      subject: 'Quotation QT-2026-001 · Website', graphId: null, messageId: null, leadId: f.lead.id, isRead: true,
+    });
+    // Queued by the quotation send (its audit row); the pointer on the quotation is cleared once the send succeeded.
+    await prisma.auditLog.create({ data: { entityType: 'quotation', entityId: '1', action: 'update', userId: f.carlos.id, after: { sendingMessageId: quote.id } } });
+    const cc = await row(f.deepak.id, f.deepakBox.id, {
+      fromAddress: CARLOS, subject: 'Quotation QT-2026-001 · Website', toAddresses: [ELAINE], ccAddresses: [DEEPAK], leadId: f.lead.id,
+      occurredAt: new Date(AT.getTime() + 60_000),
+    });
+    expect(await logLeadMail(prisma, cc.id)).toBe('skipped');
+    expect(await logLeadMail(prisma, quote.id)).toBe('skipped');
+    // Once the sender's sync claims the CRM row it carries the message id; a copy with that id is skipped too.
+    await prisma.emailMessage.update({ where: { id: quote.id }, data: { messageId: '<q1@daitpartners.com>', graphId: 'g-q1' } });
+    const later = await row(f.deepak.id, f.deepakBox.id, { fromAddress: CARLOS, messageId: '<q1@daitpartners.com>', leadId: f.lead.id, occurredAt: new Date(AT.getTime() + 3_600_000) });
+    expect(await logLeadMail(prisma, later.id)).toBe('skipped');
+    expect(await emailLines(f.lead.id)).toHaveLength(0);
+    expect(await statusOf(f.lead.id)).toBe('New');
+  });
+
   test('an email to yourself gives one line', async () => {
     const f = await setup();
     const common = { fromAddress: CARLOS, toAddresses: [CARLOS], ccAddresses: [ELAINE], messageId: '<self@daitpartners.com>', leadId: f.lead.id, status: 'sent', isRead: true };

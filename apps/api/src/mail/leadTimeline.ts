@@ -73,6 +73,36 @@ export async function alreadyLogged(db: Db, row: Copy & { leadId: number }, send
   return copies.some((c) => sameEmail(c, row, team));
 }
 
+/**
+ * True when `row`, or a copy of the same email on its lead, is a quotation's sending email: "Quotation sent" already
+ * records it, so it gets no "Email sent" line and no Contacted move. The quotation's pointer
+ * (`sending_message_id`) is cleared once the send ends, so the mark is the audit row written when it was queued
+ * (`quotations/send.ts`: entity quotation, `after.sendingMessageId`).
+ */
+async function quotationEmail(db: Db, row: Copy & { leadId: number }, senders: Map<string, number>): Promise<boolean> {
+  const window = { gte: new Date(row.occurredAt.getTime() - CLAIM_WINDOW_MS), lte: new Date(row.occurredAt.getTime() + CLAIM_WINDOW_MS) };
+  const candidates = await db.emailMessage.findMany({
+    where: {
+      leadId: row.leadId,
+      OR: [
+        { id: row.id },
+        ...(row.messageId !== null ? [{ messageId: row.messageId }] : []),
+        // The CRM fallback of `sameEmail`, either way round.
+        { source: 'crm', messageId: null, occurredAt: window },
+        ...(unclaimedCrm(row) ? [{ source: { not: 'crm' }, occurredAt: window }] : []),
+      ],
+    },
+    select: COPY,
+  });
+  const ids = candidates.filter((c) => sameEmail(c, row, senders)).map((c) => c.id);
+  if (ids.length === 0) return false;
+  const queued = await db.auditLog.findFirst({
+    where: { entityType: 'quotation', OR: ids.map((id) => ({ after: { path: ['sendingMessageId'], equals: id } })) },
+    select: { id: true },
+  });
+  return queued !== null;
+}
+
 /** Every address a team member sends from (their user email, personal mailboxes and send-as), lowercased → user id. */
 export async function teamSenders(db: Db): Promise<Map<string, number>> {
   const senders = new Map<string, number>();
@@ -97,7 +127,7 @@ export interface LogOptions {
  * Puts a stored email on its lead's timeline, once per email: `Email sent · <subject>` by the sending team member when
  * the sender is a team address, else `Email received · <subject>` with no author; dated at the email, related to the
  * row, which gets `logged_at`. A sent line moves New / Not Contacted to Contacted, as `recordOnLead`. Drafts, rows
- * without a lead and deleted-lead mail are skipped. Given a transaction it runs in it; given the client it opens one.
+ * without a lead, deleted-lead mail and a quotation's sending email (and its copies) are skipped. Given a transaction it runs in it; given the client it opens one.
  * Either way it holds the lead's advisory lock, so two copies logged at once give one line.
  */
 export async function logLeadMail(db: Db, emailMessageId: number, opts: LogOptions = {}): Promise<LogResult> {
@@ -118,6 +148,7 @@ async function logIn(tx: Tx, emailMessageId: number, opts: LogOptions): Promise<
   if (!lead) return 'skipped';
   const senders = opts.senders ?? (await teamSenders(tx));
   if (await alreadyLogged(tx, { ...row, leadId: lead.id }, senders)) return 'already';
+  if (await quotationEmail(tx, { ...row, leadId: lead.id }, senders)) return 'skipped';
 
   const by = senders.get(row.fromAddress.toLowerCase()) ?? null;
   await tx.leadActivity.create({
