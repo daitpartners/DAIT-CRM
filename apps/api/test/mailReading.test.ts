@@ -270,9 +270,12 @@ describe('GET /mail/:id — the lead panel shows the person in the open email', 
     const f = await setup();
     const panel = await panelOf(f, { fromAddress: 'Bo.Chen@Acme.com', fromName: 'Bo Chen', toAddresses: ['maya@daitpartners.com'] });
     expect(panel.contact).toEqual({ name: 'Bo Chen', role: null, email: 'bo.chen@acme.com', phone: null });
-    // Sent by the team to an unsaved company address: no name (from_name is the sender's), the address only.
+    // Sent by the team to an unsaved company address: no name known (from_name is the sender's), so the address is the name.
     const sent = await panelOf(f, { folder: 'sent', status: 'sent', fromAddress: f.rep.email, fromName: 'Maya Pillai', toAddresses: ['someone@gmail.com'], ccAddresses: ['kim@acme.com'] });
-    expect(sent.contact).toEqual({ name: null, role: null, email: 'kim@acme.com', phone: null });
+    expect(sent.contact).toEqual({ name: 'kim@acme.com', role: null, email: 'kim@acme.com', phone: null });
+    // A sender with a blank from_name is named by the address too, never blank.
+    const blank = await panelOf(f, { fromAddress: 'Jo@Acme.com', fromName: '   ', toAddresses: ['maya@daitpartners.com'] });
+    expect(blank.contact).toEqual({ name: 'jo@acme.com', role: null, email: 'jo@acme.com', phone: null });
   });
 
   it("with nobody from the company in the email the lead's main contact shows, with the lead phone fallback", async () => {

@@ -16,7 +16,7 @@ const RECENT = 3;
 /** The reading pane's lead panel (web-mail release 2, prototype "Lead" card beside an open message). */
 export interface LeadPanel {
   company: { id: number; name: string; site: string | null; place: string | null } | null;
-  contact: { name: string | null; role: string | null; email: string | null; phone: string | null } | null;
+  contact: { name: string; role: string | null; email: string | null; phone: string | null } | null;
   owner: string | null;
   followUp: { date: string; time: string | null; due: boolean } | null;
   lastActivity: { title: string; occurredAt: string } | null;
@@ -117,7 +117,7 @@ export async function leadPanel(db: Db, user: AuthUser, leadId: number, message:
  * The person in the open email, first hit wins: the sender, then the first of To then Cc, when a saved contact of the
  * lead's company (business email, any case; the active one first); else the first participant at the company's own
  * domain (`site`: never free mail, shared hosts or our own domains), sender first, named from the message when the
- * sender. Team addresses (`teamSenders`) never count. Only the lead's main contact borrows the lead's phone (`main`).
+ * sender and it has a name, else by its address. Team addresses (`teamSenders`) never count. Only the lead's main contact borrows the lead's phone (`main`).
  * Null when nobody from the company is in the email.
  */
 async function personInEmail(
@@ -142,5 +142,5 @@ async function personInEmail(
   }
   const atSite = o.site ? order.find((a) => domainOf(a) === o.site) : undefined;
   if (!atSite) return null;
-  return { name: atSite === from ? m.fromName?.trim() || null : null, role: null, email: atSite, phone: null };
+  return { name: (atSite === from && m.fromName?.trim()) || atSite, role: null, email: atSite, phone: null };
 }
