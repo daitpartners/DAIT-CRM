@@ -125,6 +125,26 @@ describe('logLeadMail', () => {
     expect(await logLeadMail(prisma, later.id)).toBe('logged');
   });
 
+  test('a CRM-sent email from a mailbox with send-as and the colleague\'s copy from the send-as address give one line', async () => {
+    const f = await setup();
+    await prisma.emailAccount.update({ where: { id: f.carlosBox.id }, data: { sendAs: 'Ventas@DaitPartners.com' } });
+    const crm = await row(f.carlos.id, f.carlosBox.id, {
+      source: 'crm', folder: 'sent', status: 'sent', fromAddress: CARLOS, toAddresses: [ELAINE], ccAddresses: [DEEPAK],
+      graphId: null, messageId: null, leadId: f.lead.id, isRead: true,
+    });
+    const lead = await prisma.lead.findUniqueOrThrow({ where: { id: f.lead.id } });
+    await prisma.$transaction((tx) => recordOnLead(tx, { id: f.carlos.id, timezone: 'Europe/London' }, lead, crm, 'Proposal'));
+    const cc = await row(f.deepak.id, f.deepakBox.id, {
+      fromAddress: 'ventas@daitpartners.com', toAddresses: [ELAINE], ccAddresses: [DEEPAK], leadId: f.lead.id,
+      occurredAt: new Date(AT.getTime() + 2 * 60_000),
+    });
+    expect(await logLeadMail(prisma, cc.id)).toBe('already');
+    expect(await emailLines(f.lead.id)).toMatchObject([{ relatedId: crm.id }]);
+    // Another team member's email with the same subject at the same time is another email.
+    const other = await row(f.deepak.id, f.deepakBox.id, { fromAddress: DEEPAK, folder: 'sent', status: 'sent', leadId: f.lead.id, occurredAt: cc.occurredAt });
+    expect(await logLeadMail(prisma, other.id)).toBe('logged');
+  });
+
   test('an email to yourself gives one line', async () => {
     const f = await setup();
     const common = { fromAddress: CARLOS, toAddresses: [CARLOS], ccAddresses: [ELAINE], messageId: '<self@daitpartners.com>', leadId: f.lead.id, status: 'sent', isRead: true };

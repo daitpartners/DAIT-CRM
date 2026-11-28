@@ -32,12 +32,24 @@ const unclaimedCrm = (r: Copy) => r.source === 'crm' && r.messageId === null;
  * email to yourself has two copies); or an unclaimed CRM row and another mailbox's copy with the same sender, subject
  * (without Re:/Fw:) and a time within the claim window, as `claimCrmCopy` matches the sender's own copy.
  */
-function sameEmail(a: Copy, b: Copy): boolean {
+function sameEmail(a: Copy, b: Copy, senders: Map<string, number>): boolean {
   if (a.id === b.id) return true;
   if (a.messageId !== null && a.messageId === b.messageId) return true;
   const crmPair = (unclaimedCrm(a) && b.source !== 'crm') || (unclaimedCrm(b) && a.source !== 'crm');
-  return crmPair && a.fromAddress.toLowerCase() === b.fromAddress.toLowerCase() && baseSubject(a.subject) === baseSubject(b.subject)
+  return crmPair && sameSender(a.fromAddress, b.fromAddress, senders) && baseSubject(a.subject) === baseSubject(b.subject)
     && Math.abs(a.occurredAt.getTime() - b.occurredAt.getTime()) <= CLAIM_WINDOW_MS;
+}
+
+/**
+ * The same address, or two addresses of one team member: a CRM row keeps the mailbox address while Graph sends as its
+ * send-as, so a colleague's copy shows the send-as address.
+ */
+function sameSender(a: string, b: string, senders: Map<string, number>): boolean {
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  if (x === y) return true;
+  const user = senders.get(x);
+  return user !== undefined && user === senders.get(y);
 }
 
 /** Serialises the mail lines of one lead until the transaction ends. */
@@ -45,8 +57,11 @@ export async function lockLeadTimeline(tx: Tx, leadId: number): Promise<void> {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(${LOCK_NAMESPACE}::int, ${leadId}::int)`;
 }
 
-/** True when the lead already has an email line made from `row` or from another copy of the same email. */
-export async function alreadyLogged(db: Db, row: Copy & { leadId: number }): Promise<boolean> {
+/**
+ * True when the lead already has an email line made from `row` or from another copy of the same email. `senders` is
+ * `teamSenders`, loaded here when not given.
+ */
+export async function alreadyLogged(db: Db, row: Copy & { leadId: number }, senders?: Map<string, number>): Promise<boolean> {
   const lines = await db.leadActivity.findMany({
     where: { leadId: row.leadId, activityType: 'email', relatedType: 'email_message', relatedId: { not: null } }, select: { relatedId: true },
   });
@@ -54,7 +69,8 @@ export async function alreadyLogged(db: Db, row: Copy & { leadId: number }): Pro
   if (ids.includes(row.id)) return true;
   if (ids.length === 0) return false;
   const copies = await db.emailMessage.findMany({ where: { id: { in: ids } }, select: COPY });
-  return copies.some((c) => sameEmail(c, row));
+  const team = senders ?? (await teamSenders(db));
+  return copies.some((c) => sameEmail(c, row, team));
 }
 
 /** Every address a team member sends from (their user email, personal mailboxes and send-as), lowercased → user id. */
@@ -100,9 +116,9 @@ async function logIn(tx: Tx, emailMessageId: number, opts: LogOptions): Promise<
   if (row.folder === 'drafts' || UNSENT.has(row.status) || row.leadDeletedAt !== null) return 'skipped';
   const lead = await tx.lead.findUnique({ where: { id: row.leadId } });
   if (!lead) return 'skipped';
-  if (await alreadyLogged(tx, { ...row, leadId: lead.id })) return 'already';
-
   const senders = opts.senders ?? (await teamSenders(tx));
+  if (await alreadyLogged(tx, { ...row, leadId: lead.id }, senders)) return 'already';
+
   const by = senders.get(row.fromAddress.toLowerCase()) ?? null;
   await tx.leadActivity.create({
     data: {
