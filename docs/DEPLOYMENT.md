@@ -581,8 +581,11 @@ release 2 (live since 27 Nov 2026 as `70ec558`; the owner live-checked every Out
 ## Lead mail timeline: deploy runbook
 
 Only after the owner says "deploy". The lead mail timeline release (branch `lead-mail-timeline`: one row per email,
-and every lead email on its lead's timeline by itself) builds on web mail release 3 (`e83f6ea`). Follow "Deploying a
-release to live" (backup first, named `dait_crm-pre-lead-mail-timeline.dump`), with these additions:
+and every lead email on its lead's timeline by itself) builds on web mail release 3 (live as `e83f6ea`). Follow
+"Deploying a release to live" (backup first, named `dait_crm-pre-lead-mail-timeline.dump`), with these additions.
+
+Run steps 3 and 4 at a quiet time (evening or weekend): each dry run holds the leads' timeline locks for its whole walk,
+so editing one of those leads meanwhile waits a few seconds.
 
 1. **Check there is no migration** (after step 3, as `daitcrm` in `~/build/<sha>`; read only):
 
@@ -592,7 +595,14 @@ release to live" (backup first, named `dait_crm-pre-lead-mail-timeline.dump`), w
 
    It must report the database schema up to date (nothing pending). Anything else means stop and ask.
 2. **Install and check** (steps 4–5 of "Deploying a release to live").
-3. **Merge the duplicate mail rows** (as `daitcrm`; counts only, never subjects or addresses). Dry run first:
+3. **Merge the duplicate mail rows** (as `daitcrm`; counts only, never subjects or addresses). First check that no
+   lead-mail backfill (12-month search) is running, as root:
+
+   ```
+   sudo -u postgres psql -d dait_crm -c "SELECT count(*) FROM mail_backfills WHERE status IN ('queued','running');"
+   ```
+
+   It must show 0 (a new lead or contact queues a search; wait a few minutes and check again). Dry run first:
 
    ```
    cd ~/live/current/apps/api
@@ -600,17 +610,20 @@ release to live" (backup first, named `dait_crm-pre-lead-mail-timeline.dump`), w
    ```
 
    Show the owner the line `mail-dedupe: dry run groups=… removed=… links_carried=… references_moved=…` (expected
-   about 225 groups, 225 removed, about 117 links carried). With the owner's OK, run it with `--apply`, then the dry run
-   again: it must show `groups=0 removed=0`.
+   about 225 groups, 225 removed, about 117 links carried). With the owner's OK, check the backfill count above is
+   still 0, run it with `--apply`, then the dry run again: it must show `groups=0 removed=0`. A few groups (mail that
+   arrived during the run) is normal: run `--apply` once more; then it must show `groups=0`.
 4. **Put past lead mail on the timelines** (same folder). Dry run first:
 
    ```
    node --env-file=$HOME/live/shared/.env dist/cli/lead-mail-timeline.js
    ```
 
-   Show the owner the line `lead-mail-timeline: dry run examined=… lines=… leads=… contacted=…` (`lines` timeline lines
-   to add, `leads` leads that get one, `contacted` leads that move from New / Not Contacted to Contacted). With the
-   owner's OK, run it with `--apply`, then the dry run again: it must show `lines=0`.
+   Show the owner the line `lead-mail-timeline: dry run examined=… lines=… leads=… contacted=…` (`examined` lead
+   emails looked at, including ones already on a timeline and quotation emails, which add no line; `lines` timeline
+   lines to add; `leads` leads that get one; `contacted` leads that move from New / Not Contacted to Contacted). With
+   the owner's OK, run it with `--apply`, then the dry run again: it must show `lines=0`. A few lines (mail that arrived
+   during the run) is normal: run `--apply` once more; then it must show `lines=0`.
 5. **Check the KPMG lead** (Elaine Reyes): its timeline ("Recent on the lead") shows Carlos's email as `Email sent · …`
    by Carlos, once.
 

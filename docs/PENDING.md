@@ -5,14 +5,14 @@ in the git history).
 
 ## Where things stand (28 Nov 2026)
 
-- **Live** at crm.daitpartners.com: release `70ec558`, web-mail release 2 (the Microsoft 365-style Email screen;
-  live since 27 Nov 2026; owner checked every Outlook action on his own mailbox, all worked). Web-mail release 1's
-  backfill and clean-up have finished.
-- **Ready, waiting for deploy:** branch `web-mail-r3` — web-mail release 3 (inline reply, full-page New message,
-  drafts in Outlook, signature, Schedule send, Undo send, follow-up box after Send, task priority and note). See
-  "Ready, waiting for deploy: web-mail release 3" below; it goes live only when you say "deploy".
-- **Ready, waiting for deploy:** branch `lead-mail-timeline` (on top of release 3) — one copy per email, and every
-  lead email on its lead's timeline by itself. See "Ready, waiting for deploy: lead mail timeline" below.
+- **Live** at crm.daitpartners.com: release `e83f6ea`, web-mail release 3 (inline reply, full-page New message,
+  drafts in Outlook, signature, Schedule send, Undo send, follow-up box after Send, task priority and note), live since
+  28 Nov 2026. Your live check of the new Outlook actions is still pending (see "Live: web-mail release 3" below).
+  Web-mail release 2's Outlook actions were checked on your own mailbox, all worked; release 1's backfill and clean-up
+  have finished.
+- **Ready, waiting for deploy:** branch `lead-mail-timeline` (on top of the live release 3) — one copy per email, and
+  every lead email on its lead's timeline by itself. See "Ready, waiting for deploy: lead mail timeline" below; it goes
+  live only when you say "deploy".
 - **There is no test copy on the server.** Each release was checked on the developer's machine (automatic tests and
   side-by-side screenshots against the prototype) and then put live by hand, only after you said "deploy". How that is
   done, and how to undo it, is in `docs/DEPLOYMENT.md`.
@@ -44,12 +44,13 @@ in the git history).
 | Leads delete, import follow-ups | Delete leads with their company (Administrators), Download all leads, update rows through Import leads, Do not email list | `7d1d8c2` (live 26 Nov) |
 | Web-mail release 1 | Lead mail only, 12-month backfill, team view (view only) for Administrators and Managers | `2f981c2` (live 27 Nov; clean-up done 27 Nov) |
 | Web-mail release 2 | Microsoft 365-style Email screen; Delete, Archive, Move, Flag, Read change Outlook too; Reply all, Forward, attachments, lead panel | `70ec558` (live 27 Nov; backup `dait_crm-pre-web-mail-r2.dump`) |
+| Web-mail release 3 | Inline reply, full-page New message, drafts in Outlook, signature, Schedule send, Undo send, follow-up box after Send | `e83f6ea` (live 28 Nov; owner's live check pending) |
 
-## Ready, waiting for deploy: web-mail release 3 (branch `web-mail-r3`)
+## Live: web-mail release 3 (`e83f6ea`, since 28 Nov 2026)
 
 Design: `docs/superpowers/specs/2026-11-26-web-mail-email-design.md` (mockup 2026-11-26-outlook-mail, states 2, 3
-and 6). Checked on the developer's machine with the automatic tests (they use a stand-in for Outlook); not yet on
-live. Goes live only when you say "deploy".
+and 6). Live since 28 Nov 2026. Still open: your live check of the new Outlook actions (the list under "The deploy"
+below).
 
 **What changes for users:**
 - **Reply, Reply all and Forward open inside the conversation** (no pop-up window): recipients with their lead tag,
@@ -119,15 +120,18 @@ Outlook.
 ## Ready, waiting for deploy: lead mail timeline (branch `lead-mail-timeline`)
 
 Design: `docs/superpowers/specs/2026-11-28-lead-mail-timeline-design.md`. Checked on the developer's machine with the
-automatic tests; not yet on live. Goes live only when you say "deploy", after web-mail release 3.
+automatic tests; not yet on live. Built on web-mail release 3 (live as `e83f6ea`); goes live only when you say
+"deploy".
 
 **What changes for users:**
 - **One copy per email.** An email found by the 12-month search and again by the regular sync is stored once (today
   some lead emails show twice, for example Elaine Reyes's reply).
 - **Every lead email is on the lead's timeline by itself**, sent or received, from any team mailbox:
   `Email sent · <subject>` by the team member who sent it, or `Email received · <subject>`, dated at the email. An email
-  in two team mailboxes (sent by Carlos, Cc to Deepak) gives one line. A team member's email moves a New or Not
-  Contacted lead to Contacted, as a CRM send does. A quotation's sending email keeps its "Quotation sent" line only.
+  in two team mailboxes (sent by Carlos, Cc to Deepak) gives one line. A team member's email to someone outside the
+  team moves a New or Not Contacted lead to Contacted, as a CRM send does; an email only between team members (for
+  example a forward of the lead's inquiry to a colleague) gets its line but leaves the stage. A sales rep sees the
+  subject of her own email even when the line was made from a colleague's copy. A quotation's sending email keeps its "Quotation sent" line only.
 - **Past mail** gets its lines once, at the deploy.
 
 **The deploy** (runbook: `docs/DEPLOYMENT.md`, "Lead mail timeline: deploy runbook"): no database change. After the
