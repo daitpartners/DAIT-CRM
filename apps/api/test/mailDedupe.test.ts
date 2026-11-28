@@ -58,6 +58,44 @@ describe('mail-dedupe (lead mail timeline)', () => {
     expect(left.map((m) => m.id)).toEqual([a.id, b.id, c.id]);
   });
 
+  test('keeps the CRM-sent row over the delta row and gives it the delta id and the campaign', async () => {
+    const lead = await makeLead();
+    const campaign = await prisma.emailCampaign.create({
+      data: {
+        name: 'Nov', templateName: 'T', subject: 'S', body: 'B', senderId: rep.id, senderAddress: rep.email, intervalMinutes: 5,
+        lawfulBasis: 'Legitimate interest', status: 'Completed',
+      },
+    });
+    const sent = { folder: 'sent', status: 'sent', fromAddress: rep.email };
+    const crm = await mail({ ...sent, source: 'crm', graphId: null, leadId: lead.id });
+    const delta = await mail({ ...sent, graphId: DELTA, campaignId: campaign.id });
+    // A second group: the CRM row has a search id and its own campaign; it keeps its campaign and takes the delta id.
+    const own = await prisma.emailCampaign.create({
+      data: {
+        name: 'Dec', templateName: 'T', subject: 'S', body: 'B', senderId: rep.id, senderAddress: rep.email, intervalMinutes: 5,
+        lawfulBasis: 'Legitimate interest', status: 'Completed',
+      },
+    });
+    const crm2 = await mail({ ...sent, source: 'crm', graphId: SEARCH, messageId: '<m2@x>', campaignId: own.id });
+    await mail({ ...sent, graphId: `${DELTA}2`, messageId: '<m2@x>', campaignId: campaign.id });
+
+    expect(await run()).toMatchObject({ groups: 2, removed: 2 });
+
+    const left = await prisma.emailMessage.findMany({ orderBy: { id: 'asc' } });
+    expect(left.map((m) => m.id)).toEqual([crm.id, crm2.id]);
+    expect(await prisma.emailMessage.findUnique({ where: { id: delta.id } })).toBeNull();
+    expect(left[0]).toMatchObject({ source: 'crm', graphId: DELTA, campaignId: campaign.id, leadId: lead.id });
+    expect(left[1]).toMatchObject({ source: 'crm', graphId: `${DELTA}2`, campaignId: own.id });
+  });
+
+  test('a CRM row kept over a search row keeps its own Graph id', async () => {
+    const crm = await mail({ folder: 'sent', status: 'sent', fromAddress: rep.email, source: 'crm', graphId: null });
+    await mail({ folder: 'sent', status: 'sent', fromAddress: rep.email, graphId: SEARCH });
+
+    expect(await run()).toMatchObject({ groups: 1, removed: 1 });
+    expect(await prisma.emailMessage.findMany()).toMatchObject([{ id: crm.id, graphId: null }]);
+  });
+
   test('carries lead, contact, company, project and logged_at from the removed row when the kept row has none', async () => {
     const company = await makeCompany({ name: 'Acme', website: 'https://acme.com' });
     const lead = await makeLead({ companyId: company.id });

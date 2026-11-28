@@ -128,6 +128,15 @@ describe('lead-mail-timeline fill', () => {
     expect(await statusOf(f.lead.id)).toBe('New');
   });
 
+  test('skips a failed CRM send: no line, no Contacted move, not examined', async () => {
+    const f = await setup();
+    await sentBy(f, { leadId: f.lead.id, source: 'crm', status: 'failed', graphId: null, messageId: null });
+
+    expect(await run(true)).toEqual({ examined: 0, lines: 0, leads: 0, contacted: 0 });
+    expect(await emailLines(f.lead.id)).toHaveLength(0);
+    expect(await statusOf(f.lead.id)).toBe('New');
+  });
+
   test('walks past a batch of 200', async () => {
     const f = await setup();
     await prisma.emailMessage.createMany({

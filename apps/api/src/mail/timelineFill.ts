@@ -1,8 +1,8 @@
 /**
  * One-time fill for the lead mail timeline (CLI `cli/lead-mail-timeline.ts`, run once after `mail-dedupe`): walks every
- * stored lead-linked email (not drafts or the send queue, lead not deleted) oldest first, in batches of 200, and puts
- * the missing ones on their lead's timeline through `logLeadMail` (same rules, same "already logged" check, same
- * Contacted move).
+ * stored lead-linked email (not drafts, the send queue or failed sends, lead not deleted) oldest first, in batches of
+ * 200, and puts the missing ones on their lead's timeline through `logLeadMail` (same rules, same "already logged"
+ * check, same Contacted move).
  *
  * The dry run runs exactly the same writes inside one transaction and rolls it back, so its counts match `--apply`
  * (copies of one email in two mailboxes count once). `--apply` commits one transaction per batch.
@@ -10,7 +10,7 @@
  * Logs counts only (never subjects, bodies or addresses). Safe to run again: a second run adds 0.
  */
 import type { Prisma, PrismaClient } from '@prisma/client';
-import { logLeadMail, teamSenders } from './leadTimeline.js';
+import { UNSENT_STATUSES, logLeadMail, teamSenders } from './leadTimeline.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -50,7 +50,7 @@ export function parseFillArgs(argv: string[]): { apply: boolean } | { error: str
 
 /** Rows the walk visits; `logLeadMail` checks the same again under the lead's lock. */
 const CANDIDATES: Prisma.EmailMessageWhereInput = {
-  leadId: { not: null }, leadDeletedAt: null, folder: { not: 'drafts' }, status: { notIn: ['draft', 'queued', 'sending'] },
+  leadId: { not: null }, leadDeletedAt: null, folder: { not: 'drafts' }, status: { notIn: UNSENT_STATUSES },
 };
 
 /**

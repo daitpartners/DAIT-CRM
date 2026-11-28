@@ -192,14 +192,14 @@ describe('logLeadMail', () => {
 
   test('a sent line moves New and Not Contacted to Contacted; a received line and a Qualified lead do not', async () => {
     const f = await setup('New');
-    const sent = await row(f.carlos.id, f.carlosBox.id, { folder: 'sent', status: 'sent', fromAddress: CARLOS, leadId: f.lead.id });
+    const sent = await row(f.carlos.id, f.carlosBox.id, { folder: 'sent', status: 'sent', fromAddress: CARLOS, toAddresses: [ELAINE], leadId: f.lead.id });
     await logLeadMail(prisma, sent.id);
     expect(await statusOf(f.lead.id)).toBe('Contacted');
     expect(await prisma.leadActivity.findFirst({ where: { leadId: f.lead.id, activityType: 'status' } }))
       .toMatchObject({ statusFrom: 'New', statusTo: 'Contacted', body: 'Email sent', byUserId: f.carlos.id });
 
     const notContacted = await makeLead({ companyId: f.acme.id, status: 'Not Contacted' });
-    const second = await row(f.carlos.id, f.carlosBox.id, { folder: 'sent', status: 'sent', fromAddress: CARLOS, leadId: notContacted.id });
+    const second = await row(f.carlos.id, f.carlosBox.id, { folder: 'sent', status: 'sent', fromAddress: CARLOS, toAddresses: [ELAINE], leadId: notContacted.id });
     await logLeadMail(prisma, second.id);
     expect(await statusOf(notContacted.id)).toBe('Contacted');
 
@@ -208,14 +208,51 @@ describe('logLeadMail', () => {
     expect(await statusOf(received.id)).toBe('New');
 
     const qualified = await makeLead({ companyId: f.acme.id, status: 'Qualified' });
-    await logLeadMail(prisma, (await row(f.carlos.id, f.carlosBox.id, { folder: 'sent', status: 'sent', fromAddress: CARLOS, leadId: qualified.id })).id);
+    await logLeadMail(prisma, (await row(f.carlos.id, f.carlosBox.id, { folder: 'sent', status: 'sent', fromAddress: CARLOS, toAddresses: [ELAINE], leadId: qualified.id })).id);
     expect(await statusOf(qualified.id)).toBe('Qualified');
 
     // contacted: false writes the line and leaves the stage.
     const kept = await makeLead({ companyId: f.acme.id, status: 'New' });
-    const third = await row(f.carlos.id, f.carlosBox.id, { folder: 'sent', status: 'sent', fromAddress: CARLOS, leadId: kept.id });
+    const third = await row(f.carlos.id, f.carlosBox.id, { folder: 'sent', status: 'sent', fromAddress: CARLOS, toAddresses: [ELAINE], leadId: kept.id });
     expect(await logLeadMail(prisma, third.id, { contacted: false })).toBe('logged');
     expect(await statusOf(kept.id)).toBe('New');
+  });
+
+  test('an internal-only email on a lead thread (a forward to a colleague) is logged but leaves the stage', async () => {
+    const f = await setup('New');
+    // Carlos forwards Elaine's inquiry to Deepak; Outlook keeps the conversation, so the forward is on the lead.
+    const fw = await row(f.carlos.id, f.carlosBox.id, {
+      folder: 'sent', status: 'sent', fromAddress: CARLOS, toAddresses: ['Deepak@DaitPartners.com'], ccAddresses: [CARLOS], subject: 'FW: Proposal', leadId: f.lead.id,
+    });
+    expect(await logLeadMail(prisma, fw.id)).toBe('logged');
+    expect(await emailLines(f.lead.id)).toMatchObject([{ title: 'Email sent · FW: Proposal', byUserId: f.carlos.id }]);
+    expect(await statusOf(f.lead.id)).toBe('New');
+
+    // One recipient outside the team (here in Bcc) is an email to the lead: Contacted.
+    const out = await row(f.carlos.id, f.carlosBox.id, {
+      folder: 'sent', status: 'sent', fromAddress: CARLOS, toAddresses: [DEEPAK], bccAddresses: [ELAINE], subject: 'Proposal', leadId: f.lead.id,
+    });
+    expect(await logLeadMail(prisma, out.id)).toBe('logged');
+    expect(await statusOf(f.lead.id)).toBe('Contacted');
+  });
+
+  test('a failed CRM send gets no line and no Contacted move', async () => {
+    const f = await setup('New');
+    const failed = await row(f.carlos.id, f.carlosBox.id, {
+      source: 'crm', folder: 'sent', status: 'failed', fromAddress: CARLOS, toAddresses: [ELAINE], graphId: null, messageId: null, leadId: f.lead.id,
+    });
+    expect(await logLeadMail(prisma, failed.id)).toBe('skipped');
+    expect(await emailLines(f.lead.id)).toHaveLength(0);
+    expect(await statusOf(f.lead.id)).toBe('New');
+  });
+
+  test('a sent line made from a colleague\'s copy relates to the sender\'s own copy when it is stored', async () => {
+    const f = await setup();
+    const { sent, cc } = await twoCopies(f);
+    expect(await logLeadMail(prisma, cc.id)).toBe('logged');
+    expect(await emailLines(f.lead.id)).toMatchObject([{ relatedId: sent.id, byUserId: f.carlos.id }]);
+    expect((await prisma.emailMessage.findUniqueOrThrow({ where: { id: sent.id } })).loggedAt).not.toBeNull();
+    expect(await logLeadMail(prisma, sent.id)).toBe('already');
   });
 
   test('two concurrent logLeadMail calls for two copies of one email add one line', async () => {
@@ -321,5 +358,25 @@ describe('callers', () => {
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toBe('already_logged');
     expect(await emailLines(f.lead.id)).toHaveLength(1);
+  });
+
+  test('a Sales rep sees the subject of her own email when the line was made from a colleague\'s copy', async () => {
+    const f = await setup();
+    const lakshita = await makeUser({ name: 'Lakshita Rao', email: 'lakshita@daitpartners.com' });
+    const ravi = await makeUser({ name: 'Ravi Rep', email: 'ravi@daitpartners.com' });
+    await prisma.lead.update({ where: { id: f.lead.id }, data: { assignedToId: lakshita.id } });
+    const common = { fromAddress: 'lakshita@daitpartners.com', toAddresses: [ELAINE], ccAddresses: [DEEPAK], messageId: '<l1@daitpartners.com>', leadId: f.lead.id };
+    // Deepak's Cc copy is logged first (his mailbox synced first); Lakshita's Sent copy is not stored yet.
+    const cc = await row(f.deepak.id, f.deepakBox.id, common);
+    expect(await logLeadMail(prisma, cc.id)).toBe('logged');
+    await row(lakshita.id, null, { ...common, folder: 'sent', status: 'sent', isRead: true });
+    expect(await emailLines(f.lead.id)).toMatchObject([{ relatedId: cc.id }]);
+    const timeline = async (cookie: string) =>
+      ((await app.inject({ method: 'GET', url: `/api/leads/${f.lead.id}`, headers: { cookie } })).json().activities as { activityType: string; title: string }[])
+        .filter((a) => a.activityType === 'email').map((a) => a.title);
+    expect(await timeline(await signIn(app, lakshita))).toEqual(['Email sent · Proposal']);
+    // A rep who owns no copy still sees only "Email sent".
+    await prisma.lead.update({ where: { id: f.lead.id }, data: { assignedToId: ravi.id } });
+    expect(await timeline(await signIn(app, ravi))).toEqual(['Email sent']);
   });
 });

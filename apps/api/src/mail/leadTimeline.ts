@@ -15,8 +15,9 @@ type Db = PrismaClient | Tx;
 /** Advisory lock namespace for a lead's mail lines (quotation numbers use 3001, project numbers 3002). */
 const LOCK_NAMESPACE = 3003;
 
-/** Statuses of a row that is not an email yet: drafts and the CRM's send queue. */
-const UNSENT = new Set(['draft', 'queued', 'sending']);
+/** Statuses of a row that is not an email (yet): drafts, the CRM's send queue and a send that failed. */
+export const UNSENT_STATUSES = ['draft', 'queued', 'sending', 'failed'];
+const UNSENT = new Set(UNSENT_STATUSES);
 
 export type LogResult = 'logged' | 'already' | 'skipped';
 
@@ -126,8 +127,9 @@ export interface LogOptions {
 /**
  * Puts a stored email on its lead's timeline, once per email: `Email sent · <subject>` by the sending team member when
  * the sender is a team address, else `Email received · <subject>` with no author; dated at the email, related to the
- * row, which gets `logged_at`. A sent line moves New / Not Contacted to Contacted, as `recordOnLead`. Drafts, rows
- * without a lead, deleted-lead mail and a quotation's sending email (and its copies) are skipped. Given a transaction it runs in it; given the client it opens one.
+ * row (for a sent line, the sender's own copy when stored), which gets `logged_at`. A sent line with a recipient outside
+ * the team moves New / Not Contacted to Contacted, as `recordOnLead`. Drafts, unsent or failed rows, rows without a
+ * lead, deleted-lead mail and a quotation's sending email (and its copies) are skipped. Given a transaction it runs in it; given the client it opens one.
  * Either way it holds the lead's advisory lock, so two copies logged at once give one line.
  */
 export async function logLeadMail(db: Db, emailMessageId: number, opts: LogOptions = {}): Promise<LogResult> {
@@ -151,15 +153,26 @@ async function logIn(tx: Tx, emailMessageId: number, opts: LogOptions): Promise<
   if (await quotationEmail(tx, { ...row, leadId: lead.id }, senders)) return 'skipped';
 
   const by = senders.get(row.fromAddress.toLowerCase()) ?? null;
+  // A sent line made from a colleague's copy relates to the sender's own copy when it is stored, so the sender sees it.
+  const own = by !== null && row.userId !== by && row.messageId !== null
+    ? await tx.emailMessage.findFirst({
+      where: { userId: by, messageId: row.messageId, leadId: lead.id, leadDeletedAt: null, folder: { not: 'drafts' }, status: { notIn: UNSENT_STATUSES } },
+      select: { id: true }, orderBy: { id: 'asc' },
+    })
+    : null;
+  const related = own?.id ?? row.id;
   await tx.leadActivity.create({
     data: {
       leadId: lead.id, activityType: 'email', title: `${by !== null ? 'Email sent' : 'Email received'} · ${row.subject}`,
-      relatedType: 'email_message', relatedId: row.id, byUserId: by, occurredAt: row.occurredAt,
+      relatedType: 'email_message', relatedId: related, byUserId: by, occurredAt: row.occurredAt,
     },
   });
-  await tx.emailMessage.updateMany({ where: { id: row.id, loggedAt: null }, data: { loggedAt: new Date() } });
-  // A team member's email to a lead not yet contacted moves it to Contacted (owner, 28 Nov 2026), as a CRM send does.
-  if (by !== null && (opts.contacted ?? true) && CONTACTED_ON_EMAIL.has(lead.status)) {
+  await tx.emailMessage.updateMany({ where: { id: related, loggedAt: null }, data: { loggedAt: new Date() } });
+  // A team member's email to a lead not yet contacted moves it to Contacted (owner, 28 Nov 2026), as a CRM send does;
+  // only when someone outside the team got it (a forward to a colleague on the lead's thread is not contact).
+  const recipients = [row.toAddresses, row.ccAddresses, row.bccAddresses].flatMap((list) => list as string[]);
+  const external = recipients.some((a) => !senders.has(a.toLowerCase()));
+  if (by !== null && external && (opts.contacted ?? true) && CONTACTED_ON_EMAIL.has(lead.status)) {
     await applyStatusChange(tx, lead, 'Contacted', { userId: by }, { sourceTitle: 'Email sent' });
   }
   return 'logged';

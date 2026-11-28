@@ -127,6 +127,9 @@ async function linkConversation(db: Tx | typeof prisma, m: EmailMessage, lead: P
   return rows.map((r) => r.id);
 }
 
+/** /link and /create-lead log a whole conversation in their transaction: more than Prisma's default 5 s. */
+const LINK_TX = { maxWait: 10_000, timeout: 30_000 };
+
 /** Lead mail timeline: a message just linked to a lead, and the conversation linked with it, go on its timeline. */
 async function logLinked(tx: Tx, ids: number[]): Promise<void> {
   const senders = await teamSenders(tx);
@@ -524,7 +527,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
         });
         await logLinked(tx, [m.id, ...(await linkConversation(tx, m, lead))]);
         return u;
-      });
+      }, LINK_TX);
       return { id: updated.id, leadId: updated.leadId };
     });
   });
@@ -597,7 +600,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
           await tx.emailMessage.update({ where: { id: m.id }, data: { leadId: l.id, companyId: l.companyId, contactId: l.contactId, leadDeletedAt: null } });
           await logLinked(tx, [m.id, ...(await linkConversation(tx, m, l))]);
           return l.id;
-        });
+        }, LINK_TX);
         // Release 4: AI research for a never-researched company with a website.
         await autoResearchForLead(leadId, user.id, (msg) => request.log.warn(msg));
         return reply.code(201).send({ id: m.id, leadId });

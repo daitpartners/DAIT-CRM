@@ -60,12 +60,25 @@ export async function messageFor(db: Db, user: AuthUser, rawId: string, use: 're
   return { m: other, viewOnly: true };
 }
 
-/** The reader of these timeline rows, with the mailbox owner of each logged email (one query; none for Admin/Manager). */
+/**
+ * The reader of these timeline rows, with the mailbox owner of each logged email (none for Admin/Manager). A line made
+ * from a colleague's copy counts as the reader's when the reader holds a copy of the same email (same internet message
+ * id), so a rep keeps the subject of her own email whichever mailbox synced first (two queries).
+ */
 export async function timelineViewer(
   db: Db, user: AuthUser, rows: { activityType: string; relatedType: string | null; relatedId: number | null }[],
 ): Promise<TimelineViewer> {
   const teamMail = canSeeTeamMail(user);
   const ids = teamMail ? [] : [...new Set(rows.flatMap((a) => (a.activityType === 'email' && a.relatedType === 'email_message' && a.relatedId !== null ? [a.relatedId] : [])))];
-  const owners = ids.length ? await db.emailMessage.findMany({ where: { id: { in: ids } }, select: { id: true, userId: true } }) : [];
-  return { id: user.id, teamMail, mailOwners: new Map(owners.map((m) => [m.id, m.userId])) };
+  const owners = ids.length ? await db.emailMessage.findMany({ where: { id: { in: ids } }, select: { id: true, userId: true, messageId: true } }) : [];
+  const mailOwners = new Map(owners.map((m) => [m.id, m.userId]));
+  const others = owners.filter((m) => m.userId !== user.id && m.messageId !== null);
+  if (others.length) {
+    const mine = await db.emailMessage.findMany({
+      where: { userId: user.id, messageId: { in: [...new Set(others.map((m) => m.messageId!))] } }, select: { messageId: true },
+    });
+    const held = new Set(mine.map((m) => m.messageId));
+    for (const m of others) if (held.has(m.messageId)) mailOwners.set(m.id, user.id);
+  }
+  return { id: user.id, teamMail, mailOwners };
 }

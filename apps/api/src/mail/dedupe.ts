@@ -4,11 +4,12 @@
  * email before `storeMessage` matched by internet message id.
  *
  * A group is a user's rows with the same non-null `message_id` on the same side (`mail/direction.ts`, the rule
- * `storeMessage` matches by), more than one row. The kept row is the one delta stored (Graph id `AAkALg…`, so a later
- * delta removal finds it); when none or several are, the lowest id. The kept row takes from the removed rows what it
- * has not got itself (lead, contact, company, project, `logged_at`); timeline lines, replies, Mailer recipients and
- * quotations pointing at a removed row then point at the kept one, and the removed rows are deleted. One transaction
- * per group.
+ * `storeMessage` matches by), more than one row. The kept row is the CRM-sent one when there is one (its send, Mailer
+ * and quotation records point at it), else the one delta stored (Graph id `AAkALg…`, so a later delta removal finds
+ * it); when none or several are, the lowest id. The kept row takes from the removed rows what it has not got itself
+ * (lead, contact, company, project, campaign, `logged_at`); timeline lines, replies, Mailer recipients and quotations
+ * pointing at a removed row then point at the kept one, and the removed rows are deleted. A kept CRM row then takes a
+ * removed row's delta id. One transaction per group.
  *
  * Logs counts only (never subjects, bodies or addresses). Safe to run again: a second run finds no groups.
  */
@@ -18,7 +19,7 @@ import { mailSide } from './direction.js';
 export interface DedupeCounts {
   groups: number;
   removed: number;
-  /** Kept rows that gained a lead, contact, company, project or `logged_at` from a removed row. */
+  /** Kept rows that gained a lead, contact, company, project, campaign or `logged_at` from a removed row. */
   linksCarried: number;
   /** Timeline lines, replies, Mailer recipients and quotations moved from a removed row to the kept one. */
   referencesMoved: number;
@@ -27,7 +28,7 @@ export interface DedupeCounts {
 /** Graph immutable ids (what delta sync stores) start with this. */
 const DELTA_ID_PREFIX = 'AAkALg';
 
-const CARRIED = ['leadId', 'contactId', 'companyId', 'projectId', 'loggedAt'] as const;
+const CARRIED = ['leadId', 'contactId', 'companyId', 'projectId', 'campaignId', 'loggedAt'] as const;
 
 export const DEDUPE_USAGE = 'usage: mail-dedupe [--dry-run | --apply]  (no flag = dry run)';
 
@@ -62,9 +63,13 @@ async function findGroups(db: PrismaClient): Promise<number[][]> {
   return [...groups.values()].filter((ids) => ids.length > 1);
 }
 
-/** The row to keep: the only delta-stored one, else the lowest id. `rows` are lowest id first. */
+const isDelta = (r: EmailMessage) => r.graphId?.startsWith(DELTA_ID_PREFIX) ?? false;
+
+/** The row to keep: the first CRM-sent one, else the only delta-stored one, else the lowest id (`rows`: lowest id first). */
 function keeperOf(rows: EmailMessage[]): EmailMessage {
-  const delta = rows.filter((r) => r.graphId?.startsWith(DELTA_ID_PREFIX));
+  const crm = rows.find((r) => r.source === 'crm');
+  if (crm) return crm;
+  const delta = rows.filter(isDelta);
   return delta.length === 1 ? delta[0]! : rows[0]!;
 }
 
@@ -101,6 +106,9 @@ async function mergeGroup(db: Prisma.TransactionClient, ids: number[], apply: bo
     ]);
     referencesMoved = moved.reduce((n, r) => n + r.count, 0);
     await db.emailMessage.deleteMany({ where: { id: { in: removedIds } } });
+    // A kept CRM row takes the delta id (after the delete: Graph ids are unique per user), so delta changes find it.
+    const deltaId = isDelta(kept) ? undefined : rows.find((r) => r.id !== kept.id && isDelta(r))?.graphId;
+    if (deltaId) await db.emailMessage.update({ where: { id: kept.id }, data: { graphId: deltaId } });
   } else {
     const counted = await Promise.all([
       db.leadActivity.count({ where: lines }),
