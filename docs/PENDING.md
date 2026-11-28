@@ -11,6 +11,8 @@ in the git history).
 - **Ready, waiting for deploy:** branch `web-mail-r3` — web-mail release 3 (inline reply, full-page New message,
   drafts in Outlook, signature, Schedule send, Undo send, follow-up box after Send, task priority and note). See
   "Ready, waiting for deploy: web-mail release 3" below; it goes live only when you say "deploy".
+- **Ready, waiting for deploy:** branch `lead-mail-timeline` (on top of release 3) — one copy per email, and every
+  lead email on its lead's timeline by itself. See "Ready, waiting for deploy: lead mail timeline" below.
 - **There is no test copy on the server.** Each release was checked on the developer's machine (automatic tests and
   side-by-side screenshots against the prototype) and then put live by hand, only after you said "deploy". How that is
   done, and how to undo it, is in `docs/DEPLOYMENT.md`.
@@ -113,6 +115,33 @@ the new columns stay and release 2 runs on them. Before going back, mail still w
 its 10 seconds) is taken out of the queue so release 2 does not send it the wrong way (it would leave without its
 attachments, pictures or Bcc); it stays in the sender's Outlook Drafts, and those people are told to send it from
 Outlook.
+
+## Ready, waiting for deploy: lead mail timeline (branch `lead-mail-timeline`)
+
+Design: `docs/superpowers/specs/2026-11-28-lead-mail-timeline-design.md`. Checked on the developer's machine with the
+automatic tests; not yet on live. Goes live only when you say "deploy", after web-mail release 3.
+
+**What changes for users:**
+- **One copy per email.** An email found by the 12-month search and again by the regular sync is stored once (today
+  some lead emails show twice, for example Elaine Reyes's reply).
+- **Every lead email is on the lead's timeline by itself**, sent or received, from any team mailbox:
+  `Email sent · <subject>` by the team member who sent it, or `Email received · <subject>`, dated at the email. An email
+  in two team mailboxes (sent by Carlos, Cc to Deepak) gives one line. A team member's email moves a New or Not
+  Contacted lead to Contacted, as a CRM send does. A quotation's sending email keeps its "Quotation sent" line only.
+- **Past mail** gets its lines once, at the deploy.
+
+**The deploy** (runbook: `docs/DEPLOYMENT.md`, "Lead mail timeline: deploy runbook"): no database change. After the
+install, two one-time steps, each a dry run shown to you first, then the real run: `mail-dedupe` merges the duplicate
+rows (expected about 225), then `lead-mail-timeline` adds the missing timeline lines. Then a check that the KPMG lead
+shows Carlos's "Email sent" line. Going back means switching to release 3 (`e83f6ea`); the merged rows and new lines
+stay, and release 3 runs fine with them.
+
+**Minor points left for later:**
+- Two genuine copies of one email with the same id in two non-Sent folders of one mailbox (rare) are merged into one.
+- `email_messages.message_id` has no index (the duplicate lookups are fine at today's size).
+- The quotation check (audit lookup) is not indexed.
+- Log as activity (`/log`) still picks its title by the inbound rule, not the team-sender rule.
+- If the row a timeline line was made from is deleted in Outlook, a later copy of the same email may add a second line.
 
 ## Live: web-mail release 2 (`70ec558`, since 27 Nov 2026)
 

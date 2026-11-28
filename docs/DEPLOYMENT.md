@@ -578,6 +578,54 @@ release 2 (live since 27 Nov 2026 as `70ec558`; the owner live-checked every Out
    `pm2 logs crm-live-worker --lines 200 --nostream`; they carry the reason and Graph's status, never the message
    itself).
 
+## Lead mail timeline: deploy runbook
+
+Only after the owner says "deploy". The lead mail timeline release (branch `lead-mail-timeline`: one row per email,
+and every lead email on its lead's timeline by itself) builds on web mail release 3 (`e83f6ea`). Follow "Deploying a
+release to live" (backup first, named `dait_crm-pre-lead-mail-timeline.dump`), with these additions:
+
+1. **Check there is no migration** (after step 3, as `daitcrm` in `~/build/<sha>`; read only):
+
+   ```
+   node --env-file=$HOME/live/shared/.env node_modules/prisma/build/index.js migrate status --schema prisma/schema.prisma
+   ```
+
+   It must report the database schema up to date (nothing pending). Anything else means stop and ask.
+2. **Install and check** (steps 4–5 of "Deploying a release to live").
+3. **Merge the duplicate mail rows** (as `daitcrm`; counts only, never subjects or addresses). Dry run first:
+
+   ```
+   cd ~/live/current/apps/api
+   node --env-file=$HOME/live/shared/.env dist/cli/mail-dedupe.js
+   ```
+
+   Show the owner the line `mail-dedupe: dry run groups=… removed=… links_carried=… references_moved=…` (expected
+   about 225 groups, 225 removed, about 117 links carried). With the owner's OK, run it with `--apply`, then the dry run
+   again: it must show `groups=0 removed=0`.
+4. **Put past lead mail on the timelines** (same folder). Dry run first:
+
+   ```
+   node --env-file=$HOME/live/shared/.env dist/cli/lead-mail-timeline.js
+   ```
+
+   Show the owner the line `lead-mail-timeline: dry run examined=… lines=… leads=… contacted=…` (`lines` timeline lines
+   to add, `leads` leads that get one, `contacted` leads that move from New / Not Contacted to Contacted). With the
+   owner's OK, run it with `--apply`, then the dry run again: it must show `lines=0`.
+5. **Check the KPMG lead** (Elaine Reyes): its timeline ("Recent on the lead") shows Carlos's email as `Email sent · …`
+   by Carlos, once.
+
+**Rollback:** switch back to `e83f6ea` as in "Rolling back" (as `daitcrm`):
+
+```
+ln -sfn ~/live/releases/e83f6ea ~/live/current
+pm2 startOrReload ~/live/current/deploy/ecosystem.config.cjs --only crm-live,crm-live-worker --update-env
+curl -s http://127.0.0.1:3090/api/health      # shows e83f6ea
+```
+
+The data changes stay and `e83f6ea` runs fine with them: there is no
+schema change, the removed rows were duplicates and the new lines are ordinary timeline lines. To undo the data too,
+restore `dait_crm-pre-lead-mail-timeline.dump` (see "Restoring").
+
 ## One-time steps after a release
 
 All of these have already been run on live; they are kept for reference and for a rebuild.
@@ -626,6 +674,15 @@ All of these have already been run on live; they are kept for reference and for 
 - **Web mail release 2 — re-read of the mailboxes** (done on live 27 Nov 2026 after the deploy of `70ec558`, no errors): after the release 1 backfill has finished,
   stop the worker, clear `email_accounts.sync_state`, start the worker, so flags already set in Outlook reach stored mail; the command and how to tell it
   has finished are in "Web mail release 2: deploy runbook", step 1. Then that runbook's step 2 (flag due-date check).
+
+- **Lead mail timeline — merge duplicate mail rows** (not yet run): `cd ~/live/current/apps/api && node
+  --env-file=$HOME/live/shared/.env dist/cli/mail-dedupe.js` (no flag, or `--dry-run`: counts only), then with
+  `--apply`; any other argument is rejected with exit 1. Safe to run again (0 groups). Details in "Lead mail timeline:
+  deploy runbook", step 3.
+- **Lead mail timeline — past lead mail on the timelines** (not yet run; after the merge above): `node
+  --env-file=$HOME/live/shared/.env dist/cli/lead-mail-timeline.js` from the same folder (dry run), then with
+  `--apply`. The dry run makes the same changes in a transaction it rolls back, so its counts are what `--apply` does.
+  Safe to run again (`lines=0`). Details in that runbook, step 4.
 
 ## Setting the server up from scratch (reference)
 
