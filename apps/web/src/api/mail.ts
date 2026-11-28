@@ -81,7 +81,7 @@ export const isScheduled = (m: Pick<MailItem, 'status' | 'scheduledAt'>) => m.st
 /** The reading pane's lead panel (mirror of the API's mail/leadPanel.ts LeadPanel). */
 export type LeadPanel = {
   company: { id: number; name: string; site: string | null; place: string | null } | null;
-  contact: { name: string; role: string | null; email: string | null; phone: string | null } | null;
+  contact: { name: string | null; role: string | null; email: string | null; phone: string | null } | null;
   owner: string | null;
   followUp: { date: string; time: string | null; due: boolean } | null;
   lastActivity: { title: string; occurredAt: string } | null;

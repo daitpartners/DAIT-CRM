@@ -23,7 +23,6 @@ import { attachmentFile, attachmentHeaders, attachmentsOf } from '../mail/attach
 import { LIST_CANDIDATES_MAX, conversationKey, countKey, decorate, listWhere, orderCandidates, type Candidate } from '../mail/list.js';
 import { leadPanel } from '../mail/leadPanel.js';
 import { setLeadFollowUp, suggestLeads } from '../mail/crm.js';
-import { participantsOf } from '../mail/leadMail.js';
 import { alreadyLogged, lockLeadTimeline, logLeadMail, teamSenders } from '../mail/leadTimeline.js';
 import { perUser } from '../mail/formatted.js';
 import { projectWhere } from '../projects/visibility.js';
@@ -370,10 +369,10 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
       const hidden = m.leadId !== null && !(await canSeeLead(prisma, user, m.leadId));
       // The list's scope for this message (its owner's mail, team-readable only in team view), for its conversation count.
       const scopeWhere: Prisma.EmailMessageWhereInput = viewOnly ? { AND: [{ userId: m.userId }, teamReadableWhere] } : { userId: user.id };
-      // The lead panel's link reason: Bcc counts for the mailbox owner only (team view never shows another user's Bcc).
-      const participants = participantsOf({
-        from: m.fromAddress, to: m.toAddresses as string[], cc: m.ccAddresses as string[], bcc: viewOnly ? [] : (m.bccAddresses as string[]),
-      });
+      // The lead panel's person and link reason; Bcc counts for the mailbox owner only (team view never shows another user's Bcc).
+      const panelMessage = {
+        from: m.fromAddress, fromName: m.fromName, to: m.toAddresses as string[], cc: m.ccAddresses as string[], bcc: viewOnly ? [] : (m.bccAddresses as string[]),
+      };
       const [restricted, lead, contact, company, thread, projects, shown, panel] = await Promise.all([
         hidden ? prisma.lead.findUnique({ where: { id: m.leadId! }, select: { number: true, companyName: true, company: { select: { name: true } } } }) : null,
         m.leadId && !hidden ? prisma.lead.findUnique({ where: { id: m.leadId }, ...leadRef }) : null,
@@ -385,7 +384,7 @@ export const mailRoutes: FastifyPluginAsync = async (app) => {
         visibleProjects(user, [m.projectId]),
         decorate([m], scopeWhere),
         // The lead panel: a visible lead only; a restricted lead keeps `restrictedLead` (number and company name) only.
-        m.leadId && !hidden ? leadPanel(prisma, user, m.leadId, participants) : null,
+        m.leadId && !hidden ? leadPanel(prisma, user, m.leadId, panelMessage) : null,
       ]);
       return {
         ...listItem({

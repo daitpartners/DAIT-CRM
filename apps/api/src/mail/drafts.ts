@@ -13,7 +13,6 @@ import { cidsOf, detachRemovedPictures, fileOfGraph, fileViews, filesData, files
 import { outgoingBody } from './formatted.js';
 import { textToHtml } from './html.js';
 import { leadPanel, type LeadPanel } from './leadPanel.js';
-import { participantsOf } from './leadMail.js';
 import { assertProjectFor } from './outgoing.js';
 
 /**
@@ -288,7 +287,7 @@ export async function draftView(user: AuthUser, m: EmailMessage, graph?: GraphCl
   const visibleLead = m.leadId !== null && (await canSeeLead(prisma, user, m.leadId)) ? m.leadId : null;
   const [named, lead, recipientZone, files] = await Promise.all([
     resolveRecipients(user, [...to, ...cc, ...bcc]),
-    visibleLead !== null ? leadPanel(prisma, user, visibleLead, participantsOf({ from: m.fromAddress, to, cc, bcc })) : null,
+    visibleLead !== null ? leadPanel(prisma, user, visibleLead, { from: m.fromAddress, fromName: m.fromName, to, cc, bcc }) : null,
     visibleLead !== null ? recipientZoneOf(visibleLead, user.timezone) : null,
     fileViews(graph, user, m),
   ]);

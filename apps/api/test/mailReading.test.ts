@@ -141,14 +141,14 @@ describe('GET /mail/:id — conversation and lead panel', () => {
     expect(body.leadPanel.recent[0]).toMatchObject({ body: null, by: { id: f.carlos.id, name: 'Carlos Mendez' } });
   });
 
-  it("follow-up falls back to the lead's date (no time, not due when later); no value without a sent quotation; phone falls back; domain link reason", async () => {
+  it("follow-up falls back to the lead's date (no time, not due when later); no value without a sent quotation; domain link reason", async () => {
     const f = await setup();
     await prisma.contact.update({ where: { id: f.ana.id }, data: { mobile: null, mobileNormalised: null } });
     await quotation({ companyId: f.acme.id, leadId: f.lead.id, ownerId: f.rep.id, status: 'Draft', date: '2026-11-20', lines: [[1, 99000]] });
     const m = await msg(f.rep.id, f.repBox.id, { fromAddress: 'Bo@Acme.com', fromName: 'Bo', leadId: f.lead.id, companyId: f.acme.id, contactId: f.ana.id });
     const panel = (await get(`/api/mail/${m.id}`, await signIn(app, f.rep))).json().leadPanel;
     expect(panel).toMatchObject({
-      contact: { phone: '+1 312 555 0199' }, followUp: { date: '2026-12-30', time: null, due: false }, value: null, lastActivity: null, recent: [],
+      contact: { name: 'Bo', role: null, email: 'bo@acme.com', phone: null }, followUp: { date: '2026-12-30', time: null, due: false }, value: null, lastActivity: null, recent: [],
       linkReason: { kind: 'domain', value: 'acme.com' },
     });
     // No participant on the lead's addresses or its company domain: no reason.
@@ -225,5 +225,67 @@ describe('GET /mail/:id — conversation and lead panel', () => {
     expect(audits[0]).toMatchObject({ entityId: String(reply.id), userId: f.admin.id, after: { ownerId: f.rep.id } });
     const logged = JSON.stringify(audits[0]);
     for (const content of ['Proposal', 'ana@acme.com', 'looks good', 'Acme']) expect(logged).not.toContain(content);
+  });
+});
+
+describe('GET /mail/:id — the lead panel shows the person in the open email', () => {
+  /** Elaine Reyes: a saved contact of the lead's company who is not the lead's main contact (Ana). */
+  const elaine = async (f: Awaited<ReturnType<typeof setup>>, phones: { phone?: string | null; mobile?: string | null } = {}) => {
+    const c = await makeContact({ companyId: f.acme.id, firstName: 'Elaine', lastName: 'Reyes', businessEmail: 'elainereyes@acme.com', ...phones });
+    await prisma.contact.update({ where: { id: c.id }, data: { designation: 'Partner' } });
+    return c;
+  };
+  const panelOf = async (f: Awaited<ReturnType<typeof setup>>, data: Partial<EmailMessage>) => {
+    const m = await msg(f.rep.id, f.repBox.id, { leadId: f.lead.id, companyId: f.acme.id, ...data });
+    return (await get(`/api/mail/${m.id}`, await signIn(app, f.rep))).json().leadPanel;
+  };
+
+  it("the panel shows the email's sender when they are a saved contact of the lead's company, not the lead's main contact", async () => {
+    const f = await setup();
+    await elaine(f, { phone: '+1 312 555 0111' });
+    // Synced before Elaine was saved: no contact on the row. Ana (the main contact) is only copied in.
+    const panel = await panelOf(f, { fromAddress: 'ElaineReyes@Acme.com', fromName: 'Elaine R.', ccAddresses: ['ana@acme.com'], contactId: null });
+    expect(panel.contact).toEqual({ name: 'Elaine Reyes', role: 'Partner', email: 'elainereyes@acme.com', phone: '+1 312 555 0111' });
+    // The link reason is unchanged: Ana's address is the lead's own.
+    expect(panel.linkReason).toEqual({ kind: 'address', value: 'ana@acme.com' });
+  });
+
+  it('a message from a team member shows the first company contact it was sent to', async () => {
+    const f = await setup();
+    await elaine(f, { mobile: '+1 312 555 0122' });
+    // Carlos's address saved at Acme by mistake: a team address is never the person shown.
+    await makeContact({ companyId: f.acme.id, firstName: 'Carlos', lastName: 'Mendez', businessEmail: f.carlos.email });
+    // Elaine's address at another company does not count for this lead.
+    await makeContact({ companyId: (await makeCompany({ name: 'Other Co' })).id, firstName: 'Kim', lastName: 'Park', businessEmail: 'kim@other.com' });
+    const panel = await panelOf(f, {
+      fromAddress: f.carlos.email.toUpperCase(), fromName: 'Carlos Mendez', toAddresses: ['kim@other.com', 'someone@gmail.com', 'ElaineReyes@acme.com'], ccAddresses: ['ana@acme.com'],
+    });
+    expect(panel.contact).toEqual({ name: 'Elaine Reyes', role: 'Partner', email: 'elainereyes@acme.com', phone: '+1 312 555 0122' });
+    // To comes before Cc; with no saved contact in To, the first one in Cc.
+    const cc = await panelOf(f, { fromAddress: f.carlos.email, toAddresses: ['someone@gmail.com'], ccAddresses: ['elainereyes@acme.com', 'ana@acme.com'] });
+    expect(cc.contact.name).toBe('Elaine Reyes');
+  });
+
+  it('a company person not saved as a contact shows their name and address from the email', async () => {
+    const f = await setup();
+    const panel = await panelOf(f, { fromAddress: 'Bo.Chen@Acme.com', fromName: 'Bo Chen', toAddresses: ['maya@daitpartners.com'] });
+    expect(panel.contact).toEqual({ name: 'Bo Chen', role: null, email: 'bo.chen@acme.com', phone: null });
+    // Sent by the team to an unsaved company address: no name (from_name is the sender's), the address only.
+    const sent = await panelOf(f, { folder: 'sent', status: 'sent', fromAddress: f.rep.email, fromName: 'Maya Pillai', toAddresses: ['someone@gmail.com'], ccAddresses: ['kim@acme.com'] });
+    expect(sent.contact).toEqual({ name: null, role: null, email: 'kim@acme.com', phone: null });
+  });
+
+  it("with nobody from the company in the email the lead's main contact shows, with the lead phone fallback", async () => {
+    const f = await setup();
+    await prisma.contact.update({ where: { id: f.ana.id }, data: { mobile: null, mobileNormalised: null } });
+    const panel = await panelOf(f, { fromAddress: 'someone@gmail.com', fromName: 'Someone', toAddresses: ['maya@daitpartners.com'] });
+    expect(panel.contact).toEqual({ name: 'Ana Ruiz', role: 'Head of Operations', email: 'ana@acme.com', phone: '+1 312 555 0199' });
+  });
+
+  it("a saved contact other than the main contact does not borrow the lead's phone", async () => {
+    const f = await setup();
+    await elaine(f);
+    const panel = await panelOf(f, { fromAddress: 'elainereyes@acme.com', fromName: 'Elaine Reyes' });
+    expect(panel.contact).toEqual({ name: 'Elaine Reyes', role: 'Partner', email: 'elainereyes@acme.com', phone: null });
   });
 });
